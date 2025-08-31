@@ -1,0 +1,188 @@
+#pragma once
+
+#include <string>
+#include <memory>
+#include <vector>
+#include <map>
+#include <sstream>
+#include "AccessLevel.h"
+
+namespace angara {
+
+    // An enum for the base kinds of types
+    enum class TypeKind {
+        PRIMITIVE,
+        LIST,
+        RECORD,
+        FUNCTION,
+        CLASS,
+        TRAIT,
+        INSTANCE,
+        ANY,
+        NIL,
+        ERROR // A special type to prevent cascading error messages
+    };
+
+
+    struct Type;
+
+    // --- BASE TYPE CLASS ---
+    struct Type {
+        const TypeKind kind;
+        explicit Type(TypeKind kind) : kind(kind) {}
+        virtual ~Type() = default;
+
+        // For pretty-printing in error messages
+        [[nodiscard]] virtual std::string toString() const = 0;
+    };
+
+    // --- PRIMITIVE TYPES ---
+    struct PrimitiveType : Type {
+        const std::string name;
+        explicit PrimitiveType(std::string name)
+                : Type(TypeKind::PRIMITIVE), name(std::move(name)) {}
+        [[nodiscard]] std::string toString() const override { return name; }
+    };
+
+    // --- COMPOUND TYPES ---
+    struct ListType : Type {
+        const std::shared_ptr<Type> element_type;
+        explicit ListType(std::shared_ptr<Type> element_type)
+                : Type(TypeKind::LIST), element_type(std::move(element_type)) {}
+        [[nodiscard]] std::string toString() const override {
+            return "list<" + element_type->toString() + ">";
+        }
+    };
+
+    struct RecordType : Type {
+        // A map from field name to the Type of that field.
+        const std::map<std::string, std::shared_ptr<Type>> fields;
+        explicit RecordType(std::map<std::string, std::shared_ptr<Type>> fields)
+                : Type(TypeKind::RECORD), fields(std::move(fields)) {}
+
+        [[nodiscard]] std::string toString() const override {
+            std::stringstream ss;
+            ss << "{";
+            for (auto it = fields.begin(); it != fields.end(); ++it) {
+                ss << it->first << ": " << it->second->toString();
+                if (std::next(it) != fields.end()) {
+                    ss << ", ";
+                }
+            }
+            ss << "}";
+            return ss.str();
+        }
+    };
+
+    struct FunctionType : Type {
+        const std::vector<std::shared_ptr<Type>> param_types;
+        const std::shared_ptr<Type> return_type;
+
+        FunctionType(std::vector<std::shared_ptr<Type>> params, std::shared_ptr<Type> ret)
+                : Type(TypeKind::FUNCTION), param_types(std::move(params)), return_type(std::move(ret)) {}
+
+        [[nodiscard]] std::string toString() const override {
+            std::stringstream ss;
+            ss << "function(";
+            for (size_t i = 0; i < param_types.size(); ++i) {
+                ss << param_types[i]->toString();
+                if (i < param_types.size() - 1) {
+                    ss << ", ";
+                }
+            }
+            ss << ") -> " << return_type->toString();
+            return ss.str();
+        }
+
+        [[nodiscard]] bool equals(const FunctionType& other) const {
+            // 1. Check arity (number of parameters)
+            if (this->param_types.size() != other.param_types.size()) {
+                return false;
+            }
+
+            // 2. Check each parameter's type in order
+            for (size_t i = 0; i < this->param_types.size(); ++i) {
+                // We can compare the string representations of the types.
+                // A more refined system might compare the Type pointers directly
+                // if we guarantee canonicalization, but toString() is safe and easy.
+                if (this->param_types[i]->toString() != other.param_types[i]->toString()) {
+                    return false;
+                }
+            }
+
+            // 3. Check the return type
+            if (this->return_type->toString() != other.return_type->toString()) {
+                return false;
+            }
+
+            // If all checks passed, the signatures are equivalent.
+            return true;
+        }
+    };
+
+
+    // --- CLASS-RELATED TYPES ---
+    // Represents the type of class itself (the factory)
+
+    struct ClassType : Type {
+
+        struct MemberInfo {
+            std::shared_ptr<Type> type;
+            AccessLevel access;
+            bool is_const;
+        };
+
+        const std::string name;
+        std::shared_ptr<ClassType> superclass = nullptr;
+        std::map<std::string, MemberInfo> fields;
+        std::map<std::string, MemberInfo> methods;
+
+        explicit ClassType(std::string name)
+                : Type(TypeKind::CLASS), name(std::move(name)) {}
+
+        [[nodiscard]] std::string toString() const override { return name; }
+
+        [[nodiscard]] const MemberInfo* findProperty(const std::string& prop_name) const {
+            // 1. Check the current class's fields.
+            auto field_it = fields.find(prop_name);
+            if (field_it != fields.end()) {
+                return &field_it->second;
+            }
+
+            // 2. Check the current class's methods.
+            auto method_it = methods.find(prop_name);
+            if (method_it != methods.end()) {
+                return &method_it->second;
+            }
+
+            // 3. If not found, check the superclass (recursive step).
+            if (superclass) {
+                return superclass->findProperty(prop_name);
+            }
+
+            // 4. If we reach the top of the chain, it's not found.
+            return nullptr;
+        }
+    };
+
+    // Represents the type of *instance* of a class
+    struct InstanceType : Type {
+        // An instance's type is defined by the class it belongs to.
+        const std::shared_ptr<ClassType> class_type;
+        explicit InstanceType(std::shared_ptr<ClassType> class_type)
+                : Type(TypeKind::INSTANCE), class_type(std::move(class_type)) {}
+        [[nodiscard]] std::string toString() const override { return class_type->name; }
+    };
+
+    struct TraitType : Type {
+        const std::string name;
+        // A map from method name to that method's FunctionType.
+        std::map<std::string, std::shared_ptr<FunctionType>> methods;
+
+        explicit TraitType(std::string name)
+                : Type(TypeKind::TRAIT), name(std::move(name)) {}
+
+        [[nodiscard]] std::string toString() const override { return name; }
+    };
+
+} // namespace angara
