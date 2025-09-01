@@ -1,33 +1,37 @@
 //
-// Created by cv2 on 8/31/25.
+// Created by cv2 on 9/1/25.
 //
 
 #pragma once
 
 #include "Expr.h"
 #include "Stmt.h"
-#include "ASTTypes.h"
+#include "Type.h"       // For our internal Type representation
+#include "TypeChecker.h"  // To access the results of the type analysis
 #include "ErrorHandler.h"
-#include "SymbolTable.h"
-#include "Type.h"
-#include <stack>
+#include <sstream>
 
 namespace angara {
 
-    class TypeChecker : public ExprVisitor, public StmtVisitor {
+/**
+ * @class CTranspiler
+ * @brief Walks a type-checked AST and generates equivalent C source code.
+ */
+    class CTranspiler : public ExprVisitor, public StmtVisitor {
     public:
-        explicit TypeChecker(ErrorHandler& errorHandler);
+        CTranspiler(TypeChecker& type_checker, ErrorHandler& errorHandler);
 
-        // The main entry point. Returns true if type checking passes.
-        bool check(const std::vector<std::shared_ptr<Stmt>>& statements);
+        /**
+         * @brief The main entry point for code generation.
+         * @param statements The vector of top-level statements from the parser.
+         * @return A string containing the generated C source code. Returns an empty
+         *         string on failure.
+         */
+        std::string generate(const std::vector<std::shared_ptr<Stmt>>& statements);
 
-        std::map<const Expr*, std::shared_ptr<Type>> m_expression_types;
-
-        SymbolTable m_symbols;
     private:
         // --- Visitor Methods ---
-        // Statements (return void)
-
+        // Statements (append to the stream)
         std::any visit(const Literal& expr) override;
         std::any visit(const Binary& expr) override;
         std::any visit(const VarExpr& expr) override;
@@ -61,50 +65,20 @@ namespace angara {
         void visit(std::shared_ptr<const ExpressionStmt> stmt) override;
         void visit(std::shared_ptr<const BlockStmt> stmt) override;
 
-
         // --- Helper Methods ---
-        // A helper to get the canonical Type from an ASTType node
-        std::shared_ptr<Type> resolveType(const std::shared_ptr<ASTType>& ast_type);
-
-        static bool isNumeric(const std::shared_ptr<Type>& type);
-        std::shared_ptr<Type> popType();
-
-        // Error reporting
-        void error(const Token& token, const std::string& message);
-        bool m_is_in_trait = false;
+        // Converts an Angara Type into a C type string (e.g., "int64_t")
+        std::string getCType(const std::shared_ptr<Type>& angaraType);
 
     private:
+        std::stringstream m_out;
+        TypeChecker& m_type_checker;
         ErrorHandler& m_errorHandler;
 
-        // We use a stack to pass type information up from expressions.
-        std::stack<std::shared_ptr<Type>> m_type_stack;
+        // For managing indentation
+        int m_indent_level = 0;
+        void indent();
 
         bool m_hadError = false;
-
-        // Pre-create canonical primitive types to avoid repeated allocations
-        std::shared_ptr<Type> m_type_i8, m_type_i16, m_type_i32, m_type_i64;
-        std::shared_ptr<Type> m_type_u8, m_type_u16, m_type_u32, m_type_u64;
-        std::shared_ptr<Type> m_type_f32, m_type_f64;
-        std::shared_ptr<Type> m_type_bool;
-        std::shared_ptr<Type> m_type_string;
-        std::shared_ptr<Type> m_type_nil;
-        std::shared_ptr<Type> m_type_any;
-        std::shared_ptr<Type> m_type_error;
-        std::shared_ptr<Type> m_type_void;
-        std::stack<std::shared_ptr<Type>> m_function_return_types;
-        std::shared_ptr<ClassType> m_current_class = nullptr;
-
-        void defineClassHeader(const ClassStmt &stmt);
-        void defineFunctionHeader(const FuncStmt &stmt);
-        void defineTraitHeader(const TraitStmt &stmt);
-
-        static bool isInteger(const std::shared_ptr<Type> &type);
-
-        static bool isUnsignedInteger(const std::shared_ptr<Type> &type);
-
-        static bool isFloat(const std::shared_ptr<Type> &type);
-
-        void pushAndSave(const Expr *expr, std::shared_ptr<Type> type);
     };
 
 } // namespace angara

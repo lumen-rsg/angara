@@ -54,6 +54,11 @@ namespace angara {
 
     }
 
+    void TypeChecker::pushAndSave(const Expr* expr, std::shared_ptr<Type> type) {
+        m_type_stack.push(type);
+        m_expression_types[expr] = type;
+    }
+
     bool TypeChecker::isInteger(const std::shared_ptr<Type>& type) {
         if (type->kind != TypeKind::PRIMITIVE) return false;
         const auto& name = type->toString();
@@ -420,67 +425,59 @@ namespace angara {
         }
     }
     std::any TypeChecker::visit(const Literal& expr) {
+        std::shared_ptr<Type> type = m_type_error;
         // Determine the type of the literal and push it onto our type stack.
         switch (expr.token.type) {
-            case TokenType::NUMBER_INT:   m_type_stack.push(m_type_i64); break;
-            case TokenType::NUMBER_FLOAT: m_type_stack.push(m_type_f64); break;
-            case TokenType::STRING:       m_type_stack.push(m_type_string); break;
+            case TokenType::NUMBER_INT:   type = m_type_i64; break;
+            case TokenType::NUMBER_FLOAT: type = m_type_f64; break;
+            case TokenType::STRING:       type = m_type_string; break;
             case TokenType::TRUE:
-            case TokenType::FALSE:        m_type_stack.push(m_type_bool); break;
-            case TokenType::NIL:          m_type_stack.push(m_type_nil); break;
+            case TokenType::FALSE:        type = m_type_bool; break;
+            case TokenType::NIL:          type = m_type_nil; break;
             default:
                 // Should be unreachable if the parser is correct.
-                m_type_stack.push(m_type_error);
+                type = m_type_error;
                 break;
         }
+        pushAndSave(&expr, type);
         return {}; // The actual return value is unused.
     }
     std::any TypeChecker::visit(const VarExpr& expr) {
+        // 1. Resolve the variable in the symbol table.
         auto symbol = m_symbols.resolve(expr.name.lexeme);
+
+        // 2. Check if the variable was found.
         if (!symbol) {
             error(expr.name, "Undefined variable '" + expr.name.lexeme + "'.");
-            m_type_stack.push(m_type_error);
+            // If it's undefined, its type is <error>.
+            pushAndSave(&expr, m_type_error);
         } else {
-            m_type_stack.push(symbol->type);
+            // 3. If it was found, its type is the type stored in the symbol table.
+            pushAndSave(&expr, symbol->type);
         }
-        m_expression_types[&expr] = m_type_stack.top(); // Store the result
+
         return {};
     }
+
     std::any TypeChecker::visit(const Unary& expr) {
-        // 1. Visit the right-hand operand to get its type.
         expr.right->accept(*this);
         auto right_type = popType();
 
-        // 2. Check the type based on the operator.
+        std::shared_ptr<Type> result_type = m_type_error;
         switch (expr.op.type) {
             case TokenType::MINUS:
-                // The '-' operator requires a numeric type (i64 or f64).
-                if (right_type->kind != TypeKind::PRIMITIVE ||
-                    (right_type->toString() != "i64" && right_type->toString() != "f64")) {
-                    error(expr.op, "Operand for '-' must be a number.");
-                    m_type_stack.push(m_type_error);
-                } else {
-                    // The result of negation is the same numeric type.
-                    m_type_stack.push(right_type);
-                }
+                if (isNumeric(right_type)) result_type = right_type;
+                else error(expr.op, "Operand for '-' must be a number.");
                 break;
             case TokenType::BANG:
-                // The '!' operator requires a boolean type.
-                if (right_type->toString() != "bool") {
-                    error(expr.op, "Operand for '!' must be a boolean.");
-                    m_type_stack.push(m_type_error);
-                } else {
-                    // The result of logical not is always a boolean.
-                    m_type_stack.push(m_type_bool);
-                }
-                break;
-            default:
-                // Should be unreachable.
-                m_type_stack.push(m_type_error);
+                if (right_type->toString() == "bool") result_type = m_type_bool;
+                else error(expr.op, "Operand for '!' must be a boolean.");
                 break;
         }
+        pushAndSave(&expr, result_type); // <-- THE FIX
         return {};
     }
+
     std::any TypeChecker::visit(const Binary& expr) {
         // 1. Visit both operands to get their types.
         expr.left->accept(*this);
@@ -488,9 +485,11 @@ namespace angara {
         expr.right->accept(*this);
         auto right_type = popType();
 
+        std::shared_ptr<Type> result_type = m_type_error;
+
         // Prevent cascading errors if operands were already invalid.
         if (left_type->kind == TypeKind::ERROR || right_type->kind == TypeKind::ERROR) {
-            m_type_stack.push(m_type_error);
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
@@ -501,25 +500,25 @@ namespace angara {
             case TokenType::STAR:
             case TokenType::SLASH:
                 if (left_type->toString() == "i64" && right_type->toString() == "i64") {
-                    m_type_stack.push(m_type_i64); // int op int -> int
+                    pushAndSave(&expr, m_type_i64);
                 } else if (isNumeric(left_type) && isNumeric(right_type)) {
-                    m_type_stack.push(m_type_f64); // mixed/float op -> float
+                    pushAndSave(&expr, m_type_f64);
                 } else {
                     error(expr.op, "Operands for arithmetic must be numbers.");
-                    m_type_stack.push(m_type_error);
+                    pushAndSave(&expr, m_type_error);
                 }
                 break;
 
             case TokenType::PLUS:
                 if (left_type->toString() == "i64" && right_type->toString() == "i64") {
-                    m_type_stack.push(m_type_i64);
+                    pushAndSave(&expr, m_type_i64);
                 } else if (isNumeric(left_type) && isNumeric(right_type)) {
-                    m_type_stack.push(m_type_f64);
+                    pushAndSave(&expr, m_type_f64);
                 } else if (left_type->toString() == "string" && right_type->toString() == "string") {
-                    m_type_stack.push(m_type_string); // string + string -> string
+                    pushAndSave(&expr, m_type_string);
                 } else {
                     error(expr.op, "'+' operator can only be used on two numbers or two strings.");
-                    m_type_stack.push(m_type_error);
+                    pushAndSave(&expr, m_type_error);
                 }
                 break;
 
@@ -530,9 +529,9 @@ namespace angara {
             case TokenType::LESS_EQUAL:
                 if (!(isNumeric(left_type) && isNumeric(right_type))) {
                     error(expr.op, "Operands for comparison must be numbers.");
-                    m_type_stack.push(m_type_error);
+                    pushAndSave(&expr, m_type_error);
                 } else {
-                    m_type_stack.push(m_type_bool); // All comparisons result in a bool.
+                    pushAndSave(&expr, m_type_bool); // All comparisons result in a bool.
                 }
                 break;
 
@@ -544,68 +543,72 @@ namespace angara {
                 if (left_type->toString() != right_type->toString()) {
                     error(expr.op, "Cannot compare two different types: '" +
                                    left_type->toString() + "' and '" + right_type->toString() + "'.");
-                    m_type_stack.push(m_type_error);
+                    pushAndSave(&expr, m_type_error);
                 } else {
-                    m_type_stack.push(m_type_bool); // Equality check always results in a bool.
+                    pushAndSave(&expr, m_type_bool); // Equality check always results in a bool.
                 }
                 break;
 
             default:
-                m_type_stack.push(m_type_error);
+                pushAndSave(&expr, m_type_error);
                 break;
         }
         return {};
     }
     std::any TypeChecker::visit(const Grouping& expr) {
         expr.expression->accept(*this);
-        // The type of the inner expression is already on the stack, so we do nothing.
+        auto inner_type = popType();
+        pushAndSave(&expr, inner_type);
         return {};
     }
+
     bool TypeChecker::isNumeric(const std::shared_ptr<Type>& type) {
         return isInteger(type) || isFloat(type);
     }
     std::any TypeChecker::visit(const ListExpr& expr) {
-        // If the list is empty, we cannot infer its type. In a more advanced
-        // system, it might get a special "empty list" type that can be unified
-        // later. For now, this is an ambiguity we can't resolve without a
-        // clear type context (e.g., `let x as list<i64> = [];`). We will
-        // handle this specific case in visit(VarDeclStmt).
+        // Case 1: The list is empty.
         if (expr.elements.empty()) {
-            // We'll create a list of a placeholder "any" type for now.
-            m_type_stack.push(std::make_shared<ListType>(m_type_any));
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
+            // An empty list `[]` has no intrinsic element type. We cannot infer it
+            // without more context (e.g., `let x as list<i64> = []`).
+            // We assign it a special `list<any>` type. The logic in variable
+            // declarations and assignments is responsible for handling this special case.
+            auto empty_list_type = std::make_shared<ListType>(m_type_any);
+            pushAndSave(&expr, empty_list_type);
             return {};
         }
 
-        // 1. Determine the type of the *first* element. This will be our
-        //    candidate type for the entire list.
+        // Case 2: The list has elements. We must infer the type.
+
+        // 1. Determine the type of the *first* element. This becomes our candidate type.
         expr.elements[0]->accept(*this);
-        auto list_type = popType();
+        auto list_element_type = popType();
 
-        if (list_type->kind == TypeKind::ERROR) {
-            m_type_stack.push(m_type_error);
+        if (list_element_type->kind == TypeKind::ERROR) {
+            // If the first element has an error, the whole list is bad.
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
-        // 2. Iterate through the rest of the elements and ensure they all
-        //    have the same type as the first one.
+        // 2. Iterate through the rest of the elements (if any).
         for (size_t i = 1; i < expr.elements.size(); ++i) {
             expr.elements[i]->accept(*this);
-            auto element_type = popType();
+            auto current_element_type = popType();
 
-            if (element_type->toString() != list_type->toString()) {
-                // We found an element with a different type. Report the error.
-                error(expr.bracket, "List elements must all be of the same type. "
-                                    "Found '" + element_type->toString() + "' in a list of type '" +
-                                    list_type->toString() + "'.");
-                m_type_stack.push(m_type_error);
+            // Rule: All elements must be of the same type.
+            if (current_element_type->toString() != list_element_type->toString()) {
+                error(expr.bracket, "List elements must all be of the same type. This list was inferred to be of type 'list<" +
+                                    list_element_type->toString() + ">', but an element of type '" +
+                                    current_element_type->toString() + "' was found.");
+                pushAndSave(&expr, m_type_error);
                 return {};
             }
         }
 
-        // 3. If we get here, all elements were the same type. Push the final
-        //    inferred list type (e.g., list<i64>) onto the stack.
-        m_type_stack.push(std::make_shared<ListType>(list_type));
+        // 3. If we get here, all elements were the same type. The final, inferred
+        //    type of this expression is a ListType containing the element type.
+        auto final_list_type = std::make_shared<ListType>(list_element_type);
+        pushAndSave(&expr, final_list_type);
+
         return {};
     }
 /**
@@ -1006,7 +1009,7 @@ namespace angara {
 
         // 3. If either sub-expression had an error, stop immediately.
         if (rhs_type->kind == TypeKind::ERROR || lhs_type->kind == TypeKind::ERROR) {
-            m_type_stack.push(m_type_error);
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
@@ -1071,8 +1074,7 @@ namespace angara {
         }
 
         // An assignment expression evaluates to the assigned value.
-        m_type_stack.push(rhs_type);
-        m_expression_types[&expr] = m_type_stack.top(); // Store the result
+        pushAndSave(&expr, rhs_type);
         return {};
     }
 
@@ -1087,7 +1089,7 @@ namespace angara {
         if (!isNumeric(target_type)) {
             error(expr.op, "Operand for increment/decrement must be a number, but got '" +
                            target_type->toString() + "'.");
-            m_type_stack.push(m_type_error);
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
@@ -1099,15 +1101,16 @@ namespace angara {
             }
         } else {
             error(expr.op, "Invalid target for increment/decrement.");
-            m_type_stack.push(m_type_error);
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
         // 3. The result type of update expression is the same as the target's type.
-        m_type_stack.push(target_type);
-        m_expression_types[&expr] = m_type_stack.top(); // Store the result
+        pushAndSave(&expr, target_type);
         return {};
     }
+
+// in TypeChecker.cpp
 
     std::any TypeChecker::visit(const CallExpr& expr) {
         // 1. Type check the callee to see what is being called.
@@ -1121,40 +1124,58 @@ namespace angara {
             arg_types.push_back(popType());
         }
 
+        // Stop immediately if the callee or any argument had a type error.
+        if (callee_type->kind == TypeKind::ERROR) {
+            pushAndSave(&expr, m_type_error);
+            return {};
+        }
+        for (const auto& arg_type : arg_types) {
+            if (arg_type->kind == TypeKind::ERROR) {
+                pushAndSave(&expr, m_type_error);
+                return {};
+            }
+        }
+
+        std::shared_ptr<Type> result_type = m_type_error; // Default to error
+
         // --- Case 1: Calling a function ---
         if (callee_type->kind == TypeKind::FUNCTION) {
             auto func_type = std::dynamic_pointer_cast<FunctionType>(callee_type);
 
-            // --- THIS IS THE FIX ---
             // Rule: Check arity, taking variadic functions into account.
             if (func_type->is_variadic) {
-                // A variadic function can be called with any number of arguments.
-                // A more advanced check could enforce a minimum number of arguments
-                // if the signature was, e.g., `(string, ...any)`.
-                // For `print`, any number is fine.
+                // A variadic function can be called with zero or more arguments.
+                // A more advanced check could enforce a minimum number of fixed
+                // arguments, but our current design for `print` has no fixed args.
+                // This is sufficient for now.
             } else {
-                // This is the existing logic for non-variadic functions.
+                // This is the logic for non-variadic functions.
                 if (arg_types.size() != func_type->param_types.size()) {
-                    error(expr.paren, "Incorrect number of arguments. Expected " +
+                    error(expr.paren, "Incorrect number of arguments. Function expects " +
                                       std::to_string(func_type->param_types.size()) + ", but got " +
                                       std::to_string(arg_types.size()) + ".");
-                    m_type_stack.push(m_type_error);
-                    return {};
+                    result_type = m_type_error;
                 }
             }
-            // --- END OF FIX ---
 
             // Rule: Check the type of each *fixed* argument.
-            for (size_t i = 0; i < func_type->param_types.size(); ++i) {
-                if (arg_types[i]->toString() != func_type->param_types[i]->toString()) {
-                    // ... (error reporting is unchanged) ...
+            // We only do this if the arity was correct (or if it's variadic).
+            if (result_type->kind != TypeKind::ERROR) {
+                for (size_t i = 0; i < func_type->param_types.size(); ++i) {
+                    if (arg_types[i]->toString() != func_type->param_types[i]->toString()) {
+                        error(expr.paren, "Type mismatch for argument " + std::to_string(i + 1) +
+                                          ". Expected '" + func_type->param_types[i]->toString() +
+                                          "', but got '" + arg_types[i]->toString() + "'.");
+                        result_type = m_type_error;
+                        break; // One bad argument is enough to fail the check.
+                    }
                 }
             }
-            // Note: We don't type-check the variadic arguments. They are implicitly 'any'.
 
-            // If all checks pass, the result is the function's return type.
-            m_type_stack.push(func_type->return_type);
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
+            // If no errors were found, the result of the call is the function's return type.
+            if (result_type->kind != TypeKind::ERROR) {
+                result_type = func_type->return_type;
+            }
 
         }
             // --- Case 2: Calling a class (constructing an instance) ---
@@ -1167,77 +1188,87 @@ namespace angara {
                 // No explicit 'init' method, so we expect zero arguments for the default constructor.
                 if (!arg_types.empty()) {
                     error(expr.paren, "Class '" + class_type->name + "' has no 'init' method and cannot be called with arguments.");
+                    result_type = m_type_error;
                 }
             } else {
                 // An 'init' method exists. Validate the call against its signature.
                 auto init_sig = std::dynamic_pointer_cast<FunctionType>(init_it->second.type);
 
-                // Arity check
                 if (arg_types.size() != init_sig->param_types.size()) {
                     error(expr.paren, "Incorrect number of arguments for constructor of '" + class_type->name +
                                       "'. Expected " + std::to_string(init_sig->param_types.size()) +
                                       ", but got " + std::to_string(arg_types.size()) + ".");
+                    result_type = m_type_error;
                 } else {
-                    // Argument type check
                     for (size_t i = 0; i < arg_types.size(); ++i) {
                         if (arg_types[i]->toString() != init_sig->param_types[i]->toString()) {
                             error(expr.paren, "Type mismatch for constructor argument " + std::to_string(i + 1) +
                                               ". Expected '" + init_sig->param_types[i]->toString() +
                                               "', but got '" + arg_types[i]->toString() + "'.");
+                            result_type = m_type_error;
+                            break;
                         }
                     }
                 }
             }
 
-            // If all checks pass, the result of constructing a class is an instance of that class.
-            m_type_stack.push(std::make_shared<InstanceType>(class_type));
+            // If no errors, the result of constructing a class is an instance of that class.
+            if (result_type->kind != TypeKind::ERROR) {
+                result_type = std::make_shared<InstanceType>(class_type);
+            }
 
         } else {
             // The callee is not a function or a class.
             error(expr.paren, "This expression is not callable. Can only call functions and classes.");
-            m_type_stack.push(m_type_error);
+            result_type = m_type_error;
         }
-        m_expression_types[&expr] = m_type_stack.top(); // Store the result
+
+        pushAndSave(&expr, result_type);
         return {};
     }
 
     std::any TypeChecker::visit(const GetExpr& expr) {
+        // 1. Type check the object on the left of the dot.
         expr.object->accept(*this);
         auto object_type = popType();
-        const std::string& property_name = expr.name.lexeme;
 
+        // Bail out early if the object itself had an error.
+        if (object_type->kind == TypeKind::ERROR) {
+            pushAndSave(&expr, m_type_error);
+            return {};
+        }
+
+        const std::string& property_name = expr.name.lexeme;
+        std::shared_ptr<Type> result_type = m_type_error; // Default to error
+
+        // --- Case 1: Accessing a property on a class instance ---
         if (object_type->kind == TypeKind::INSTANCE) {
             auto instance_type = std::dynamic_pointer_cast<InstanceType>(object_type);
             auto class_type = instance_type->class_type;
 
+            // Use our recursive helper to find the property in the inheritance chain.
             const ClassType::MemberInfo* property_info = class_type->findProperty(property_name);
 
             if (property_info == nullptr) {
-                // The property was not found anywhere in the inheritance chain.
+                // Not found anywhere.
                 error(expr.name, "Instance of class '" + class_type->name + "' has no property named '" + property_name + "'.");
-                m_type_stack.push(m_type_error);
-                m_expression_types[&expr] = m_type_stack.top(); // Store the result
+                result_type = m_type_error;
             } else {
                 // The property was found. Now check access.
                 if (property_info->access == AccessLevel::PRIVATE) {
-                    // Private members are only accessible if we are inside the class
-                    // that *defines* them. This is a complex check. A simpler rule
-                    // for now is that you can't access them via the '.' operator from outside.
-                    // Our current check is sufficient for this.
-                    // TODO: refine.
-                    if (m_current_class == nullptr || m_current_class->name != class_type->name) { // This check is a simplification
-                        error(expr.name, "Property '" + property_name + "' is private and cannot be accessed from here.");
-                        m_type_stack.push(m_type_error);
-                        m_expression_types[&expr] = m_type_stack.top(); // Store the result
-                        return {};
+                    // This is a simplified check. A full implementation would need to
+                    // know which class *defined* the private member.
+                    if (m_current_class == nullptr || m_current_class->name != class_type->name) {
+                        error(expr.name, "Property '" + property_name + "' is private and cannot be accessed from this context.");
+                        result_type = m_type_error;
                     }
                 }
 
-                // Success! The type of the expression is the type of the property.
-                m_type_stack.push(property_info->type);
-                m_expression_types[&expr] = m_type_stack.top(); // Store the result
+                // If we haven't set an error, the access is valid.
+                if (result_type->kind != TypeKind::ERROR) {
+                    result_type = property_info->type;
+                }
             }
-
         }
             // --- TODO: Case 2: Accessing a member of a module ---
             // else if (object_type->kind == TypeKind::MODULE) { ... }
@@ -1245,9 +1276,11 @@ namespace angara {
             // The object is not an instance, so it can't have properties.
             error(expr.name, "Only instances of classes have properties. Cannot access '" +
                              property_name + "' on a value of type '" + object_type->toString() + "'.");
-            m_type_stack.push(m_type_error);
+            result_type = m_type_error;
         }
-        m_expression_types[&expr] = m_type_stack.top(); // Store the result
+
+        // Finally, push and save the single, definitive result type for this expression.
+        pushAndSave(&expr, result_type);
         return {};
     }
 
@@ -1260,10 +1293,11 @@ namespace angara {
         expr.right->accept(*this);
         auto right_type = popType();
 
+        std::shared_ptr<Type> result_type = m_type_error;
+
         // 3. Prevent cascading errors.
         if (left_type->kind == TypeKind::ERROR || right_type->kind == TypeKind::ERROR) {
-            m_type_stack.push(m_type_error);
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
@@ -1272,49 +1306,42 @@ namespace angara {
         if (left_type->toString() != "bool" || right_type->toString() != "bool") {
             error(expr.op, "Both operands for a logical operator ('&&', '||') must be of type 'bool'. "
                            "Got '" + left_type->toString() + "' and '" + right_type->toString() + "'.");
-            m_type_stack.push(m_type_error);
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
         // 5. If the types are correct, the result of a logical expression is always a 'bool'.
-        m_type_stack.push(m_type_bool);
-        m_expression_types[&expr] = m_type_stack.top(); // Store the result
+        pushAndSave(&expr, m_type_bool);
         return {};
     }
 
     std::any TypeChecker::visit(const SubscriptExpr& expr) {
-        // 1. Type check the object being subscripted (e.g., 'my_list').
+        // 1. Type check the object being subscripted and the index.
         expr.object->accept(*this);
         auto collection_type = popType();
-
-        // 2. Type check the index expression (e.g., 'i').
         expr.index->accept(*this);
         auto index_type = popType();
 
+        // 2. Bail out early if a sub-expression had an error.
         if (collection_type->kind == TypeKind::ERROR || index_type->kind == TypeKind::ERROR) {
-            m_type_stack.push(m_type_error);
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
+            pushAndSave(&expr, m_type_error);
             return {};
         }
+
+        std::shared_ptr<Type> result_type = m_type_error; // Default to error
 
         // --- Case 1: Accessing a list element ---
         if (collection_type->kind == TypeKind::LIST) {
             auto list_type = std::dynamic_pointer_cast<ListType>(collection_type);
 
             // Rule: List indices must be integers.
-            if (index_type->toString() != "i64") { // Or check isNumeric for more flexibility
+            if (!isInteger(index_type)) { // Use our isInteger helper for flexibility
                 error(expr.bracket, "List index must be an integer, but got '" +
                                     index_type->toString() + "'.");
-                m_type_stack.push(m_type_error);
-                m_expression_types[&expr] = m_type_stack.top(); // Store the result
-                return {};
+            } else {
+                // Success! The result type is the list's element type.
+                result_type = list_type->element_type;
             }
-
-            // Success! The result of the expression is the list's element type.
-            m_type_stack.push(list_type->element_type);
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
-
         }
             // --- Case 2: Accessing a record field ---
         else if (collection_type->kind == TypeKind::RECORD) {
@@ -1324,38 +1351,41 @@ namespace angara {
             if (index_type->toString() != "string") {
                 error(expr.bracket, "Record key must be a string, but got '" +
                                     index_type->toString() + "'.");
-                m_type_stack.push(m_type_error);
-                m_expression_types[&expr] = m_type_stack.top(); // Store the result
-                return {};
-            }
-
-            // Rule: The key must be a string LITERAL for compile-time checking.
-            if (auto key_literal = std::dynamic_pointer_cast<const Literal>(expr.index)) {
-                const std::string& key_name = key_literal->token.lexeme;
-
-                // Rule: The field must exist in the record's type definition.
-                auto field_it = record_type->fields.find(key_name);
-                if (field_it == record_type->fields.end()) {
-                    error(key_literal->token, "Record of type '" + record_type->toString() +
-                                              "' has no field named '" + key_name + "'.");
-                    m_type_stack.push(m_type_error);
-                    m_expression_types[&expr] = m_type_stack.top(); // Store the result
-                } else {
-                    // Success! The result of the expression is the field's type.
-                    m_type_stack.push(field_it->second);
-                    m_expression_types[&expr] = m_type_stack.top(); // Store the result
-                }
             } else {
-                error(expr.bracket, "Record fields can only be accessed with a string literal key for static type checking.");
-                m_type_stack.push(m_type_error);
-                m_expression_types[&expr] = m_type_stack.top(); // Store the result
+                // Rule: The key must be a string LITERAL for compile-time checking.
+                if (auto key_literal = std::dynamic_pointer_cast<const Literal>(expr.index)) {
+                    const std::string& key_name = key_literal->token.lexeme;
+
+                    auto field_it = record_type->fields.find(key_name);
+                    if (field_it == record_type->fields.end()) {
+                        error(key_literal->token, "Record of type '" + record_type->toString() +
+                                                  "' has no field named '" + key_name + "'.");
+                    } else {
+                        // Success! The result type is the field's type.
+                        result_type = field_it->second;
+                    }
+                } else {
+                    error(expr.bracket, "Record fields can only be accessed with a string literal key for static type checking.");
+                }
             }
-        } else {
-            error(expr.bracket, "Object of type '" + collection_type->toString() + "' is not subscriptable.");
-            m_type_stack.push(m_type_error);
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
         }
-        m_expression_types[&expr] = m_type_stack.top(); // Store the result
+            // --- Case 3: Accessing a string character ---
+        else if (collection_type->toString() == "string") {
+            // Rule: String indices must be integers.
+            if (!isInteger(index_type)) {
+                error(expr.bracket, "String index must be an integer, but got '" +
+                                    index_type->toString() + "'.");
+            } else {
+                // Success! The result of subscripting a string is another string.
+                result_type = m_type_string;
+            }
+        }
+        else {
+            error(expr.bracket, "Object of type '" + collection_type->toString() + "' is not subscriptable.");
+        }
+
+        // Finally, push and save the single, definitive result type for this expression.
+        pushAndSave(&expr, result_type);
         return {};
     }
 
@@ -1383,8 +1413,7 @@ namespace angara {
         }
 
         // 5. Create a new internal RecordType from the inferred fields and push it.
-        m_type_stack.push(std::make_shared<RecordType>(inferred_fields));
-        m_expression_types[&expr] = m_type_stack.top(); // Store the result
+        pushAndSave(&expr, std::make_shared<RecordType>(inferred_fields));
 
         return {};
     }
@@ -1405,8 +1434,7 @@ namespace angara {
             then_type->kind == TypeKind::ERROR ||
             else_type->kind == TypeKind::ERROR) {
 
-            m_type_stack.push(m_type_error);
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
@@ -1414,8 +1442,7 @@ namespace angara {
         if (condition_type->toString() != "bool") {
             error(Token(), "Ternary condition must be of type 'bool', but got '" +
                            condition_type->toString() + "'."); // Placeholder token
-            m_type_stack.push(m_type_error);
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
@@ -1424,14 +1451,12 @@ namespace angara {
             error(Token(), "Type mismatch in ternary expression. The 'then' branch has type '" +
                            then_type->toString() + "', but the 'else' branch has type '" +
                            else_type->toString() + "'. Both branches must have the same type.");
-            m_type_stack.push(m_type_error);
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
         // --- RULE 3: The result of the expression is the type of the branches ---
-        m_type_stack.push(then_type);
-        m_expression_types[&expr] = m_type_stack.top(); // Store the result
+        pushAndSave(&expr, then_type);
 
         return {};
     }
@@ -1440,14 +1465,12 @@ namespace angara {
         // --- RULE 1: Check if we are inside a class ---
         if (m_current_class == nullptr) {
             error(expr.keyword, "Cannot use 'this' outside of a class method.");
-            m_type_stack.push(m_type_error);
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
         // --- RULE 2: The type of 'this' is the instance type of the current class ---
-        m_type_stack.push(std::make_shared<InstanceType>(m_current_class));
-        m_expression_types[&expr] = m_type_stack.top(); // Store the result
+        pushAndSave(&expr, std::make_shared<InstanceType>(m_current_class));
         return {};
     }
 
@@ -1455,16 +1478,14 @@ namespace angara {
         // --- RULE 1: Must be inside a class ---
         if (m_current_class == nullptr) {
             error(expr.keyword, "Cannot use 'super' outside of a class method.");
-            m_type_stack.push(m_type_error);
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
         // --- RULE 2: The class must have a superclass ---
         if (m_current_class->superclass == nullptr) {
             error(expr.keyword, "Cannot use 'super' in a class with no superclass.");
-            m_type_stack.push(m_type_error);
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
@@ -1475,22 +1496,19 @@ namespace angara {
         if (method_it == m_current_class->superclass->methods.end()) {
             error(expr.method, "The superclass '" + m_current_class->superclass->name +
                                "' has no method named '" + method_name + "'.");
-            m_type_stack.push(m_type_error);
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
         // Check for private access on the superclass method
         if (method_it->second.access == AccessLevel::PRIVATE) {
             error(expr.method, "Superclass method '" + method_name + "' is private and cannot be accessed.");
-            m_type_stack.push(m_type_error);
-            m_expression_types[&expr] = m_type_stack.top(); // Store the result
+            pushAndSave(&expr, m_type_error);
             return {};
         }
 
         // --- RULE 4: Success! The type is the method's FunctionType ---
-        m_type_stack.push(method_it->second.type);
-        m_expression_types[&expr] = m_type_stack.top(); // Store the result
+        pushAndSave(&expr, method_it->second.type);
         return {};
     }
 } // namespace angara

@@ -3,7 +3,6 @@ project(angara_compiled)
 
 set(CMAKE_CXX_STANDARD 23)
 
-find_package(LLVM REQUIRED CONFIG)
 
 add_executable(angara_compiled
         src/ErrorHandler.cpp
@@ -17,14 +16,10 @@ add_executable(angara_compiled
         src/AngaraClosure.cpp
         src/TypeChecker.cpp
         src/SymbolTable.cpp
-        src/LLVMCodeGenerator.cpp
+        src/CTranspiler.cpp
 )
 
 target_include_directories(angara_compiled PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-
-# Link your executable against the LLVM libraries
-# We need the core libraries, the code generator, and the JIT compiler.
-target_link_libraries(angara_compiled PRIVATE ${LLVM_LIBRARIES} LLVMCore LLVMSupport LLVMIRReader)
 
 # This is a required setting for LLVM's C++ API
 add_definitions(${LLVM_DEFINITIONS})
