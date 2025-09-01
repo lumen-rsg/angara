@@ -21,6 +21,8 @@ namespace angara {
         // The main entry point. Returns true if type checking passes.
         bool check(const std::vector<std::shared_ptr<Stmt>>& statements);
 
+        std::map<const Expr*, std::shared_ptr<Type>> m_expression_types;
+
     private:
         // --- Visitor Methods ---
         // Statements (return void)
@@ -92,6 +94,12 @@ namespace angara {
         void defineClassHeader(const ClassStmt &stmt);
         void defineFunctionHeader(const FuncStmt &stmt);
         void defineTraitHeader(const TraitStmt &stmt);
+
+        static bool isInteger(const std::shared_ptr<Type> &type);
+
+        static bool isUnsignedInteger(const std::shared_ptr<Type> &type);
+
+        static bool isFloat(const std::shared_ptr<Type> &type);
     };
 
 } // namespace angara

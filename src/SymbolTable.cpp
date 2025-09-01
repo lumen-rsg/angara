@@ -25,7 +25,7 @@ namespace angara {
         }
     }
 
-    bool SymbolTable::declare(const Token& token, std::shared_ptr<Type> type, bool is_const) {
+    bool SymbolTable::declare(const Token &token, std::shared_ptr<Type> type, bool is_const) {
         auto& current_scope = m_scopes.back();
         if (current_scope.count(token.lexeme)) {
             return false;

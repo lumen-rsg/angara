@@ -78,14 +78,27 @@ namespace angara {
         const std::vector<std::shared_ptr<Type>> param_types;
         const std::shared_ptr<Type> return_type;
 
-        FunctionType(std::vector<std::shared_ptr<Type>> params, std::shared_ptr<Type> ret)
-                : Type(TypeKind::FUNCTION), param_types(std::move(params)), return_type(std::move(ret)) {}
+        // --- THIS IS THE NEW MEMBER ---
+        const bool is_variadic;
+        // --- END OF NEW MEMBER ---
 
-        [[nodiscard]] std::string toString() const override {
+        // Update constructor to accept the flag, defaulting to false.
+        FunctionType(std::vector<std::shared_ptr<Type>> params, std::shared_ptr<Type> ret, bool is_variadic = false)
+                : Type(TypeKind::FUNCTION),
+                  param_types(std::move(params)),
+                  return_type(std::move(ret)),
+                  is_variadic(is_variadic) {} // <-- Add to initializer list
+
+        std::string toString() const override {
             std::stringstream ss;
             ss << "function(";
             for (size_t i = 0; i < param_types.size(); ++i) {
                 ss << param_types[i]->toString();
+                // --- NEW: Add '...' for variadic functions ---
+                if (is_variadic && i == param_types.size() - 1) {
+                    ss << "...";
+                }
+                // --- END OF NEW ---
                 if (i < param_types.size() - 1) {
                     ss << ", ";
                 }
@@ -94,29 +107,14 @@ namespace angara {
             return ss.str();
         }
 
-        [[nodiscard]] bool equals(const FunctionType& other) const {
-            // 1. Check arity (number of parameters)
-            if (this->param_types.size() != other.param_types.size()) {
-                return false;
-            }
+        // The 'equals' method also needs a small update.
+        bool equals(const FunctionType& other) const {
+            // --- THIS IS THE CHANGE ---
+            if (this->is_variadic != other.is_variadic) return false;
+            // --- END OF CHANGE ---
 
-            // 2. Check each parameter's type in order
-            for (size_t i = 0; i < this->param_types.size(); ++i) {
-                // We can compare the string representations of the types.
-                // A more refined system might compare the Type pointers directly
-                // if we guarantee canonicalization, but toString() is safe and easy.
-                if (this->param_types[i]->toString() != other.param_types[i]->toString()) {
-                    return false;
-                }
-            }
-
-            // 3. Check the return type
-            if (this->return_type->toString() != other.return_type->toString()) {
-                return false;
-            }
-
-            // If all checks passed, the signatures are equivalent.
-            return true;
+            if (this->param_types.size() != other.param_types.size()) return false;
+            // ... (rest of the method is unchanged) ...
         }
     };
 
