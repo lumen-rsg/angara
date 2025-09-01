@@ -80,6 +80,12 @@ namespace angara {
         return name == "f32" || name == "f64";
     }
 
+    bool TypeChecker::isTruthy(const std::shared_ptr<Type>& type) {
+        // For now, we'll say any number or boolean is valid in a boolean context.
+        // We could add strings, lists, etc. later.
+        return isNumeric(type) || type->toString() == "bool";
+    }
+
     void TypeChecker::defineTraitHeader(const TraitStmt& stmt) {
         auto symbol = m_symbols.resolve(stmt.name.lexeme);
         auto trait_type = std::dynamic_pointer_cast<TraitType>(symbol->type);
@@ -194,35 +200,24 @@ namespace angara {
         m_current_class = nullptr;
     }
 
-
-
     bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         m_hadError = false;
 
-        // --- PASS 1: Declare all top-level type names ---
-        std::cerr << "--- TYPECHECKER: PASS 1 (Declarations) ---\n";
+        // --- PASS 1: Define all top-level headers and signatures ---
+        // This pass creates and populates the types for all classes, traits,
+        // and global functions, but does NOT look inside method bodies or initializers.
         for (const auto& stmt : statements) {
             if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+                // First, just declare the name to allow for forward references.
                 auto class_type = std::make_shared<ClassType>(class_stmt->name.lexeme);
                 if (!m_symbols.declare(class_stmt->name, class_type, true)) {
                     error(class_stmt->name, "A symbol with this name already exists in this scope.");
-                } else {
-                    std::cerr << "Declared class '" << class_stmt->name.lexeme << "' in global scope.\n";
-                }
-            } else if (auto trait_stmt = std::dynamic_pointer_cast<const TraitStmt>(stmt)) {
-                auto trait_type = std::make_shared<TraitType>(trait_stmt->name.lexeme);
-                if (!m_symbols.declare(trait_stmt->name, trait_type, true)) {
-                    error(trait_stmt->name, "A symbol with this name already exists in this scope.");
-                } else {
-                    std::cerr << "Declared trait '" << trait_stmt->name.lexeme << "' in global scope.\n";
                 }
             }
+            // ... (can add similar logic for traits and funcs if needed, but this is the key)
         }
 
-        if (m_hadError) return false;
-
-        // --- PASS 2: Define all headers and signatures ---
-        std::cerr << "\n--- TYPECHECKER: PASS 2 (Headers/Signatures) ---\n";
+        // Now, define the headers now that all names are known.
         for (const auto& stmt : statements) {
             if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
                 defineClassHeader(*class_stmt);
@@ -235,8 +230,9 @@ namespace angara {
 
         if (m_hadError) return false;
 
-        // --- PASS 3: Check all implementations ---
-        std::cerr << "\n--- TYPECHECKER: PASS 3 (Implementations) ---\n";
+        // --- PASS 2: Check all implementation code ---
+        // This pass visits every statement again, but this time the visitors
+        // will dive into method bodies and field initializers.
         for (const auto& stmt : statements) {
             stmt->accept(*this, stmt);
         }
@@ -418,12 +414,13 @@ namespace angara {
             declared_type = initializer_type;
         }
         // (The case where only an annotation exists is fine, the variable is just uninitialized)
-
+        m_variable_types[stmt.get()] = declared_type;
         // 4. Declare the new variable in the symbol table.
         if (!m_symbols.declare(stmt->name, declared_type, stmt->is_const)) {
             error(stmt->name, "A variable with this name already exists in this scope.");
         }
     }
+
     std::any TypeChecker::visit(const Literal& expr) {
         std::shared_ptr<Type> type = m_type_error;
         // Determine the type of the literal and push it onto our type stack.
@@ -442,6 +439,7 @@ namespace angara {
         pushAndSave(&expr, type);
         return {}; // The actual return value is unused.
     }
+
     std::any TypeChecker::visit(const VarExpr& expr) {
         // 1. Resolve the variable in the symbol table.
         auto symbol = m_symbols.resolve(expr.name.lexeme);
@@ -479,82 +477,91 @@ namespace angara {
     }
 
     std::any TypeChecker::visit(const Binary& expr) {
-        // 1. Visit both operands to get their types.
+        // 1. Visit operands.
         expr.left->accept(*this);
         auto left_type = popType();
         expr.right->accept(*this);
         auto right_type = popType();
 
+        // 2. Default to an error type. We will only change this if a rule passes.
         std::shared_ptr<Type> result_type = m_type_error;
 
-        // Prevent cascading errors if operands were already invalid.
+        // 3. Bail out early if sub-expressions had errors.
         if (left_type->kind == TypeKind::ERROR || right_type->kind == TypeKind::ERROR) {
             pushAndSave(&expr, m_type_error);
             return {};
         }
 
-        // 2. Check the types based on the operator.
+        // 4. Check the types based on the operator.
         switch (expr.op.type) {
-            // --- Arithmetic Operators ---
             case TokenType::MINUS:
             case TokenType::STAR:
             case TokenType::SLASH:
-                if (left_type->toString() == "i64" && right_type->toString() == "i64") {
-                    pushAndSave(&expr, m_type_i64);
-                } else if (isNumeric(left_type) && isNumeric(right_type)) {
-                    pushAndSave(&expr, m_type_f64);
+            case TokenType::PERCENT: // Modulo is now part of this group
+                if (isNumeric(left_type) && isNumeric(right_type)) {
+                    // If either operand is a float, the result is a float (f64).
+                    if (isFloat(left_type) || isFloat(right_type)) {
+                        result_type = m_type_f64;
+                    } else {
+                        // Otherwise, both are integers, the result is an integer (i64).
+                        result_type = m_type_i64;
+                    }
                 } else {
-                    error(expr.op, "Operands for arithmetic must be numbers.");
-                    pushAndSave(&expr, m_type_error);
+                    error(expr.op, "Operands for this arithmetic operator must be numbers.");
                 }
                 break;
 
             case TokenType::PLUS:
-                if (left_type->toString() == "i64" && right_type->toString() == "i64") {
-                    pushAndSave(&expr, m_type_i64);
-                } else if (isNumeric(left_type) && isNumeric(right_type)) {
-                    pushAndSave(&expr, m_type_f64);
+                if (isNumeric(left_type) && isNumeric(right_type)) {
+                    if (isFloat(left_type) || isFloat(right_type)) {
+                        result_type = m_type_f64;
+                    } else {
+                        result_type = m_type_i64;
+                    }
                 } else if (left_type->toString() == "string" && right_type->toString() == "string") {
-                    pushAndSave(&expr, m_type_string);
+                    result_type = m_type_string;
                 } else {
                     error(expr.op, "'+' operator can only be used on two numbers or two strings.");
-                    pushAndSave(&expr, m_type_error);
                 }
                 break;
 
-                // --- Comparison Operators ---
             case TokenType::GREATER:
             case TokenType::GREATER_EQUAL:
             case TokenType::LESS:
             case TokenType::LESS_EQUAL:
-                if (!(isNumeric(left_type) && isNumeric(right_type))) {
-                    error(expr.op, "Operands for comparison must be numbers.");
-                    pushAndSave(&expr, m_type_error);
+                if (isNumeric(left_type) && isNumeric(right_type)) {
+                    result_type = m_type_bool; // All comparisons result in a bool.
                 } else {
-                    pushAndSave(&expr, m_type_bool); // All comparisons result in a bool.
+                    error(expr.op, "Operands for comparison must be numbers.");
                 }
                 break;
 
-                // --- Equality Operators ---
             case TokenType::EQUAL_EQUAL:
             case TokenType::BANG_EQUAL:
-                // For now, we'll allow comparing any two types, but they must be the same.
-                // TODO: A more advanced type system could have a "Comparable" trait.
-                if (left_type->toString() != right_type->toString()) {
-                    error(expr.op, "Cannot compare two different types: '" +
-                                   left_type->toString() + "' and '" + right_type->toString() + "'.");
-                    pushAndSave(&expr, m_type_error);
+                if (left_type->toString() == right_type->toString()) {
+                    result_type = m_type_bool;
                 } else {
-                    pushAndSave(&expr, m_type_bool); // Equality check always results in a bool.
+                    // Allow comparing any number to any other number
+                    if (isNumeric(left_type) && isNumeric(right_type)) {
+                        result_type = m_type_bool;
+                    } else {
+                        error(expr.op, "Cannot compare two different types: '" +
+                                       left_type->toString() + "' and '" + right_type->toString() + "'.");
+                    }
                 }
                 break;
 
             default:
-                pushAndSave(&expr, m_type_error);
+                // This case should not be reachable if the parser is correct.
+                error(expr.op, "Unknown binary operator.");
                 break;
         }
+
+        // 5. Push the single, definitive result type for this expression.
+        pushAndSave(&expr, result_type);
         return {};
     }
+
     std::any TypeChecker::visit(const Grouping& expr) {
         expr.expression->accept(*this);
         auto inner_type = popType();
@@ -565,6 +572,7 @@ namespace angara {
     bool TypeChecker::isNumeric(const std::shared_ptr<Type>& type) {
         return isInteger(type) || isFloat(type);
     }
+
     std::any TypeChecker::visit(const ListExpr& expr) {
         // Case 1: The list is empty.
         if (expr.elements.empty()) {
@@ -611,19 +619,14 @@ namespace angara {
 
         return {};
     }
-/**
- * @brief Type checks an if-orif-else statement.
- *
- * The fundamental rule of an 'if' statement is that its condition MUST evaluate
- * to a boolean value. This is the primary check we perform.
- */
+
     void TypeChecker::visit(std::shared_ptr<const IfStmt> stmt) {
         // 1. Type check the condition expression.
         stmt->condition->accept(*this);
         auto condition_type = popType();
 
         // 2. Enforce the rule: the condition must be a 'bool'.
-        if (condition_type->toString() != "bool") {
+        if (!isTruthy(condition_type)) {
             error(stmt->keyword, "If statement condition must be of type 'bool', but got '" +
                                  condition_type->toString() + "'.");
         }
@@ -640,13 +643,14 @@ namespace angara {
     void TypeChecker::visit(std::shared_ptr<const EmptyStmt> stmt) {
         // *literally does nothing. just like me when. idk xd*
     }
+
     void TypeChecker::visit(std::shared_ptr<const WhileStmt> stmt) {
         // 1. Type check the condition expression.
         stmt->condition->accept(*this);
         auto condition_type = popType();
 
         // 2. Enforce the rule: the condition must be a 'bool'.
-        if (condition_type->toString() != "bool") {
+        if (!isTruthy(condition_type)) {
             error(Token(), "While loop condition must be of type 'bool', but got '" +
                            condition_type->toString() + "'.");
         }
@@ -654,6 +658,7 @@ namespace angara {
         // 3. Type check the loop body.
         stmt->body->accept(*this, stmt->body);
     }
+
     void TypeChecker::visit(std::shared_ptr<const ForStmt> stmt) {
         // 1. A C-style for loop introduces a new scope for its initializer.
         m_symbols.enterScope();
@@ -663,28 +668,32 @@ namespace angara {
             stmt->initializer->accept(*this, stmt->initializer);
         }
 
-        // 3. Type check the condition, if it exists, and enforce that it's a bool.
+        // --- THIS IS THE CRITICAL FIX ---
+        // 3. Type check the condition, if it exists.
         if (stmt->condition) {
             stmt->condition->accept(*this);
             auto condition_type = popType();
-            if (condition_type->toString() != "bool") {
-                error(Token(), "For loop condition must be of type 'bool', but got '" +
-                               condition_type->toString() + "'.");
+            // Enforce that the condition is a "truthy" type.
+            if (!isTruthy(condition_type)) {
+                error(stmt->keyword, "For loop condition must be a truthy type (bool or number), but got '" +
+                                     condition_type->toString() + "'.");
             }
         }
 
-        // 4. Type check the increment, if it exists. Its value is discarded, so we pop its type.
+        // 4. Type check the increment, if it exists.
         if (stmt->increment) {
             stmt->increment->accept(*this);
-            popType();
+            popType(); // The resulting value of the increment expression is not used.
         }
+        // --- END OF CRITICAL FIX ---
 
         // 5. Type check the loop body.
         stmt->body->accept(*this, stmt->body);
 
-        // 6. Exit the scope, destroying the initializer variable (e.g., 'let i').
+        // 6. Exit the scope, destroying the initializer variable.
         m_symbols.exitScope();
     }
+
     void TypeChecker::visit(std::shared_ptr<const ForInStmt> stmt) {
         // 1. The for..in loop also introduces a new scope.
         m_symbols.enterScope();
@@ -722,52 +731,48 @@ namespace angara {
     }
 
     void TypeChecker::visit(std::shared_ptr<const FuncStmt> stmt) {
-        // This visitor is now part of PASS 3. Its only job is to check the
-        // correctness of the function's BODY. The function's signature was
-        // already processed and declared in Pass 2 by defineFunctionHeader.
+        // This visitor is called in Pass 2 to check the body of a function.
+        // The signature was already processed in Pass 1.
 
-        // 1. A function with no body (like in a trait) has no implementation to check.
+        // A function with no body (a trait method) has no implementation to check.
         if (!stmt->body) {
             return;
         }
 
-        // 2. Fetch the full FunctionType from the symbol table. This was created in Pass 2.
+        // 1. Fetch the full FunctionType from the symbol table (created in Pass 1).
         auto symbol = m_symbols.resolve(stmt->name.lexeme);
-        if (!symbol || symbol->type->kind != TypeKind::FUNCTION) {
-            // This should be unreachable if Pass 2 was successful.
-            return;
+        // Note: for methods, the name is not in the global scope. We need to look it up
+        // in the current class context.
+        std::shared_ptr<FunctionType> func_type;
+        if (m_current_class && m_current_class->methods.count(stmt->name.lexeme)) {
+            func_type = std::dynamic_pointer_cast<FunctionType>(m_current_class->methods.at(stmt->name.lexeme).type);
+        } else if (symbol && symbol->type->kind == TypeKind::FUNCTION) {
+            func_type = std::dynamic_pointer_cast<FunctionType>(symbol->type);
+        } else {
+            return; // Error was already reported in Pass 1
         }
-        auto func_type = std::dynamic_pointer_cast<FunctionType>(symbol->type);
 
-        // 3. Enter a new scope for the function's body.
+        // 2. Enter a new scope for the function's body.
         m_symbols.enterScope();
-
-        // 4. Set the context for 'return' statements.
         m_function_return_types.push(func_type->return_type);
 
-        // 5. If it's a method, declare 'this' in the new scope.
-        if (stmt->has_this) {
-            // The error for 'this' outside a class is caught in Pass 2.
-            // Here, we can assume m_current_class is correctly set by visit(ClassStmt).
-            if (m_current_class) {
-                Token this_token(TokenType::THIS, "this", stmt->name.line, 0);
-                m_symbols.declare(this_token, std::make_shared<InstanceType>(m_current_class), true);
-            }
+        // 3. If it's a method, declare 'this'.
+        if (stmt->has_this && m_current_class) {
+            Token this_token(TokenType::THIS, "this", stmt->name.line, 0);
+            m_symbols.declare(this_token, std::make_shared<InstanceType>(m_current_class), true);
         }
 
-        // 6. Declare all parameters as local variables in the new scope.
+        // 4. Declare all parameters as local variables.
         for (size_t i = 0; i < stmt->params.size(); ++i) {
-            const auto& param_ast = stmt->params[i];
-            const auto& param_type = func_type->param_types[i];
-            m_symbols.declare(param_ast.name, param_type, true); // Parameters are implicitly const.
+            m_symbols.declare(stmt->params[i].name, func_type->param_types[i], true);
         }
 
-        // 7. Finally, type-check every statement in the function's body.
+        // 5. Type-check every statement in the function's body.
         for (const auto& bodyStmt : (*stmt->body)) {
             bodyStmt->accept(*this, bodyStmt);
         }
 
-        // 8. Restore the context by exiting the scope and popping the return type.
+        // 6. Restore the context.
         m_function_return_types.pop();
         m_symbols.exitScope();
     }
@@ -808,6 +813,7 @@ namespace angara {
         Token module_token(TokenType::IDENTIFIER, module_name, stmt->modulePath.line, stmt->modulePath.column);
         m_symbols.declare(module_token, m_type_any, false);
     }
+
     void TypeChecker::visit(std::shared_ptr<const ThrowStmt> stmt) {
         // 1. Type check the expression whose value is being thrown.
         stmt->expression->accept(*this);
@@ -816,7 +822,6 @@ namespace angara {
         //    the flow of the type checker, so we pop it.
         popType();
     }
-
 
     void TypeChecker::visit(std::shared_ptr<const TryStmt> stmt) {
         // 1. Type check the 'try' block. Any errors inside it will be reported.
@@ -841,63 +846,46 @@ namespace angara {
         m_symbols.exitScope();
     }
 
-
     void TypeChecker::visit(std::shared_ptr<const ClassStmt> stmt) {
-        // This visitor is now part of PASS 3. Its only job is to check the
-        // correctness of field initializers and method bodies. The class's
-        // header/signatures were already processed in Pass 2 by defineClassHeader.
+        // PASS 2: Check the implementation details (initializers and method bodies).
 
-        // 1. Fetch the full ClassType from the symbol table. This was populated in Pass 2.
+        // 1. Fetch the full ClassType from the symbol table. This was populated in Pass 1.
         auto symbol = m_symbols.resolve(stmt->name.lexeme);
-        if (!symbol || symbol->type->kind != TypeKind::CLASS) {
-            // Should be unreachable if Pass 1 & 2 were successful.
-            return;
-        }
         auto class_type = std::dynamic_pointer_cast<ClassType>(symbol->type);
 
         // 2. Set the context to indicate we are "inside" this class.
-        //    This is crucial for validating 'this', 'super', and private access.
         auto enclosing_class = m_current_class;
         m_current_class = class_type;
 
-        // 3. Enter a new scope for the class's implementation details.
+        // 3. Enter a new scope for the class's body.
         m_symbols.enterScope();
 
-        // 4. Declare 'this' in the new scope so it's available to initializers and methods.
+        // 4. Declare 'this' so it's available to initializers and methods.
         Token this_token(TokenType::THIS, "this", stmt->name.line, 0);
-        m_symbols.declare(this_token, std::make_shared<InstanceType>(class_type), true); // 'this' is const
+        m_symbols.declare(this_token, std::make_shared<InstanceType>(class_type), true);
 
-        // --- Pass 3: Check all implementation code ---
+        // 5. Check all implementation code.
         for (const auto& member : stmt->members) {
             if (auto field_member = std::dynamic_pointer_cast<const FieldMember>(member)) {
                 // Check the field's initializer expression, if it has one.
                 if (field_member->declaration->initializer) {
-                    // Get the field's declared type from our class definition (resolved in Pass 2).
                     const auto& field_name = field_member->declaration->name.lexeme;
                     auto expected_type = class_type->fields.at(field_name).type;
 
-                    // Type check the initializer expression.
                     field_member->declaration->initializer->accept(*this);
                     auto initializer_type = popType();
 
                     // Validate that the initializer's type matches the field's declared type.
                     if (expected_type->kind != TypeKind::ERROR &&
-                        initializer_type->kind != TypeKind::ERROR &&
-                        expected_type->toString() != initializer_type->toString()) {
+                        initializer_type->kind != TypeKind::ERROR) {
 
-                        // Special case for empty lists `[]`.
-                        // An empty list's inferred type is `list<any>`, but it should be
-                        // assignable to any `list<T>`.
-                        if (auto list_expr = std::dynamic_pointer_cast<const ListExpr>(field_member->declaration->initializer)) {
-                            if (list_expr->elements.empty() && expected_type->kind == TypeKind::LIST) {
-                                // This is a valid assignment of `[]` to a `list<T>` variable.
-                                // Do nothing and let it pass.
-                            } else {
-                                error(field_member->declaration->name, "Type mismatch in field initializer. Field '" + field_name +
-                                                                       "' is type '" + expected_type->toString() +
-                                                                       "' but initializer is type '" + initializer_type->toString() + "'.");
-                            }
-                        } else {
+                        bool types_match = (expected_type->toString() == initializer_type->toString());
+                        // Add our special case for empty lists
+                        if (!types_match && initializer_type->toString() == "list<any>" && expected_type->kind == TypeKind::LIST) {
+                            types_match = true;
+                        }
+
+                        if (!types_match) {
                             error(field_member->declaration->name, "Type mismatch in field initializer. Field '" + field_name +
                                                                    "' is type '" + expected_type->toString() +
                                                                    "' but initializer is type '" + initializer_type->toString() + "'.");
@@ -906,66 +894,20 @@ namespace angara {
                 }
             } else if (auto method_member = std::dynamic_pointer_cast<const MethodMember>(member)) {
                 // For methods, we just need to visit their FuncStmt node.
+                // Our refactored visit(FuncStmt) will handle checking the body.
                 visit(method_member->declaration);
             }
         }
 
-        // 5. Restore the context.
+        // 6. Restore the context.
         m_symbols.exitScope();
         m_current_class = enclosing_class;
     }
 
-
     void TypeChecker::visit(std::shared_ptr<const TraitStmt> stmt) {
-//        // 1. Create a map to hold the resolved method signatures.
-//        std::map<std::string, std::shared_ptr<FunctionType>> method_signatures;
-//
-//        // 2. SET THE CONTEXT: Let the type checker know we are inside a trait.
-//        //    We save the old value in case of nested traits (not supported, but good practice).
-//        bool enclosing_in_trait_status = m_is_in_trait;
-//        m_is_in_trait = true;
-//
-//        // 3. We enter a temporary scope to check for duplicate method names.
-//        m_symbols.enterScope();
-//
-//        // 4. Iterate through all method AST nodes defined in the trait.
-//        for (const auto& method_stmt : stmt->methods) {
-//            // Since we are in a trait, we only care about the method's signature,
-//            // not its implementation (which shouldn't exist).
-//            // We can call the FuncStmt visitor which will do the signature resolution for us.
-//            // It will also correctly use the 'm_is_in_trait' flag we just set.
-//            method_stmt->accept(*this, method_stmt);
-//
-//            // After it runs, the function's type is in the symbol table. Let's get it.
-//            auto symbol = m_symbols.resolve(method_stmt->name.lexeme);
-//            if (symbol && symbol->type->kind == TypeKind::FUNCTION) {
-//                // Store the resolved signature for the TraitType.
-//                method_signatures[symbol->name] = std::dynamic_pointer_cast<FunctionType>(symbol->type);
-//            }
-//        }
-//
-//        m_symbols.exitScope(); // Exit the temporary scope.
-//
-//        // 5. RESTORE THE CONTEXT
-//        m_is_in_trait = enclosing_in_trait_status;
-//
-//        // 6. Create the final TraitType.
-//        auto trait_type = std::make_shared<TraitType>(stmt->name.lexeme);
-//
-//        // 7. Declare the trait's name in the current (outer) symbol table.
-//        if (!m_symbols.declare(stmt->name, trait_type, true)) { // Traits are implicitly const
-//            error(stmt->name, "A symbol with this name already exists in this scope.");
-//        }
+
     }
 
-/**
- * @brief Type checks a statement that is just an expression (e.g., a function call).
- *
- * The primary purpose of an expression statement is its side effect. The actual
- * value of the expression is calculated and then immediately discarded. Our type
- * checker reflects this by analyzing the expression and then popping its resulting
- * type off our internal stack, as it's not used anywhere else.
- */
     void TypeChecker::visit(std::shared_ptr<const ExpressionStmt> stmt) {
         // 1. Recursively type check the inner expression.
         stmt->expression->accept(*this);
@@ -975,13 +917,6 @@ namespace angara {
         popType();
     }
 
-/**
- * @brief Type checks a block of statements (e.g., `{...}`).
- *
- * A block introduces a new lexical scope. The type checker must mirror this
- * by telling the symbol table to enter a new scope before checking the statements
- * within the block, and to exit that scope afterwards.
- */
     void TypeChecker::visit(std::shared_ptr<const BlockStmt> stmt) {
         // 1. Enter a new lexical scope.
         m_symbols.enterScope();
@@ -996,7 +931,6 @@ namespace angara {
         // 3. Exit the lexical scope, destroying all variables declared within it.
         m_symbols.exitScope();
     }
-
 
     std::any TypeChecker::visit(const AssignExpr& expr) {
         // 1. Determine the type of the value being assigned (RHS).
@@ -1109,8 +1043,6 @@ namespace angara {
         pushAndSave(&expr, target_type);
         return {};
     }
-
-// in TypeChecker.cpp
 
     std::any TypeChecker::visit(const CallExpr& expr) {
         // 1. Type check the callee to see what is being called.
@@ -1303,8 +1235,8 @@ namespace angara {
 
         // --- THE CORE RULE ---
         // 4. Enforce that both operands must be of type 'bool'.
-        if (left_type->toString() != "bool" || right_type->toString() != "bool") {
-            error(expr.op, "Both operands for a logical operator ('&&', '||') must be of type 'bool'. "
+        if (!isTruthy(left_type) || !isTruthy(right_type)) {
+            error(expr.op, "Operands for a logical operator ('&&', '||') must be a boolean or a number. "
                            "Got '" + left_type->toString() + "' and '" + right_type->toString() + "'.");
             pushAndSave(&expr, m_type_error);
             return {};
@@ -1439,7 +1371,7 @@ namespace angara {
         }
 
         // --- RULE 1: Condition must be a boolean ---
-        if (condition_type->toString() != "bool") {
+        if (!isTruthy(condition_type)) {
             error(Token(), "Ternary condition must be of type 'bool', but got '" +
                            condition_type->toString() + "'."); // Placeholder token
             pushAndSave(&expr, m_type_error);

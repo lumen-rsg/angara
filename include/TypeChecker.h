@@ -24,6 +24,7 @@ namespace angara {
         std::map<const Expr*, std::shared_ptr<Type>> m_expression_types;
 
         SymbolTable m_symbols;
+        std::map<const VarDeclStmt*, std::shared_ptr<Type>> m_variable_types;
     private:
         // --- Visitor Methods ---
         // Statements (return void)
@@ -105,6 +106,8 @@ namespace angara {
         static bool isFloat(const std::shared_ptr<Type> &type);
 
         void pushAndSave(const Expr *expr, std::shared_ptr<Type> type);
+
+        static bool isTruthy(const std::shared_ptr<Type> &type);
     };
 
 } // namespace angara

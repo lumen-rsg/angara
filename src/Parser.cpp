@@ -197,10 +197,14 @@ namespace angara {
         return expr;
     }
 
-// factor → unary ( ( "/" | "*" ) unary )*
+// factor → unary ( ( "/" | "*" | "%" ) unary )*
     std::shared_ptr<Expr> Parser::factor() {
         std::shared_ptr<Expr> expr = unary();
-        while (match({TokenType::SLASH, TokenType::STAR})) {
+
+        // --- THIS IS THE FIX ---
+        // Add TokenType::PERCENT to this list.
+        while (match({TokenType::SLASH, TokenType::STAR, TokenType::PERCENT})) {
+            // --- END OF FIX ---
             Token op = previous();
             std::shared_ptr<Expr> right = unary();
             expr = std::make_shared<Binary>(std::move(expr), std::move(op), std::move(right));

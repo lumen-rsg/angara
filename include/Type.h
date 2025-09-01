@@ -183,4 +183,21 @@ namespace angara {
         [[nodiscard]] std::string toString() const override { return name; }
     };
 
+    inline bool isFloat(const std::shared_ptr<Type>& type) {
+        if (!type || type->kind != TypeKind::PRIMITIVE) return false;
+        const auto& name = type->toString();
+        return name == "f32" || name == "f64";
+    }
+
+    inline bool isInteger(const std::shared_ptr<Type>& type) {
+        if (!type || type->kind != TypeKind::PRIMITIVE) return false;
+        const auto& name = type->toString();
+        return name == "i8" || name == "i16" || name == "i32" || name == "i64" ||
+               name == "u8" || name == "u16" || name == "u32" || name == "u64";
+    }
+
+    inline bool isNumeric(const std::shared_ptr<Type>& type) {
+        return isInteger(type) || isFloat(type);
+    }
+
 } // namespace angara

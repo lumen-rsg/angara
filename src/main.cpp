@@ -8,6 +8,8 @@
 #include "Lexer.h"
 #include "Parser.h"
 #include "TypeChecker.h"
+#include "CTranspiler.h"
+#include "ASTPrinter.h"
 
 // A helper function to run the static analysis pipeline
 void check(const std::string& source) {
@@ -32,6 +34,18 @@ void check(const std::string& source) {
     } else {
         std::cerr << "Analysis failed due to type errors." << std::endl;
     }
+
+    angara::ASTPrinter printer(typeChecker);
+    std::cout << printer.print(statements) << std::endl;
+
+    // 4. transpiler
+    angara::CTranspiler transpiler(typeChecker, errorHandler);
+    auto c_source = transpiler.generate(statements);
+
+    // opt: print the C code out.
+    std::cout << "---C SOURCE RESULT---" << std::endl << std::endl;
+    std::cout << c_source << std::endl;
+    std::cout << "------END SOURCE-----" << std::endl;
 }
 
 int main(int argc, char* argv[]) {

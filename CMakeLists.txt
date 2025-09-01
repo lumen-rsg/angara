@@ -17,6 +17,7 @@ add_executable(angara_compiled
         src/TypeChecker.cpp
         src/SymbolTable.cpp
         src/CTranspiler.cpp
+        src/ASTPrinter.cpp
 )
 
 target_include_directories(angara_compiled PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

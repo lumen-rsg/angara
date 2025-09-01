@@ -10,6 +10,7 @@
 #include "TypeChecker.h"  // To access the results of the type analysis
 #include "ErrorHandler.h"
 #include <sstream>
+#include "SymbolTable.h"
 
 namespace angara {
 
@@ -76,9 +77,20 @@ namespace angara {
 
         // For managing indentation
         int m_indent_level = 0;
+        std::stringstream m_globals; // For structs, forward decls, and functions
         void indent();
 
+        SymbolTable m_symbols; // The transpiler's own symbol table.
+
         bool m_hadError = false;
+
+        void transpileListDeclaration(const VarDeclStmt &stmt, const ListExpr &list_expr);
+
+        void transpileRecordDeclaration(const VarDeclStmt &stmt, const RecordExpr &record_expr);
+
+        void transpileMethod(const ClassType &klass, const FuncStmt &stmt);
+
+        std::string transpileConstructorCall(const ClassType &class_type, const vector<std::shared_ptr<Expr>> &args);
     };
 
 } // namespace angara
