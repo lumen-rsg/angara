@@ -33,6 +33,17 @@ namespace angara {
         void transpileExpressionStmt(const ExpressionStmt& stmt);
         void transpileBlock(const BlockStmt& stmt);
         void transpileIfStmt(const IfStmt& stmt);
+
+        void transpileWhileStmt(const WhileStmt &stmt);
+
+        void transpileForStmt(const ForStmt &stmt);
+
+        void transpileReturnStmt(const ReturnStmt &stmt);
+
+        std::string transpileCallExpr(const CallExpr &expr);
+
+        std::string transpileAssignExpr(const AssignExpr &expr);
+
         // ... and so on for all statement types ...
 
         // --- Expression Transpilation Helpers ---
@@ -40,11 +51,28 @@ namespace angara {
         std::string transpileExpr(const std::shared_ptr<Expr>& expr);
         std::string transpileLiteral(const Literal& expr);
         std::string transpileBinary(const Binary& expr);
+
+        std::string transpileGrouping(const Grouping &expr);
+
+        std::string transpileLogical(const LogicalExpr &expr);
+
+        std::string transpileUpdate(const UpdateExpr& expr);
+
+        std::string transpileTernary(const TernaryExpr &expr);
+
+        std::string transpileUnary(const Unary &expr);
+
+        std::string transpileListExpr(const ListExpr &expr);
+
+        std::string transpileRecordExpr(const RecordExpr &expr);
+
         // ... and so on for all expression types ...
 
         // --- Utility Methods ---
         std::string getCType(const std::shared_ptr<Type>& angaraType);
         void indent();
+
+        void transpileFunctionSignature(const FuncStmt &stmt);
 
     private:
         TypeChecker& m_type_checker;

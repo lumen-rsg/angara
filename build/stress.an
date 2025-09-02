@@ -1,0 +1,31 @@
+// --- C Transpiler Stress Test ---
+
+// A global function
+func get_initial_score() -> i64 {
+  return 100;
+}
+
+let global_scope_var as string = "i am global";
+let counter as i64 = 0;
+
+// A C-style for loop
+for (let i as i64 = 0; i < 5; i = i + 1) {
+  counter = counter + 1;
+}
+
+// A function with parameters and control flow
+func check_value(val as i64) -> string {
+  if (val > 10) {
+    return "large";
+  } else {
+    return "small";
+  }
+}
+
+// Top-level execution
+let initial_score = get_initial_score();
+let result_message = check_value(counter); // counter is 5, so this will be "small"
+
+print("Loop counter final value:", counter);
+print("Initial score from function:", initial_score);
+print("Result of check_value:", result_message);
