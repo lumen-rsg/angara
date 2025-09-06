@@ -1,31 +1,41 @@
-// --- C Transpiler Stress Test ---
+// --- C Transpiler Test for Classes ---
 
-// A global function
-func get_initial_score() -> i64 {
-  return 100;
-}
+class Point {
+  public:
+    let x as i64;
+    let y as i64;
 
-let global_scope_var as string = "i am global";
-let counter as i64 = 0;
+  func init(this, x_val as i64, y_val as i64) -> void {
+    print("Point constructor called!");
+    this.x = x_val;
+    this.y = y_val;
+  }
 
-// A C-style for loop
-for (let i as i64 = 0; i < 5; i = i + 1) {
-  counter = counter + 1;
-}
+  func move(this, dx as i64, dy as i64) -> void {
+    this.x = this.x + dx;
+    this.y = this.y + dy;
+  }
 
-// A function with parameters and control flow
-func check_value(val as i64) -> string {
-  if (val > 10) {
-    return "large";
-  } else {
-    return "small";
+  func to_string(this) -> string {
+    return "a point object";
   }
 }
 
-// Top-level execution
-let initial_score = get_initial_score();
-let result_message = check_value(counter); // counter is 5, so this will be "small"
+// --- Top-level script execution ---
 
-print("Loop counter final value:", counter);
-print("Initial score from function:", initial_score);
-print("Result of check_value:", result_message);
+print("Creating a Point instance...");
+let p1 = Point(3, 4);
+
+print("Initial values:");
+print("p1.x =", p1.x);
+print("p1.y =", p1.y);
+
+print("Moving the point...");
+p1.move(10, 20);
+
+print("New values:");
+print("p1.x =", p1.x);
+print("p1.y =", p1.y);
+
+let desc = p1.to_string();
+print("Description:", desc);

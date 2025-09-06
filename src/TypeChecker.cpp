@@ -82,23 +82,42 @@ namespace angara {
 
     bool TypeChecker::isTruthy(const std::shared_ptr<Type>& type) {
         // For now, we'll say any number or boolean is valid in a boolean context.
+        // TODO - refine.
         // We could add strings, lists, etc. later.
         return isNumeric(type) || type->toString() == "bool";
     }
+
+    // in TypeChecker.cpp
 
     void TypeChecker::defineTraitHeader(const TraitStmt& stmt) {
         auto symbol = m_symbols.resolve(stmt.name.lexeme);
         auto trait_type = std::dynamic_pointer_cast<TraitType>(symbol->type);
 
-        m_is_in_trait = true; // Set context for visit(FuncStmt)
+        // We are defining a trait's header, so we ARE in a trait.
+        m_is_in_trait = true;
+
         for (const auto& method_stmt : stmt.methods) {
-            visit(method_stmt); // This will just define the signature, not the body
-            auto method_symbol = m_symbols.resolve(method_stmt->name.lexeme);
-            if (method_symbol) {
-                trait_type->methods[method_symbol->name] = std::dynamic_pointer_cast<FunctionType>(method_symbol->type);
+            // We need to resolve the signature of this method prototype.
+            // We can't use defineFunctionHeader because it declares a global symbol.
+            // Let's do it manually.
+            std::vector<std::shared_ptr<Type>> param_types;
+            for (const auto& p : method_stmt->params) {
+                param_types.push_back(resolveType(p.type));
+            }
+            std::shared_ptr<Type> return_type = m_type_void;
+            if (method_stmt->returnType) {
+                return_type = resolveType(method_stmt->returnType);
+            }
+            auto method_type = std::make_shared<FunctionType>(param_types, return_type);
+
+            if (trait_type->methods.count(method_stmt->name.lexeme)) {
+                error(method_stmt->name, "Duplicate method in trait.");
+            } else {
+                trait_type->methods[method_stmt->name.lexeme] = method_type;
             }
         }
-        m_is_in_trait = false; // Unset context
+
+        m_is_in_trait = false;
     }
 
 
@@ -140,10 +159,21 @@ namespace angara {
                 error(stmt.superclass->name, "'" + stmt.superclass->name.lexeme + "' is not a class and cannot be inherited from.");
             } else {
                 auto superclass_type = std::dynamic_pointer_cast<ClassType>(super_symbol->type);
-                // Check for inheritance cycles.
-                if (superclass_type->name == class_type->name) {
-                    error(stmt.name, "A class cannot inherit from itself.");
-                } else {
+
+                // --- NEW: INHERITANCE CYCLE DETECTION ---
+                auto current = superclass_type;
+                bool has_cycle = false;
+                while (current) {
+                    if (current->name == class_type->name) {
+                        error(stmt.name, "Inheritance cycle detected: class '" + class_type->name + "' cannot inherit from itself.");
+                        has_cycle = true;
+                        break;
+                    }
+                    current = current->superclass;
+                }
+
+                // Only link the superclass if no cycle was found.
+                if (!has_cycle) {
                     class_type->superclass = superclass_type;
                 }
             }
@@ -193,53 +223,131 @@ namespace angara {
 
         // 4. Resolve and validate traits.
         for (const auto& trait_expr : stmt.traits) {
-            // TODO ... (resolve trait, check if it's a TraitType, compare method signatures) ...
-        }
+            auto trait_symbol = m_symbols.resolve(trait_expr->name.lexeme);
+            if (!trait_symbol) {
+                error(trait_expr->name, "Undefined trait '" + trait_expr->name.lexeme + "'.");
+                continue; // Move to the next trait
+            }
+            if (trait_symbol->type->kind != TypeKind::TRAIT) {
+                error(trait_expr->name, "'" + trait_expr->name.lexeme + "' is not a trait.");
+                continue;
+            }
+            auto trait_type = std::dynamic_pointer_cast<TraitType>(trait_symbol->type);
 
-        // Unset the context before leaving.
-        m_current_class = nullptr;
-    }
+            // Check if the class implements all methods required by the trait.
+            for (const auto& [name, required_sig] : trait_type->methods) {
+                auto method_it = class_type->methods.find(name);
+                if (method_it == class_type->methods.end()) {
+                    error(stmt.name, "Class '" + stmt.name.lexeme + "' does not implement required trait method '" + name + "'.");
+                } else {
+                    // Method exists, now check the signature.
+                    auto implemented_sig_info = method_it->second;
+                    auto implemented_sig = std::dynamic_pointer_cast<FunctionType>(implemented_sig_info.type);
 
-    bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
-        m_hadError = false;
-
-        // --- PASS 1: Define all top-level headers and signatures ---
-        // This pass creates and populates the types for all classes, traits,
-        // and global functions, but does NOT look inside method bodies or initializers.
-        for (const auto& stmt : statements) {
-            if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
-                // First, just declare the name to allow for forward references.
-                auto class_type = std::make_shared<ClassType>(class_stmt->name.lexeme);
-                if (!m_symbols.declare(class_stmt->name, class_type, true)) {
-                    error(class_stmt->name, "A symbol with this name already exists in this scope.");
+                    if (!implemented_sig->equals(*required_sig)) {
+                        error(stmt.name, "The signature of method '" + name + "' in class '" + stmt.name.lexeme +
+                            "' does not match the signature required by trait '" + trait_type->name + "'.\n" +
+                            "  Required: " + required_sig->toString() + "\n" +
+                            "  Found:    " + implemented_sig->toString());
+                    }
                 }
             }
-            // ... (can add similar logic for traits and funcs if needed, but this is the key)
         }
 
-        // Now, define the headers now that all names are known.
-        for (const auto& stmt : statements) {
-            if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
-                defineClassHeader(*class_stmt);
-            } else if (auto trait_stmt = std::dynamic_pointer_cast<const TraitStmt>(stmt)) {
-                defineTraitHeader(*trait_stmt);
-            } else if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
-                defineFunctionHeader(*func_stmt);
-            }
-        }
+        m_current_class = nullptr; // Unset context
 
-        if (m_hadError) return false;
-
-        // --- PASS 2: Check all implementation code ---
-        // This pass visits every statement again, but this time the visitors
-        // will dive into method bodies and field initializers.
-        for (const auto& stmt : statements) {
-            stmt->accept(*this, stmt);
-        }
-
-        return !m_hadError;
     }
 
+bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
+    m_hadError = false;
+
+    // --- PASS 1: Declare all top-level type names (unchanged) ---
+    for (const auto& stmt : statements) {
+        if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+            auto class_type = std::make_shared<ClassType>(class_stmt->name.lexeme);
+            if (!m_symbols.declare(class_stmt->name, class_type, true)) { /* error */ }
+        } else if (auto trait_stmt = std::dynamic_pointer_cast<const TraitStmt>(stmt)) {
+            auto trait_type = std::make_shared<TraitType>(trait_stmt->name.lexeme);
+            if (!m_symbols.declare(trait_stmt->name, trait_type, true)) { /* error */ }
+        }
+    }
+    if (m_hadError) return false;
+
+
+    // --- PASS 2: Define all headers and signatures ---
+
+    // --- STAGE 2a: Define TRAIT headers FIRST ---
+    for (const auto& stmt : statements) {
+        if (auto trait_stmt = std::dynamic_pointer_cast<const TraitStmt>(stmt)) {
+            defineTraitHeader(*trait_stmt);
+        }
+    }
+    if (m_hadError) return false;
+
+    // --- STAGE 2b: Define CLASS headers NEXT ---
+    for (const auto& stmt : statements) {
+        if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+            defineClassHeader(*class_stmt);
+        }
+    }
+    if (m_hadError) return false;
+
+    // --- STAGE 2c: Define global FUNCTION headers LAST ---
+    for (const auto& stmt : statements) {
+        if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
+            // We need to ensure we don't process methods, which are also FuncStmts
+            // but are part of a class. The simplest way is to check if it's already in the symbol table.
+            // A better way would be to check its parent in the AST if we had that link.
+
+            // TODO - refine
+            if (m_symbols.resolve(func_stmt->name.lexeme) == nullptr) {
+                 defineFunctionHeader(*func_stmt);
+            }
+        }
+    }
+    if (m_hadError) return false;
+
+
+    // --- PASS 3: Check all implementation code (unchanged) ---
+    for (const auto& stmt : statements) {
+        stmt->accept(*this, stmt);
+    }
+
+        // --- FINAL VALIDATION ---
+        auto main_symbol = m_symbols.resolve("main");
+        if (!main_symbol || main_symbol->type->kind != TypeKind::FUNCTION) {
+            error(Token(), "Program has no 'main' function to act as an entry point.");
+            return false;
+        }
+
+        auto main_func_type = std::dynamic_pointer_cast<FunctionType>(main_symbol->type);
+        if (!isInteger(main_func_type->return_type)) {
+            error(Token(), "'main' function must be declared to return an integer type (e.g., i64).");
+            return false;
+        }
+
+        // --- THIS IS THE FIX ---
+        // Check for the two valid signatures:
+        // 1. main() -> i64
+        // 2. main(args as list<string>) -> i64
+        if (main_func_type->param_types.empty()) {
+            // Signature 1 is valid.
+        } else if (main_func_type->param_types.size() == 1) {
+            // Signature 2 might be valid. Check the parameter type.
+            if (main_func_type->param_types[0]->toString() != "list<string>") {
+                error(Token(), "The 'main' function parameter must be of type 'list<string>'.");
+                return false;
+            }
+        } else {
+            // Any other number of parameters is invalid.
+            error(Token(), "'main' function must have zero or one parameter.");
+            return false;
+        }
+        // --- END OF FIX ---
+
+
+    return !m_hadError;
+}
 
     void TypeChecker::error(const Token& token, const std::string& message) {
         // We only report the first error in a sequence to avoid spam.
@@ -1186,20 +1294,21 @@ namespace angara {
                 error(expr.name, "Instance of class '" + class_type->name + "' has no property named '" + property_name + "'.");
                 result_type = m_type_error;
             } else {
-                // The property was found. Now check access.
+                // --- THIS IS THE ACCESS CHECK ---
                 if (property_info->access == AccessLevel::PRIVATE) {
-                    // This is a simplified check. A full implementation would need to
-                    // know which class *defined* the private member.
+                    // To access a private member, we must be inside a method of that same class.
+                    // `m_current_class` tells us which class body we are currently checking.
                     if (m_current_class == nullptr || m_current_class->name != class_type->name) {
                         error(expr.name, "Property '" + property_name + "' is private and cannot be accessed from this context.");
-                        result_type = m_type_error;
+                    } else {
+                        // Access is granted.
+                        result_type = property_info->type;
                     }
-                }
-
-                // If we haven't set an error, the access is valid.
-                if (result_type->kind != TypeKind::ERROR) {
+                } else {
+                    // Access is public, so it's granted.
                     result_type = property_info->type;
                 }
+                // --- END OF ACCESS CHECK ---
             }
         }
             // --- TODO: Case 2: Accessing a member of a module ---

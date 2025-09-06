@@ -23,8 +23,16 @@ namespace angara {
     private:
         // --- Main Pass Methods ---
         void pass_1_generate_structs(const std::vector<std::shared_ptr<Stmt>>& statements);
+
+        void transpileMethodSignature(const std::string &class_name, const FuncStmt &stmt);
+
+        void transpileMethodBody(const ClassType &klass, const FuncStmt &stmt);
+
         void pass_2_generate_function_declarations(const std::vector<std::shared_ptr<Stmt>>& statements);
         void pass_3_generate_function_implementations(const std::vector<std::shared_ptr<Stmt>>& statements);
+
+        void transpileStruct(const ClassStmt &stmt);
+
         void pass_4_generate_main(const std::vector<std::shared_ptr<Stmt>>& statements);
 
         // --- Statement Transpilation Helpers ---
@@ -44,11 +52,24 @@ namespace angara {
 
         std::string transpileAssignExpr(const AssignExpr &expr);
 
+        const FuncStmt *findMethodAst(const ClassStmt &class_stmt, const std::string &name);
+
+        std::string transpileGetExpr(const GetExpr &expr);
+
+        std::string transpileThisExpr(const ThisExpr &expr);
+
+        void transpileThrowStmt(const ThrowStmt &stmt);
+
+        void transpileTryStmt(const TryStmt &stmt);
+
         // ... and so on for all statement types ...
 
         // --- Expression Transpilation Helpers ---
         // These now return a string directly.
         std::string transpileExpr(const std::shared_ptr<Expr>& expr);
+
+        std::string transpileSuperExpr(const SuperExpr &expr);
+
         std::string transpileLiteral(const Literal& expr);
         std::string transpileBinary(const Binary& expr);
 
@@ -65,6 +86,7 @@ namespace angara {
         std::string transpileListExpr(const ListExpr &expr);
 
         std::string transpileRecordExpr(const RecordExpr &expr);
+        void transpileGlobalFunction(const FuncStmt& stmt);
 
         // ... and so on for all expression types ...
 
@@ -73,6 +95,7 @@ namespace angara {
         void indent();
 
         void transpileFunctionSignature(const FuncStmt &stmt);
+        const ClassType* findPropertyOwner(const ClassType* klass, const std::string& prop_name);
 
     private:
         TypeChecker& m_type_checker;
@@ -89,6 +112,10 @@ namespace angara {
 
         int m_indent_level = 0;
         bool m_hadError = false;
+
+        // Tracks the name of the class whose methods we are currently transpiling.
+        // An empty string means we are in the global scope.
+        std::string m_current_class_name;
     };
 
 } // namespace angara

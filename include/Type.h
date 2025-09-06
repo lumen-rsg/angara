@@ -109,12 +109,28 @@ namespace angara {
 
         // The 'equals' method also needs a small update.
         bool equals(const FunctionType& other) const {
-            // --- THIS IS THE CHANGE ---
+            // 1. Check variadic flag
             if (this->is_variadic != other.is_variadic) return false;
-            // --- END OF CHANGE ---
 
-            if (this->param_types.size() != other.param_types.size()) return false;
-            // ... (rest of the method is unchanged) ...
+            // 2. Check arity
+            if (this->param_types.size() != other.param_types.size()) {
+                return false;
+            }
+
+            // 3. Check each parameter's type
+            for (size_t i = 0; i < this->param_types.size(); ++i) {
+                // We are comparing the string representations.
+                if (this->param_types[i]->toString() != other.param_types[i]->toString()) {
+                    return false;
+                }
+            }
+
+            // 4. Check the return type
+            if (this->return_type->toString() != other.return_type->toString()) {
+                return false;
+            }
+
+            return true;
         }
     };
 
@@ -161,6 +177,7 @@ namespace angara {
             // 4. If we reach the top of the chain, it's not found.
             return nullptr;
         }
+
     };
 
     // Represents the type of *instance* of a class

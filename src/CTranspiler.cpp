@@ -19,6 +19,14 @@ namespace angara {
         }
     }
 
+     const ClassType* CTranspiler::findPropertyOwner(const ClassType* klass, const std::string& prop_name) {
+        if (!klass) return nullptr;
+        if (klass->fields.count(prop_name) || klass->methods.count(prop_name)) {
+            return klass;
+        }
+        return findPropertyOwner(klass->superclass.get(), prop_name);
+    }
+
     std::string CTranspiler::getCType(const std::shared_ptr<Type>& angaraType) {
         if (!angaraType) {
             return "void /* unknown type */";
@@ -37,6 +45,7 @@ namespace angara {
     // --- Helper to transpile a function signature ---
     // (Add its declaration to CTranspiler.h)
     void CTranspiler::transpileFunctionSignature(const FuncStmt& stmt) {
+
         // --- THIS IS THE FIX ---
         // 1. Get the function's symbol from the symbol table using its name.
         auto symbol = m_type_checker.m_symbols.resolve(stmt.name.lexeme);
@@ -47,9 +56,15 @@ namespace angara {
             return;
         }
         auto func_type = std::dynamic_pointer_cast<FunctionType>(symbol->type);
+
+        // --- THIS IS THE FIX ---
+        std::string func_name = stmt.name.lexeme;
+        if (func_name == "main") {
+            func_name = "angara_main"; // Mangle the name
+        }
         // --- END OF FIX ---
 
-        *m_current_out << getCType(func_type->return_type) << " " << stmt.name.lexeme << "(";
+        *m_current_out << getCType(func_type->return_type) << " " << func_name << "(";
         for (size_t i = 0; i < stmt.params.size(); ++i) {
             // We get the C type from the resolved FunctionType, but the parameter
             // name from the AST.
@@ -62,78 +77,318 @@ namespace angara {
     }
 
 
-    void CTranspiler::pass_2_generate_function_declarations(const std::vector<std::shared_ptr<Stmt>>& statements) {
-        m_current_out = &m_function_declarations;
-        m_indent_level = 0;
+void CTranspiler::pass_2_generate_function_declarations(const std::vector<std::shared_ptr<Stmt>>& statements) {
+    m_current_out = &m_function_declarations;
+    m_indent_level = 0;
 
-        for (const auto& stmt : statements) {
-            if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
-                // Generate the prototype, e.g., "AngaraObject add(AngaraObject, AngaraObject);"
-                transpileFunctionSignature(*func_stmt);
-                *m_current_out << ";\n";
+    (*m_current_out) << "// --- Function Forward Declarations ---\n";
+    for (const auto& stmt : statements) {
+        if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
+            // ... (this part is correct) ...
+        } else if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+
+            // --- THIS IS THE FIX ---
+            // ALWAYS generate a forward declaration for the _new function.
+            auto class_type = std::dynamic_pointer_cast<ClassType>(m_type_checker.m_symbols.resolve(class_stmt->name.lexeme)->type);
+            (*m_current_out) << "AngaraObject Angara_" << class_stmt->name.lexeme << "_new(";
+
+            // Find the init method to determine the constructor parameters.
+            auto init_it = class_type->methods.find("init");
+            if (init_it != class_type->methods.end()) {
+                auto init_func_type = std::dynamic_pointer_cast<FunctionType>(init_it->second.type);
+                for (size_t i = 0; i < init_func_type->param_types.size(); ++i) {
+                    (*m_current_out) << getCType(init_func_type->param_types[i]);
+                    if (i < init_func_type->param_types.size() - 1) (*m_current_out) << ", ";
+                }
+            } // If no init method, the parameter list is empty, which is correct.
+
+            (*m_current_out) << ");\n";
+            // --- END OF FIX ---
+
+            // Generate prototypes for all other methods (this part is correct).
+            for (const auto& member : class_stmt->members) {
+                if (auto method_member = std::dynamic_pointer_cast<const MethodMember>(member)) {
+                    transpileMethodSignature(class_stmt->name.lexeme, *method_member->declaration);
+                    (*m_current_out) << ";\n";
+                }
             }
         }
     }
+}
 
-    void CTranspiler::pass_3_generate_function_implementations(const std::vector<std::shared_ptr<Stmt>>& statements) {
-        m_current_out = &m_function_implementations;
-        m_indent_level = 0;
+    void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt) {
+        // This function handles a top-level `func` declaration.
 
-        for (const auto& stmt : statements) {
-            if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
-                // 1. Generate the same signature as the forward declaration.
-                transpileFunctionSignature(*func_stmt);
-                *m_current_out << " {\n";
-                m_indent_level++;
+        // 1. Generate the function signature using our existing helper.
+        transpileFunctionSignature(stmt);
+        (*m_current_out) << " {\n";
+        m_indent_level++;
 
-                // 2. Transpile the body.
-                if (func_stmt->body) {
-                    for (const auto& body_stmt : *func_stmt->body) {
-                        transpileStmt(body_stmt);
-                    }
-                }
-
-                // 3. Handle implicit returns. The Type Checker guarantees that a non-void
-                //    function must have an explicit return, so we only need to handle
-                //    the case where a void function might not have one.
-                auto symbol = m_type_checker.m_symbols.resolve(func_stmt->name.lexeme);
-                auto func_type = std::dynamic_pointer_cast<FunctionType>(symbol->type);
-                if (func_type->return_type->toString() == "void") {
-                    // Check if the last statement was a return. This is complex.
-                    // For now, we can just add a return, it's often harmless.
-                    indent();
-                    *m_current_out << "return;\n";
-                }
-
-
-                m_indent_level--;
-                *m_current_out << "}\n\n";
+        // 2. Transpile all statements in the function's body.
+        if (stmt.body) {
+            for (const auto& body_stmt : *stmt.body) {
+                transpileStmt(body_stmt);
             }
         }
+
+        // 3. Handle implicit returns for void functions.
+        //    Get the canonical type from the symbol table.
+        auto symbol = m_type_checker.m_symbols.resolve(stmt.name.lexeme);
+        auto func_type = std::dynamic_pointer_cast<FunctionType>(symbol->type);
+
+        if (func_type->return_type->toString() == "void") {
+            // A simple check: if the last statement in the body wasn't a return, add one.
+            // This is a simplification; a truly robust check would require analyzing
+            // all possible control flow paths.
+
+            // TODO: refine.
+
+            if (stmt.body->empty() || !isa<ReturnStmt>(stmt.body->back())) {
+                indent();
+                (*m_current_out) << "return;\n";
+            }
+        }
+
+        m_indent_level--;
+        (*m_current_out) << "}\n\n";
+    }
+
+void CTranspiler::pass_3_generate_function_implementations(const std::vector<std::shared_ptr<Stmt>>& statements) {
+    m_current_out = &m_function_implementations;
+    m_indent_level = 0;
+
+    (*m_current_out) << "// --- Function Implementations ---\n";
+    for (const auto& stmt : statements) {
+        if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
+            m_current_class_name = "";
+            transpileGlobalFunction(*func_stmt);
+        } else if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+            m_current_class_name = class_stmt->name.lexeme;
+            auto class_type = std::dynamic_pointer_cast<ClassType>(m_type_checker.m_symbols.resolve(class_stmt->name.lexeme)->type);
+            std::string c_struct_name = "Angara_" + class_type->name;
+
+            // --- THIS IS THE FIX ---
+            // ALWAYS generate the _new function, regardless of whether an 'init' method exists.
+
+            auto init_method_ast = findMethodAst(*class_stmt, "init");
+
+            // 1. Signature
+            (*m_current_out) << "AngaraObject Angara_" << class_type->name << "_new(";
+            if (init_method_ast) {
+                // If init exists, the _new function takes its parameters.
+                auto init_info = class_type->methods.at("init");
+                auto init_func_type = std::dynamic_pointer_cast<FunctionType>(init_info.type);
+                for (size_t i = 0; i < init_method_ast->params.size(); ++i) {
+                     (*m_current_out) << getCType(init_func_type->param_types[i]) << " " << init_method_ast->params[i].name.lexeme << (i == init_method_ast->params.size() - 1 ? "" : ", ");
+                }
+            } // If no init, the parameter list is empty.
+            (*m_current_out) << ") {\n";
+            m_indent_level++;
+
+            // 2. Body
+            indent(); (*m_current_out) << c_struct_name << "* instance = (" << c_struct_name << "*)angara_instance_new(sizeof(" << c_struct_name << "), NULL);\n";
+            indent(); (*m_current_out) << "AngaraObject this_obj = (AngaraObject){VAL_OBJ, {.obj = (Object*)instance}};\n";
+
+            // Conditionally call the _init method ONLY if it exists.
+            if (init_method_ast) {
+                indent(); (*m_current_out) << "Angara_" << class_type->name << "_init(this_obj";
+                for (const auto& param : init_method_ast->params) {
+                    (*m_current_out) << ", " << param.name.lexeme;
+                }
+                (*m_current_out) << ");\n";
+            }
+
+            indent(); (*m_current_out) << "return this_obj;\n";
+            m_indent_level--;
+            (*m_current_out) << "}\n\n";
+            // --- END OF FIX ---
+
+            // --- Generate Method Implementations (this part is correct) ---
+            for (const auto& member : class_stmt->members) {
+                if (auto method_member = std::dynamic_pointer_cast<const MethodMember>(member)) {
+                    transpileMethodBody(*class_type, *method_member->declaration);
+                }
+            }
+
+            m_current_class_name = "";
+        }
+    }
+}
+
+    void CTranspiler::transpileStruct(const ClassStmt& stmt) {
+        // 1. Get the canonical ClassType from the type checker's symbol table.
+        //    This was fully populated by the checker's Pass 1 and Pass 2.
+        auto class_symbol = m_type_checker.m_symbols.resolve(stmt.name.lexeme);
+        auto class_type = std::dynamic_pointer_cast<ClassType>(class_symbol->type);
+
+        std::string c_struct_name = "Angara_" + stmt.name.lexeme;
+
+        (*m_current_out) << "typedef struct " << c_struct_name << " " << c_struct_name << ";\n";
+        (*m_current_out) << "struct " << c_struct_name << " {\n";
+        m_indent_level++;
+
+        // 2. Add the base header.
+        // If there is a superclass, its struct ALREADY contains the base header.
+        if (class_type->superclass) {
+            indent(); (*m_current_out) << "struct Angara_" << class_type->superclass->name << " parent;\n";
+        } else {
+            indent(); (*m_current_out) << "AngaraInstance base;\n";
+        }
+
+        // 3. Add all fields DEFINED IN THIS CLASS.
+        //    We iterate the AST to get the field names in their declared order.
+        for (const auto& member : stmt.members) {
+            if (auto field_member = std::dynamic_pointer_cast<const FieldMember>(member)) {
+                const auto& field_name = field_member->declaration->name.lexeme;
+                // Get the type from the ClassType's field map, not m_variable_types.
+                const auto& field_info = class_type->fields.at(field_name);
+
+                indent();
+                (*m_current_out) << getCType(field_info.type) << " " << field_name << ";\n";
+            }
+        }
+        // --- END OF FIX ---
+
+        m_indent_level--;
+        (*m_current_out) << "};\n\n";
     }
 
 // --- Main Orchestrator ---
-    std::string CTranspiler::generate(const std::vector<std::shared_ptr<Stmt>>& statements) {
-        pass_1_generate_structs(statements);
-        pass_2_generate_function_declarations(statements);
-        pass_3_generate_function_implementations(statements);
-        pass_4_generate_main(statements);
+// in CTranspiler.cpp
 
-        if (m_hadError) return "";
+std::string CTranspiler::generate(const std::vector<std::shared_ptr<Stmt>>& statements) {
+    // --- Run all the passes to populate the internal streams ---
+    pass_1_generate_structs(statements);
+    pass_2_generate_function_declarations(statements);
+    pass_3_generate_function_implementations(statements);
 
-        std::stringstream final_code;
-        final_code << "#include \"angara_runtime.h\"\n\n";
-        final_code << m_structs_and_globals.str() << "\n";
-        final_code << m_function_declarations.str() << "\n";
-        final_code << m_function_implementations.str() << "\n";
-        final_code << m_main_body.str() << "\n";
-        return final_code.str();
+    // If any pass reported an error, abort.
+    if (m_hadError) {
+        return "";
     }
 
-// --- Pass Implementations (Stubs for now) ---
+    // --- Assemble the final C file from all the pieces ---
+    std::stringstream final_code;
+
+    // 1. Add the preamble (includes).
+    final_code << "#include \"angara_runtime.h\"\n\n";
+
+    // 2. Add the generated structs and global variable definitions.
+    final_code << m_structs_and_globals.str() << "\n";
+
+    // 3. Add the function forward declarations.
+    final_code << m_function_declarations.str() << "\n";
+
+    // 4. Add the full function implementations.
+    final_code << m_function_implementations.str() << "\n";
+
+    // 5. Finally, generate and add the C `main()` entry point wrapper.
+    final_code << "// --- C Entry Point ---\n";
+    final_code << "int main(int argc, const char* argv[]) {\n";
+    final_code << "    angara_runtime_init();\n\n";
+
+    auto main_symbol = m_type_checker.m_symbols.resolve("main");
+    // The Type Checker already guarantees main_symbol and its type are valid,
+    // so we can use it without extra null checks here.
+    auto main_func_type = std::dynamic_pointer_cast<FunctionType>(main_symbol->type);
+
+    final_code << "    // Call the user's Angara main function (mangled to angara_main)\n";
+    if (main_func_type->param_types.empty()) {
+        final_code << "    AngaraObject result = angara_main();\n";
+    } else {
+        final_code << "    AngaraObject args_list = angara_list_new();\n";
+        final_code << "    for (int i = 0; i < argc; i++) {\n";
+        final_code << "        angara_list_push(args_list, angara_string_from_c(argv[i]));\n";
+        final_code << "    }\n";
+        final_code << "    AngaraObject result = angara_main(args_list);\n";
+        final_code << "    angara_decref(args_list);\n";
+    }
+
+    final_code << "\n";
+    final_code << "    int exit_code = (int)AS_I64(result);\n";
+    final_code << "    angara_decref(result);\n\n";
+    final_code << "    angara_runtime_shutdown();\n";
+    final_code << "    return exit_code;\n";
+    final_code << "}\n";
+
+    return final_code.str();
+}
+
+
     void CTranspiler::pass_1_generate_structs(const std::vector<std::shared_ptr<Stmt>>& statements) {
         m_current_out = &m_structs_and_globals;
-        // TODO: Loop and find ClassStmts to generate structs
+        m_indent_level = 0;
+
+        (*m_current_out) << "// --- Struct Definitions ---\n";
+        for (const auto& stmt : statements) {
+            if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+                transpileStruct(*class_stmt);
+
+            // After defining the struct, declare the global C variable that will
+            // represent the class object itself at runtime.
+            m_structs_and_globals << "AngaraClass g_" << class_stmt->name.lexeme << "_class;\n";
+            }
+        }
+    }
+
+    void CTranspiler::transpileMethodSignature(const std::string& class_name, const FuncStmt& stmt) {
+        // Look up the canonical FunctionType from the Type Checker's results.
+        auto class_symbol = m_type_checker.m_symbols.resolve(class_name);
+        auto class_type = std::dynamic_pointer_cast<ClassType>(class_symbol->type);
+        auto method_info = class_type->methods.at(stmt.name.lexeme);
+        auto func_type = std::dynamic_pointer_cast<FunctionType>(method_info.type);
+
+        // Generate the mangled name, e.g., "Angara_Point_move"
+        (*m_current_out) << getCType(func_type->return_type) << " "
+                         << "Angara_" << class_name << "_" << stmt.name.lexeme << "(";
+
+        // The first parameter is always 'this'.
+        if (stmt.has_this) {
+            (*m_current_out) << "AngaraObject this_obj";
+            if (!stmt.params.empty()) {
+                (*m_current_out) << ", ";
+            }
+        }
+
+        // Add the regular parameters.
+        for (size_t i = 0; i < stmt.params.size(); ++i) {
+            (*m_current_out) << getCType(func_type->param_types[i]) << " " << stmt.params[i].name.lexeme;
+            if (i < stmt.params.size() - 1) {
+                (*m_current_out) << ", ";
+            }
+        }
+        (*m_current_out) << ")";
+    }
+
+    void CTranspiler::transpileMethodBody(const ClassType& klass, const FuncStmt& stmt) {
+        // 1. Generate the full function signature again (this time for the definition).
+        transpileMethodSignature(klass.name, stmt);
+        (*m_current_out) << " {\n";
+        m_indent_level++;
+
+        // 2. If it's a method with 'this', create the typed 'this' pointer.
+        if (stmt.has_this) {
+            indent();
+            (*m_current_out) << "struct Angara_" << klass.name << "* this = (struct Angara_" << klass.name << "*)AS_INSTANCE(this_obj);\n";
+        }
+
+        // 3. Transpile all statements in the method's body.
+        if (stmt.body) {
+            for (const auto& body_stmt : *stmt.body) {
+                transpileStmt(body_stmt);
+            }
+        }
+
+        // 4. Handle implicit returns for void methods.
+        auto method_info = klass.methods.at(stmt.name.lexeme);
+        auto func_type = std::dynamic_pointer_cast<FunctionType>(method_info.type);
+        if (func_type->return_type->toString() == "void") {
+            indent();
+            (*m_current_out) << "return;\n";
+        }
+
+        m_indent_level--;
+        (*m_current_out) << "}\n\n";
     }
 
 
@@ -142,6 +397,19 @@ namespace angara {
         m_indent_level = 0;
         *m_current_out << "int main(void) {\n";
         m_indent_level++;
+
+        indent(); (*m_current_out) << "// --- Initialize Class Objects ---\n";
+        for (const auto& stmt : statements) {
+            if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+                indent();
+                (*m_current_out) << "g_" << class_stmt->name.lexeme << "_class = (AngaraClass){"
+                                 << "{OBJ_CLASS, 1}, " // Base object header
+                                 << "\"" << class_stmt->name.lexeme << "\"" // Name
+                                 << "};\n";
+            }
+        }
+        indent(); (*m_current_out) << "\n";
+
         for (const auto& stmt : statements) {
             if (!isa<ClassStmt>(stmt) && !isa<FuncStmt>(stmt) && !isa<TraitStmt>(stmt)) {
                 transpileStmt(stmt);
@@ -168,8 +436,12 @@ namespace angara {
             transpileForStmt(*for_stmt);
         } else if (auto ret_stmt = std::dynamic_pointer_cast<const ReturnStmt>(stmt)) {
             transpileReturnStmt(*ret_stmt);
+        } else if (auto try_stmt = std::dynamic_pointer_cast<const TryStmt>(stmt)) {
+            transpileTryStmt(*try_stmt);
+        } else if (auto throw_stmt = std::dynamic_pointer_cast<const ThrowStmt>(stmt)) {
+            transpileThrowStmt(*throw_stmt);
         }
-            // ... other else if ...
+
         else {
             indent();
             (*m_current_out) << "/* unhandled statement */;\n";
@@ -233,9 +505,25 @@ namespace angara {
             return transpileCallExpr(*call);
         } else if (auto assign = std::dynamic_pointer_cast<const AssignExpr>(expr)) {
             return transpileAssignExpr(*assign);
+        } else if (auto get = std::dynamic_pointer_cast<const GetExpr>(expr)) { // <-- ADD THIS
+            return transpileGetExpr(*get);
+        } else if (auto call = std::dynamic_pointer_cast<const CallExpr>(expr)) { // <-- ADD THIS
+            return transpileCallExpr(*call);
+        } else if (auto this_expr = std::dynamic_pointer_cast<const ThisExpr>(expr)) { // <-- ADD THIS
+            return transpileThisExpr(*this_expr);
+        } else if (auto super = std::dynamic_pointer_cast<const SuperExpr>(expr)) {
+            return transpileSuperExpr(*super);
         }
         // ... other else if for Call, Get, etc. ...
         return "/* unknown expr */";
+    }
+
+    std::string CTranspiler::transpileSuperExpr(const SuperExpr& expr) {
+        // This transpiles a `super.method` expression. The expression itself
+        // doesn't generate a value, but it tells a subsequent CallExpr which
+        // C function to call. This is tricky.
+        // Let's adjust the CallExpr visitor to handle this.
+        return "/* super." + expr.method.lexeme + " */"; // Keep as placeholder for now
     }
 
     std::string CTranspiler::transpileLiteral(const Literal& expr) {
@@ -530,6 +818,71 @@ void CTranspiler::transpileWhileStmt(const WhileStmt& stmt) {
     }
 
     std::string CTranspiler::transpileCallExpr(const CallExpr& expr) {
+
+        // 1. Get the pre-computed type of the thing being called.
+        auto callee_type = m_type_checker.m_expression_types.at(expr.callee.get());
+
+        // 2. Transpile all arguments into a single comma-separated string.
+        std::string args_str;
+        for (size_t i = 0; i < expr.arguments.size(); ++i) {
+            args_str += transpileExpr(expr.arguments[i]);
+            if (i < expr.arguments.size() - 1) args_str += ", ";
+        }
+
+        // --- Case 1: Class Constructor Call, e.g., Point(3, 4) ---
+        if (callee_type->kind == TypeKind::CLASS) {
+            auto class_type = std::dynamic_pointer_cast<ClassType>(callee_type);
+            // A constructor call is transpiled into a call to our special _new function.
+            return "Angara_" + class_type->name + "_new(" + args_str + ")";
+        }
+
+        // --- Case 2: Instance Method Call, e.g., p1.move(10, 20) ---
+        if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(expr.callee)) {
+            // This is a method call, e.g., p1.move(...)
+            std::string object_str = transpileExpr(get_expr->object);
+            const std::string& method_name = get_expr->name.lexeme;
+
+            // --- THIS IS THE FIX ---
+            auto object_type = std::dynamic_pointer_cast<InstanceType>(
+                m_type_checker.m_expression_types.at(get_expr->object.get())
+            );
+            // Find which class in the hierarchy owns the method.
+            const ClassType* owner_class = findPropertyOwner(object_type->class_type.get(), method_name);
+            std::string owner_class_name = owner_class ? owner_class->name : "UNKNOWN";
+            // --- END OF FIX ---
+
+            std::string final_args = object_str;
+            if (!args_str.empty()) final_args += ", " + args_str;
+
+            // Generate the call to the correct owner's mangled function.
+            return "Angara_" + owner_class_name + "_" + method_name + "(" + final_args + ")";
+        }
+
+        if (auto super_expr = std::dynamic_pointer_cast<const SuperExpr>(expr.callee)) {
+            // We must be inside a class to use 'super'.
+            if (!m_current_class_name.empty()) {
+                // Get the current class's type to find its superclass.
+                auto class_symbol = m_type_checker.m_symbols.resolve(m_current_class_name);
+                auto class_type = std::dynamic_pointer_cast<ClassType>(class_symbol->type);
+
+                if (class_type->superclass) {
+                    std::string superclass_name = class_type->superclass->name;
+                    const std::string& method_name = super_expr->method.lexeme;
+
+                    // The first argument to a super call is always 'this'
+                    std::string final_args = "this_obj";
+                    if (!args_str.empty()) {
+                        final_args += ", " + args_str;
+                    }
+                    // Call the superclass's version of the method: SuperClassName_methodName(this, ...)
+                    return "Angara_" + superclass_name + "_" + method_name + "(" + final_args + ")";
+                }
+            }
+            // The Type Checker should have already caught invalid 'super' calls.
+            return "/* invalid super call */";
+        }
+
+
         auto callee_str = transpileExpr(expr.callee);
 
         // Handle our built-in functions
@@ -552,7 +905,6 @@ void CTranspiler::transpileWhileStmt(const WhileStmt& stmt) {
         }
 
         // Transpile arguments for a regular function call
-        std::string args_str;
         for (size_t i = 0; i < expr.arguments.size(); ++i) {
             args_str += transpileExpr(expr.arguments[i]);
             if (i < expr.arguments.size() - 1) args_str += ", ";
@@ -567,5 +919,90 @@ void CTranspiler::transpileWhileStmt(const WhileStmt& stmt) {
         // TODO: Handle compound assignment like '+='
         return "(" + lhs_str + " = " + rhs_str + ")";
     }
+
+    const FuncStmt* CTranspiler::findMethodAst(const ClassStmt& class_stmt, const std::string& name) {
+        // 1. Iterate through all the members defined in the class's AST node.
+        for (const auto& member : class_stmt.members) {
+            // 2. Try to cast the generic member to a MethodMember.
+            if (auto method_member = std::dynamic_pointer_cast<const MethodMember>(member)) {
+                // 3. If it's a method, check if its name matches the one we're looking for.
+                if (method_member->declaration->name.lexeme == name) {
+                    // 4. Found it. Return a raw pointer to the FuncStmt node.
+                    return method_member->declaration.get();
+                }
+            }
+        }
+        // 5. If we've searched all members and haven't found it, return nullptr.
+        return nullptr;
+    }
+
+
+    std::string CTranspiler::transpileGetExpr(const GetExpr& expr) {
+        std::string object_str = transpileExpr(expr.object);
+        const std::string& prop_name = expr.name.lexeme;
+
+        auto object_type = std::dynamic_pointer_cast<InstanceType>(
+            m_type_checker.m_expression_types.at(expr.object.get())
+        );
+        std::string c_struct_name = "Angara_" + object_type->class_type->name;
+
+        // --- THIS IS THE FIX ---
+        // Find which class in the hierarchy owns the property.
+        const ClassType* owner_class = findPropertyOwner(object_type->class_type.get(), prop_name);
+
+        std::string access_path = "->";
+        const ClassType* current = object_type->class_type.get();
+        while (current && current->name != owner_class->name) {
+            access_path += "parent.";
+            current = current->superclass.get();
+        }
+        access_path += prop_name;
+        // --- END OF FIX ---
+
+        return "((" + c_struct_name + "*)AS_INSTANCE(" + object_str + "))" + access_path;
+    }
+
+    std::string CTranspiler::transpileThisExpr(const ThisExpr& expr) {
+        // Inside a method, the first parameter is always the instance object.
+        // Our convention is to name this C parameter 'this_obj'.
+        return "this_obj";
+    }
+
+    void CTranspiler::transpileThrowStmt(const ThrowStmt& stmt) {
+        indent();
+        (*m_current_out) << "angara_throw(" << transpileExpr(stmt.expression) << ");\n";
+    }
+
+    void CTranspiler::transpileTryStmt(const TryStmt& stmt) {
+        indent(); (*m_current_out) << "{\n";
+        m_indent_level++;
+        indent(); (*m_current_out) << "ExceptionFrame __frame;\n";
+        indent(); (*m_current_out) << "__frame.prev = g_exception_chain_head;\n";
+        indent(); (*m_current_out) << "g_exception_chain_head = &__frame;\n";
+
+        indent(); (*m_current_out) << "if (setjmp(__frame.buffer) == 0) {\n";
+        m_indent_level++;
+
+        transpileStmt(stmt.tryBlock);
+
+        m_indent_level--;
+        indent(); (*m_current_out) << "}\n";
+
+        indent(); (*m_current_out) << "g_exception_chain_head = __frame.prev; // Pop the frame\n";
+
+        indent(); (*m_current_out) << "if (g_current_exception.type != VAL_NIL) {\n";
+        m_indent_level++;
+
+        indent(); (*m_current_out) << "AngaraObject " << stmt.catchName.lexeme << " = g_current_exception;\n";
+        indent(); (*m_current_out) << "g_current_exception = create_nil();\n";
+
+        transpileStmt(stmt.catchBlock);
+
+        m_indent_level--;
+        indent(); (*m_current_out) << "}\n";
+        m_indent_level--;
+        indent(); (*m_current_out) << "}\n";
+    }
+
 
 } // namespace angara
