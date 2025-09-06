@@ -247,4 +247,35 @@ void angara_runtime_shutdown(void) {
     printf("-- Angara Runtime Shutdown --\n");
 }
 
+// --- Update Expression Implementation ---
+
+AngaraObject angara_pre_increment(AngaraObject* lvalue) {
+    // Note: Assumes the type is i64 for simplicity. A real implementation
+    // would check for floats as well.
+    lvalue->as.i64++;
+    // Returns the NEW value.
+    angara_incref(*lvalue); // The caller gets a new reference.
+    return *lvalue;
+}
+
+AngaraObject angara_post_increment(AngaraObject* lvalue) {
+    // Returns the ORIGINAL value.
+    AngaraObject original_value = create_i64(lvalue->as.i64);
+    lvalue->as.i64++;
+    // No incref needed, create_i64 returns a fresh value.
+    return original_value;
+}
+
+AngaraObject angara_pre_decrement(AngaraObject* lvalue) {
+    lvalue->as.i64--;
+    angara_incref(*lvalue);
+    return *lvalue;
+}
+
+AngaraObject angara_post_decrement(AngaraObject* lvalue) {
+    AngaraObject original_value = create_i64(lvalue->as.i64);
+    lvalue->as.i64--;
+    return original_value;
+}
+
 

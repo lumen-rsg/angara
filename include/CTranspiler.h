@@ -62,6 +62,8 @@ namespace angara {
 
         void transpileTryStmt(const TryStmt &stmt);
 
+        void transpileForInStmt(const ForInStmt &stmt);
+
         // ... and so on for all statement types ...
 
         // --- Expression Transpilation Helpers ---

@@ -20,6 +20,8 @@ namespace angara {
         INSTANCE,
         ANY,
         NIL,
+        THREAD,
+        MUTEX,
         ERROR // A special type to prevent cascading error messages
     };
 
@@ -216,5 +218,15 @@ namespace angara {
     inline bool isNumeric(const std::shared_ptr<Type>& type) {
         return isInteger(type) || isFloat(type);
     }
+
+    struct ThreadType : Type {
+        ThreadType() : Type(TypeKind::THREAD) {}
+        std::string toString() const override { return "Thread"; }
+    };
+
+    struct MutexType : Type {
+        MutexType() : Type(TypeKind::MUTEX) {}
+        std::string toString() const override { return "Mutex"; }
+    };
 
 } // namespace angara

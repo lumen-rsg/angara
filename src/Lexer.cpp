@@ -71,7 +71,8 @@ namespace angara {
             {"any",      TokenType::TYPE_ANY},
             {"private",  TokenType::PRIVATE},
             {"public",   TokenType::PUBLIC},
-            {"void",     TokenType::TYPE_VOID}
+            {"void",     TokenType::TYPE_VOID},
+            {"Thread", TokenType::TYPE_THREAD}
     };
 
     Lexer::Lexer(const std::string &source) : m_source(source) {}
@@ -210,8 +211,18 @@ namespace angara {
                 addToken(TokenType::COMMA);
                 break;
             case '.':
-                addToken(TokenType::DOT);
-                break;
+                if (match('.')) {
+                    if (match('.')) {
+                        addToken(TokenType::DOT_DOT_DOT);
+                    } else {
+                        // This could be a range operator '..' later.
+                        // For now, it's an error.
+                        std::cerr << "Error: Unexpected '..'\n";
+                    }
+                } else {
+                    addToken(TokenType::DOT);
+                }
+            break;
             case '*':
                 addToken(match('=') ? TokenType::STAR_EQUAL : TokenType::STAR); // <-- MODIFY
                 break;

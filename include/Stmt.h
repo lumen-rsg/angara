@@ -53,6 +53,7 @@ namespace angara {
     struct Parameter {
         Token name;
         std::shared_ptr<ASTType> type;
+        bool is_variadic = false; // <-- NEW
     };
 
     struct ClassMember {

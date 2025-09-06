@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <setjmp.h> // <-- Include for jmp_buf
+#include <pthread.h>
 
 // --- Core Object Representation ---
 
@@ -15,7 +16,9 @@ typedef enum {
     OBJ_RECORD,
     OBJ_CLOSURE,
     OBJ_CLASS,
-    OBJ_INSTANCE
+    OBJ_INSTANCE,
+    OBJ_THREAD,
+    OBJ_MUTEX,
 } ObjectType;
 
 // The base struct for all heap-allocated Angara objects.
@@ -94,6 +97,14 @@ typedef struct {
     RecordEntry* entries;
 } AngaraRecord;
 
+typedef AngaraObject (*GenericAngaraFn)(int arg_count, AngaraObject args[]);
+typedef struct {
+    Object obj;
+    GenericAngaraFn fn; // Pointer to the C function to call
+    int arity;
+    bool is_native; // Flag to distinguish
+} AngaraClosure;
+
 
 // --- Helper Macros for Type Checking and Casting ---
 #define IS_NIL(value)     ((value).type == VAL_NIL)
@@ -116,6 +127,9 @@ typedef struct {
 
 #define AS_CLASS(value)    ((AngaraClass*)AS_OBJ(value))
 #define AS_INSTANCE(value) ((AngaraInstance*)AS_OBJ(value))
+#define AS_CLOSURE(value) ((AngaraClosure*)AS_OBJ(value))
+#define AS_THREAD(value) ((AngaraThread*)AS_OBJ(value))
+#define AS_MUTEX(value) ((AngaraMutex*)AS_OBJ(value))
 
 // --- Value Constructor Functions ---
 AngaraObject create_nil(void);
@@ -176,6 +190,43 @@ extern ExceptionFrame* g_exception_chain_head;
 
 void angara_runtime_init(void);
 void angara_runtime_shutdown(void);
+
+// --- NEW Thread struct ---
+typedef struct {
+    Object obj;
+    pthread_t handle;
+    AngaraObject return_value;
+    AngaraObject closure_to_run;
+} AngaraThread;
+
+
+// --- NEW Built-in functions ---
+// --- Runtime API ---
+// We no longer need separate spawn/call for closures vs. native.
+// Everything is a closure now.
+AngaraObject angara_spawn(AngaraObject closure);
+AngaraObject angara_call(AngaraObject closure, int arg_count, AngaraObject args[]);
+
+// We need a way to create closures.
+AngaraObject angara_closure_new(GenericAngaraFn fn, int arity, bool is_native);
+AngaraObject angara_thread_join(AngaraObject thread_obj);
+
+typedef struct {
+    Object obj;
+    pthread_mutex_t handle;
+} AngaraMutex;
+
+// --- NEW: Mutex API functions ---
+AngaraObject angara_mutex_new(void);
+void angara_mutex_lock(AngaraObject mutex_obj);
+void angara_mutex_unlock(AngaraObject mutex_obj);
+
+AngaraObject angara_pre_increment(AngaraObject* lvalue);
+AngaraObject angara_post_increment(AngaraObject* lvalue);
+AngaraObject angara_pre_decrement(AngaraObject* lvalue);
+AngaraObject angara_post_decrement(AngaraObject* lvalue);
+
+AngaraObject angara_typeof(AngaraObject value);
 
 
 #endif //ANGARA_RUNTIME_H

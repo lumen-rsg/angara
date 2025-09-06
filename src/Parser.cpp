@@ -14,7 +14,7 @@ namespace angara {
             TokenType::TYPE_INT, TokenType::TYPE_U8, TokenType::TYPE_U16, TokenType::TYPE_U32,
             TokenType::TYPE_U64, TokenType::TYPE_UINT, TokenType::TYPE_F32, TokenType::TYPE_F64,
             TokenType::TYPE_FLOAT, TokenType::TYPE_BOOL, TokenType::TYPE_STRING, TokenType::TYPE_NIL,
-            TokenType::TYPE_LIST, TokenType::TYPE_RECORD, TokenType::TYPE_ANY, TokenType::TYPE_VOID
+            TokenType::TYPE_LIST, TokenType::TYPE_RECORD, TokenType::TYPE_ANY, TokenType::TYPE_VOID, TokenType::TYPE_THREAD
     };
 
     std::shared_ptr<ASTType> Parser::type() {
@@ -604,7 +604,14 @@ namespace angara {
                     Token param_name = consume(TokenType::IDENTIFIER, "Expect parameter name.");
                     consume(TokenType::AS, "Expect 'as' after parameter name.");
                     std::shared_ptr<ASTType> param_type = type();
+                    bool is_variadic = match({TokenType::DOT_DOT_DOT});
+
                     parameters.push_back({param_name, param_type});
+
+                    // Rule: The variadic parameter must be the last one.
+                    if (is_variadic && !check(TokenType::RIGHT_PAREN)) {
+                        throw error(peek(), "A variadic parameter '...' must be the last parameter in a function signature.");
+                    }
                 } while (match({TokenType::COMMA}));
             }
         }

@@ -27,7 +27,7 @@ namespace angara {
                 "EQUAL", "EQUAL_EQUAL",
                 "GREATER", "GREATER_EQUAL",
                 "LESS", "LESS_EQUAL",
-                "PIPE", "QUESTION_QUESTION",
+                "PIPE", "QUESTION_QUESTION", "DOT_DOT_DOT",
 
                 // Literals
                 "IDENTIFIER", "STRING", "NUMBER_INT", "NUMBER_FLOAT",
@@ -45,7 +45,7 @@ namespace angara {
                 "TYPE_LIST", "TYPE_MAP", "TYPE_VOID",
 
                 "EOF_TOKEN", "EOF_TOKEN", "AS", "TYPE_I8", "TYPE_I16", "TYPE_I32", "TYPE_I64", "TYPE_U8", "TYPE_U16", "TYPE_U32", "TYPE_U64", "TYPE_UINT", "TYPE_F32",
-                "TYPE_F64", "TYPE_NIL", "TYPE_RECORD", "TYPE_FUNCTION", "TYPE_ANY"
+                "TYPE_F64", "TYPE_NIL", "TYPE_RECORD", "TYPE_FUNCTION", "TYPE_ANY", "TYPE_THREAD"
         };
 
         // Safety check to prevent crashing if the enum and array get out of sync

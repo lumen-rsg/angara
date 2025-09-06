@@ -177,5 +177,11 @@ extern ExceptionFrame* g_exception_chain_head;
 void angara_runtime_init(void);
 void angara_runtime_shutdown(void);
 
+AngaraObject angara_pre_increment(AngaraObject* lvalue);
+AngaraObject angara_post_increment(AngaraObject* lvalue);
+AngaraObject angara_pre_decrement(AngaraObject* lvalue);
+AngaraObject angara_post_decrement(AngaraObject* lvalue);
+
+AngaraObject angara_typeof(AngaraObject value);
 
 #endif //ANGARA_RUNTIME_H

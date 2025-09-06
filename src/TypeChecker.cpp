@@ -29,6 +29,8 @@ namespace angara {
         m_type_nil = std::make_shared<PrimitiveType>("nil");
         m_type_any = std::make_shared<PrimitiveType>("any");
         m_type_error = std::make_shared<PrimitiveType>("<error>");
+        m_type_thread = std::make_shared<ThreadType>();
+        m_type_mutex = std::make_shared<MutexType>();
 
         auto print_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{}, // No fixed parameters
@@ -36,6 +38,7 @@ namespace angara {
                 true // <-- Set the variadic flag to true
         );
         // Note: A better model for variadics is a special flag in FunctionType.
+        // TODO: refine.
         // For now, this is a good approximation.
         m_symbols.declare(Token(TokenType::IDENTIFIER, "print", 0, 0), print_type, true);
         // func len(any) -> i64;
@@ -51,6 +54,24 @@ namespace angara {
                 m_type_string
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "typeof", 0, 0), typeof_type, true);
+
+        auto worker_fn_type = std::make_shared<FunctionType>(
+            std::vector<std::shared_ptr<Type>>{}, // No parameters
+            m_type_void
+        );
+
+        // Define the signature for `spawn` itself: function(function() -> void) -> Thread
+        auto spawn_type = std::make_shared<FunctionType>(
+            std::vector<std::shared_ptr<Type>>{worker_fn_type},
+            std::make_shared<ThreadType>() // Returns our new Thread type
+        );
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "spawn", 0, 0), spawn_type, true);
+
+        auto mutex_constructor_type = std::make_shared<FunctionType>(
+            std::vector<std::shared_ptr<Type>>{},
+            m_type_mutex
+        );
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "Mutex", 0, 0), mutex_constructor_type, true);
 
     }
 
@@ -81,10 +102,18 @@ namespace angara {
     }
 
     bool TypeChecker::isTruthy(const std::shared_ptr<Type>& type) {
-        // For now, we'll say any number or boolean is valid in a boolean context.
-        // TODO - refine.
-        // We could add strings, lists, etc. later.
-        return isNumeric(type) || type->toString() == "bool";
+        // In our new, more flexible system, almost any type can be evaluated
+        // in a boolean context. The only exceptions might be types that have
+        // no logical "empty" or "zero" state.
+
+        // For now, we can say that every valid type is truthy.
+        // The only non-truthy type would be an error type.
+        if (type->kind == TypeKind::ERROR) {
+            return false;
+        }
+
+        // Allow everything: bool, nil, numbers, strings, lists, records, functions, etc.
+        return true;
     }
 
     // in TypeChecker.cpp
@@ -125,14 +154,18 @@ namespace angara {
         // This helper only resolves and declares the function signature.
         // It is used for both global functions and methods in Pass 2.
         std::vector<std::shared_ptr<Type>> param_types;
+        bool is_variadic = false;
         for (const auto& p : stmt.params) {
             param_types.push_back(resolveType(p.type));
+            if (p.is_variadic) {
+                is_variadic = true;
+            }
         }
         std::shared_ptr<Type> return_type = m_type_void;
         if (stmt.returnType) {
             return_type = resolveType(stmt.returnType);
         }
-        auto function_type = std::make_shared<FunctionType>(param_types, return_type);
+        auto function_type = std::make_shared<FunctionType>(param_types, return_type, is_variadic);
 
         if (!m_symbols.declare(stmt.name, function_type, true)) {
             error(stmt.name, "A symbol with this name already exists in this scope.");
@@ -394,6 +427,7 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
             if (name == "string") return m_type_string;
             if (name == "void") return m_type_void;
             if (name == "any") return m_type_any;
+            if (name == "Thread") return m_type_thread; // <-- ADD THIS
 
             // If it's not a primitive, it must be a user-defined type (class or trait).
             // We look it up in the symbol table.
@@ -462,72 +496,66 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         return m_type_error;
     }
 
-    void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
-        std::shared_ptr<Type> initializer_type = nullptr;
+void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
+    std::shared_ptr<Type> initializer_type = nullptr;
+    if (stmt->initializer) {
+        stmt->initializer->accept(*this);
+        initializer_type = popType();
+    }
 
-        // 1. Determine the type of the initializer, if it exists.
-        if (stmt->initializer) {
-            stmt->initializer->accept(*this);
-            initializer_type = popType();
-            if (initializer_type->kind == TypeKind::ERROR) {
-                // Don't proceed if the initializer itself had an error.
-                m_symbols.declare(stmt->name, m_type_error, stmt->is_const); // Declare with error type
-                return;
+    std::shared_ptr<Type> declared_type = nullptr;
+    if (stmt->typeAnnotation) {
+        declared_type = resolveType(stmt->typeAnnotation);
+    }
+
+    // --- Logic for type inference and error checking ---
+    if (!declared_type && initializer_type) {
+        // Infer type from initializer
+        declared_type = initializer_type;
+    } else if (declared_type && !initializer_type) {
+        // This is fine, e.g., `let x as i64;`
+    } else if (!declared_type && !initializer_type) {
+        error(stmt->name, "Cannot declare a variable without a type annotation or an initializer.");
+        declared_type = m_type_error;
+    } else if (declared_type && initializer_type) {
+        // Both exist. This is where we compare them.
+
+        bool types_match = (declared_type->toString() == initializer_type->toString());
+
+        // --- THIS IS THE FIX ---
+        // Special Rule: An empty list literal (inferred as `list<any>`) can be
+        // assigned to a variable of any specific list type.
+        if (!types_match && initializer_type->toString() == "list<any>" && declared_type->kind == TypeKind::LIST) {
+            // Check if the initializer was actually an empty list expression.
+            if (auto list_expr = std::dynamic_pointer_cast<const ListExpr>(stmt->initializer)) {
+                if (list_expr->elements.empty()) {
+                    types_match = true;
+                }
             }
         }
+        // --- END OF FIX ---
 
-        std::shared_ptr<Type> declared_type = nullptr;
-        // 2. Determine the type from the annotation, if it exists.
-        if (stmt->typeAnnotation) {
-            declared_type = resolveType(stmt->typeAnnotation);
+        // (You can also add the numeric literal conversion rules here if they aren't already present)
+        if (!types_match && isInteger(declared_type) && initializer_type->toString() == "i64") {
+            types_match = true;
         }
 
-        // 3. Compare the types and enforce the rules.
-        if (declared_type && initializer_type) {
-            bool types_match = (declared_type->toString() == initializer_type->toString());
-
-            // --- THIS IS THE FULLY EXPANDED LOGIC ---
-
-            // RULE 1: Allow assigning an i64 literal to any other integer type.
-            if (!types_match && initializer_type->toString() == "i64" && isInteger(declared_type)) {
-                // e.g., `let x as i32 = 10;` or `let y as u8 = 255;`
-                // NOTE: A more advanced checker would validate that the literal value `10`
-                // actually fits into an `i32`, but for now this is a safe conversion.
-                types_match = true;
-            }
-
-            // RULE 2: Allow assigning an f64 literal to an f32.
-            if (!types_match && initializer_type->toString() == "f64" && declared_type->toString() == "f32") {
-                // e.g., `let pi as f32 = 3.14;`
-                types_match = true;
-            }
-
-            // RULE 3: Allow assigning an integer literal to a float variable.
-            if (!types_match && initializer_type->toString() == "i64" && isFloat(declared_type)) {
-                // e.g., `let gravity as f32 = 10;` (promotes 10 to 10.0)
-                types_match = true;
-            }
-
-            // --- END OF EXPANDED LOGIC ---
-
-            if (!types_match) {
-                // If, after all our special conversion rules, they still don't match, report the error.
-                error(stmt->name, "Type mismatch. Variable is annotated as '" +
-                                  declared_type->toString() + "' but is initialized with a value of type '" +
-                                  initializer_type->toString() + "'.");
-                declared_type = m_type_error;
-            }
-        }  else if (!declared_type) {
-            // No annotation, but there is an initializer. Infer the type.
-            declared_type = initializer_type;
-        }
-        // (The case where only an annotation exists is fine, the variable is just uninitialized)
-        m_variable_types[stmt.get()] = declared_type;
-        // 4. Declare the new variable in the symbol table.
-        if (!m_symbols.declare(stmt->name, declared_type, stmt->is_const)) {
-            error(stmt->name, "A variable with this name already exists in this scope.");
+        if (!types_match) {
+            error(stmt->name, "Type mismatch. Variable is annotated as '" +
+                declared_type->toString() + "' but is initialized with a value of type '" +
+                initializer_type->toString() + "'.");
+            declared_type = m_type_error;
         }
     }
+
+    // Store the final canonical type for this variable declaration
+    m_variable_types[stmt.get()] = declared_type;
+
+    // Declare the symbol in the current scope
+    if (!m_symbols.declare(stmt->name, declared_type, stmt->is_const)) {
+        error(stmt->name, "A variable with this name already exists in this scope.");
+    }
+}
 
     std::any TypeChecker::visit(const Literal& expr) {
         std::shared_ptr<Type> type = m_type_error;
@@ -1179,44 +1207,48 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         std::shared_ptr<Type> result_type = m_type_error; // Default to error
 
         // --- Case 1: Calling a function ---
+
         if (callee_type->kind == TypeKind::FUNCTION) {
             auto func_type = std::dynamic_pointer_cast<FunctionType>(callee_type);
 
-            // Rule: Check arity, taking variadic functions into account.
+            // --- THIS IS THE REFINED LOGIC ---
+            size_t num_fixed_params = func_type->param_types.size();
             if (func_type->is_variadic) {
-                // A variadic function can be called with zero or more arguments.
-                // A more advanced check could enforce a minimum number of fixed
-                // arguments, but our current design for `print` has no fixed args.
-                // This is sufficient for now.
+                // For a variadic function, the number of arguments must be
+                // AT LEAST the number of fixed parameters.
+                if (arg_types.size() < num_fixed_params) {
+                    error(expr.paren, "Incorrect number of arguments. Function expects at least " +
+                                      std::to_string(num_fixed_params) + ", but got " +
+                                      std::to_string(arg_types.size()) + ".");
+                    result_type = m_type_error;
+                }
             } else {
-                // This is the logic for non-variadic functions.
-                if (arg_types.size() != func_type->param_types.size()) {
+                // For non-variadic functions, the number must match exactly.
+                if (arg_types.size() != num_fixed_params) {
                     error(expr.paren, "Incorrect number of arguments. Function expects " +
-                                      std::to_string(func_type->param_types.size()) + ", but got " +
+                                      std::to_string(num_fixed_params) + ", but got " +
                                       std::to_string(arg_types.size()) + ".");
                     result_type = m_type_error;
                 }
             }
+            // --- END OF REFINED LOGIC ---
 
             // Rule: Check the type of each *fixed* argument.
-            // We only do this if the arity was correct (or if it's variadic).
             if (result_type->kind != TypeKind::ERROR) {
-                for (size_t i = 0; i < func_type->param_types.size(); ++i) {
+                for (size_t i = 0; i < num_fixed_params; ++i) {
                     if (arg_types[i]->toString() != func_type->param_types[i]->toString()) {
-                        error(expr.paren, "Type mismatch for argument " + std::to_string(i + 1) +
-                                          ". Expected '" + func_type->param_types[i]->toString() +
-                                          "', but got '" + arg_types[i]->toString() + "'.");
+                        // ... error reporting ...
                         result_type = m_type_error;
-                        break; // One bad argument is enough to fail the check.
+                        break;
                     }
                 }
             }
+            // Note: The types of the variadic arguments are not checked here.
+            // They are effectively treated as 'any'.
 
-            // If no errors were found, the result of the call is the function's return type.
             if (result_type->kind != TypeKind::ERROR) {
                 result_type = func_type->return_type;
             }
-
         }
             // --- Case 2: Calling a class (constructing an instance) ---
         else if (callee_type->kind == TypeKind::CLASS) {
@@ -1311,6 +1343,56 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
                 // --- END OF ACCESS CHECK ---
             }
         }
+
+        // --- NEW LOGIC for List methods ---
+        if (object_type->kind == TypeKind::LIST) {
+            if (property_name == "push") {
+                // This is the 'push' method. We need to construct its FunctionType.
+                auto list_type = std::dynamic_pointer_cast<ListType>(object_type);
+
+                // The signature is: function(T) -> void
+                // where 'T' is the element type of the list.
+                result_type = std::make_shared<FunctionType>(
+                    std::vector<std::shared_ptr<Type>>{list_type->element_type}, // One parameter of type T
+                    m_type_void                                                  // Returns void
+                );
+            } else {
+                error(expr.name, "Type '" + object_type->toString() + "' has no property named '" + property_name + "'.");
+            }
+        }
+        // --- END OF NEW LOGIC ---
+
+        if (object_type->kind == TypeKind::THREAD) {
+            if (expr.name.lexeme == "join") {
+                // The `join` method is a function with signature: function() -> void
+                auto join_type = std::make_shared<FunctionType>(
+                    std::vector<std::shared_ptr<Type>>{}, // Takes no parameters
+                    m_type_any // <-- Returns 'any'
+                );
+                pushAndSave(&expr, join_type);
+                return {};
+            } else {
+                error(expr.name, "Type 'Thread' has no property named '" + expr.name.lexeme + "'.");
+            }
+        }
+
+        // --- NEW: Handle built-in methods for Mutex ---
+        else if (object_type->kind == TypeKind::MUTEX) {
+            if (expr.name.lexeme == "lock" || expr.name.lexeme == "unlock") {
+                // Both .lock() and .unlock() are methods with signature: function() -> void
+                auto method_type = std::make_shared<FunctionType>(
+                    std::vector<std::shared_ptr<Type>>{},
+                    m_type_void
+                );
+                pushAndSave(&expr, method_type);
+                return {};
+            } else {
+                error(expr.name, "Type 'Mutex' has no property named '" + expr.name.lexeme + "'.");
+                pushAndSave(&expr, m_type_error);
+                return {};
+            }
+        }
+
             // --- TODO: Case 2: Accessing a member of a module ---
             // else if (object_type->kind == TypeKind::MODULE) { ... }
         else {
