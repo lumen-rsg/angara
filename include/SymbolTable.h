@@ -35,6 +35,7 @@ namespace angara {
         [[nodiscard]] std::shared_ptr<Symbol> resolve(const std::string& name) const;
 
         bool declare(const Token &token, std::shared_ptr<Type> type, bool is_const);
+        const std::map<std::string, std::shared_ptr<Symbol>>& getGlobalScope() const;
 
     private:
         // A stack of scopes, where each scope is a map from name to Symbol.

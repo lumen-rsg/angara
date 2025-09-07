@@ -12,11 +12,13 @@
 #include "Type.h"
 #include <stack>
 
+#include "CompilerDriver.h"
+
 namespace angara {
 
     class TypeChecker : public ExprVisitor, public StmtVisitor {
     public:
-        explicit TypeChecker(ErrorHandler& errorHandler);
+        TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler);
 
         // The main entry point. Returns true if type checking passes.
         bool check(const std::vector<std::shared_ptr<Stmt>>& statements);
@@ -25,6 +27,7 @@ namespace angara {
 
         SymbolTable m_symbols;
         std::map<const VarDeclStmt*, std::shared_ptr<Type>> m_variable_types;
+        const SymbolTable& getSymbolTable() const;
     private:
         // --- Visitor Methods ---
         // Statements (return void)
@@ -74,6 +77,8 @@ namespace angara {
         void error(const Token& token, const std::string& message);
         bool m_is_in_trait = false;
 
+
+
     private:
         ErrorHandler& m_errorHandler;
 
@@ -94,6 +99,7 @@ namespace angara {
         std::shared_ptr<Type> m_type_void;
         std::shared_ptr<Type> m_type_thread;
         std::shared_ptr<Type> m_type_mutex;
+        CompilerDriver& m_driver;
         std::stack<std::shared_ptr<Type>> m_function_return_types;
         std::shared_ptr<ClassType> m_current_class = nullptr;
 

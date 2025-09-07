@@ -22,6 +22,7 @@ namespace angara {
         NIL,
         THREAD,
         MUTEX,
+        MODULE,
         ERROR // A special type to prevent cascading error messages
     };
 

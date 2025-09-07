@@ -55,4 +55,9 @@ namespace angara {
         return nullptr;
     }
 
+    const std::map<std::string, std::shared_ptr<Symbol>>& SymbolTable::getGlobalScope() const {
+        // The global scope is always the first one we pushed.
+        return m_scopes.front();
+    }
+
 } // namespace angara

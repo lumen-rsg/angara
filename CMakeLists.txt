@@ -18,6 +18,8 @@ add_executable(angara_compiled
         src/SymbolTable.cpp
         src/CTranspiler.cpp
         src/ASTPrinter.cpp
+        include/CompilerDriver.h
+        src/CompilerDriver.cpp
 )
 
 target_include_directories(angara_compiled PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

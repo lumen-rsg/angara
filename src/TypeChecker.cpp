@@ -9,7 +9,12 @@ namespace angara {
 
 // --- Constructor and Main Entry Point ---
 
-    TypeChecker::TypeChecker(ErrorHandler& errorHandler) : m_errorHandler(errorHandler) {
+    const SymbolTable& TypeChecker::getSymbolTable() const {
+        return m_symbols;
+    }
+
+    TypeChecker::TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler)
+    : m_errorHandler(errorHandler), m_driver(driver) {
         // Integer Types
         m_type_i8 = std::make_shared<PrimitiveType>("i8");
         m_type_i16 = std::make_shared<PrimitiveType>("i16");
@@ -942,12 +947,30 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         }
     }
 
+
+
     void TypeChecker::visit(std::shared_ptr<const AttachStmt> stmt) {
-        // TODO TEMPORARY: For now, just declare the module name as type 'any'
-        // to allow the program to compile. We have no cross-file type safety.
-        std::string module_name;
-        Token module_token(TokenType::IDENTIFIER, module_name, stmt->modulePath.line, stmt->modulePath.column);
-        m_symbols.declare(module_token, m_type_any, false);
+        // 1. Ask the main driver to resolve this module path.
+        std::string module_path = stmt->modulePath.lexeme;
+
+        // --- THIS IS THE FIX ---
+        // Use the correct return type and pass the required token.
+        std::shared_ptr<ModuleType> module_type = m_driver.resolveModule(module_path, stmt->modulePath);
+
+        if (!module_type) {
+            // The driver already reported the error.
+            return;
+        }
+
+        // Use the public static helper from the driver.
+        std::string module_name = CompilerDriver::get_base_name(module_path);
+        Token module_token(TokenType::IDENTIFIER, module_name, stmt->modulePath.line, 0);
+
+        // 2. Declare the new module symbol in the current scope.
+        if (!m_symbols.declare(module_token, module_type, true)) { // Modules are const
+            error(module_token, "A symbol with this name already exists in this scope.");
+        }
+        // --- END OF FIX ---
     }
 
     void TypeChecker::visit(std::shared_ptr<const ThrowStmt> stmt) {
