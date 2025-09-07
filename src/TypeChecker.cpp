@@ -1300,112 +1300,63 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     }
 
     std::any TypeChecker::visit(const GetExpr& expr) {
-        // 1. Type check the object on the left of the dot.
-        expr.object->accept(*this);
-        auto object_type = popType();
+    expr.object->accept(*this);
+    auto object_type = popType();
 
-        // Bail out early if the object itself had an error.
-        if (object_type->kind == TypeKind::ERROR) {
-            pushAndSave(&expr, m_type_error);
-            return {};
-        }
-
-        const std::string& property_name = expr.name.lexeme;
-        std::shared_ptr<Type> result_type = m_type_error; // Default to error
-
-        // --- Case 1: Accessing a property on a class instance ---
-        if (object_type->kind == TypeKind::INSTANCE) {
-            auto instance_type = std::dynamic_pointer_cast<InstanceType>(object_type);
-            auto class_type = instance_type->class_type;
-
-            // Use our recursive helper to find the property in the inheritance chain.
-            const ClassType::MemberInfo* property_info = class_type->findProperty(property_name);
-
-            if (property_info == nullptr) {
-                // Not found anywhere.
-                error(expr.name, "Instance of class '" + class_type->name + "' has no property named '" + property_name + "'.");
-                result_type = m_type_error;
-            } else {
-                // --- THIS IS THE ACCESS CHECK ---
-                if (property_info->access == AccessLevel::PRIVATE) {
-                    // To access a private member, we must be inside a method of that same class.
-                    // `m_current_class` tells us which class body we are currently checking.
-                    if (m_current_class == nullptr || m_current_class->name != class_type->name) {
-                        error(expr.name, "Property '" + property_name + "' is private and cannot be accessed from this context.");
-                    } else {
-                        // Access is granted.
-                        result_type = property_info->type;
-                    }
-                } else {
-                    // Access is public, so it's granted.
-                    result_type = property_info->type;
-                }
-                // --- END OF ACCESS CHECK ---
-            }
-        }
-
-        // --- NEW LOGIC for List methods ---
-        if (object_type->kind == TypeKind::LIST) {
-            if (property_name == "push") {
-                // This is the 'push' method. We need to construct its FunctionType.
-                auto list_type = std::dynamic_pointer_cast<ListType>(object_type);
-
-                // The signature is: function(T) -> void
-                // where 'T' is the element type of the list.
-                result_type = std::make_shared<FunctionType>(
-                    std::vector<std::shared_ptr<Type>>{list_type->element_type}, // One parameter of type T
-                    m_type_void                                                  // Returns void
-                );
-            } else {
-                error(expr.name, "Type '" + object_type->toString() + "' has no property named '" + property_name + "'.");
-            }
-        }
-        // --- END OF NEW LOGIC ---
-
-        if (object_type->kind == TypeKind::THREAD) {
-            if (expr.name.lexeme == "join") {
-                // The `join` method is a function with signature: function() -> void
-                auto join_type = std::make_shared<FunctionType>(
-                    std::vector<std::shared_ptr<Type>>{}, // Takes no parameters
-                    m_type_any // <-- Returns 'any'
-                );
-                pushAndSave(&expr, join_type);
-                return {};
-            } else {
-                error(expr.name, "Type 'Thread' has no property named '" + expr.name.lexeme + "'.");
-            }
-        }
-
-        // --- NEW: Handle built-in methods for Mutex ---
-        else if (object_type->kind == TypeKind::MUTEX) {
-            if (expr.name.lexeme == "lock" || expr.name.lexeme == "unlock") {
-                // Both .lock() and .unlock() are methods with signature: function() -> void
-                auto method_type = std::make_shared<FunctionType>(
-                    std::vector<std::shared_ptr<Type>>{},
-                    m_type_void
-                );
-                pushAndSave(&expr, method_type);
-                return {};
-            } else {
-                error(expr.name, "Type 'Mutex' has no property named '" + expr.name.lexeme + "'.");
-                pushAndSave(&expr, m_type_error);
-                return {};
-            }
-        }
-
-            // --- TODO: Case 2: Accessing a member of a module ---
-            // else if (object_type->kind == TypeKind::MODULE) { ... }
-        else {
-            // The object is not an instance, so it can't have properties.
-            error(expr.name, "Only instances of classes have properties. Cannot access '" +
-                             property_name + "' on a value of type '" + object_type->toString() + "'.");
-            result_type = m_type_error;
-        }
-
-        // Finally, push and save the single, definitive result type for this expression.
-        pushAndSave(&expr, result_type);
+    if (object_type->kind == TypeKind::ERROR) {
+        pushAndSave(&expr, m_type_error);
         return {};
     }
+
+    const std::string& property_name = expr.name.lexeme;
+    std::shared_ptr<Type> result_type = m_type_error;
+
+    // --- THIS IS THE FIX: A single, clean if/else if chain ---
+    if (object_type->kind == TypeKind::INSTANCE) {
+        auto instance_type = std::dynamic_pointer_cast<InstanceType>(object_type);
+        const ClassType::MemberInfo* prop_info = instance_type->class_type->findProperty(property_name);
+        if (!prop_info) {
+            error(expr.name, "Instance of class '" + instance_type->toString() + "' has no property named '" + property_name + "'.");
+        } else {
+            if (prop_info->access == AccessLevel::PRIVATE && (m_current_class == nullptr || m_current_class->name != instance_type->class_type->name)) {
+                error(expr.name, "Property '" + property_name + "' is private and cannot be accessed from this context.");
+            } else {
+                result_type = prop_info->type;
+            }
+        }
+    }
+    else if (object_type->kind == TypeKind::LIST) {
+        if (property_name == "push") {
+            auto list_type = std::dynamic_pointer_cast<ListType>(object_type);
+            result_type = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{list_type->element_type},
+                m_type_void
+            );
+        } else {
+            error(expr.name, "Type 'list' has no property named '" + property_name + "'.");
+        }
+    }
+    else if (object_type->kind == TypeKind::THREAD) {
+        if (property_name == "join") {
+            result_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_any);
+        } else {
+            error(expr.name, "Type 'Thread' has no property named '" + property_name + "'.");
+        }
+    }
+    else if (object_type->kind == TypeKind::MUTEX) {
+        if (property_name == "lock" || property_name == "unlock") {
+            result_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_void);
+        } else {
+            error(expr.name, "Type 'Mutex' has no property named '" + property_name + "'.");
+        }
+    }
+    else {
+        error(expr.name, "Only instances of classes, lists, threads, or mutexes have properties. Cannot access property on type '" + object_type->toString() + "'.");
+    }
+
+    pushAndSave(&expr, result_type);
+    return {};
+}
 
     std::any TypeChecker::visit(const LogicalExpr& expr) {
         // 1. Type check the left-hand side.

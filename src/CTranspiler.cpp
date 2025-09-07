@@ -77,84 +77,192 @@ namespace angara {
     }
 
 
-void CTranspiler::pass_2_generate_function_declarations(const std::vector<std::shared_ptr<Stmt>>& statements) {
-    m_current_out = &m_function_declarations;
-    m_indent_level = 0;
+void CTranspiler::pass_2_generate_declarations(const std::vector<std::shared_ptr<Stmt>>& statements) {
+    (*m_current_out) << "// --- Global Variable Forward Declarations ---\n";
+    for (const auto& stmt : statements) {
+        if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
+            (*m_current_out) << "extern AngaraObject " << var_decl->name.lexeme << ";\n";
+        }
+    }
+    (*m_current_out) << "\n";
 
     (*m_current_out) << "// --- Function Forward Declarations ---\n";
     for (const auto& stmt : statements) {
         if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
-            // ... (this part is correct) ...
+            transpileFunctionSignature(*func_stmt);
+            (*m_current_out) << ";\n";
         } else if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
-
-            // --- THIS IS THE FIX ---
-            // ALWAYS generate a forward declaration for the _new function.
             auto class_type = std::dynamic_pointer_cast<ClassType>(m_type_checker.m_symbols.resolve(class_stmt->name.lexeme)->type);
+
+            (*m_current_out) << "extern AngaraClass g_" << class_stmt->name.lexeme << "_class;\n";
+
             (*m_current_out) << "AngaraObject Angara_" << class_stmt->name.lexeme << "_new(";
 
-            // Find the init method to determine the constructor parameters.
             auto init_it = class_type->methods.find("init");
             if (init_it != class_type->methods.end()) {
                 auto init_func_type = std::dynamic_pointer_cast<FunctionType>(init_it->second.type);
                 for (size_t i = 0; i < init_func_type->param_types.size(); ++i) {
                     (*m_current_out) << getCType(init_func_type->param_types[i]);
-                    if (i < init_func_type->param_types.size() - 1) (*m_current_out) << ", ";
+                    if (i < init_func_type->param_types.size() - 1) {
+                        (*m_current_out) << ", ";
+                    }
                 }
-            } // If no init method, the parameter list is empty, which is correct.
-
+            }
             (*m_current_out) << ");\n";
-            // --- END OF FIX ---
 
-            // Generate prototypes for all other methods (this part is correct).
             for (const auto& member : class_stmt->members) {
                 if (auto method_member = std::dynamic_pointer_cast<const MethodMember>(member)) {
-                    transpileMethodSignature(class_stmt->name.lexeme, *method_member->declaration);
-                    (*m_current_out) << ";\n";
+                    if (method_member->access == AccessLevel::PUBLIC) {
+                        transpileMethodSignature(class_stmt->name.lexeme, *method_member->declaration);
+                        (*m_current_out) << ";\n";
+                    }
                 }
             }
         }
     }
 }
 
-    void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt) {
-        // This function handles a top-level `func` declaration.
-
-        // 1. Generate the function signature using our existing helper.
-        transpileFunctionSignature(stmt);
-        (*m_current_out) << " {\n";
-        m_indent_level++;
-
-        // 2. Transpile all statements in the function's body.
-        if (stmt.body) {
-            for (const auto& body_stmt : *stmt.body) {
-                transpileStmt(body_stmt);
-            }
+    void CTranspiler::pass_3_generate_globals_and_implementations(const std::vector<std::shared_ptr<Stmt>>& statements, const std::string& module_name) {
+    (*m_current_out) << "// --- Global Variable Definitions ---\n";
+    for (const auto& stmt : statements) {
+        if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+             (*m_current_out) << "AngaraClass g_" << class_stmt->name.lexeme << "_class;\n";
+        } else if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
+            (*m_current_out) << "AngaraObject " << var_decl->name.lexeme << ";\n";
         }
-
-        // 3. Handle implicit returns for void functions.
-        //    Get the canonical type from the symbol table.
-        auto symbol = m_type_checker.m_symbols.resolve(stmt.name.lexeme);
-        auto func_type = std::dynamic_pointer_cast<FunctionType>(symbol->type);
-
-        if (func_type->return_type->toString() == "void") {
-            // A simple check: if the last statement in the body wasn't a return, add one.
-            // This is a simplification; a truly robust check would require analyzing
-            // all possible control flow paths.
-
-            // TODO: refine.
-
-            if (stmt.body->empty() || !isa<ReturnStmt>(stmt.body->back())) {
-                indent();
-                (*m_current_out) << "return;\n";
-            }
-        }
-
-        m_indent_level--;
-        (*m_current_out) << "}\n\n";
-
     }
+    (*m_current_out) << "\n";
 
-void CTranspiler::pass_3_generate_function_implementations(const std::vector<std::shared_ptr<Stmt>>& statements) {
+    std::string init_func_name = "Angara_" + module_name + "_init_globals";
+    (*m_current_out) << "// --- Global Initializer Function ---\n";
+    (*m_current_out) << "void " << init_func_name << "(void) {\n";
+    m_indent_level++;
+    for (const auto& stmt : statements) {
+         if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
+            indent();
+            (*m_current_out) << var_decl->name.lexeme << " = ";
+            if (var_decl->initializer) {
+                (*m_current_out) << transpileExpr(var_decl->initializer);
+            } else {
+                (*m_current_out) << "create_nil()";
+            }
+            (*m_current_out) << ";\n";
+         }
+         if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+             indent();
+             (*m_current_out) << "g_" << class_stmt->name.lexeme << "_class = (AngaraClass){{OBJ_CLASS, 1}, \"" << class_stmt->name.lexeme << "\"};\n";
+         }
+    }
+    m_indent_level--;
+    (*m_current_out) << "}\n\n";
+
+    (*m_current_out) << "// --- Function Implementations ---\n";
+    for (const auto& stmt : statements) {
+        if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
+            m_current_class_name = "";
+            transpileGlobalFunction(*func_stmt);
+        } else if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+            m_current_class_name = class_stmt->name.lexeme;
+            auto class_type = std::dynamic_pointer_cast<ClassType>(m_type_checker.m_symbols.resolve(class_stmt->name.lexeme)->type);
+            std::string c_struct_name = "Angara_" + class_type->name;
+
+            (*m_current_out) << "AngaraObject Angara_" << class_type->name << "_new(";
+            auto init_method_ast = findMethodAst(*class_stmt, "init");
+            if (init_method_ast) {
+                auto init_info = class_type->methods.at("init");
+                auto init_func_type = std::dynamic_pointer_cast<FunctionType>(init_info.type);
+                for (size_t i = 0; i < init_method_ast->params.size(); ++i) {
+                     (*m_current_out) << getCType(init_func_type->param_types[i]) << " " << init_method_ast->params[i].name.lexeme << (i == init_method_ast->params.size() - 1 ? "" : ", ");
+                }
+            }
+            (*m_current_out) << ") {\n";
+            m_indent_level++;
+
+            indent();
+            (*m_current_out) << c_struct_name << "* instance = (" << c_struct_name << "*)angara_instance_new(sizeof(" << c_struct_name << "), &g_" << class_type->name << "_class);\n";
+            indent();
+            (*m_current_out) << "AngaraObject this_obj = (AngaraObject){VAL_OBJ, {.obj = (Object*)instance}};\n";
+
+            if (init_method_ast) {
+                indent();
+                (*m_current_out) << "Angara_" << class_type->name << "_init(this_obj";
+                for (const auto& param : init_method_ast->params) {
+                    (*m_current_out) << ", " << param.name.lexeme;
+                }
+                (*m_current_out) << ");\n";
+            }
+
+            indent();
+            (*m_current_out) << "return this_obj;\n";
+            m_indent_level--;
+            (*m_current_out) << "}\n\n";
+
+            for (const auto& member : class_stmt->members) {
+                if (auto method_member = std::dynamic_pointer_cast<const MethodMember>(member)) {
+                    transpileMethodBody(*class_type, *method_member->declaration);
+                }
+            }
+            m_current_class_name = "";
+        }
+    }
+}
+
+void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt) {
+    // This helper now generates BOTH the real function and its wrapper.
+
+    // --- 1. Transpile the actual, strongly-typed C function ---
+    transpileFunctionSignature(stmt);
+    (*m_current_out) << " {\n";
+    m_indent_level++;
+    if (stmt.body) {
+        for (const auto& body_stmt : *stmt.body) {
+            transpileStmt(body_stmt);
+        }
+    }
+    // Handle implicit returns for void functions
+    auto symbol = m_type_checker.m_symbols.resolve(stmt.name.lexeme);
+    auto func_type = std::dynamic_pointer_cast<FunctionType>(symbol->type);
+    if (func_type->return_type->toString() == "void") {
+        if (stmt.body->empty() || !isa<ReturnStmt>(stmt.body->back())) {
+             indent();
+             (*m_current_out) << "return;\n";
+        }
+    }
+    m_indent_level--;
+    (*m_current_out) << "}\n\n";
+
+
+    // --- 2. Generate the generic wrapper for it ---
+    std::string func_name = stmt.name.lexeme;
+    std::string c_name = (func_name == "main") ? "angara_main" : func_name;
+
+    (*m_current_out) << "// Wrapper for " << func_name << " to conform to GenericAngaraFn\n";
+    (*m_current_out) << "AngaraObject wrapper_" << c_name << "(int arg_count, AngaraObject args[]) {\n";
+    m_indent_level++;
+    indent();
+
+    if (func_type->return_type->toString() == "void") {
+        // If the real function is void, call it and then return nil.
+        (*m_current_out) << c_name << "(";
+        for (int i = 0; i < stmt.params.size(); ++i) {
+            (*m_current_out) << "args[" << i << "]" << (i == stmt.params.size() - 1 ? "" : ", ");
+        }
+        (*m_current_out) << ");\n";
+        indent();
+        (*m_current_out) << "return create_nil();\n";
+    } else {
+        // If the real function returns a value, just call and return it.
+        (*m_current_out) << "return " << c_name << "(";
+        for (int i = 0; i < stmt.params.size(); ++i) {
+            (*m_current_out) << "args[" << i << "]" << (i == stmt.params.size() - 1 ? "" : ", ");
+        }
+        (*m_current_out) << ");\n";
+    }
+    m_indent_level--;
+    (*m_current_out) << "}\n\n";
+}
+
+void CTranspiler::pass_4_generate_function_implementations(const std::vector<std::shared_ptr<Stmt>>& statements) {
     m_current_out = &m_function_implementations;
     m_indent_level = 0;
 
@@ -299,97 +407,102 @@ void CTranspiler::pass_3_generate_function_implementations(const std::vector<std
         (*m_current_out) << "};\n\n";
     }
 
+    void CTranspiler::pass_3_generate_globals(const std::vector<std::shared_ptr<Stmt>>& statements, const std::string& module_name) {
+        // This pass writes to the source file (.c) stream.
+        m_current_out = &m_source_out;
+        m_indent_level = 0;
+
+        // --- Stage 1: Generate Definitions for Global Variables ---
+        (*m_current_out) << "// --- Global Variable Definitions ---\n";
+        std::vector<const VarDeclStmt*> global_vars; // Keep track of them for the init function
+        for (const auto& stmt : statements) {
+            if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
+                // Generate the uninitialized declaration, e.g., "AngaraObject my_var;"
+                (*m_current_out) << "AngaraObject " << var_decl->name.lexeme << ";\n";
+                global_vars.push_back(var_decl.get());
+            }
+        }
+        (*m_current_out) << "\n";
+
+        // --- Stage 2: Generate the Global Initializer Function ---
+        std::string init_func_name = "Angara_" + module_name + "_init_globals";
+        (*m_current_out) << "// --- Global Initializer Function ---\n";
+        (*m_current_out) << "void " << init_func_name << "(void) {\n";
+        m_indent_level++;
+
+        // Create the C assignment statement for each global variable
+        for (const auto* var_decl : global_vars) {
+            indent();
+            (*m_current_out) << var_decl->name.lexeme << " = ";
+            if (var_decl->initializer) {
+                (*m_current_out) << transpileExpr(var_decl->initializer);
+            } else {
+                (*m_current_out) << "create_nil()";
+            }
+            (*m_current_out) << ";\n";
+        }
+
+        m_indent_level--;
+        (*m_current_out) << "}\n\n";
+
+    }
+
 // --- Main Orchestrator ---
-// in CTranspiler.cpp
 
-std::string CTranspiler::generate(const std::vector<std::shared_ptr<Stmt>>& statements) {
-    // --- Run all the passes (unchanged) ---
-    pass_1_generate_structs(statements);
-    pass_2_generate_function_declarations(statements);
-    pass_3_generate_function_implementations(statements);
-    if (m_hadError) return "";
 
-    // --- Assemble the final C file (unchanged preamble) ---
-    std::stringstream final_code;
-    final_code << "#include \"angara_runtime.h\"\n\n";
-    final_code << m_structs_and_globals.str() << "\n";
-    final_code << m_function_declarations.str() << "\n";
-    final_code << m_function_implementations.str() << "\n";
+    TranspileResult CTranspiler::generate(const std::vector<std::shared_ptr<Stmt>>& statements, const std::string& module_name) {
+        if (m_hadError) return {};
 
-    // --- Generate the C main() wrapper (UPDATED LOGIC) ---
-    final_code << "// --- C Entry Point ---\n";
-    final_code << "int main(int argc, const char* argv[]) {\n";
-    final_code << "    angara_runtime_init();\n\n";
+        // --- HEADER FILE GENERATION ---
+        m_current_out = &m_header_out; // Set context for Pass 1 & 2
+        m_indent_level = 0;
 
-    // --- NEW: Initialize all global function closures ---
-    final_code << "    // Initialize Global Function Closures\n";
-    for (const auto& stmt : statements) {
+        std::string header_guard = "ANGARA_GEN_" + module_name + "_H";
+        *m_current_out << "#ifndef " << header_guard << "\n";
+        *m_current_out << "#define " << header_guard << "\n\n";
+        *m_current_out << "#include \"angara_runtime.h\"\n\n";
 
-        if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
-            // Generate the INITIALIZATION code inside main.
-            final_code << "    " << var_decl->name.lexeme << " = "
-                       << transpileExpr(var_decl->initializer) << ";\n";
+        pass_1_generate_structs(statements);
+        pass_2_generate_declarations(statements);
+
+        *m_current_out << "\n#endif //" << header_guard << "\n";
+
+
+        // --- SOURCE FILE GENERATION ---
+        m_current_out = &m_source_out; // Set context for Pass 3 & 4
+        m_indent_level = 0;
+
+        *m_current_out << "#include \"" << module_name << ".h\"\n\n";
+
+        pass_3_generate_globals_and_implementations(statements, module_name);
+
+        // Pass 5: Generate the C main() function if this is the main module.
+        auto main_symbol = m_type_checker.m_symbols.resolve("main");
+        if (main_symbol) {
+            pass_5_generate_main(statements, module_name);
         }
-        if (auto func = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
-            std::string func_name = func->name.lexeme;
-            std::string c_name = (func_name == "main") ? "angara_main" : func_name;
 
-            // Declare a C variable to hold the closure for this function.
-            final_code << "    AngaraObject " << func_name << " = angara_closure_new(&wrapper_"
-                       << c_name << ", " << func->params.size() << ", false);\n";
+        if (m_hadError) return {};
+
+        // --- THIS IS THE FIX ---
+        // Assemble the final source file from BOTH the main source stream
+        // AND the main body stream.
+        std::string final_source = m_source_out.str();
+        if (main_symbol) {
+            final_source += m_main_body.str();
         }
+
+        if (m_hadError) return {};
+        return {m_header_out.str(), final_source};
     }
-    final_code << "\n";
-
-    // Get the signature of the user's main function from the Type Checker.
-    auto main_symbol = m_type_checker.m_symbols.resolve("main");
-    auto main_func_type = std::dynamic_pointer_cast<FunctionType>(main_symbol->type);
-
-    final_code << "    // Call the user's Angara main function\n";
-    if (main_func_type->param_types.empty()) {
-        // Call `angara_call` with the 'main' closure object.
-        final_code << "    AngaraObject result = angara_call(main, 0, NULL);\n";
-    } else {
-        // Create the list of C argv strings.
-        final_code << "    AngaraObject args_list = angara_list_new();\n";
-        final_code << "    for (int i = 0; i < argc; i++) {\n";
-        final_code << "        angara_list_push(args_list, angara_string_from_c(argv[i]));\n";
-        final_code << "    }\n";
-        // Call `angara_call` with the 'main' closure and the args list.
-        final_code << "    AngaraObject result = angara_call(main, 1, &args_list);\n";
-        final_code << "    angara_decref(args_list);\n";
-    }
-
-    final_code << "\n";
-    // Decrement the ref count for all the global function closures
-    for (const auto& stmt : statements) {
-        if (auto func = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
-             final_code << "    angara_decref(" << func->name.lexeme << ");\n";
-        }
-    }
-    final_code << "\n";
-    final_code << "    int exit_code = (int)AS_I64(result);\n";
-    final_code << "    angara_decref(result);\n\n";
-    final_code << "    angara_runtime_shutdown();\n";
-    final_code << "    return exit_code;\n";
-    final_code << "}\n";
-
-    return final_code.str();
-}
 
 
     void CTranspiler::pass_1_generate_structs(const std::vector<std::shared_ptr<Stmt>>& statements) {
-        m_current_out = &m_structs_and_globals;
-        m_indent_level = 0;
-
         (*m_current_out) << "// --- Struct Definitions ---\n";
         for (const auto& stmt : statements) {
             if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
                 transpileStruct(*class_stmt);
-
-            // After defining the struct, declare the global C variable that will
-            // represent the class object itself at runtime.
-            m_structs_and_globals << "AngaraClass g_" << class_stmt->name.lexeme << "_class;\n";
+                (*m_current_out) << "extern AngaraClass g_" << class_stmt->name.lexeme << "_class;\n";
             }
         }
     }
@@ -455,33 +568,93 @@ std::string CTranspiler::generate(const std::vector<std::shared_ptr<Stmt>>& stat
     }
 
 
-    void CTranspiler::pass_4_generate_main(const std::vector<std::shared_ptr<Stmt>>& statements) {
-        m_current_out = &m_main_body;
-        m_indent_level = 0;
-        *m_current_out << "int main(void) {\n";
-        m_indent_level++;
+void CTranspiler::pass_5_generate_main(const std::vector<std::shared_ptr<Stmt>>& statements, const std::string& module_name) {
+    // This pass writes its output to the separate m_main_body stream,
+    // which is then appended to the final source file.
+    m_current_out = &m_main_body;
+    m_indent_level = 0;
 
-        indent(); (*m_current_out) << "// --- Initialize Class Objects ---\n";
-        for (const auto& stmt : statements) {
-            if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
-                indent();
-                (*m_current_out) << "g_" << class_stmt->name.lexeme << "_class = (AngaraClass){"
-                                 << "{OBJ_CLASS, 1}, " // Base object header
-                                 << "\"" << class_stmt->name.lexeme << "\"" // Name
-                                 << "};\n";
-            }
-        }
-        indent(); (*m_current_out) << "\n";
+    *m_current_out << "// --- C Entry Point ---\n";
+    *m_current_out << "int main(int argc, const char* argv[]) {\n";
+    m_indent_level++;
 
-        for (const auto& stmt : statements) {
-            if (!isa<ClassStmt>(stmt) && !isa<FuncStmt>(stmt) && !isa<TraitStmt>(stmt)) {
-                transpileStmt(stmt);
-            }
+    // 1. Initialize the Angara Runtime.
+    indent();
+    *m_current_out << "angara_runtime_init();\n\n";
+
+    // 2. Call this module's global variable initializer function.
+    indent();
+    *m_current_out << "Angara_" << module_name << "_init_globals();\n\n";
+
+    // 3. Create the runtime closure objects for all global functions.
+    indent();
+    *m_current_out << "// Initialize Global Function Closures\n";
+    for (const auto& stmt : statements) {
+        if (auto func = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
+            std::string func_name = func->name.lexeme;
+            std::string c_name = (func_name == "main") ? "angara_main" : func_name;
+            indent();
+            *m_current_out << "AngaraObject " << func_name << " = angara_closure_new(&wrapper_"
+                           << c_name << ", " << func->params.size() << ", false);\n";
         }
-        indent(); *m_current_out << "return 0;\n";
-        m_indent_level--;
-        *m_current_out << "}\n";
     }
+    *m_current_out << "\n";
+
+    // 4. Get the signature of the user's Angara 'main' function to decide how to call it.
+    auto main_symbol = m_type_checker.m_symbols.resolve("main");
+    auto main_func_type = std::dynamic_pointer_cast<FunctionType>(main_symbol->type);
+
+    // 5. Call the user's Angara 'main' function via the generic `angara_call`.
+    indent();
+    *m_current_out << "// Call the user's Angara main function\n";
+    if (main_func_type->param_types.empty()) {
+        // Case 1: main()
+        indent();
+        *m_current_out << "AngaraObject result = angara_call(main, 0, NULL);\n";
+    } else {
+        // Case 2: main(args as list<string>)
+        indent();
+        *m_current_out << "AngaraObject args_list = angara_list_new();\n";
+        indent();
+        *m_current_out << "for (int i = 0; i < argc; i++) {\n";
+        m_indent_level++;
+        indent();
+        *m_current_out << "angara_list_push(args_list, angara_string_from_c(argv[i]));\n";
+        m_indent_level--;
+        indent();
+        *m_current_out << "}\n";
+        indent();
+        *m_current_out << "AngaraObject result = angara_call(main, 1, &args_list);\n";
+        indent();
+        *m_current_out << "angara_decref(args_list);\n";
+    }
+
+    *m_current_out << "\n";
+
+    // 6. Clean up: Decrement reference counts for global closures.
+    for (const auto& stmt : statements) {
+        if (auto func = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
+             indent();
+             *m_current_out << "angara_decref(" << func->name.lexeme << ");\n";
+        }
+    }
+    *m_current_out << "\n";
+
+    // 7. Process the return value and shut down the runtime.
+    indent();
+    *m_current_out << "int exit_code = (int)AS_I64(result);\n";
+    indent();
+    *m_current_out << "angara_decref(result);\n\n";
+
+    indent();
+    *m_current_out << "angara_runtime_shutdown();\n";
+
+    indent();
+    *m_current_out << "return exit_code;\n";
+
+    m_indent_level--;
+    *m_current_out << "}\n";
+}
 
 // --- Statement Transpilation Helpers ---
     void CTranspiler::transpileStmt(const std::shared_ptr<Stmt>& stmt) {

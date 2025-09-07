@@ -9,6 +9,8 @@
 
 namespace angara {
 
+    using TranspileResult = std::pair<std::string, std::string>;
+
     class CTranspiler {
     public:
         CTranspiler(TypeChecker& type_checker, ErrorHandler& errorHandler);
@@ -18,7 +20,8 @@ namespace angara {
          * @param statements The root of the type-checked AST.
          * @return A string containing the complete, compilable C source code.
          */
-        std::string generate(const std::vector<std::shared_ptr<Stmt>>& statements);
+
+        TranspileResult generate(const std::vector<std::shared_ptr<Stmt>>& statements, const std::string& module_name);
 
     private:
         // --- Main Pass Methods ---
@@ -28,12 +31,19 @@ namespace angara {
 
         void transpileMethodBody(const ClassType &klass, const FuncStmt &stmt);
 
-        void pass_2_generate_function_declarations(const std::vector<std::shared_ptr<Stmt>>& statements);
-        void pass_3_generate_function_implementations(const std::vector<std::shared_ptr<Stmt>>& statements);
+        void pass_2_generate_declarations(const std::vector<std::shared_ptr<Stmt>>& statements);
+
+        void pass_3_generate_globals_and_implementations(const std::vector<std::shared_ptr<Stmt>> &statements,
+                                                         const std::string &module_name);
+
+        void pass_4_generate_function_implementations(const std::vector<std::shared_ptr<Stmt>>& statements);
 
         void transpileStruct(const ClassStmt &stmt);
 
-        void pass_4_generate_main(const std::vector<std::shared_ptr<Stmt>>& statements);
+        void pass_3_generate_globals(const std::vector<std::shared_ptr<Stmt>> &statements,
+                                     const std::string &module_name);
+
+        void pass_5_generate_main(const std::vector<std::shared_ptr<Stmt>> &statements, const std::string &module_name);
 
         // --- Statement Transpilation Helpers ---
         void transpileStmt(const std::shared_ptr<Stmt>& stmt);
@@ -108,6 +118,9 @@ namespace angara {
         std::stringstream m_function_declarations;
         std::stringstream m_function_implementations;
         std::stringstream m_main_body;
+
+        std::stringstream m_header_out; // For the .h file
+        std::stringstream m_source_out; // For the .c file
 
         // We need to track the current output stream.
         std::stringstream* m_current_out;
