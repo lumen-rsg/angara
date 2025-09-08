@@ -54,23 +54,60 @@ std::string CompilerDriver::read_file(const std::string& path) {
     return buffer.str();
 }
 
-    bool CompilerDriver::compile(const std::string& root_file_path) {
+bool CompilerDriver::compile(const std::string& root_file_path) {
+    // 1. Reset state for a fresh compilation run.
+    m_had_error = false;
     m_modules_compiled = 0;
+    m_total_modules = 0; // Will be incremented by resolveModule
+    m_module_cache.clear();
+    m_compilation_stack.clear();
+    m_compiled_c_files.clear();
 
+    // 2. Recursively compile the root module and all of its dependencies.
+    //    resolveModule is the heart of the compilation process.
+    //    The Token here is a dummy, as the root file isn't imported by anything.
     auto root_module_type = resolveModule(root_file_path, Token());
 
+    // 3. Check if any stage of the recursive compilation failed.
     if (!root_module_type || m_had_error) {
         std::cout << "\n" << BOLD << RED << "Build failed." << RESET << std::endl;
         return false;
     }
 
+    // 4. After all files are compiled, perform the final "linker" check to
+    //    ensure the root module provides a valid `main` function.
+    auto main_symbol_it = root_module_type->exports.find("main");
+    if (main_symbol_it == root_module_type->exports.end()) {
+        std::cerr << "\n" << BOLD << RED << "Linker Error: " << RESET
+                  << "Program has no exported 'main' function to act as an entry point.\n"
+                  << "Required signature: 'export func main() -> i64' or 'export func main(args as list<string>) -> i64'."
+                  << std::endl;
+        return false;
+    }
+
+    // 5. Validate the signature of the found 'main' function.
+    if (main_symbol_it->second->kind != TypeKind::FUNCTION) {
+        std::cerr << "\n" << BOLD << RED << "Linker Error: " << RESET << "The global symbol 'main' must be a function." << std::endl;
+        return false;
+    }
+    auto main_func_type = std::dynamic_pointer_cast<FunctionType>(main_symbol_it->second);
+    if (!isInteger(main_func_type->return_type)) {
+        std::cerr << "\n" << BOLD << RED << "Linker Error: " << RESET << "'main' function must be declared to return an integer type (e.g., i64), but it returns '" << main_func_type->return_type->toString() << "'." << std::endl;
+        return false;
+    }
+    if (main_func_type->param_types.size() > 1 ||
+        (main_func_type->param_types.size() == 1 && main_func_type->param_types[0]->toString() != "list<string>")) {
+         std::cerr << "\n" << BOLD << RED << "Linker Error: " << RESET << "'main' function can only have zero parameters, or one parameter of type 'list<string>'." << std::endl;
+         return false;
+    }
+
+    // 6. If all checks passed, link all the generated .c files into the final executable.
     log_step("Linking final executable...");
     std::string base_name = get_base_name(root_file_path);
-    std::string runtime_path = "src/runtime/angara_runtime.c";
+    std::string runtime_path = "src/runtime/angara_runtime.c"; // Adjust this path as needed
 
     std::stringstream command_ss;
     command_ss << "gcc -o " << base_name;
-    // Add all the generated .c files to the command
     for (const auto& c_file : m_compiled_c_files) {
         command_ss << " " << c_file;
     }
@@ -81,11 +118,11 @@ std::string CompilerDriver::read_file(const std::string& path) {
     int result = system(command.c_str());
 
     if (result != 0) {
-        std::cerr << "\n" << RED << "Build failed: C linker returned a non-zero exit code." << RESET << std::endl;
+        std::cerr << "\n" << RED << "Build failed: The C compiler/linker returned a non-zero exit code." << RESET << std::endl;
         return false;
     }
 
-    m_modules_compiled = m_total_modules;
+    m_modules_compiled = m_total_modules > 0 ? m_total_modules : 1;
     print_progress("Done!");
     std::cout << "\n" << BOLD << GREEN << "Build successful! Executable created: ./" << base_name << RESET << std::endl;
     return true;
@@ -111,45 +148,43 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
     return path.substr(start, last_dot - start);
 }
 
-    void extract_public_api(TypeChecker& checker, std::shared_ptr<ModuleType>& module_type) {
-    const auto& global_scope = checker.getSymbolTable().getGlobalScope();
-    for (const auto& [name, symbol] : global_scope) {
-        // A simplified rule: export all global functions, classes, traits, and consts.
-        if (symbol->is_const || symbol->type->kind == TypeKind::FUNCTION ||
-            symbol->type->kind == TypeKind::CLASS || symbol->type->kind == TypeKind::TRAIT) {
-            module_type->exports[name] = symbol->type;
-            }
-    }
-}
 
 std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& path, const Token& import_token) {
+    // 1. Check the cache first.
     if (m_module_cache.count(path)) {
         return m_module_cache[path];
     }
+
+    // 2. Check for circular dependencies.
     for (const auto& p : m_compilation_stack) {
         if (p == path) {
-            // Error reporting needs a real ErrorHandler for the importing file
-            std::cerr << "\nError: Circular dependency detected involving '" << path << "'.\n";
+            std::cerr << "\nError at line " << import_token.line << ": Circular dependency detected involving module '" << path << "'.\n";
             m_had_error = true;
             return nullptr;
         }
     }
 
     m_compilation_stack.push_back(path);
-    m_total_modules++; // We can adjust this later for a more accurate progress bar
+    m_total_modules++;
     print_progress(path);
 
+    // 3. Read the source file.
     std::string source = read_file(path);
     if (source.empty()) {
-        std::cerr << "\nError: Could not open source file '" << path << "'.\n";
+        std::cerr << "\nError at line " << import_token.line << ": Could not open source file '" << path << "'\n";
         m_had_error = true;
         m_compilation_stack.pop_back();
         return nullptr;
     }
 
+    // --- THIS IS THE FIX ---
+
+    // 4. --- RUN THE FULL PIPELINE for the dependency ---
     ErrorHandler errorHandler(source);
+
     Lexer lexer(source);
     auto tokens = lexer.scanTokens();
+
     Parser parser(tokens, errorHandler);
     auto statements = parser.parseStmts();
     if (errorHandler.hadError()) {
@@ -158,23 +193,25 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
         return nullptr;
     }
 
-    TypeChecker typeChecker(*this, errorHandler);
+    // Correctly create the TypeChecker, passing the module name.
+    std::string module_name = get_base_name(path);
+    TypeChecker typeChecker(*this, errorHandler, module_name);
     if (!typeChecker.check(statements)) {
         m_had_error = true;
         m_compilation_stack.pop_back();
         return nullptr;
     }
 
-    std::string module_name = get_base_name(path);
+    // 5. --- TRANSPILE ---
     CTranspiler transpiler(typeChecker, errorHandler);
-    auto [header_code, source_code] = transpiler.generate(statements, module_name);
+    auto [header_code, source_code] = transpiler.generate(statements, module_name, m_compiled_module_names);
 
-    if (header_code.empty() && source_code.empty()) {
-        m_had_error = true;
-        m_compilation_stack.pop_back();
-        return nullptr;
+    if (m_had_error || (header_code.empty() && source_code.empty())) {
+         m_compilation_stack.pop_back();
+         return nullptr;
     }
 
+    // 6. --- WRITE FILES TO DISK ---
     std::string h_filename = module_name + ".h";
     std::ofstream h_file(h_filename);
     h_file << header_code;
@@ -185,12 +222,16 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
     c_file << source_code;
     c_file.close();
 
-    auto module_type = std::make_shared<ModuleType>(module_name);
-    extract_public_api(typeChecker, module_type);
+    // 7. --- GET THE PUBLIC API for the CALLER ---
+    // The getModuleType() method returns the completed module interface.
+    auto module_type = typeChecker.getModuleType();
+
+    // --- END OF FIX ---
 
     m_compilation_stack.pop_back();
     m_module_cache[path] = module_type;
-    m_compiled_c_files.push_back(c_filename); // Add to the list for the final link
+    m_compiled_c_files.push_back(c_filename);
+    m_compiled_module_names.push_back(module_name); // <-- ADD THIS
 
     return module_type;
 }

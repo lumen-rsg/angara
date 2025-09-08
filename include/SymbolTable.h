@@ -18,6 +18,7 @@ namespace angara {
         std::string name;
         std::shared_ptr<Type> type;
         bool is_const;
+        int depth;
     };
 
     class SymbolTable {
@@ -36,6 +37,7 @@ namespace angara {
 
         bool declare(const Token &token, std::shared_ptr<Type> type, bool is_const);
         const std::map<std::string, std::shared_ptr<Symbol>>& getGlobalScope() const;
+        int getScopeDepth() const;
 
     private:
         // A stack of scopes, where each scope is a map from name to Symbol.

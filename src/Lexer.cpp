@@ -39,7 +39,7 @@ namespace angara {
             {"trait",    TokenType::TRAIT},
             {"uses",     TokenType::USES},
             {"static",   TokenType::STATIC},
-
+            {"export",   TokenType::EXPORT},
             {"as",       TokenType::AS},
 
             // Integer Types

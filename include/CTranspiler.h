@@ -21,7 +21,7 @@ namespace angara {
          * @return A string containing the complete, compilable C source code.
          */
 
-        TranspileResult generate(const std::vector<std::shared_ptr<Stmt>>& statements, const std::string& module_name);
+        TranspileResult generate(const std::vector<std::shared_ptr<Stmt>>& statements, const std::string& module_name, std::vector<std::string>& all_module_names);
 
     private:
         // --- Main Pass Methods ---
@@ -31,10 +31,12 @@ namespace angara {
 
         void transpileMethodBody(const ClassType &klass, const FuncStmt &stmt);
 
-        void pass_2_generate_declarations(const std::vector<std::shared_ptr<Stmt>>& statements);
+        void pass_2_generate_declarations(const std::vector<std::shared_ptr<Stmt>>& statements, const std::string& module_name);
 
         void pass_3_generate_globals_and_implementations(const std::vector<std::shared_ptr<Stmt>> &statements,
                                                          const std::string &module_name);
+
+        void transpileClassNew(const ClassStmt &stmt);
 
         void pass_4_generate_function_implementations(const std::vector<std::shared_ptr<Stmt>>& statements);
 
@@ -43,13 +45,18 @@ namespace angara {
         void pass_3_generate_globals(const std::vector<std::shared_ptr<Stmt>> &statements,
                                      const std::string &module_name);
 
-        void pass_5_generate_main(const std::vector<std::shared_ptr<Stmt>> &statements, const std::string &module_name);
+        void pass_5_generate_main(const std::vector<std::shared_ptr<Stmt>>& statements,
+                          const std::string& module_name,
+                          const std::vector<std::string>& all_module_names); // <-- ADD PARAMETER
 
         // --- Statement Transpilation Helpers ---
         void transpileStmt(const std::shared_ptr<Stmt>& stmt);
         void transpileVarDecl(const VarDeclStmt& stmt);
         void transpileExpressionStmt(const ExpressionStmt& stmt);
         void transpileBlock(const BlockStmt& stmt);
+
+        std::string transpileVarExpr(const VarExpr &expr);
+
         void transpileIfStmt(const IfStmt& stmt);
 
         void transpileWhileStmt(const WhileStmt &stmt);
@@ -74,7 +81,6 @@ namespace angara {
 
         void transpileForInStmt(const ForInStmt &stmt);
 
-        // ... and so on for all statement types ...
 
         // --- Expression Transpilation Helpers ---
         // These now return a string directly.
@@ -98,7 +104,7 @@ namespace angara {
         std::string transpileListExpr(const ListExpr &expr);
 
         std::string transpileRecordExpr(const RecordExpr &expr);
-        void transpileGlobalFunction(const FuncStmt& stmt);
+        void transpileGlobalFunction(const FuncStmt& stmt, const std::string& module_name);
 
         // ... and so on for all expression types ...
 
@@ -106,7 +112,7 @@ namespace angara {
         std::string getCType(const std::shared_ptr<Type>& angaraType);
         void indent();
 
-        void transpileFunctionSignature(const FuncStmt &stmt);
+        void transpileFunctionSignature(const FuncStmt &stmt, const std::string& module_name);
         const ClassType* findPropertyOwner(const ClassType* klass, const std::string& prop_name);
 
     private:
@@ -131,6 +137,7 @@ namespace angara {
         // Tracks the name of the class whose methods we are currently transpiling.
         // An empty string means we are in the global scope.
         std::string m_current_class_name;
+        std::string m_current_module_name;
     };
 
 } // namespace angara

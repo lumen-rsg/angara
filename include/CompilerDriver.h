@@ -30,6 +30,7 @@ namespace angara {
         std::shared_ptr<ModuleType> resolveModule(const std::string& path, const Token& import_token);
         static std::string get_base_name(const std::string& path);
 
+
     private:
         std::string read_file(const std::string& path);
 
@@ -48,6 +49,8 @@ namespace angara {
 
         int m_total_modules = 0;
         int m_modules_compiled = 0;
+        std::vector<std::string> m_compiled_module_names;
+
     };
 
 } // namespace angara

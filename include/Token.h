@@ -35,7 +35,7 @@ namespace angara {
         LET, CONST, IF, ELSE, ORIF,
         FOR, WHILE, IN,
         FUNC, RETURN, TRUE, FALSE, TRY, CATCH, ATTACH, NIL, THROW, FROM,
-        CLASS, THIS, INHERITS, SUPER, TRAIT, USES, STATIC, PRIVATE, PUBLIC,
+        CLASS, THIS, INHERITS, SUPER, TRAIT, USES, STATIC, PRIVATE, PUBLIC, EXPORT,
 
         // Type Keywords (reserved for future use)
         TYPE_STRING, TYPE_INT, TYPE_FLOAT, TYPE_BOOL,

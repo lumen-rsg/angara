@@ -98,16 +98,46 @@ namespace angara {
     }
 
 // declaration → letDecl | statement
+    // declaration → "export"? (class_decl | trait_decl | func_decl | var_decl) | statement
     std::shared_ptr<Stmt> Parser::declaration() {
         try {
-            if (match({TokenType::CLASS})) return classDeclaration();
-            if (match({TokenType::TRAIT})) return traitDeclaration();
-            if (match({TokenType::FUNC})) return function("function");
-            if (match({TokenType::LET})) return varDeclaration(false);
-            if (match({TokenType::CONST})) return varDeclaration(true);
-            if (match({TokenType::ATTACH})) return attachStatement();
-            return statement();
-        } catch (const ParseError &error) {
+            // --- THIS IS THE FIX ---
+            // Look for an optional 'export' keyword first.
+            bool is_exported = match({TokenType::EXPORT});
+            // --- END OF FIX ---
+
+            // Now, parse the actual declaration.
+            std::shared_ptr<Stmt> decl_stmt = nullptr;
+            if (match({TokenType::CLASS})) {
+                decl_stmt = classDeclaration();
+                // We need to downcast to set the flag.
+                std::static_pointer_cast<ClassStmt>(decl_stmt)->is_exported = is_exported;
+            } else if (match({TokenType::TRAIT})) {
+                decl_stmt = traitDeclaration();
+                std::static_pointer_cast<TraitStmt>(decl_stmt)->is_exported = is_exported;
+            } else if (match({TokenType::FUNC})) {
+                decl_stmt = function("function");
+                std::static_pointer_cast<FuncStmt>(decl_stmt)->is_exported = is_exported;
+            } else if (match({TokenType::CONST})) {
+                decl_stmt = varDeclaration(true);
+                std::static_pointer_cast<VarDeclStmt>(decl_stmt)->is_exported = is_exported;
+            } else if (match({TokenType::LET})) {
+                decl_stmt = varDeclaration(false);
+                std::static_pointer_cast<VarDeclStmt>(decl_stmt)->is_exported = is_exported;
+            } else if (match({TokenType::ATTACH})) return attachStatement();
+
+            else {
+                // If we saw 'export' but not a valid declaration, it's an error.
+                if (is_exported) {
+                    throw error(peek(), "Expect a class, trait, function, or variable declaration after 'export'.");
+                }
+                // Otherwise, it's just a regular statement.
+                return statement();
+            }
+
+            return decl_stmt;
+
+        } catch (const ParseError& error) {
             synchronize();
             return nullptr;
         }

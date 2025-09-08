@@ -34,6 +34,7 @@ namespace angara {
         symbol->name = token.lexeme;
         symbol->type = std::move(type);
         symbol->is_const = is_const; // <-- Store the flag
+        symbol->depth = getScopeDepth(); // <-- SET THE DEPTH
         current_scope[token.lexeme] = std::move(symbol);
         return true;
     }
@@ -58,6 +59,12 @@ namespace angara {
     const std::map<std::string, std::shared_ptr<Symbol>>& SymbolTable::getGlobalScope() const {
         // The global scope is always the first one we pushed.
         return m_scopes.front();
+    }
+
+    int SymbolTable::getScopeDepth() const {
+        // The global scope is depth 0. A scope inside that is depth 1, etc.
+        // The number of maps on the stack minus one gives the depth.
+        return m_scopes.size() - 1;
     }
 
 } // namespace angara

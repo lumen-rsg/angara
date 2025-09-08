@@ -18,7 +18,7 @@ namespace angara {
 
     class TypeChecker : public ExprVisitor, public StmtVisitor {
     public:
-        TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler);
+        TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler, std::string module_name);
 
         // The main entry point. Returns true if type checking passes.
         bool check(const std::vector<std::shared_ptr<Stmt>>& statements);
@@ -28,6 +28,8 @@ namespace angara {
         SymbolTable m_symbols;
         std::map<const VarDeclStmt*, std::shared_ptr<Type>> m_variable_types;
         const SymbolTable& getSymbolTable() const;
+        [[nodiscard]] std::shared_ptr<ModuleType> getModuleType() const;
+        std::map<const VarExpr*, std::shared_ptr<Symbol>> m_variable_resolutions;
     private:
         // --- Visitor Methods ---
         // Statements (return void)
@@ -100,6 +102,7 @@ namespace angara {
         std::shared_ptr<Type> m_type_thread;
         std::shared_ptr<Type> m_type_mutex;
         CompilerDriver& m_driver;
+        std::shared_ptr<ModuleType> m_module_type;
         std::stack<std::shared_ptr<Type>> m_function_return_types;
         std::shared_ptr<ClassType> m_current_class = nullptr;
 

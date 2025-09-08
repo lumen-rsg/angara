@@ -13,7 +13,11 @@ namespace angara {
         return m_symbols;
     }
 
-    TypeChecker::TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler)
+    std::shared_ptr<ModuleType> TypeChecker::getModuleType() const {
+        return m_module_type;
+    }
+
+    TypeChecker::TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler, std::string module_name)
     : m_errorHandler(errorHandler), m_driver(driver) {
         // Integer Types
         m_type_i8 = std::make_shared<PrimitiveType>("i8");
@@ -36,6 +40,7 @@ namespace angara {
         m_type_error = std::make_shared<PrimitiveType>("<error>");
         m_type_thread = std::make_shared<ThreadType>();
         m_type_mutex = std::make_shared<MutexType>();
+        m_module_type = std::make_shared<ModuleType>(module_name);
 
         auto print_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{}, // No fixed parameters
@@ -127,6 +132,13 @@ namespace angara {
         auto symbol = m_symbols.resolve(stmt.name.lexeme);
         auto trait_type = std::dynamic_pointer_cast<TraitType>(symbol->type);
 
+        // --- THIS IS THE FIX ---
+        // 2. If the trait was marked with 'export', add it to the module's public API.
+        if (stmt.is_exported) {
+            m_module_type->exports[stmt.name.lexeme] = trait_type;
+        }
+        // --- END OF FIX ---
+
         // We are defining a trait's header, so we ARE in a trait.
         m_is_in_trait = true;
 
@@ -155,25 +167,63 @@ namespace angara {
     }
 
 
+
     void TypeChecker::defineFunctionHeader(const FuncStmt& stmt) {
-        // This helper only resolves and declares the function signature.
-        // It is used for both global functions and methods in Pass 2.
+        // This helper only resolves and declares the function signature for Pass 2.
+
         std::vector<std::shared_ptr<Type>> param_types;
-        bool is_variadic = false;
-        for (const auto& p : stmt.params) {
-            param_types.push_back(resolveType(p.type));
-            if (p.is_variadic) {
-                is_variadic = true;
+
+        if (stmt.has_this) {
+            if (m_current_class == nullptr) {
+                error(stmt.name, "Cannot use 'this' in a non-method function.");
             }
         }
+
+        for (const auto& p : stmt.params) {
+            if (p.type) {
+                param_types.push_back(resolveType(p.type));
+            } else {
+                error(p.name, "Missing type annotation for parameter '" + p.name.lexeme + "'.");
+                param_types.push_back(m_type_error);
+            }
+        }
+
+
+
         std::shared_ptr<Type> return_type = m_type_void;
         if (stmt.returnType) {
             return_type = resolveType(stmt.returnType);
         }
-        auto function_type = std::make_shared<FunctionType>(param_types, return_type, is_variadic);
 
+        auto function_type = std::make_shared<FunctionType>(param_types, return_type);
+
+        // 1. Declare the function in the current symbol table so it can be used.
         if (!m_symbols.declare(stmt.name, function_type, true)) {
             error(stmt.name, "A symbol with this name already exists in this scope.");
+            // We can often continue even if the name is a duplicate.
+        }
+
+        // --- THIS IS THE FIX ---
+        // 2. If the function was marked with 'export', add it to the module's public API.
+        if (stmt.is_exported) {
+            // We only allow top-level functions to be exported, not methods inside classes.
+            // The parser should enforce this, but we can double-check here.
+            if (m_current_class != nullptr) {
+                error(stmt.name, "Cannot use 'export' on a method inside a class. Make the class public instead.");
+            } else {
+                m_module_type->exports[stmt.name.lexeme] = function_type;
+            }
+        }
+        // --- END OF FIX ---
+
+        // --- THIS IS THE FIX ---
+        // If the function is EXPORTED or if its NAME IS "main", add it to the public API.
+        if (stmt.is_exported || stmt.name.lexeme == "main") {
+            if (m_current_class != nullptr) {
+                error(stmt.name, "'export' can only be used on top-level declarations.");
+            } else {
+                m_module_type->exports[stmt.name.lexeme] = function_type;
+            }
         }
     }
 
@@ -183,6 +233,13 @@ namespace angara {
         auto symbol = m_symbols.resolve(stmt.name.lexeme);
         // This should never fail if Pass 1 ran correctly.
         auto class_type = std::dynamic_pointer_cast<ClassType>(symbol->type);
+
+        // --- THIS IS THE FIX ---
+        // 2. If the class was marked with 'export', add it to the module's public API.
+        if (stmt.is_exported) {
+            m_module_type->exports[stmt.name.lexeme] = class_type;
+        }
+        // --- END OF FIX ---
 
         // Set the current class context so 'this' can be resolved if needed
         // (e.g., for a method signature that returns the instance type).
@@ -351,39 +408,6 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         stmt->accept(*this, stmt);
     }
 
-        // --- FINAL VALIDATION ---
-        auto main_symbol = m_symbols.resolve("main");
-        if (!main_symbol || main_symbol->type->kind != TypeKind::FUNCTION) {
-            error(Token(), "Program has no 'main' function to act as an entry point.");
-            return false;
-        }
-
-        auto main_func_type = std::dynamic_pointer_cast<FunctionType>(main_symbol->type);
-        if (!isInteger(main_func_type->return_type)) {
-            error(Token(), "'main' function must be declared to return an integer type (e.g., i64).");
-            return false;
-        }
-
-        // --- THIS IS THE FIX ---
-        // Check for the two valid signatures:
-        // 1. main() -> i64
-        // 2. main(args as list<string>) -> i64
-        if (main_func_type->param_types.empty()) {
-            // Signature 1 is valid.
-        } else if (main_func_type->param_types.size() == 1) {
-            // Signature 2 might be valid. Check the parameter type.
-            if (main_func_type->param_types[0]->toString() != "list<string>") {
-                error(Token(), "The 'main' function parameter must be of type 'list<string>'.");
-                return false;
-            }
-        } else {
-            // Any other number of parameters is invalid.
-            error(Token(), "'main' function must have zero or one parameter.");
-            return false;
-        }
-        // --- END OF FIX ---
-
-
     return !m_hadError;
 }
 
@@ -513,6 +537,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         declared_type = resolveType(stmt->typeAnnotation);
     }
 
+
     // --- Logic for type inference and error checking ---
     if (!declared_type && initializer_type) {
         // Infer type from initializer
@@ -556,10 +581,24 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     // Store the final canonical type for this variable declaration
     m_variable_types[stmt.get()] = declared_type;
 
+
     // Declare the symbol in the current scope
     if (!m_symbols.declare(stmt->name, declared_type, stmt->is_const)) {
         error(stmt->name, "A variable with this name already exists in this scope.");
     }
+
+        // --- THIS IS THE FIX ---
+        // If the variable is exported, add it to the module's public API.
+        // We only do this for global variables (scope depth 0).
+        if (stmt->is_exported) {
+            if (m_symbols.getScopeDepth() > 0) { // Assumes you add a getScopeDepth() helper
+                error(stmt->name, "'export' can only be used on top-level declarations.");
+            } else {
+                m_module_type->exports[stmt->name.lexeme] = declared_type;
+            }
+        }
+        // --- END OF FIX ---
+
 }
 
     std::any TypeChecker::visit(const Literal& expr) {
@@ -582,19 +621,17 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     }
 
     std::any TypeChecker::visit(const VarExpr& expr) {
-        // 1. Resolve the variable in the symbol table.
         auto symbol = m_symbols.resolve(expr.name.lexeme);
-
-        // 2. Check if the variable was found.
         if (!symbol) {
             error(expr.name, "Undefined variable '" + expr.name.lexeme + "'.");
-            // If it's undefined, its type is <error>.
             pushAndSave(&expr, m_type_error);
         } else {
-            // 3. If it was found, its type is the type stored in the symbol table.
+            // --- THIS IS THE FIX ---
+            // Save the result of the resolution for the transpiler.
+            m_variable_resolutions[&expr] = symbol;
+            // --- END OF FIX ---
             pushAndSave(&expr, symbol->type);
         }
-
         return {};
     }
 
@@ -913,6 +950,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             bodyStmt->accept(*this, bodyStmt);
         }
 
+
         // 6. Restore the context.
         m_function_return_types.pop();
         m_symbols.exitScope();
@@ -950,27 +988,23 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
 
 
     void TypeChecker::visit(std::shared_ptr<const AttachStmt> stmt) {
-        // 1. Ask the main driver to resolve this module path.
         std::string module_path = stmt->modulePath.lexeme;
+        std::shared_ptr<ModuleType> module_type = m_driver.resolveModule(module_path, stmt->modulePath);
+        if (!module_type) return;
 
         // --- THIS IS THE FIX ---
-        // Use the correct return type and pass the required token.
-        std::shared_ptr<ModuleType> module_type = m_driver.resolveModule(module_path, stmt->modulePath);
+        // Instead of declaring one variable for the module, we merge its exports
+        // into the current scope.
+        for (const auto& [name, type] : module_type->exports) {
+            // We need to create a dummy token for the declaration.
+            Token symbol_token(TokenType::IDENTIFIER, name, stmt->modulePath.line, 0);
 
-        if (!module_type) {
-            // The driver already reported the error.
-            return;
+            // We need to decide if these are const. Let's assume they are.
+            if (!m_symbols.declare(symbol_token, type, true)) {
+                error(symbol_token, "A symbol named '" + name + "' from module '" + module_type->name +
+                                    "' conflicts with an existing symbol in this scope.");
+            }
         }
-
-        // Use the public static helper from the driver.
-        std::string module_name = CompilerDriver::get_base_name(module_path);
-        Token module_token(TokenType::IDENTIFIER, module_name, stmt->modulePath.line, 0);
-
-        // 2. Declare the new module symbol in the current scope.
-        if (!m_symbols.declare(module_token, module_type, true)) { // Modules are const
-            error(module_token, "A symbol with this name already exists in this scope.");
-        }
-        // --- END OF FIX ---
     }
 
     void TypeChecker::visit(std::shared_ptr<const ThrowStmt> stmt) {
@@ -1323,6 +1357,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     }
 
     std::any TypeChecker::visit(const GetExpr& expr) {
+    // 1. Type check the object on the left of the dot.
     expr.object->accept(*this);
     auto object_type = popType();
 
@@ -1332,12 +1367,14 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     }
 
     const std::string& property_name = expr.name.lexeme;
-    std::shared_ptr<Type> result_type = m_type_error;
+    std::shared_ptr<Type> result_type = m_type_error; // Default to error
 
-    // --- THIS IS THE FIX: A single, clean if/else if chain ---
+    // --- A single, clean if/else if chain for all property access ---
+
     if (object_type->kind == TypeKind::INSTANCE) {
         auto instance_type = std::dynamic_pointer_cast<InstanceType>(object_type);
         const ClassType::MemberInfo* prop_info = instance_type->class_type->findProperty(property_name);
+
         if (!prop_info) {
             error(expr.name, "Instance of class '" + instance_type->toString() + "' has no property named '" + property_name + "'.");
         } else {
@@ -1348,6 +1385,21 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             }
         }
     }
+    // --- THIS IS THE FINAL FIX ---
+    else if (object_type->kind == TypeKind::MODULE) {
+        auto module_type = std::dynamic_pointer_cast<ModuleType>(object_type);
+
+        // Look for the property in the module's public API (its exports).
+        auto member_it = module_type->exports.find(property_name);
+
+        if (member_it == module_type->exports.end()) {
+            error(expr.name, "Module '" + module_type->name + "' has no exported member named '" + property_name + "'.");
+        } else {
+            // Success! The result is the type of the exported symbol.
+            result_type = member_it->second;
+        }
+    }
+    // --- END OF FINAL FIX ---
     else if (object_type->kind == TypeKind::LIST) {
         if (property_name == "push") {
             auto list_type = std::dynamic_pointer_cast<ListType>(object_type);
@@ -1374,7 +1426,8 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         }
     }
     else {
-        error(expr.name, "Only instances of classes, lists, threads, or mutexes have properties. Cannot access property on type '" + object_type->toString() + "'.");
+        // Update the error message to be fully comprehensive.
+        error(expr.name, "Only instances, modules, lists, threads, or mutexes have properties. Cannot access property on type '" + object_type->toString() + "'.");
     }
 
     pushAndSave(&expr, result_type);

@@ -103,6 +103,7 @@ namespace angara {
 
         bool is_static = false;
         const bool is_const;
+        bool is_exported = false;
 
         VarDeclStmt(Token name, std::shared_ptr<ASTType> type, std::shared_ptr<Expr> initializer, bool is_const)
                 : name(std::move(name)),
@@ -214,15 +215,16 @@ namespace angara {
 
         const std::optional<std::vector<std::shared_ptr<Stmt>>> body;
         bool is_static = false;
+        bool is_exported = false;
 
         // TODO ignore `throws` for now and add it when exceptions are fully implemented.
 
         FuncStmt(Token name, bool has_this, std::vector<Parameter> params,
                  std::shared_ptr<ASTType> returnType, std::optional<std::vector<std::shared_ptr<Stmt>>> body)
                 : name(std::move(name)),
-                  has_this(has_this),
                   params(std::move(params)),
                   returnType(std::move(returnType)),
+                  has_this(has_this),
                   body(std::move(body)) {}
 
         void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
@@ -286,6 +288,7 @@ namespace angara {
         const std::shared_ptr<VarExpr> superclass;
         const std::vector<std::shared_ptr<VarExpr>> traits;
         const std::vector<std::shared_ptr<ClassMember>> members;
+        bool is_exported = false;
 
         ClassStmt(Token name, std::shared_ptr<VarExpr> superclass,
                   std::vector<std::shared_ptr<VarExpr>> traits,
@@ -304,6 +307,7 @@ namespace angara {
     struct TraitStmt : Stmt {
         const Token name;
         const std::vector<std::shared_ptr<FuncStmt>> methods;
+        bool is_exported = false;
 
         TraitStmt(Token name, std::vector<std::shared_ptr<FuncStmt>> methods)
                 : name(std::move(name)), methods(std::move(methods)) {}
