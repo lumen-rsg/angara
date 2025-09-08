@@ -689,7 +689,7 @@ namespace angara {
             Token modulePath = consume(TokenType::STRING, "Expect module path as a string after 'from'.");
 
             consume(TokenType::SEMICOLON, "Expect ';' after attach statement.");
-            return std::make_shared<AttachStmt>(std::move(names), std::move(modulePath));
+            return std::make_shared<AttachStmt>(std::move(names), std::move(modulePath), std::move(modulePath));
 
         } else {
             // --- Parse the Simple Form: attach "path" or attach name ---
@@ -700,9 +700,15 @@ namespace angara {
                 throw error(peek(), "Expect module name or path after 'attach'.");
             }
 
+            // --- NEW: Check for optional 'as' alias ---
+            std::optional<Token> alias;
+            if (match({TokenType::AS})) {
+                alias = consume(TokenType::IDENTIFIER, "Expect alias name after 'as'.");
+            }
+            // --- END OF NEW ---
+
             consume(TokenType::SEMICOLON, "Expect ';' after attach statement.");
-            return std::make_shared<AttachStmt>(std::vector<Token>{},
-                                                std::move(modulePath)); // Pass empty vector for names
+            return std::make_shared<AttachStmt>(std::vector<Token>{}, modulePath, alias);
         }
     }
 

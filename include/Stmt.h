@@ -248,9 +248,12 @@ namespace angara {
         // A list of specific names to import. If empty, it's a simple attach.
         const std::vector<Token> names;
         const Token modulePath;
+        const std::optional<Token> alias;
 
-        AttachStmt(std::vector<Token> names, Token modulePath)
-                : names(std::move(names)), modulePath(std::move(modulePath)) {}
+        AttachStmt(std::vector<Token> names, Token modulePath, std::optional<Token> alias)
+                : names(std::move(names)),
+                  modulePath(std::move(modulePath)),
+                  alias(std::move(alias)) {}
 
         void accept(StmtVisitor &visitor, std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const AttachStmt>(self));

@@ -169,53 +169,111 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
         last_dot = path.length();
     }
 
-    // Return the substring between the start and the last dot.
-    return path.substr(start, last_dot - start);
+    std::string basename = path.substr(start, last_dot - start);
+    // --- THIS IS THE FIX ---
+    // If the name starts with "lib", strip it. e.g., "libfs" -> "fs"
+    if (basename.rfind("lib", 0) == 0) {
+        return basename.substr(3);
+    }
+    // --- END OF FIX ---
+    return basename;
 }
 
 
-std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& path, const Token& import_token) {
+std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& path_or_id, const Token& import_token) {
+
+    std::string found_path = "";
+    // First, check if a full path was already resolved and cached.
+    if (m_module_cache.count(path_or_id)) {
+        return m_module_cache[path_or_id];
+    }
+
+    // --- THIS IS THE FIX ---
+    // 1. Determine if the input is a direct path or a logical module ID.
+    bool is_direct_path = (path_or_id.find('/') != std::string::npos ||
+                           path_or_id.find('\\') != std::string::npos ||
+                           path_or_id.ends_with(".an") ||
+                           path_or_id.ends_with(".so") ||
+                           path_or_id.ends_with(".dylib") ||
+                           path_or_id.ends_with(".dll"));
+
+    if (is_direct_path) {
+        // It's a path. Check if this specific path exists.
+        std::ifstream f(path_or_id);
+        if (f.good()) {
+            found_path = path_or_id;
+        }
+    } else {
+        // It's a logical ID (like "fs"). Search for it in the search paths.
+        std::vector<std::string> search_paths;
+        // TODO: Add current file's directory and ANGARA_PATH dirs here.
+        search_paths.push_back(".");
+
+        for (const auto& dir : search_paths) {
+            std::vector<std::string> potential_paths = {
+                    dir + "/" + path_or_id + ".an",
+                    dir + "/lib" + path_or_id + ".so",
+                    dir + "/lib" + path_or_id + ".dylib"
+            };
+            for (const auto& p : potential_paths) {
+                std::ifstream f(p);
+                if (f.good()) {
+                    found_path = p;
+                    break;
+                }
+            }
+            if (!found_path.empty()) break;
+        }
+    }
+
+    if (found_path.empty()) {
+        std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Cannot find module '" << path_or_id << "'.\n";
+        m_had_error = true;
+        return nullptr;
+    }
+    // --- END OF FIX ---
+
     // 1. Check the cache first to avoid recompiling the same file.
-    if (m_module_cache.count(path)) {
-        return m_module_cache[path];
+    if (m_module_cache.count(path_or_id)) {
+        return m_module_cache[path_or_id];
     }
 
     // 2. Check for circular dependencies by seeing if the path is already in our call stack.
     for (const auto& p : m_compilation_stack) {
-        if (p == path) {
-            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Circular dependency detected. Module '" << path << "' is already being compiled in this chain.\n";
+        if (p == path_or_id) {
+            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Circular dependency detected. Module '" << path_or_id << "' is already being compiled in this chain.\n";
             m_had_error = true;
             return nullptr;
         }
     }
 
-    m_compilation_stack.push_back(path);
+    m_compilation_stack.push_back(path_or_id);
     m_total_modules++;
-    print_progress(path);
+    print_progress(path_or_id);
 
     // --- DISPATCHER: Decide how to handle the file based on its extension ---
     std::shared_ptr<ModuleType> module_type = nullptr;
-    if (path.ends_with(".so") || path.ends_with(".dylib") || path.ends_with(".dll")) {
+    if (path_or_id.ends_with(".so") || path_or_id.ends_with(".dylib") || path_or_id.ends_with(".dll")) {
         // --- Path 1: Load a pre-compiled native module ---
-        module_type = loadNativeModule(path, import_token);
+        module_type = loadNativeModule(path_or_id, import_token);
 
         if (module_type) {
             // --- THIS IS THE FIX ---
             // 1. Extract the directory path.
-            size_t last_slash = path.find_last_of("/\\");
+            size_t last_slash = path_or_id.find_last_of("/\\");
             if (last_slash != std::string::npos) {
-                m_native_lib_paths.insert(path.substr(0, last_slash));
+                m_native_lib_paths.insert(path_or_id.substr(0, last_slash));
             }
             // 2. Extract the clean library name.
-            m_native_lib_names.push_back(get_lib_name(path));
+            m_native_lib_names.push_back(get_lib_name(path_or_id));
             // --- END OF FIX ---
         }
 
     } else {
         // --- Path 2: Compile an Angara source file ---
-        std::string source = read_file(path);
+        std::string source = read_file(path_or_id);
         if (source.empty()) {
-            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Could not open source file '" << path << "'\n";
+            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Could not open source file '" << path_or_id << "'\n";
             m_had_error = true;
             m_compilation_stack.pop_back();
             return nullptr;
@@ -233,7 +291,7 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
             return nullptr;
         }
 
-        std::string module_name = get_base_name(path);
+        std::string module_name = get_base_name(path_or_id);
         TypeChecker typeChecker(*this, errorHandler, module_name);
         if (!typeChecker.check(statements)) {
             m_had_error = true;
@@ -269,7 +327,7 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
     // 3. Clean up and cache the result.
     m_compilation_stack.pop_back();
     if (module_type) {
-        m_module_cache[path] = module_type;
+        m_module_cache[path_or_id] = module_type;
         m_modules_compiled++;
     }
 
@@ -289,9 +347,12 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
     }
 
     // 2. Find the exported `AngaraModule_Init` function.
-    AngaraModuleInitFn init_fn = (AngaraModuleInitFn)dlsym(handle, "AngaraModule_Init");
+
+        std::string module_name = get_base_name(path);
+        std::string init_func_name = "Angara_" + module_name + "_Init";
+        AngaraModuleInitFn init_fn = (AngaraModuleInitFn)dlsym(handle, init_func_name.c_str());
     if (!init_fn) {
-        std::cerr << "\nError at line " << import_token.line << ": Invalid native module '" << path << "'. Missing 'AngaraModule_Init' entry point.\n";
+        std::cerr << "\nError at line " << import_token.line << ": Invalid native module '" << path << "'. Missing " << init_func_name << " entry point.\n";
         m_had_error = true;
         dlclose(handle);
         return nullptr;
@@ -301,7 +362,6 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
     int def_count = 0;
     const AngaraFuncDef* defs = init_fn(&def_count);
 
-    std::string module_name = get_base_name(path);
     auto module_type = std::make_shared<ModuleType>(module_name);
 
     // 4. Populate the module's public API.

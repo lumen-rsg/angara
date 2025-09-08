@@ -7,8 +7,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-// --- Core Angara Value Representation ---
-
+// --- Core Angara Value Representation --
 typedef enum {
     VAL_NIL, VAL_BOOL, VAL_I64, VAL_F64, VAL_OBJ
 } AngaraValueType;
@@ -31,8 +30,7 @@ typedef struct {
 } AngaraObject;
 
 
-// --- NEW: Public Definitions for Core Object Structs ---
-// These definitions must exactly match the internal definitions in angara_runtime.h
+// --- Public Definitions for Core Object Structs ---
 typedef struct {
     Object obj;
     size_t length;
@@ -45,7 +43,6 @@ typedef struct {
     size_t capacity;
     AngaraObject* elements;
 } AngaraList;
-// --- END OF NEW ---
 
 
 // --- C ABI Function Signature ---
@@ -53,7 +50,6 @@ typedef AngaraObject (*AngaraNativeFn)(int arg_count, AngaraObject* args);
 
 
 // --- API Provided by the Angara Host ---
-// (These are functions exported by the main Angara executable or libangara_core)
 AngaraObject create_nil(void);
 AngaraObject create_bool(bool value);
 AngaraObject create_i64(int64_t value);
@@ -67,6 +63,16 @@ AngaraObject angara_equals(AngaraObject a, AngaraObject b);
 // --- Helper Macros ---
 #define ANGARA_IS_STRING(value) ((value).type == VAL_OBJ && ((Object*)(value).as.obj)->type == OBJ_STRING)
 #define ANGARA_AS_CSTRING(value) (((AngaraString*)(value).as.obj)->chars)
+
+#define ANGARA_ABI_PASTE_IMPL(a, b) a##b
+#define ANGARA_ABI_PASTE(a, b) ANGARA_ABI_PASTE_IMPL(a, b)
+
+// The official macro for defining the module's entry point.
+//  `ANGARA_MODULE_INIT(fs)` which expands to:
+// `const AngaraFuncDef* Angara_fs_Init(int* def_count)`
+
+#define ANGARA_MODULE_INIT(MODULE_NAME) \
+    const AngaraFuncDef* ANGARA_ABI_PASTE(Angara_, ANGARA_ABI_PASTE(MODULE_NAME, _Init))(int* def_count)
 
 
 // --- API Provided by the Module ---

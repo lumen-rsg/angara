@@ -11,7 +11,7 @@
 
 // 1. Implement the native function with the correct signature.
 
-AngaraObject read_file(int arg_count, AngaraObject* args) {
+AngaraObject Angara_fs_read_file(int arg_count, AngaraObject* args) {
     if (arg_count != 1) {
         angara_throw_error("read_file() expects 1 argument.");
         return create_nil();
@@ -41,12 +41,12 @@ AngaraObject read_file(int arg_count, AngaraObject* args) {
 
 // 5. Create the definition array.
 static const AngaraFuncDef FS_FUNCTIONS[] = {
-    {"read_file", read_file, 1},
-    {NULL, NULL, 0} // Sentinel to mark the end of the array
+        {"read_file", Angara_fs_read_file, 1},
+        {NULL, NULL, 0}
 };
 
 // 6. Implement the exported entry point.
-const AngaraFuncDef* AngaraModule_Init(int* def_count) {
+ANGARA_MODULE_INIT(fs) {
     *def_count = (sizeof(FS_FUNCTIONS) / sizeof(AngaraFuncDef)) - 1;
     return FS_FUNCTIONS;
 }

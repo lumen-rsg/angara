@@ -1008,18 +1008,25 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         m_module_resolutions[stmt.get()] = module_type;
 
         // --- THIS IS THE FIX ---
-        // 2. We need to declare a variable in the current scope that represents this module.
+        // Determine the name to declare in the symbol table.
+        std::string symbol_name;
+        Token name_token;
 
-        // For a simple `attach "utils.an"`
-        if (stmt->names.empty()) {
-            std::string module_name = CompilerDriver::get_base_name(module_path);
-            Token module_token(TokenType::IDENTIFIER, module_name, stmt->modulePath.line, 0);
-
-            // Declare a new, constant variable with the module's type.
-            if (!m_symbols.declare(module_token, module_type, true)) {
-                error(module_token, "A symbol with this name already exists in this scope.");
-            }
+        if (stmt->alias) {
+            // If an alias exists, use it.
+            symbol_name = stmt->alias->lexeme;
+            name_token = *stmt->alias;
+        } else {
+            // Otherwise, use the base name of the module file.
+            symbol_name = CompilerDriver::get_base_name(module_path);
+            name_token = Token(TokenType::IDENTIFIER, symbol_name, stmt->modulePath.line, 0);
         }
+
+        // Now, declare the symbol with the chosen name.
+        if (!m_symbols.declare(name_token, module_type, true)) {
+            error(name_token, "A symbol with this name already exists in this scope.");
+        }
+            // --- END OF FIX ---
             // For `attach PI, circle_area from "utils.an"`
         else {
             // This is the `from ... import` syntax.
@@ -1038,6 +1045,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             }
         }
         // --- END OF FIX ---
+        std::cout << "attached module with a name: " << name_token.lexeme << std::endl;
     }
 
 
@@ -1071,6 +1079,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
 
         // 5. Exit the scope for the catch block.
         m_symbols.exitScope();
+
     }
 
     void TypeChecker::visit(std::shared_ptr<const ClassStmt> stmt) {

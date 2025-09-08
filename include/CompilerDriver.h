@@ -30,7 +30,7 @@ namespace angara {
     public:
         CompilerDriver();
         bool compile(const std::string& root_file_path);
-        std::shared_ptr<ModuleType> resolveModule(const std::string& path, const Token& import_token);
+        std::shared_ptr<ModuleType> resolveModule(const std::string& path_or_id, const Token& import_token);
         static std::string get_base_name(const std::string& path);
 
 

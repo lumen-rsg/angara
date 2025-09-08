@@ -143,11 +143,18 @@ void CTranspiler::pass_2_generate_declarations(const std::vector<std::shared_ptr
 
                 // If the attached module was a native library, generate prototypes for its functions.
                 if (module_type->is_native) {
-                    for (const auto& [name, type] : module_type->exports) {
+                    // If it's a native C module, we need to generate prototypes for its
+                    // mangled C function names so our code can call them.
+                    (*m_current_out) << "// --- Prototypes for Native Module: " << module_type->name << " ---\n";
+                    for (const auto &[export_name, type]: module_type->exports) {
                         if (type->kind == TypeKind::FUNCTION) {
                             auto func_type = std::dynamic_pointer_cast<FunctionType>(type);
-                            // Generate the C ABI signature: AngaraObject func_name(int, AngaraObject*)
-                            (*m_current_out) << "AngaraObject " << name << "(int arg_count, AngaraObject* args);\n";
+
+                            // Construct the mangled name, e.g., "Angara_fs_read_file"
+                            std::string mangled_name = "Angara_" + module_type->name + "_" + export_name;
+
+                            (*m_current_out) << "extern AngaraObject " << mangled_name
+                                             << "(int arg_count, AngaraObject args[]);\n";
                         }
                     }
                 }
@@ -1162,10 +1169,8 @@ void CTranspiler::transpileWhileStmt(const WhileStmt& stmt) {
             if (module_type->is_native) {
                 // It's a call to a native C function.
                 std::string func_name = get_expr->name.lexeme;
-                // We need a generic way to call it. This requires a trampoline.
-                // The C ABI `AngaraNativeFn` is `AngaraObject(*)(int, AngaraObject*)`
-                // This is the correct signature.
-                return func_name + "(" + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
+                std::string mangled_func_name = "Angara_" + module_type->name + "_" + get_expr->name.lexeme;
+                return mangled_func_name + "(" + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
             }
         }
         // --- END OF NEW LOGIC ---
