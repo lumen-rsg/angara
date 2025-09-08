@@ -33,8 +33,8 @@ namespace angara {
         auto symbol = std::make_shared<Symbol>();
         symbol->name = token.lexeme;
         symbol->type = std::move(type);
-        symbol->is_const = is_const; // <-- Store the flag
-        symbol->depth = getScopeDepth(); // <-- SET THE DEPTH
+        symbol->is_const = is_const;
+        symbol->depth = getScopeDepth();
         current_scope[token.lexeme] = std::move(symbol);
         return true;
     }

@@ -12,7 +12,7 @@
 
 namespace angara {
 
-    // --- NEW: ModuleType to represent the public API of a module ---
+    // --- ModuleType to represent the public API of a module ---
     struct ModuleType : Type {
         const std::string name;
         // A map from exported symbol name to its Type.
@@ -37,30 +37,25 @@ namespace angara {
     private:
         std::string read_file(const std::string& path);
 
-        // --- NEWLY DECLARED MEMBERS ---
         void log_step(const std::string& message);
         void print_progress(const std::string& current_file);
         bool m_had_error = false;
-        // --- END OF NEW MEMBERS ---
 
         std::map<std::string, std::shared_ptr<ModuleType>> m_module_cache;
         std::vector<std::string> m_compilation_stack;
 
-        // --- NEW: Track files for the final link step ---
+        // --- Track files for the final link step ---
         std::vector<std::string> m_compiled_c_files;
-        // --- END OF NEW ---
 
         int m_total_modules = 0;
         int m_modules_compiled = 0;
         std::vector<std::string> m_compiled_module_names;
         std::shared_ptr<ModuleType> loadNativeModule(const std::string& path, const Token& import_token);
         SymbolTable m_global_symbols;
-        // --- THIS IS THE FIX ---
         // Use a set to automatically store only unique library directories.
         std::set<std::string> m_native_lib_paths;
         // Store the clean library names (e.g., "fs", "http").
         std::vector<std::string> m_native_lib_names;
-        // --- END OF FIX ---
 
         const std::string m_runtime_path;
         const std::string m_angara_module_path;

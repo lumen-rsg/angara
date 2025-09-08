@@ -81,27 +81,23 @@ namespace angara {
         const std::vector<std::shared_ptr<Type>> param_types;
         const std::shared_ptr<Type> return_type;
 
-        // --- THIS IS THE NEW MEMBER ---
         const bool is_variadic;
-        // --- END OF NEW MEMBER ---
 
         // Update constructor to accept the flag, defaulting to false.
         FunctionType(std::vector<std::shared_ptr<Type>> params, std::shared_ptr<Type> ret, bool is_variadic = false)
                 : Type(TypeKind::FUNCTION),
                   param_types(std::move(params)),
                   return_type(std::move(ret)),
-                  is_variadic(is_variadic) {} // <-- Add to initializer list
+                  is_variadic(is_variadic) {}
 
         std::string toString() const override {
             std::stringstream ss;
             ss << "function(";
             for (size_t i = 0; i < param_types.size(); ++i) {
                 ss << param_types[i]->toString();
-                // --- NEW: Add '...' for variadic functions ---
                 if (is_variadic && i == param_types.size() - 1) {
                     ss << "...";
                 }
-                // --- END OF NEW ---
                 if (i < param_types.size() - 1) {
                     ss << ", ";
                 }

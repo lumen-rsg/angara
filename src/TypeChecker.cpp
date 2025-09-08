@@ -97,14 +97,13 @@ namespace angara {
                name == "u8" || name == "u16" || name == "u32" || name == "u64";
     }
 
-    // --- NEW HELPER ---
     bool TypeChecker::isUnsignedInteger(const std::shared_ptr<Type>& type) {
         if (type->kind != TypeKind::PRIMITIVE) return false;
         const auto& name = type->toString();
         return name == "u8" || name == "u16" || name == "u32" || name == "u64";
     }
 
-// --- NEW HELPER ---
+
     bool TypeChecker::isFloat(const std::shared_ptr<Type>& type) {
         if (type->kind != TypeKind::PRIMITIVE) return false;
         const auto& name = type->toString();
@@ -132,12 +131,10 @@ namespace angara {
         auto symbol = m_symbols.resolve(stmt.name.lexeme);
         auto trait_type = std::dynamic_pointer_cast<TraitType>(symbol->type);
 
-        // --- THIS IS THE FIX ---
         // 2. If the trait was marked with 'export', add it to the module's public API.
         if (stmt.is_exported) {
             m_module_type->exports[stmt.name.lexeme] = trait_type;
         }
-        // --- END OF FIX ---
 
         // We are defining a trait's header, so we ARE in a trait.
         m_is_in_trait = true;
@@ -188,8 +185,6 @@ namespace angara {
             }
         }
 
-
-
         std::shared_ptr<Type> return_type = m_type_void;
         if (stmt.returnType) {
             return_type = resolveType(stmt.returnType);
@@ -203,7 +198,6 @@ namespace angara {
             // We can often continue even if the name is a duplicate.
         }
 
-        // --- THIS IS THE FIX ---
         // 2. If the function was marked with 'export', add it to the module's public API.
         if (stmt.is_exported) {
             // We only allow top-level functions to be exported, not methods inside classes.
@@ -214,9 +208,7 @@ namespace angara {
                 m_module_type->exports[stmt.name.lexeme] = function_type;
             }
         }
-        // --- END OF FIX ---
 
-        // --- THIS IS THE FIX ---
         // If the function is EXPORTED or if its NAME IS "main", add it to the public API.
         if (stmt.is_exported || stmt.name.lexeme == "main") {
             if (m_current_class != nullptr) {
@@ -234,12 +226,10 @@ namespace angara {
         // This should never fail if Pass 1 ran correctly.
         auto class_type = std::dynamic_pointer_cast<ClassType>(symbol->type);
 
-        // --- THIS IS THE FIX ---
         // 2. If the class was marked with 'export', add it to the module's public API.
         if (stmt.is_exported) {
             m_module_type->exports[stmt.name.lexeme] = class_type;
         }
-        // --- END OF FIX ---
 
         // Set the current class context so 'this' can be resolved if needed
         // (e.g., for a method signature that returns the instance type).
@@ -255,7 +245,7 @@ namespace angara {
             } else {
                 auto superclass_type = std::dynamic_pointer_cast<ClassType>(super_symbol->type);
 
-                // --- NEW: INHERITANCE CYCLE DETECTION ---
+                // --- INHERITANCE CYCLE DETECTION ---
                 auto current = superclass_type;
                 bool has_cycle = false;
                 while (current) {
@@ -457,7 +447,7 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
             if (name == "void") return m_type_void;
             if (name == "nil") return m_type_nil;
             if (name == "any") return m_type_any;
-            if (name == "Thread") return m_type_thread; // <-- ADD THIS
+            if (name == "Thread") return m_type_thread;
 
             // If it's not a primitive, it must be a user-defined type (class or trait).
             // We look it up in the symbol table.
@@ -538,7 +528,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         declared_type = resolveType(stmt->typeAnnotation);
     }
 
-
     // --- Logic for type inference and error checking ---
     if (!declared_type && initializer_type) {
         // Infer type from initializer
@@ -553,7 +542,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
 
         bool types_match = (declared_type->toString() == initializer_type->toString());
 
-        // --- THIS IS THE FIX ---
         // Special Rule: An empty list literal (inferred as `list<any>`) can be
         // assigned to a variable of any specific list type.
         if (!types_match && initializer_type->toString() == "list<any>" && declared_type->kind == TypeKind::LIST) {
@@ -564,9 +552,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                 }
             }
         }
-        // --- END OF FIX ---
 
-        // (You can also add the numeric literal conversion rules here if they aren't already present)
         if (!types_match && isInteger(declared_type) && initializer_type->toString() == "i64") {
             types_match = true;
         }
@@ -588,7 +574,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         error(stmt->name, "A variable with this name already exists in this scope.");
     }
 
-        // --- THIS IS THE FIX ---
         // If the variable is exported, add it to the module's public API.
         // We only do this for global variables (scope depth 0).
         if (stmt->is_exported) {
@@ -598,7 +583,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                 m_module_type->exports[stmt->name.lexeme] = declared_type;
             }
         }
-        // --- END OF FIX ---
 
 }
 
@@ -627,10 +611,8 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             error(expr.name, "Undefined variable '" + expr.name.lexeme + "'.");
             pushAndSave(&expr, m_type_error);
         } else {
-            // --- THIS IS THE FIX ---
             // Save the result of the resolution for the transpiler.
             m_variable_resolutions[&expr] = symbol;
-            // --- END OF FIX ---
             pushAndSave(&expr, symbol->type);
         }
         return {};
@@ -651,7 +633,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                 else error(expr.op, "Operand for '!' must be a boolean.");
                 break;
         }
-        pushAndSave(&expr, result_type); // <-- THE FIX
+        pushAndSave(&expr, result_type);
         return {};
     }
 
@@ -717,7 +699,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
 
             case TokenType::EQUAL_EQUAL:
             case TokenType::BANG_EQUAL: {
-                // --- THIS IS THE FINAL, CORRECT LOGIC FOR EQUALITY ---
                 // The comparison is valid if:
                 // 1. The types are exactly the same.
                 // 2. One of the types is 'any' (or nil, which can be compared to anything).
@@ -852,7 +833,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             stmt->initializer->accept(*this, stmt->initializer);
         }
 
-        // --- THIS IS THE CRITICAL FIX ---
         // 3. Type check the condition, if it exists.
         if (stmt->condition) {
             stmt->condition->accept(*this);
@@ -869,7 +849,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             stmt->increment->accept(*this);
             popType(); // The resulting value of the increment expression is not used.
         }
-        // --- END OF CRITICAL FIX ---
 
         // 5. Type check the loop body.
         stmt->body->accept(*this, stmt->body);
@@ -992,7 +971,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     }
 
 
-
     void TypeChecker::visit(std::shared_ptr<const AttachStmt> stmt) {
         // 1. Ask the main driver to resolve this module path.
         //    This will handle caching and either compile the .an or load the .so.
@@ -1007,7 +985,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         // Save the resolution result for the CTranspiler to use later.
         m_module_resolutions[stmt.get()] = module_type;
 
-        // --- THIS IS THE FIX ---
         // Determine the name to declare in the symbol table.
         std::string symbol_name;
         Token name_token;
@@ -1026,7 +1003,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         if (!m_symbols.declare(name_token, module_type, true)) {
             error(name_token, "A symbol with this name already exists in this scope.");
         }
-            // --- END OF FIX ---
             // For `attach PI, circle_area from "utils.an"`
         else {
             // This is the `from ... import` syntax.
@@ -1044,8 +1020,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                 }
             }
         }
-        // --- END OF FIX ---
-        std::cout << "attached module with a name: " << name_token.lexeme << std::endl;
     }
 
 
@@ -1311,7 +1285,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         if (callee_type->kind == TypeKind::FUNCTION) {
             auto func_type = std::dynamic_pointer_cast<FunctionType>(callee_type);
 
-            // --- THIS IS THE REFINED LOGIC ---
             size_t num_fixed_params = func_type->param_types.size();
             if (func_type->is_variadic) {
                 // For a variadic function, the number of arguments must be
@@ -1331,7 +1304,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                     result_type = m_type_error;
                 }
             }
-            // --- END OF REFINED LOGIC ---
 
             // Rule: Check the type of each *fixed* argument.
             if (result_type->kind != TypeKind::ERROR) {
@@ -1428,7 +1400,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             }
         }
     }
-    // --- THIS IS THE FINAL FIX ---
     else if (object_type->kind == TypeKind::MODULE) {
         auto module_type = std::dynamic_pointer_cast<ModuleType>(object_type);
 
@@ -1442,7 +1413,6 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             result_type = member_it->second;
         }
     }
-    // --- END OF FINAL FIX ---
     else if (object_type->kind == TypeKind::LIST) {
         if (property_name == "push") {
             auto list_type = std::dynamic_pointer_cast<ListType>(object_type);

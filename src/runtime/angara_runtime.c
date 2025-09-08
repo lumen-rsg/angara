@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h> // For fmod
+#include <math.h>
 
 // --- Internal Forward Declarations ---
 static void free_object(Object* object);
@@ -57,7 +57,6 @@ bool angara_is_truthy(AngaraObject value) {
         case VAL_F64:
             return AS_F64(value) != 0.0;
         case VAL_OBJ: {
-            // --- THIS IS THE NEW LOGIC ---
             // For object types, we check if they are "empty".
             switch (OBJ_TYPE(value)) {
                 case OBJ_STRING:
@@ -74,7 +73,6 @@ bool angara_is_truthy(AngaraObject value) {
                 default:
                     return true;
             }
-            // --- END OF NEW LOGIC ---
         }
         default:
             return false; // Should be unreachable
@@ -229,16 +227,14 @@ Object* angara_instance_new(size_t size, AngaraClass* klass) {
     AngaraInstance* instance = (AngaraInstance*)malloc(size);
     if (instance == NULL) exit(1);
 
-    // --- THIS IS THE FIX ---
     instance->obj.type = OBJ_INSTANCE;
     instance->obj.ref_count = 1;
     instance->klass = klass; // Store the pointer to the class object
-    // --- END OF FIX ---
 
     return (Object*)instance;
 }
 
-// --- NEW: Exception Handling Implementation ---
+// --- Exception Handling Implementation ---
 AngaraObject g_current_exception;
 jmp_buf g_exception_stack[ANGARA_MAX_EXCEPTION_FRAMES];
 int g_exception_stack_top = 0;
@@ -272,13 +268,12 @@ void angara_throw(AngaraObject exception) {
 void angara_runtime_init(void) {
     // For now, this is empty. But in the future, it could initialize
     // a memory manager, a thread pool, random number seeds, etc.
-    printf("-- Angara Runtime Initialized --\n");
+
 }
 
 void angara_runtime_shutdown(void) {
     // This is where we would perform final cleanup, like ensuring all
     // allocated objects have been freed (a good way to detect memory leaks).
-    printf("-- Angara Runtime Shutdown --\n");
 }
 
 
@@ -292,10 +287,8 @@ void* thread_starter_routine(void* arg) {
     // Call the closure with no arguments.
     AngaraObject result = angara_call(thread->closure_to_run, 0, NULL);
 
-    // --- THIS IS THE FIX ---
     // Store the result in the thread object.
     thread->return_value = result;
-    // --- END OF FIX ---
 
     // We are done with our reference to the closure.
     angara_decref(thread->closure_to_run);
@@ -312,10 +305,8 @@ AngaraObject angara_spawn(AngaraObject closure) {
     thread_obj->return_value = create_nil(); // Initialize return value to nil
     angara_incref(closure);
 
-    // --- THIS IS THE FIX ---
     // 2. Pass a pointer to the entire AngaraThread object to the new thread.
     if (pthread_create(&thread_obj->handle, NULL, &thread_starter_routine, thread_obj) != 0) {
-        // --- END OF FIX ---
         printf("Error: Failed to create Angara thread.\n");
         angara_decref(closure);
         free(thread_obj);
@@ -334,12 +325,10 @@ AngaraObject angara_thread_join(AngaraObject thread_obj) {
     // 1. Wait for the C thread to finish its execution.
     pthread_join(thread->handle, NULL);
 
-    // --- THIS IS THE FIX ---
     // 2. Return the value that the thread stored.
     //    The caller now gets a reference to this value.
     angara_incref(thread->return_value);
     return thread->return_value;
-    // --- END OF FIX ---
 }
 
 AngaraObject angara_closure_new(GenericAngaraFn fn, int arity, bool is_native) {

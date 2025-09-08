@@ -37,10 +37,6 @@ add_executable(angara_compiler
         src/main.cpp
         src/Parser.cpp
         src/Token.cpp
-        src/AngaraClass.cpp
-        src/AngaraInstance.cpp
-        src/AngaraTrait.cpp
-        src/AngaraClosure.cpp
         src/TypeChecker.cpp
         src/SymbolTable.cpp
         src/CTranspiler.cpp

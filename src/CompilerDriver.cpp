@@ -38,7 +38,6 @@ void CompilerDriver::log_step(const std::string& message) {
     {}
 
 void CompilerDriver::print_progress(const std::string& current_file) {
-    // This creates a progress bar like: [===>      ] (3/10) Compiling: utils.an
     int bar_width = 20;
     float progress = (m_total_modules > 0) ? (float)m_modules_compiled / m_total_modules : 0;
     int pos = bar_width * progress;
@@ -50,7 +49,8 @@ void CompilerDriver::print_progress(const std::string& current_file) {
         else std::cout << " ";
     }
     std::cout << "] (" << m_modules_compiled << "/" << m_total_modules << ") "
-              << "Compiling: " << current_file << "\n";
+              << "Compiling: " << current_file << "\r";
+    std::cout << std::flush;
 
 }
 
@@ -150,7 +150,6 @@ bool CompilerDriver::compile(const std::string& root_file_path) {
 
     // Add final flags
     command_ss << " -pthread -lm";
-    // --- END OF FINAL FIX ---
     std::string command = command_ss.str();
 
     std::cout << YELLOW << "   $ " << command << RESET << std::endl;
@@ -184,12 +183,10 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
     }
 
     std::string basename = path.substr(start, last_dot - start);
-    // --- THIS IS THE FIX ---
     // If the name starts with "lib", strip it. e.g., "libfs" -> "fs"
     if (basename.rfind("lib", 0) == 0) {
         return basename.substr(3);
     }
-    // --- END OF FIX ---
     return basename;
 }
 
@@ -266,7 +263,6 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
         module_type = loadNativeModule(path_or_id, import_token);
 
         if (module_type) {
-            // --- THIS IS THE FIX ---
             // 1. Extract the directory path.
             size_t last_slash = path_or_id.find_last_of("/\\");
             if (last_slash != std::string::npos) {
@@ -274,7 +270,6 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
             }
             // 2. Extract the clean library name.
             m_native_lib_names.push_back(get_lib_name(path_or_id));
-            // --- END OF FIX ---
         }
 
     } else {
@@ -329,7 +324,7 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
 
         // Get the public API of the compiled module.
         module_type = typeChecker.getModuleType();
-        m_compiled_c_files.push_back(c_filename); // Add to the list for the final link step.
+        m_compiled_c_files.push_back(c_filename);
     }
 
     // 3. Clean up and cache the result.
@@ -353,8 +348,6 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
         m_had_error = true;
         return nullptr;
     }
-
-    // 2. Find the exported `AngaraModule_Init` function.
 
         std::string module_name = get_base_name(path);
         std::string init_func_name = "Angara_" + module_name + "_Init";

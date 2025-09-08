@@ -1,8 +1,7 @@
 #include <iostream>
 #include <string>
-#include "CompilerDriver.h" // The new high-level orchestrator
+#include "CompilerDriver.h"
 
-// --- ANSI Color Codes for beautiful output ---
 const char* const RESET = "\033[0m";
 const char* const BOLD = "\033[1m";
 const char* const RED = "\033[31m";

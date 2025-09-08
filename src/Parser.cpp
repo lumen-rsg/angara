@@ -101,11 +101,8 @@ namespace angara {
     // declaration → "export"? (class_decl | trait_decl | func_decl | var_decl) | statement
     std::shared_ptr<Stmt> Parser::declaration() {
         try {
-            // --- THIS IS THE FIX ---
             // Look for an optional 'export' keyword first.
             bool is_exported = match({TokenType::EXPORT});
-            // --- END OF FIX ---
-
             // Now, parse the actual declaration.
             std::shared_ptr<Stmt> decl_stmt = nullptr;
             if (match({TokenType::CLASS})) {
@@ -231,10 +228,8 @@ namespace angara {
     std::shared_ptr<Expr> Parser::factor() {
         std::shared_ptr<Expr> expr = unary();
 
-        // --- THIS IS THE FIX ---
         // Add TokenType::PERCENT to this list.
         while (match({TokenType::SLASH, TokenType::STAR, TokenType::PERCENT})) {
-            // --- END OF FIX ---
             Token op = previous();
             std::shared_ptr<Expr> right = unary();
             expr = std::make_shared<Binary>(std::move(expr), std::move(op), std::move(right));
@@ -700,12 +695,11 @@ namespace angara {
                 throw error(peek(), "Expect module name or path after 'attach'.");
             }
 
-            // --- NEW: Check for optional 'as' alias ---
+            // ---  Check for optional 'as' alias ---
             std::optional<Token> alias;
             if (match({TokenType::AS})) {
                 alias = consume(TokenType::IDENTIFIER, "Expect alias name after 'as'.");
             }
-            // --- END OF NEW ---
 
             consume(TokenType::SEMICOLON, "Expect ';' after attach statement.");
             return std::make_shared<AttachStmt>(std::vector<Token>{}, modulePath, alias);

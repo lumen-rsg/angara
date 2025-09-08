@@ -38,12 +38,7 @@ namespace angara {
 
         void transpileClassNew(const ClassStmt &stmt);
 
-        void pass_4_generate_function_implementations(const std::vector<std::shared_ptr<Stmt>>& statements);
-
         void transpileStruct(const ClassStmt &stmt);
-
-        void pass_3_generate_globals(const std::vector<std::shared_ptr<Stmt>> &statements,
-                                     const std::string &module_name);
 
         void pass_5_generate_main(const std::vector<std::shared_ptr<Stmt>>& statements,
                           const std::string& module_name,
@@ -83,7 +78,6 @@ namespace angara {
 
 
         // --- Expression Transpilation Helpers ---
-        // These now return a string directly.
         std::string transpileExpr(const std::shared_ptr<Expr>& expr);
 
         std::string transpileSuperExpr(const SuperExpr &expr);
@@ -106,7 +100,6 @@ namespace angara {
         std::string transpileRecordExpr(const RecordExpr &expr);
         void transpileGlobalFunction(const FuncStmt& stmt, const std::string& module_name);
 
-        // ... and so on for all expression types ...
 
         // --- Utility Methods ---
         std::string getCType(const std::shared_ptr<Type>& angaraType);

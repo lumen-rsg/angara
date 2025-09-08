@@ -273,7 +273,7 @@ namespace angara {
                 if (match('&')) { addToken(TokenType::LOGICAL_AND); }
                 else { std::cerr << "Line " << m_line << ": Unexpected character '&'\n"; }
                 break;
-            case '?': // <-- THE MISSING PIECE
+            case '?':
                 addToken(match('?') ? TokenType::QUESTION_QUESTION : TokenType::QUESTION);
                 break;
 

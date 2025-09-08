@@ -27,7 +27,7 @@ namespace angara {
 
         SymbolTable m_symbols;
         std::map<const VarDeclStmt*, std::shared_ptr<Type>> m_variable_types;
-        const SymbolTable& getSymbolTable() const;
+        [[nodiscard]] const SymbolTable& getSymbolTable() const;
         [[nodiscard]] std::shared_ptr<ModuleType> getModuleType() const;
         std::map<const VarExpr*, std::shared_ptr<Symbol>> m_variable_resolutions;
         std::map<const AttachStmt*, std::shared_ptr<ModuleType>> m_module_resolutions;

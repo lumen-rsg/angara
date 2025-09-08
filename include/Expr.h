@@ -21,7 +21,7 @@ namespace angara {
     struct UpdateExpr;
     struct CallExpr;
     struct GetExpr;
-    struct ListExpr; // Forward declare
+    struct ListExpr;
     struct LogicalExpr;
     struct SubscriptExpr;
     struct RecordExpr;
@@ -34,31 +34,21 @@ namespace angara {
     public:
         virtual ~ExprVisitor() = default;
 
-        // All expression visit methods now return std::any
         virtual std::any visit(const Binary &expr) = 0;
-
         virtual std::any visit(const Grouping &expr) = 0;
-
         virtual std::any visit(const Literal &expr) = 0;
-
         virtual std::any visit(const Unary &expr) = 0;
-
         virtual std::any visit(const VarExpr &expr) = 0;
-
-        virtual std::any visit(const AssignExpr &expr) = 0; // <-- Add this
-        virtual std::any visit(const UpdateExpr &expr) = 0; // <-- Add visitor method
-        virtual std::any visit(const CallExpr &expr) = 0; // <-- Add
-        virtual std::any visit(const GetExpr &expr) = 0; // <-- Add
+        virtual std::any visit(const AssignExpr &expr) = 0;
+        virtual std::any visit(const UpdateExpr &expr) = 0;
+        virtual std::any visit(const CallExpr &expr) = 0;
+        virtual std::any visit(const GetExpr &expr) = 0;
         virtual std::any visit(const ListExpr &expr) = 0;
-
         virtual std::any visit(const LogicalExpr &expr) = 0;
-
-        virtual std::any visit(const SubscriptExpr &expr) = 0; // <-- Add this
-        virtual std::any visit(const RecordExpr &expr) = 0; // <-- Add this
+        virtual std::any visit(const SubscriptExpr &expr) = 0;
+        virtual std::any visit(const RecordExpr &expr) = 0;
         virtual std::any visit(const TernaryExpr &expr) = 0;
-
         virtual std::any visit(const ThisExpr &expr) = 0;
-
         virtual std::any visit(const SuperExpr &expr) = 0;
 
     };
@@ -171,13 +161,11 @@ namespace angara {
 
 // Represents a list literal expression, e.g., [1, 2, 3]
     struct ListExpr : Expr {
-        // --- THE FIX ---
         const Token bracket; // The opening '[' token
         const std::vector<std::shared_ptr<Expr>> elements;
 
         ListExpr(Token bracket, std::vector<std::shared_ptr<Expr>> elements)
                 : bracket(std::move(bracket)), elements(std::move(elements)) {}
-        // --- END OF FIX ---
 
         std::any accept(ExprVisitor& visitor) const override { return visitor.visit(*this); }
     };

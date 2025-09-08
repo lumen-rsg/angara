@@ -32,14 +32,11 @@ namespace angara {
         // --- Visitor Methods ---
         void visit(std::shared_ptr<const VarDeclStmt> stmt) override;
         void visit(std::shared_ptr<const ExpressionStmt> stmt) override;
-        // ... other statement visitors ...
 
         std::any visit(const Literal& expr) override;
         std::any visit(const Binary& expr) override;
         std::any visit(const VarExpr& expr) override;
         std::any visit(const Grouping& expr) override;
-        // ... other expression visitors ...
-
         // --- Helper for formatting ---
         // Takes a name and a variable number of expressions to print.
         std::string parenthesize(const std::string& name, std::initializer_list<const Expr*> exprs);
