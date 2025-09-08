@@ -70,7 +70,7 @@ bool angara_is_truthy(AngaraObject value) {
                     // An empty record is falsy.
                     return AS_RECORD(value)->count > 0;
 
-                // All other object types (functions, instances, threads, etc.) are always truthy.
+                    // All other object types (functions, instances, threads, etc.) are always truthy.
                 default:
                     return true;
             }
@@ -177,15 +177,15 @@ static void free_object(Object* object) {
         case OBJ_RECORD: /* TODO */ free(object); break;
         case OBJ_INSTANCE:
             // For now, just free the memory. We'll need to handle
-                // decref-ing all fields later.
-                    free(object);
-        break;
+            // decref-ing all fields later.
+            free(object);
+            break;
         case OBJ_CLASS:
             // Classes can be global/static, may not need freeing,
-                // or may need their name freed.
-                    free(((AngaraClass*)object)->name);
-        free(object);
-        break;
+            // or may need their name freed.
+            free(((AngaraClass*)object)->name);
+            free(object);
+            break;
         case OBJ_MUTEX: free_mutex((AngaraMutex*)object); break; // <-- ADD THIS
         default: break;
     }
@@ -212,10 +212,10 @@ void printObject(AngaraObject obj) {
                 }
                 case OBJ_CLASS:
                     printf("<class %s>", AS_CLASS(obj)->name);
-                break;
+                    break;
                 case OBJ_INSTANCE:
                     printf("<instance of %s>", AS_INSTANCE(obj)->klass->name);
-                break;
+                    break;
                 case OBJ_THREAD: printf("<thread>"); break;
                 case OBJ_MUTEX: printf("<mutex>"); break; // <-- ADD THIS
 
@@ -315,7 +315,7 @@ AngaraObject angara_spawn(AngaraObject closure) {
     // --- THIS IS THE FIX ---
     // 2. Pass a pointer to the entire AngaraThread object to the new thread.
     if (pthread_create(&thread_obj->handle, NULL, &thread_starter_routine, thread_obj) != 0) {
-    // --- END OF FIX ---
+        // --- END OF FIX ---
         printf("Error: Failed to create Angara thread.\n");
         angara_decref(closure);
         free(thread_obj);
@@ -462,4 +462,28 @@ AngaraObject angara_create_string_no_copy(char* chars, size_t length) {
     string->length = length;
     string->chars = chars; // Takes ownership of the pointer
     return (AngaraObject){VAL_OBJ, {.obj = (Object*)string}};
+}
+
+AngaraObject angara_equals(AngaraObject a, AngaraObject b) {
+    if (a.type != b.type) {
+        // Special case: allow comparing any number to any other number
+        if ((IS_I64(a) || IS_F64(a)) && (IS_I64(b) || IS_F64(b))) {
+            return create_bool(AS_F64(a) == AS_F64(b));
+        }
+        return create_bool(false); // Different types are not equal
+    }
+
+    switch (a.type) {
+        case VAL_NIL: return create_bool(true);
+        case VAL_BOOL: return create_bool(AS_BOOL(a) == AS_BOOL(b));
+        case VAL_I64: return create_bool(AS_I64(a) == AS_I64(b));
+        case VAL_F64: return create_bool(AS_F64(a) == AS_F64(b));
+        case VAL_OBJ:
+            if (OBJ_TYPE(a) == OBJ_STRING) {
+                return create_bool(strcmp(AS_CSTRING(a), AS_CSTRING(b)) == 0);
+            }
+            // For other objects, compare pointers for now.
+            return create_bool(AS_OBJ(a) == AS_OBJ(b));
+    }
+    return create_bool(false);
 }

@@ -230,4 +230,14 @@ namespace angara {
         std::string toString() const override { return "Mutex"; }
     };
 
+    struct NilType : Type {
+        NilType() : Type(TypeKind::NIL) {}
+        std::string toString() const override { return "nil"; }
+    };
+
+    struct AnyType : Type {
+        AnyType() : Type(TypeKind::ANY) {}
+        std::string toString() const override { return "any"; }
+    };
+
 } // namespace angara

@@ -463,3 +463,27 @@ AngaraObject angara_create_string_no_copy(char* chars, size_t length) {
     string->chars = chars; // Takes ownership of the pointer
     return (AngaraObject){VAL_OBJ, {.obj = (Object*)string}};
 }
+
+AngaraObject angara_equals(AngaraObject a, AngaraObject b) {
+    if (a.type != b.type) {
+        // Special case: allow comparing any number to any other number
+        if ((IS_I64(a) || IS_F64(a)) && (IS_I64(b) || IS_F64(b))) {
+            return create_bool(AS_F64(a) == AS_F64(b));
+        }
+        return create_bool(false); // Different types are not equal
+    }
+
+    switch (a.type) {
+        case VAL_NIL: return create_bool(true);
+        case VAL_BOOL: return create_bool(AS_BOOL(a) == AS_BOOL(b));
+        case VAL_I64: return create_bool(AS_I64(a) == AS_I64(b));
+        case VAL_F64: return create_bool(AS_F64(a) == AS_F64(b));
+        case VAL_OBJ:
+            if (OBJ_TYPE(a) == OBJ_STRING) {
+                return create_bool(strcmp(AS_CSTRING(a), AS_CSTRING(b)) == 0);
+            }
+            // For other objects, compare pointers for now.
+            return create_bool(AS_OBJ(a) == AS_OBJ(b));
+    }
+    return create_bool(false);
+}

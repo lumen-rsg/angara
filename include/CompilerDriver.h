@@ -6,6 +6,7 @@
 #include <memory>
 #include <SymbolTable.h>
 #include <Token.h>
+#include <set>
 
 #include "Type.h" // For our internal Type representation
 
@@ -54,6 +55,12 @@ namespace angara {
         std::vector<std::string> m_compiled_module_names;
         std::shared_ptr<ModuleType> loadNativeModule(const std::string& path, const Token& import_token);
         SymbolTable m_global_symbols;
+        // --- THIS IS THE FIX ---
+        // Use a set to automatically store only unique library directories.
+        std::set<std::string> m_native_lib_paths;
+        // Store the clean library names (e.g., "fs", "http").
+        std::vector<std::string> m_native_lib_names;
+        // --- END OF FIX ---
 
     };
 

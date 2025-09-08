@@ -54,12 +54,15 @@ typedef AngaraObject (*AngaraNativeFn)(int arg_count, AngaraObject* args);
 
 // --- API Provided by the Angara Host ---
 // (These are functions exported by the main Angara executable or libangara_core)
-AngaraObject angara_create_nil(void);
-AngaraObject angara_create_bool(bool value);
-AngaraObject angara_create_i64(int64_t value);
-AngaraObject angara_create_f64(double value);
-AngaraObject angara_create_string_no_copy(char* chars, size_t length); // For efficiency
+AngaraObject create_nil(void);
+AngaraObject create_bool(bool value);
+AngaraObject create_i64(int64_t value);
+AngaraObject create_f64(double value);
+AngaraObject angara_string_from_c(const char* chars);
 void angara_throw_error(const char* message);
+AngaraObject angara_create_string_no_copy(char* chars, size_t length);
+AngaraObject angara_equals(AngaraObject a, AngaraObject b);
+
 
 // --- Helper Macros ---
 #define ANGARA_IS_STRING(value) ((value).type == VAL_OBJ && ((Object*)(value).as.obj)->type == OBJ_STRING)

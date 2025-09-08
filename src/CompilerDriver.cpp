@@ -26,7 +26,6 @@ typedef const AngaraFuncDef* (*AngaraModuleInitFn)(int*);
 
 namespace angara {
 
-
 void CompilerDriver::log_step(const std::string& message) {
     std::cout << BOLD << GREEN << "-> " << RESET << BOLD << message << RESET << std::endl;
 }
@@ -46,9 +45,18 @@ void CompilerDriver::print_progress(const std::string& current_file) {
         else std::cout << " ";
     }
     std::cout << "] (" << m_modules_compiled << "/" << m_total_modules << ") "
-              << "Compiling: " << current_file << "\r";
-    std::cout.flush();
+              << "Compiling: " << current_file << "\n";
+
 }
+
+    static std::string get_lib_name(const std::string& path) {
+        std::string basename = CompilerDriver::get_base_name(path);
+        // Strip the "lib" prefix if it exists
+        if (basename.rfind("lib", 0) == 0) {
+            return basename.substr(3);
+        }
+        return basename;
+    }
 
 std::string CompilerDriver::read_file(const std::string& path) {
     std::ifstream file(path);
@@ -114,10 +122,21 @@ bool CompilerDriver::compile(const std::string& root_file_path) {
 
     std::stringstream command_ss;
     command_ss << "gcc -o " << base_name;
+
     for (const auto& c_file : m_compiled_c_files) {
         command_ss << " " << c_file;
     }
-    command_ss << " " << runtime_path << " -I. -Isrc/runtime -pthread -lm";
+
+    // Link against the runtime library and native modules
+    command_ss << " -L" << "lib"; // Assuming libs are in a 'lib' subdir
+
+    for (const auto& lib_name : m_native_lib_names) {
+        command_ss << " -l" << lib_name;
+    }
+
+    command_ss << " -langara_runtime";
+
+    command_ss << " -I. -pthread -lm -I src/runtime/";
     std::string command = command_ss.str();
 
     std::cout << YELLOW << "   $ " << command << RESET << std::endl;
@@ -179,6 +198,18 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
     if (path.ends_with(".so") || path.ends_with(".dylib") || path.ends_with(".dll")) {
         // --- Path 1: Load a pre-compiled native module ---
         module_type = loadNativeModule(path, import_token);
+
+        if (module_type) {
+            // --- THIS IS THE FIX ---
+            // 1. Extract the directory path.
+            size_t last_slash = path.find_last_of("/\\");
+            if (last_slash != std::string::npos) {
+                m_native_lib_paths.insert(path.substr(0, last_slash));
+            }
+            // 2. Extract the clean library name.
+            m_native_lib_names.push_back(get_lib_name(path));
+            // --- END OF FIX ---
+        }
 
     } else {
         // --- Path 2: Compile an Angara source file ---
@@ -287,6 +318,8 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
         }
         auto return_type = std::make_shared<PrimitiveType>("any");
         auto func_type = std::make_shared<FunctionType>(params, return_type, def.arity == -1);
+
+        module_type->is_native = true;
 
         module_type->exports[def.name] = func_type;
     }

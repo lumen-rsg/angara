@@ -524,14 +524,24 @@ void CTranspiler::pass_4_generate_function_implementations(const std::vector<std
 
         this->m_current_module_name = module_name;
 
+        // --- Pass 0: Handle Attachments ---
+        // --- THIS IS THE FIX ---
+        m_current_out = &m_header_out; // We write prototypes to the header
+
+        // Pass 0: Handle Attachments for the HEADER file
         for (const auto& stmt : statements) {
             if (auto attach = std::dynamic_pointer_cast<const AttachStmt>(stmt)) {
-                std::string header_name = CompilerDriver::get_base_name(attach->modulePath.lexeme) + ".h";
-                // THE FIX: Write to m_header_out, NOT final_code
-                m_header_out << "#include \"" << header_name << "\"\n";
+                auto module_type = m_type_checker.m_module_resolutions.at(attach.get());
+                std::cout << "resolving module: " << module_type->name << ", is it native?: "<< module_type->is_native << std::endl;
+                // ONLY include headers for OTHER ANGARA modules.
+                if (!module_type->is_native) {
+                    m_header_out << "#include \"" << module_type->name << ".h\"\n";
+                }
             }
         }
         m_header_out << "\n";
+        (*m_current_out) << "\n";
+        // --- END OF FIX ---
 
         // --- HEADER FILE GENERATION ---
         m_current_out = &m_header_out; // Set context for Pass 1 & 2
@@ -830,75 +840,56 @@ void CTranspiler::pass_4_generate_function_implementations(const std::vector<std
     }
 // in CTranspiler.cpp
 
-std::string CTranspiler::transpileBinary(const Binary& expr) {
-    // 1. Get the pre-computed types of the operands from the Type Checker.
-    auto lhs_type = m_type_checker.m_expression_types.at(expr.left.get());
-    auto rhs_type = m_type_checker.m_expression_types.at(expr.right.get());
+    std::string CTranspiler::transpileBinary(const Binary& expr) {
+        // 1. Recursively transpile the left and right sub-expressions.
+        std::string lhs_str = transpileExpr(expr.left);
+        std::string rhs_str = transpileExpr(expr.right);
+        std::string op = expr.op.lexeme;
 
-    // 2. Recursively transpile the left and right sub-expressions.
-    std::string lhs_str = transpileExpr(expr.left);
-    std::string rhs_str = transpileExpr(expr.right);
+        // 2. Get the pre-computed types of the operands from the Type Checker.
+        auto lhs_type = m_type_checker.m_expression_types.at(expr.left.get());
+        auto rhs_type = m_type_checker.m_expression_types.at(expr.right.get());
 
-    std::string op = expr.op.lexeme;
-
-    // --- Case 1: Numeric Operations ---
-    if (isNumeric(lhs_type) && isNumeric(rhs_type)) {
+        // 3. Dispatch based on the operator type.
         switch (expr.op.type) {
-            // --- Comparisons ---
-            // The result is always a C `bool`, which we re-box into an AngaraObject.
+            // --- Equality Operators (handle all types) ---
+            case TokenType::EQUAL_EQUAL:
+                return "angara_equals(" + lhs_str + ", " + rhs_str + ")";
+            case TokenType::BANG_EQUAL:
+                return "create_bool(!AS_BOOL(angara_equals(" + lhs_str + ", " + rhs_str + ")))";
+
+                // --- Comparison Operators (numeric only) ---
             case TokenType::GREATER:
             case TokenType::GREATER_EQUAL:
             case TokenType::LESS:
             case TokenType::LESS_EQUAL:
-            case TokenType::EQUAL_EQUAL:
-            case TokenType::BANG_EQUAL:
-                // We promote both operands to a C double for a safe comparison
-                // using our smart AS_F64 macro.
+                // The Type Checker guarantees these are numeric. We promote to float for a safe comparison.
                 return "create_bool((AS_F64(" + lhs_str + ") " + op + " AS_F64(" + rhs_str + ")))";
 
-            // --- Arithmetic ---
-            // The result is a number, so we wrap it in the appropriate create_* function.
+                // --- Arithmetic Operators (numeric only) ---
             case TokenType::PLUS:
             case TokenType::MINUS:
             case TokenType::STAR:
             case TokenType::SLASH:
                 if (isFloat(lhs_type) || isFloat(rhs_type)) {
-                    std::string expression = "(AS_F64(" + lhs_str + ") " + op + " AS_F64(" + rhs_str + "))";
-                    return "create_f64(" + expression + ")";
+                    return "create_f64((AS_F64(" + lhs_str + ") " + op + " AS_F64(" + rhs_str + ")))";
                 } else {
-                    std::string expression = "(AS_I64(" + lhs_str + ") " + op + " AS_I64(" + rhs_str + "))";
-                    return "create_i64(" + expression + ")";
+                    return "create_i64((AS_I64(" + lhs_str + ") " + op + " AS_I64(" + rhs_str + ")))";
                 }
 
             case TokenType::PERCENT:
-                 if (isFloat(lhs_type) || isFloat(rhs_type)) {
-                    std::string expression = "fmod(AS_F64(" + lhs_str + "), AS_F64(" + rhs_str + "))";
-                    return "create_f64(" + expression + ")";
+                if (isFloat(lhs_type) || isFloat(rhs_type)) {
+                    return "create_f64(fmod(AS_F64(" + lhs_str + "), AS_F64(" + rhs_str + ")))";
                 } else {
-                    std::string expression = "(AS_I64(" + lhs_str + ") % AS_I64(" + rhs_str + "))";
-                    return "create_i64(" + expression + ")";
+                    return "create_i64((AS_I64(" + lhs_str + ") % AS_I64(" + rhs_str + ")))";
                 }
+
             default:
-                break; // Should not be reached
+                // String concatenation is handled by the PLUS case if types match.
+                // Any other operator on non-numeric types would have been caught by the Type Checker.
+                return "create_nil() /* unreachable */";
         }
     }
-
-    // --- Case 2: String Operations ---
-    if (lhs_type->toString() == "string" && rhs_type->toString() == "string") {
-        if (expr.op.type == TokenType::PLUS) {
-            return "angara_string_concat(" + lhs_str + ", " + rhs_str + ")";
-        }
-        if (expr.op.type == TokenType::EQUAL_EQUAL) {
-             return "angara_string_equals(" + lhs_str + ", " + rhs_str + ")";
-        }
-         if (expr.op.type == TokenType::BANG_EQUAL) {
-             return "create_bool(!AS_BOOL(angara_string_equals(" + lhs_str + ", " + rhs_str + ")))";
-        }
-    }
-
-    // Fallback for any unhandled or invalid binary operations.
-    return "create_nil() /* unsupported binary op */";
-}
 
     std::string CTranspiler::transpileGrouping(const Grouping& expr) {
         // A grouping expression in Angara is also a grouping expression in C.

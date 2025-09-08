@@ -8,22 +8,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+
 // 1. Implement the native function with the correct signature.
 
-AngaraObject fs_read_file(int arg_count, AngaraObject* args) {
+AngaraObject read_file(int arg_count, AngaraObject* args) {
     if (arg_count != 1) {
         angara_throw_error("read_file() expects 1 argument.");
-        return angara_create_nil();
+        return create_nil();
     }
     if (!ANGARA_IS_STRING(args[0])) { // Use the new macro
         angara_throw_error("read_file() argument must be a string.");
-        return angara_create_nil();
+        return create_nil();
     }
 
     const char* path = ANGARA_AS_CSTRING(args[0]); // This now works
 
     FILE* file = fopen(path, "rb");
-    if (!file) return angara_create_nil();
+    if (!file) return create_nil();
 
     fseek(file, 0L, SEEK_END);
     size_t file_size = ftell(file);
@@ -40,7 +41,7 @@ AngaraObject fs_read_file(int arg_count, AngaraObject* args) {
 
 // 5. Create the definition array.
 static const AngaraFuncDef FS_FUNCTIONS[] = {
-    {"read_file", fs_read_file, 1},
+    {"read_file", read_file, 1},
     {NULL, NULL, 0} // Sentinel to mark the end of the array
 };
 

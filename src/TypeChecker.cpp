@@ -35,8 +35,8 @@ namespace angara {
         m_type_bool = std::make_shared<PrimitiveType>("bool");
         m_type_string = std::make_shared<PrimitiveType>("string");
         m_type_void = std::make_shared<PrimitiveType>("void");
-        m_type_nil = std::make_shared<PrimitiveType>("nil");
-        m_type_any = std::make_shared<PrimitiveType>("any");
+        m_type_nil = std::make_shared<NilType>();
+        m_type_any = std::make_shared<AnyType>();
         m_type_error = std::make_shared<PrimitiveType>("<error>");
         m_type_thread = std::make_shared<ThreadType>();
         m_type_mutex = std::make_shared<MutexType>();
@@ -455,6 +455,7 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
             if (name == "bool") return m_type_bool;
             if (name == "string") return m_type_string;
             if (name == "void") return m_type_void;
+            if (name == "nil") return m_type_nil;
             if (name == "any") return m_type_any;
             if (name == "Thread") return m_type_thread; // <-- ADD THIS
 
@@ -654,14 +655,16 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         return {};
     }
 
+// in TypeChecker.cpp
+
     std::any TypeChecker::visit(const Binary& expr) {
-        // 1. Visit operands.
+        // 1. Visit operands to get their types.
         expr.left->accept(*this);
         auto left_type = popType();
         expr.right->accept(*this);
         auto right_type = popType();
 
-        // 2. Default to an error type. We will only change this if a rule passes.
+        // 2. Default to an error type. We only change this if a rule passes.
         std::shared_ptr<Type> result_type = m_type_error;
 
         // 3. Bail out early if sub-expressions had errors.
@@ -675,13 +678,11 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             case TokenType::MINUS:
             case TokenType::STAR:
             case TokenType::SLASH:
-            case TokenType::PERCENT: // Modulo is now part of this group
+            case TokenType::PERCENT:
                 if (isNumeric(left_type) && isNumeric(right_type)) {
-                    // If either operand is a float, the result is a float (f64).
                     if (isFloat(left_type) || isFloat(right_type)) {
                         result_type = m_type_f64;
                     } else {
-                        // Otherwise, both are integers, the result is an integer (i64).
                         result_type = m_type_i64;
                     }
                 } else {
@@ -708,29 +709,33 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             case TokenType::LESS:
             case TokenType::LESS_EQUAL:
                 if (isNumeric(left_type) && isNumeric(right_type)) {
-                    result_type = m_type_bool; // All comparisons result in a bool.
+                    result_type = m_type_bool;
                 } else {
                     error(expr.op, "Operands for comparison must be numbers.");
                 }
                 break;
 
             case TokenType::EQUAL_EQUAL:
-            case TokenType::BANG_EQUAL:
-                if (left_type->toString() == right_type->toString()) {
+            case TokenType::BANG_EQUAL: {
+                // --- THIS IS THE FINAL, CORRECT LOGIC FOR EQUALITY ---
+                // The comparison is valid if:
+                // 1. The types are exactly the same.
+                // 2. One of the types is 'any' (or nil, which can be compared to anything).
+                // 3. Both types are numeric (allowing i64 == f64).
+                if (left_type->toString() == right_type->toString() ||
+                    left_type->kind == TypeKind::ANY || right_type->kind == TypeKind::ANY ||
+                    left_type->kind == TypeKind::NIL || right_type->kind == TypeKind::NIL ||
+                    (isNumeric(left_type) && isNumeric(right_type)))
+                {
                     result_type = m_type_bool;
                 } else {
-                    // Allow comparing any number to any other number
-                    if (isNumeric(left_type) && isNumeric(right_type)) {
-                        result_type = m_type_bool;
-                    } else {
-                        error(expr.op, "Cannot compare two different types: '" +
-                                       left_type->toString() + "' and '" + right_type->toString() + "'.");
-                    }
+                    error(expr.op, "Cannot compare two different types: '" +
+                                   left_type->toString() + "' and '" + right_type->toString() + "'.");
                 }
                 break;
+            }
 
             default:
-                // This case should not be reachable if the parser is correct.
                 error(expr.op, "Unknown binary operator.");
                 break;
         }
@@ -739,6 +744,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         pushAndSave(&expr, result_type);
         return {};
     }
+
 
     std::any TypeChecker::visit(const Grouping& expr) {
         expr.expression->accept(*this);
@@ -988,26 +994,52 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
 
 
     void TypeChecker::visit(std::shared_ptr<const AttachStmt> stmt) {
+        // 1. Ask the main driver to resolve this module path.
+        //    This will handle caching and either compile the .an or load the .so.
         std::string module_path = stmt->modulePath.lexeme;
         std::shared_ptr<ModuleType> module_type = m_driver.resolveModule(module_path, stmt->modulePath);
-        if (!module_type) return;
 
-        // --- THIS IS THE FIX ---
-        // Instead of declaring one variable for the module, we merge its exports
-        // into the current scope.
-        for (const auto& [name, type] : module_type->exports) {
-            // We need to create a dummy token for the declaration.
-            Token symbol_token(TokenType::IDENTIFIER, name, stmt->modulePath.line, 0);
-
-            // We need to decide if these are const. Let's assume they are.
-            if (!m_symbols.declare(symbol_token, type, true)) {
-                error(symbol_token, "A symbol named '" + name + "' from module '" + module_type->name +
-                                    "' conflicts with an existing symbol in this scope.");
-            }
+        if (!module_type) {
+            // The driver already reported the error (e.g., file not found, circular dependency).
+            return;
         }
 
+        // Save the resolution result for the CTranspiler to use later.
         m_module_resolutions[stmt.get()] = module_type;
+
+        // --- THIS IS THE FIX ---
+        // 2. We need to declare a variable in the current scope that represents this module.
+
+        // For a simple `attach "utils.an"`
+        if (stmt->names.empty()) {
+            std::string module_name = CompilerDriver::get_base_name(module_path);
+            Token module_token(TokenType::IDENTIFIER, module_name, stmt->modulePath.line, 0);
+
+            // Declare a new, constant variable with the module's type.
+            if (!m_symbols.declare(module_token, module_type, true)) {
+                error(module_token, "A symbol with this name already exists in this scope.");
+            }
+        }
+            // For `attach PI, circle_area from "utils.an"`
+        else {
+            // This is the `from ... import` syntax.
+            for (const auto& name_token : stmt->names) {
+                const std::string& name_str = name_token.lexeme;
+                // Find the symbol in the imported module's public API.
+                auto export_it = module_type->exports.find(name_str);
+                if (export_it == module_type->exports.end()) {
+                    error(name_token, "Module '" + module_type->name + "' has no exported member named '" + name_str + "'.");
+                } else {
+                    // Declare a new symbol in the current scope with the imported type.
+                    if (!m_symbols.declare(name_token, export_it->second, true)) {
+                        error(name_token, "A symbol with this name already exists in this scope.");
+                    }
+                }
+            }
+        }
+        // --- END OF FIX ---
     }
+
 
     void TypeChecker::visit(std::shared_ptr<const ThrowStmt> stmt) {
         // 1. Type check the expression whose value is being thrown.
