@@ -30,8 +30,8 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
 endforeach()
 
 
-# --- 3. Build the angara_compiler executable ---
-add_executable(angara_compiler
+# --- 3. Build the angc executable ---
+add_executable(angc
         src/ErrorHandler.cpp
         src/Lexer.cpp
         src/main.cpp
@@ -44,18 +44,18 @@ add_executable(angara_compiler
         src/CompilerDriver.cpp
 )
 # The compiler itself does not need to link against the runtime.
-target_include_directories(angara_compiler PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(angara_compiler PRIVATE angara_runtime)
+target_include_directories(angc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(angc PRIVATE angara_runtime)
 
 
 # --- 4. A new target to run tests ---
 # This will build and run the transpiled code.
 add_custom_target(run_test
         # First, build the compiler and all libraries
-        DEPENDS angara_compiler fs # Add other modules here
+        DEPENDS angc fs # Add other modules here
 
         # Then, run the compilation process
-        COMMAND ${CMAKE_BINARY_DIR}/angara_compiler ${CMAKE_SOURCE_DIR}/native_test.an
+        COMMAND ${CMAKE_BINARY_DIR}/angc ${CMAKE_SOURCE_DIR}/native_test.an
 
         # Then, compile the generated C code, linking against our runtime library
         COMMAND gcc -o native_test_executable native_test.c -L${CMAKE_BINARY_DIR}/lib -langara_runtime -lfs -I. -pthread -lm
