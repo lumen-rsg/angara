@@ -20,6 +20,8 @@ add_executable(angara_compiled
         src/ASTPrinter.cpp
         include/CompilerDriver.h
         src/CompilerDriver.cpp
+        include/AngaraABI.h
+        src/modules/fs.c
 )
 
 target_include_directories(angara_compiled PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
