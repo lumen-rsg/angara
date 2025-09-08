@@ -448,3 +448,18 @@ AngaraObject angara_typeof(AngaraObject value) {
             return angara_string_from_c("unknown");
     }
 }
+
+void angara_throw_error(const char* message) {
+    // Create an Angara string from the error message and throw it.
+    angara_throw(angara_string_from_c(message));
+}
+
+// And a more efficient string creator for the ABI.
+AngaraObject angara_create_string_no_copy(char* chars, size_t length) {
+    AngaraString* string = (AngaraString*)malloc(sizeof(AngaraString));
+    string->obj.type = OBJ_STRING;
+    string->obj.ref_count = 1;
+    string->length = length;
+    string->chars = chars; // Takes ownership of the pointer
+    return (AngaraObject){VAL_OBJ, {.obj = (Object*)string}};
+}

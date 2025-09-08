@@ -30,6 +30,7 @@ namespace angara {
         const SymbolTable& getSymbolTable() const;
         [[nodiscard]] std::shared_ptr<ModuleType> getModuleType() const;
         std::map<const VarExpr*, std::shared_ptr<Symbol>> m_variable_resolutions;
+        std::map<const AttachStmt*, std::shared_ptr<ModuleType>> m_module_resolutions;
     private:
         // --- Visitor Methods ---
         // Statements (return void)

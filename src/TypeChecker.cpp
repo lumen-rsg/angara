@@ -1005,6 +1005,8 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                                     "' conflicts with an existing symbol in this scope.");
             }
         }
+
+        m_module_resolutions[stmt.get()] = module_type;
     }
 
     void TypeChecker::visit(std::shared_ptr<const ThrowStmt> stmt) {

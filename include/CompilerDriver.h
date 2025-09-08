@@ -4,6 +4,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <SymbolTable.h>
 #include <Token.h>
 
 #include "Type.h" // For our internal Type representation
@@ -15,6 +16,7 @@ namespace angara {
         const std::string name;
         // A map from exported symbol name to its Type.
         std::map<std::string, std::shared_ptr<Type>> exports;
+        bool is_native = false;
 
         explicit ModuleType(std::string name)
             : Type(TypeKind::MODULE), name(std::move(name)) {}
@@ -50,6 +52,8 @@ namespace angara {
         int m_total_modules = 0;
         int m_modules_compiled = 0;
         std::vector<std::string> m_compiled_module_names;
+        std::shared_ptr<ModuleType> loadNativeModule(const std::string& path, const Token& import_token);
+        SymbolTable m_global_symbols;
 
     };
 

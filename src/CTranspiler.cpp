@@ -134,6 +134,27 @@ void CTranspiler::pass_2_generate_declarations(const std::vector<std::shared_ptr
         }
     }
 
+        (*m_current_out) << "\n// --- Imported Native Function Declarations ---\n";
+        for (const auto& stmt : statements) {
+            if (auto attach_stmt = std::dynamic_pointer_cast<const AttachStmt>(stmt)) {
+                // Get the ModuleType that the Type Checker resolved for this attach statement.
+
+                auto module_type = m_type_checker.m_module_resolutions.at(attach_stmt.get());
+
+                // If the attached module was a native library, generate prototypes for its functions.
+                if (module_type->is_native) {
+                    for (const auto& [name, type] : module_type->exports) {
+                        if (type->kind == TypeKind::FUNCTION) {
+                            auto func_type = std::dynamic_pointer_cast<FunctionType>(type);
+                            // Generate the C ABI signature: AngaraObject func_name(int, AngaraObject*)
+                            (*m_current_out) << "AngaraObject " << name << "(int arg_count, AngaraObject* args);\n";
+                        }
+                    }
+                }
+            }
+        }
+        // --- END OF FIX ---
+
     // --- Add the module initializer prototype ---
     (*m_current_out) << "\n// --- Module Initializer ---\n";
     (*m_current_out) << "void Angara_" << module_name << "_init_globals(void);\n";
@@ -1144,6 +1165,19 @@ void CTranspiler::transpileWhileStmt(const WhileStmt& stmt) {
         if (object_type->kind == TypeKind::LIST) {
              if (method_name == "push") return "angara_list_push(" + object_str + ", " + args_str + ")";
         }
+
+        if (object_type->kind == TypeKind::MODULE) {
+            auto module_type = std::dynamic_pointer_cast<ModuleType>(object_type);
+            if (module_type->is_native) {
+                // It's a call to a native C function.
+                std::string func_name = get_expr->name.lexeme;
+                // We need a generic way to call it. This requires a trampoline.
+                // The C ABI `AngaraNativeFn` is `AngaraObject(*)(int, AngaraObject*)`
+                // This is the correct signature.
+                return func_name + "(" + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
+            }
+        }
+        // --- END OF NEW LOGIC ---
     }
 
     // --- Case 2: A direct call to a named entity (e.g., `print(...)`, `Point(...)`, `my_func(...)`) ---
@@ -1189,6 +1223,7 @@ void CTranspiler::transpileWhileStmt(const WhileStmt& stmt) {
         std::string c_name = (func_name == "main") ? "angara_main" : func_name;
         return c_name + "(" + args_str + ")";
     }
+
 
     // --- Case 3: A method or module call ---
     if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(expr.callee)) {
@@ -1277,9 +1312,13 @@ std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
         if (object_type->kind == TypeKind::MODULE) {
             auto module_type = std::dynamic_pointer_cast<ModuleType>(object_type);
             auto symbol = module_type->exports.at(expr.name.lexeme);
-            if (symbol->kind == TypeKind::FUNCTION) {
-                return "g_" + expr.name.lexeme;
+            // Is the symbol from a native C module or a transpiled Angara module?
+            // We need to know this. Let's add a flag to ModuleType.
+            if (module_type->is_native) {
+                // Native function names are not mangled.
+                return expr.name.lexeme;
             } else {
+                // Transpiled Angara symbol.
                 return module_type->name + "_" + expr.name.lexeme;
             }
         }

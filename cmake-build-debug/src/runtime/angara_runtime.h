@@ -228,5 +228,8 @@ AngaraObject angara_post_decrement(AngaraObject* lvalue);
 
 AngaraObject angara_typeof(AngaraObject value);
 
+void angara_throw_error(const char* message);
+AngaraObject angara_create_string_no_copy(char* chars, size_t length);
+
 
 #endif //ANGARA_RUNTIME_H

@@ -12,11 +12,17 @@
 #include <fstream>
 #include <sstream>
 
+#include <dlfcn.h> // For dlopen, dlsym
+
+#include "AngaraABI.h"
+
 const char* const RESET = "\033[0m";
 const char* const BOLD = "\033[1m";
 const char* const RED = "\033[31m";
 const char* const GREEN = "\033[32m";
 const char* const YELLOW = "\033[33m";
+
+typedef const AngaraFuncDef* (*AngaraModuleInitFn)(int*);
 
 namespace angara {
 
@@ -150,15 +156,15 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
 
 
 std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& path, const Token& import_token) {
-    // 1. Check the cache first.
+    // 1. Check the cache first to avoid recompiling the same file.
     if (m_module_cache.count(path)) {
         return m_module_cache[path];
     }
 
-    // 2. Check for circular dependencies.
+    // 2. Check for circular dependencies by seeing if the path is already in our call stack.
     for (const auto& p : m_compilation_stack) {
         if (p == path) {
-            std::cerr << "\nError at line " << import_token.line << ": Circular dependency detected involving module '" << path << "'.\n";
+            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Circular dependency detected. Module '" << path << "' is already being compiled in this chain.\n";
             m_had_error = true;
             return nullptr;
         }
@@ -168,71 +174,129 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
     m_total_modules++;
     print_progress(path);
 
-    // 3. Read the source file.
-    std::string source = read_file(path);
-    if (source.empty()) {
-        std::cerr << "\nError at line " << import_token.line << ": Could not open source file '" << path << "'\n";
-        m_had_error = true;
-        m_compilation_stack.pop_back();
-        return nullptr;
+    // --- DISPATCHER: Decide how to handle the file based on its extension ---
+    std::shared_ptr<ModuleType> module_type = nullptr;
+    if (path.ends_with(".so") || path.ends_with(".dylib") || path.ends_with(".dll")) {
+        // --- Path 1: Load a pre-compiled native module ---
+        module_type = loadNativeModule(path, import_token);
+
+    } else {
+        // --- Path 2: Compile an Angara source file ---
+        std::string source = read_file(path);
+        if (source.empty()) {
+            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Could not open source file '" << path << "'\n";
+            m_had_error = true;
+            m_compilation_stack.pop_back();
+            return nullptr;
+        }
+
+        // Run the full pipeline: Lexer -> Parser -> TypeChecker
+        ErrorHandler errorHandler(source);
+        Lexer lexer(source);
+        auto tokens = lexer.scanTokens();
+        Parser parser(tokens, errorHandler);
+        auto statements = parser.parseStmts();
+        if (errorHandler.hadError()) {
+            m_had_error = true;
+            m_compilation_stack.pop_back();
+            return nullptr;
+        }
+
+        std::string module_name = get_base_name(path);
+        TypeChecker typeChecker(*this, errorHandler, module_name);
+        if (!typeChecker.check(statements)) {
+            m_had_error = true;
+            m_compilation_stack.pop_back();
+            return nullptr;
+        }
+
+        // Transpile the type-checked AST to C header and source files.
+        CTranspiler transpiler(typeChecker, errorHandler);
+        auto [header_code, source_code] = transpiler.generate(statements, module_name, m_compiled_module_names);
+
+        if (m_had_error || (header_code.empty() && source_code.empty())) {
+             m_compilation_stack.pop_back();
+             return nullptr;
+        }
+
+        // Write the generated files to disk.
+        std::string h_filename = module_name + ".h";
+        std::ofstream h_file(h_filename);
+        h_file << header_code;
+        h_file.close();
+
+        std::string c_filename = module_name + ".c";
+        std::ofstream c_file(c_filename);
+        c_file << source_code;
+        c_file.close();
+
+        // Get the public API of the compiled module.
+        module_type = typeChecker.getModuleType();
+        m_compiled_c_files.push_back(c_filename); // Add to the list for the final link step.
     }
 
-    // --- THIS IS THE FIX ---
-
-    // 4. --- RUN THE FULL PIPELINE for the dependency ---
-    ErrorHandler errorHandler(source);
-
-    Lexer lexer(source);
-    auto tokens = lexer.scanTokens();
-
-    Parser parser(tokens, errorHandler);
-    auto statements = parser.parseStmts();
-    if (errorHandler.hadError()) {
-        m_had_error = true;
-        m_compilation_stack.pop_back();
-        return nullptr;
-    }
-
-    // Correctly create the TypeChecker, passing the module name.
-    std::string module_name = get_base_name(path);
-    TypeChecker typeChecker(*this, errorHandler, module_name);
-    if (!typeChecker.check(statements)) {
-        m_had_error = true;
-        m_compilation_stack.pop_back();
-        return nullptr;
-    }
-
-    // 5. --- TRANSPILE ---
-    CTranspiler transpiler(typeChecker, errorHandler);
-    auto [header_code, source_code] = transpiler.generate(statements, module_name, m_compiled_module_names);
-
-    if (m_had_error || (header_code.empty() && source_code.empty())) {
-         m_compilation_stack.pop_back();
-         return nullptr;
-    }
-
-    // 6. --- WRITE FILES TO DISK ---
-    std::string h_filename = module_name + ".h";
-    std::ofstream h_file(h_filename);
-    h_file << header_code;
-    h_file.close();
-
-    std::string c_filename = module_name + ".c";
-    std::ofstream c_file(c_filename);
-    c_file << source_code;
-    c_file.close();
-
-    // 7. --- GET THE PUBLIC API for the CALLER ---
-    // The getModuleType() method returns the completed module interface.
-    auto module_type = typeChecker.getModuleType();
-
-    // --- END OF FIX ---
-
+    // 3. Clean up and cache the result.
     m_compilation_stack.pop_back();
-    m_module_cache[path] = module_type;
-    m_compiled_c_files.push_back(c_filename);
-    m_compiled_module_names.push_back(module_name); // <-- ADD THIS
+    if (module_type) {
+        m_module_cache[path] = module_type;
+        m_modules_compiled++;
+    }
 
+    return module_type;
+}
+
+
+    std::shared_ptr<ModuleType> CompilerDriver::loadNativeModule(const std::string& path, const Token& import_token) {
+    print_progress("Loading native module: " + path);
+
+    // 1. Open the dynamic library.
+    void* handle = dlopen(path.c_str(), RTLD_LAZY);
+    if (!handle) {
+        std::cerr << "\nError at line " << import_token.line << ": Could not load native module '" << path << "'. Reason: " << dlerror() << "\n";
+        m_had_error = true;
+        return nullptr;
+    }
+
+    // 2. Find the exported `AngaraModule_Init` function.
+    AngaraModuleInitFn init_fn = (AngaraModuleInitFn)dlsym(handle, "AngaraModule_Init");
+    if (!init_fn) {
+        std::cerr << "\nError at line " << import_token.line << ": Invalid native module '" << path << "'. Missing 'AngaraModule_Init' entry point.\n";
+        m_had_error = true;
+        dlclose(handle);
+        return nullptr;
+    }
+
+    // 3. Call the init function to get the API definitions.
+    int def_count = 0;
+    const AngaraFuncDef* defs = init_fn(&def_count);
+
+    std::string module_name = get_base_name(path);
+    auto module_type = std::make_shared<ModuleType>(module_name);
+
+    // 4. Populate the module's public API.
+    for (int i = 0; i < def_count; i++) {
+        const AngaraFuncDef& def = defs[i];
+        // For now, we don't have the types of the parameters, so we'll have to
+        // represent them as 'any'. This is a limitation of a pure C ABI.
+        // A more advanced ABI might have a type description string.
+        std::vector<std::shared_ptr<Type>> params;
+        if (def.arity != -1) { // -1 is variadic
+             for (int j = 0; j < def.arity; ++j) {
+                 params.push_back(std::make_shared<PrimitiveType>("any"));
+             }
+        }
+        auto return_type = std::make_shared<PrimitiveType>("any");
+        auto func_type = std::make_shared<FunctionType>(params, return_type, def.arity == -1);
+
+        module_type->exports[def.name] = func_type;
+    }
+
+    // We don't need to add this to a link list. The OS linker will handle it.
+    // We just needed the type information.
+    // dlclose(handle); // Don't close it, we need the symbols at runtime!
+
+    m_module_cache[path] = module_type;
+    m_modules_compiled++; // Count it as a "compiled" unit
     return module_type;
 }
 

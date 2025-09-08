@@ -39,6 +39,7 @@ namespace angara {
         const std::map<std::string, std::shared_ptr<Symbol>>& getGlobalScope() const;
         int getScopeDepth() const;
 
+
     private:
         // A stack of scopes, where each scope is a map from name to Symbol.
         std::vector<std::map<std::string, std::shared_ptr<Symbol>>> m_scopes;

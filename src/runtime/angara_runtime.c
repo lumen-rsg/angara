@@ -48,12 +48,36 @@ AngaraObject angara_len(AngaraObject collection) {
 
 bool angara_is_truthy(AngaraObject value) {
     switch (value.type) {
-        case VAL_NIL: return false;
-        case VAL_BOOL: return AS_BOOL(value);
-        case VAL_I64: return AS_I64(value) != 0;
-        case VAL_F64: return AS_F64(value) != 0.0;
-        case VAL_OBJ: return true; // All objects are truthy for now
-        default: return false;
+        case VAL_NIL:
+            return false;
+        case VAL_BOOL:
+            return AS_BOOL(value);
+        case VAL_I64:
+            return AS_I64(value) != 0;
+        case VAL_F64:
+            return AS_F64(value) != 0.0;
+        case VAL_OBJ: {
+            // --- THIS IS THE NEW LOGIC ---
+            // For object types, we check if they are "empty".
+            switch (OBJ_TYPE(value)) {
+                case OBJ_STRING:
+                    // An empty string is falsy.
+                    return AS_STRING(value)->length > 0;
+                case OBJ_LIST:
+                    // An empty list is falsy.
+                    return AS_LIST(value)->count > 0;
+                case OBJ_RECORD:
+                    // An empty record is falsy.
+                    return AS_RECORD(value)->count > 0;
+
+                // All other object types (functions, instances, threads, etc.) are always truthy.
+                default:
+                    return true;
+            }
+            // --- END OF NEW LOGIC ---
+        }
+        default:
+            return false; // Should be unreachable
     }
 }
 
@@ -139,6 +163,12 @@ static void free_list(AngaraList* list) {
     free(list);
 }
 
+// Update the memory manager and printer
+static void free_mutex(AngaraMutex* mutex) {
+    pthread_mutex_destroy(&mutex->handle);
+    free(mutex);
+}
+
 static void free_object(Object* object) {
     // printf("-- freeing object of type %d --\n", object->type);
     switch (object->type) {
@@ -156,6 +186,7 @@ static void free_object(Object* object) {
                     free(((AngaraClass*)object)->name);
         free(object);
         break;
+        case OBJ_MUTEX: free_mutex((AngaraMutex*)object); break; // <-- ADD THIS
         default: break;
     }
 }
@@ -185,6 +216,9 @@ void printObject(AngaraObject obj) {
                 case OBJ_INSTANCE:
                     printf("<instance of %s>", AS_INSTANCE(obj)->klass->name);
                 break;
+                case OBJ_THREAD: printf("<thread>"); break;
+                case OBJ_MUTEX: printf("<mutex>"); break; // <-- ADD THIS
+
                 default: printf("<object>"); break;
             }
             break;
@@ -247,7 +281,121 @@ void angara_runtime_shutdown(void) {
     printf("-- Angara Runtime Shutdown --\n");
 }
 
-// --- Update Expression Implementation ---
+
+// The generic C function that a new pthread will execute.
+// It's a simple wrapper that calls our Angara function.
+void* thread_starter_routine(void* arg) {
+    // The argument is a pointer to the AngaraThread object itself,
+    // not just the closure. This allows us to store the return value.
+    AngaraThread* thread = (AngaraThread*)arg;
+
+    // Call the closure with no arguments.
+    AngaraObject result = angara_call(thread->closure_to_run, 0, NULL);
+
+    // --- THIS IS THE FIX ---
+    // Store the result in the thread object.
+    thread->return_value = result;
+    // --- END OF FIX ---
+
+    // We are done with our reference to the closure.
+    angara_decref(thread->closure_to_run);
+
+    return NULL;
+}
+
+AngaraObject angara_spawn(AngaraObject closure) {
+    // 1. Create the AngaraThread object that we will return.
+    AngaraThread* thread_obj = (AngaraThread*)malloc(sizeof(AngaraThread));
+    thread_obj->obj.type = OBJ_THREAD;
+    thread_obj->obj.ref_count = 1;
+    thread_obj->closure_to_run = closure;
+    thread_obj->return_value = create_nil(); // Initialize return value to nil
+    angara_incref(closure);
+
+    // --- THIS IS THE FIX ---
+    // 2. Pass a pointer to the entire AngaraThread object to the new thread.
+    if (pthread_create(&thread_obj->handle, NULL, &thread_starter_routine, thread_obj) != 0) {
+    // --- END OF FIX ---
+        printf("Error: Failed to create Angara thread.\n");
+        angara_decref(closure);
+        free(thread_obj);
+        return create_nil();
+    }
+
+    return (AngaraObject){VAL_OBJ, {.obj = (Object*)thread_obj}};
+}
+
+AngaraObject angara_thread_join(AngaraObject thread_obj) {
+    if (!IS_OBJ(thread_obj) || OBJ_TYPE(thread_obj) != OBJ_THREAD) {
+        return create_nil(); // Return nil on error
+    }
+    AngaraThread* thread = AS_THREAD(thread_obj);
+
+    // 1. Wait for the C thread to finish its execution.
+    pthread_join(thread->handle, NULL);
+
+    // --- THIS IS THE FIX ---
+    // 2. Return the value that the thread stored.
+    //    The caller now gets a reference to this value.
+    angara_incref(thread->return_value);
+    return thread->return_value;
+    // --- END OF FIX ---
+}
+
+AngaraObject angara_closure_new(GenericAngaraFn fn, int arity, bool is_native) {
+    AngaraClosure* closure = (AngaraClosure*)malloc(sizeof(AngaraClosure));
+    closure->obj.type = OBJ_CLOSURE;
+    closure->obj.ref_count = 1;
+    closure->fn = fn;
+    closure->arity = arity;
+    closure->is_native = is_native;
+    return (AngaraObject){VAL_OBJ, {.obj = (Object*)closure}};
+}
+
+AngaraObject angara_call(AngaraObject closure_obj, int arg_count, AngaraObject args[]) {
+    if (!IS_OBJ(closure_obj) || OBJ_TYPE(closure_obj) != OBJ_CLOSURE) {
+        // This would be a runtime error.
+        printf("Runtime Error: Attempted to call a non-function.\n");
+        return create_nil();
+    }
+
+    AngaraClosure* closure = AS_CLOSURE(closure_obj);
+
+    // Arity check
+    if (!closure->is_native && closure->arity != arg_count) {
+        printf("Runtime Error: Expected %d arguments but got %d.\n", closure->arity, arg_count);
+        return create_nil();
+    }
+
+    // --- The actual call ---
+    // We can call the function pointer directly.
+    return closure->fn(arg_count, args);
+}
+
+AngaraObject angara_mutex_new(void) {
+    AngaraMutex* mutex = (AngaraMutex*)malloc(sizeof(AngaraMutex));
+    mutex->obj.type = OBJ_MUTEX;
+    mutex->obj.ref_count = 1;
+
+    // Initialize the underlying pthread mutex
+    if (pthread_mutex_init(&mutex->handle, NULL) != 0) {
+        printf("Error: Failed to initialize mutex.\n");
+        free(mutex);
+        return create_nil();
+    }
+
+    return (AngaraObject){VAL_OBJ, {.obj = (Object*)mutex}};
+}
+
+void angara_mutex_lock(AngaraObject mutex_obj) {
+    if (!IS_OBJ(mutex_obj) || OBJ_TYPE(mutex_obj) != OBJ_MUTEX) return;
+    pthread_mutex_lock(&AS_MUTEX(mutex_obj)->handle);
+}
+
+void angara_mutex_unlock(AngaraObject mutex_obj) {
+    if (!IS_OBJ(mutex_obj) || OBJ_TYPE(mutex_obj) != OBJ_MUTEX) return;
+    pthread_mutex_unlock(&AS_MUTEX(mutex_obj)->handle);
+}
 
 AngaraObject angara_pre_increment(AngaraObject* lvalue) {
     // Note: Assumes the type is i64 for simplicity. A real implementation
@@ -278,4 +426,40 @@ AngaraObject angara_post_decrement(AngaraObject* lvalue) {
     return original_value;
 }
 
+AngaraObject angara_typeof(AngaraObject value) {
+    switch (value.type) {
+        case VAL_NIL:   return angara_string_from_c("nil");
+        case VAL_BOOL:  return angara_string_from_c("bool");
+        case VAL_I64:   return angara_string_from_c("i64");
+        case VAL_F64:   return angara_string_from_c("f64");
+        case VAL_OBJ:
+            switch (OBJ_TYPE(value)) {
+                case OBJ_STRING:   return angara_string_from_c("string");
+                case OBJ_LIST:     return angara_string_from_c("list");
+                case OBJ_RECORD:   return angara_string_from_c("record");
+                case OBJ_CLOSURE:  return angara_string_from_c("function");
+                case OBJ_CLASS:    return angara_string_from_c("class");
+                case OBJ_INSTANCE: return angara_string_from_c("instance");
+                case OBJ_THREAD:   return angara_string_from_c("Thread");
+                case OBJ_MUTEX:    return angara_string_from_c("Mutex");
+                default:           return angara_string_from_c("unknown object");
+            }
+        default:
+            return angara_string_from_c("unknown");
+    }
+}
 
+void angara_throw_error(const char* message) {
+    // Create an Angara string from the error message and throw it.
+    angara_throw(angara_string_from_c(message));
+}
+
+// And a more efficient string creator for the ABI.
+AngaraObject angara_create_string_no_copy(char* chars, size_t length) {
+    AngaraString* string = (AngaraString*)malloc(sizeof(AngaraString));
+    string->obj.type = OBJ_STRING;
+    string->obj.ref_count = 1;
+    string->length = length;
+    string->chars = chars; // Takes ownership of the pointer
+    return (AngaraObject){VAL_OBJ, {.obj = (Object*)string}};
+}

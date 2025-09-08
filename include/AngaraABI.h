@@ -7,9 +7,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-// This file defines the exact same AngaraObject struct as our internal runtime.
-// By keeping them identical, we can pass values across the ABI boundary with zero overhead.
-
 // --- Core Angara Value Representation ---
 
 typedef enum {
@@ -33,45 +30,49 @@ typedef struct {
     } as;
 } AngaraObject;
 
+
+// --- NEW: Public Definitions for Core Object Structs ---
+// These definitions must exactly match the internal definitions in angara_runtime.h
+typedef struct {
+    Object obj;
+    size_t length;
+    char* chars;
+} AngaraString;
+
+typedef struct {
+    Object obj;
+    size_t count;
+    size_t capacity;
+    AngaraObject* elements;
+} AngaraList;
+// --- END OF NEW ---
+
+
 // --- C ABI Function Signature ---
-// Every native function exposed to Angara MUST have this signature.
-// It receives an array of arguments and returns a single AngaraObject.
 typedef AngaraObject (*AngaraNativeFn)(int arg_count, AngaraObject* args);
 
 
 // --- API Provided by the Angara Host ---
-// The module can call these functions, which are provided by the core Angara runtime.
-// A module developer would link their .so against a small `libangara_core.so`
-// that exports these symbols.
-
-// Value constructors
+// (These are functions exported by the main Angara executable or libangara_core)
 AngaraObject angara_create_nil(void);
 AngaraObject angara_create_bool(bool value);
 AngaraObject angara_create_i64(int64_t value);
 AngaraObject angara_create_f64(double value);
-AngaraObject angara_create_string(const char* chars);
-
-// Value accessors (macros are often better for this)
-#define ANGARA_AS_BOOL(value)   ((value).as.boolean)
-#define ANGARA_AS_I64(value)    ((value).as.i64)
-#define ANGARA_AS_F64(value)    ((value).as.f64)
-#define ANGARA_AS_CSTRING(value) (((AngaraString*)(value).as.obj)->chars) // Example
-
-// A function to signal a runtime error from within a native function.
+AngaraObject angara_create_string_no_copy(char* chars, size_t length); // For efficiency
 void angara_throw_error(const char* message);
+
+// --- Helper Macros ---
+#define ANGARA_IS_STRING(value) ((value).type == VAL_OBJ && ((Object*)(value).as.obj)->type == OBJ_STRING)
+#define ANGARA_AS_CSTRING(value) (((AngaraString*)(value).as.obj)->chars)
 
 
 // --- API Provided by the Module ---
-// A struct that the module uses to define a single exported function.
 typedef struct {
     const char* name;
     AngaraNativeFn function;
-    int arity; // -1 for variadic
+    int arity;
 } AngaraFuncDef;
 
-// The single, C-style entry point that every Angara native module MUST export.
-// Its job is to return an array of function definitions.
-// It must also return the number of definitions in the array.
 const AngaraFuncDef* AngaraModule_Init(int* def_count);
 
 #endif // ANGARA_NATIVE_H

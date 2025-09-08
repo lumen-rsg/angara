@@ -9,25 +9,21 @@
 #include <stdlib.h>
 
 // 1. Implement the native function with the correct signature.
+
 AngaraObject fs_read_file(int arg_count, AngaraObject* args) {
-    // 2. Perform manual type and arity checking.
     if (arg_count != 1) {
         angara_throw_error("read_file() expects 1 argument.");
         return angara_create_nil();
     }
-    AngaraObject path_obj = args[0];
-    if (path_obj.type != VAL_OBJ || ((Object*)path_obj.as.obj)->type != OBJ_STRING) {
+    if (!ANGARA_IS_STRING(args[0])) { // Use the new macro
         angara_throw_error("read_file() argument must be a string.");
         return angara_create_nil();
     }
 
-    const char* path = ANGARA_AS_CSTRING(path_obj);
+    const char* path = ANGARA_AS_CSTRING(args[0]); // This now works
 
-    // 3. Do the actual work.
     FILE* file = fopen(path, "rb");
-    if (file == NULL) {
-        return angara_create_nil(); // Return nil on failure
-    }
+    if (!file) return angara_create_nil();
 
     fseek(file, 0L, SEEK_END);
     size_t file_size = ftell(file);
@@ -38,10 +34,8 @@ AngaraObject fs_read_file(int arg_count, AngaraObject* args) {
     buffer[file_size] = '\0';
     fclose(file);
 
-    // 4. Return an AngaraObject.
-    AngaraObject result = angara_create_string(buffer);
-    free(buffer);
-    return result;
+    // Use the efficient no-copy function since we just malloc'd the buffer.
+    return angara_create_string_no_copy(buffer, file_size);
 }
 
 // 5. Create the definition array.
