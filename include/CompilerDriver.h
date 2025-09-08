@@ -62,6 +62,10 @@ namespace angara {
         std::vector<std::string> m_native_lib_names;
         // --- END OF FIX ---
 
+        const std::string m_runtime_path;
+        const std::string m_angara_module_path;
+        const std::string m_native_module_path;
+
     };
 
 } // namespace angara

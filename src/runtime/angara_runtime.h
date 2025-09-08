@@ -37,7 +37,6 @@ typedef struct {
 
 // Forward declaration for the List struct
 typedef struct AngaraList AngaraList;
-
 typedef struct AngaraClass AngaraClass;
 typedef struct AngaraInstance AngaraInstance;
 
@@ -132,10 +131,10 @@ typedef struct {
 #define AS_MUTEX(value) ((AngaraMutex*)AS_OBJ(value))
 
 // --- Value Constructor Functions ---
-AngaraObject create_nil(void);
-AngaraObject create_bool(bool value);
-AngaraObject create_i64(int64_t value);
-AngaraObject create_f64(double value);
+AngaraObject angara_create_nil(void);
+AngaraObject angara_create_bool(bool value);
+AngaraObject angara_create_i64(int64_t value);
+AngaraObject angara_create_f64(double value);
 AngaraObject angara_string_from_c(const char* chars);
 
 // --- Memory Management API ---
@@ -161,7 +160,6 @@ AngaraObject angara_record_new(void);
 AngaraObject angara_record_new_with_fields(size_t pair_count, AngaraObject kvs[]);
 void angara_record_set(AngaraObject record, const char* key, AngaraObject value);
 AngaraObject angara_record_get(AngaraObject record, const char* key);
-
 Object* angara_instance_new(size_t size, AngaraClass* klass);
 
 // --- NEW: Exception Handling Globals and API ---
@@ -200,10 +198,6 @@ typedef struct {
 } AngaraThread;
 
 
-// --- NEW Built-in functions ---
-// --- Runtime API ---
-// We no longer need separate spawn/call for closures vs. native.
-// Everything is a closure now.
 AngaraObject angara_spawn(AngaraObject closure);
 AngaraObject angara_call(AngaraObject closure, int arg_count, AngaraObject args[]);
 
@@ -216,7 +210,7 @@ typedef struct {
     pthread_mutex_t handle;
 } AngaraMutex;
 
-// --- NEW: Mutex API functions ---
+// --- Mutex API functions ---
 AngaraObject angara_mutex_new(void);
 void angara_mutex_lock(AngaraObject mutex_obj);
 void angara_mutex_unlock(AngaraObject mutex_obj);

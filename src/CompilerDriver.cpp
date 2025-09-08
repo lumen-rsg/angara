@@ -13,6 +13,7 @@
 #include <sstream>
 
 #include <dlfcn.h> // For dlopen, dlsym
+#include <filesystem>
 
 #include "AngaraABI.h"
 
@@ -30,7 +31,11 @@ void CompilerDriver::log_step(const std::string& message) {
     std::cout << BOLD << GREEN << "-> " << RESET << BOLD << message << RESET << std::endl;
 }
 
-CompilerDriver::CompilerDriver() {}
+    CompilerDriver::CompilerDriver()
+            : m_runtime_path("/usr/src/angara/runtime"),
+              m_angara_module_path("/usr/src/angara/modules"),
+              m_native_module_path("/lib64/angara")
+    {}
 
 void CompilerDriver::print_progress(const std::string& current_file) {
     // This creates a progress bar like: [===>      ] (3/10) Compiling: utils.an
@@ -72,7 +77,7 @@ bool CompilerDriver::compile(const std::string& root_file_path) {
     // 1. Reset state for a fresh compilation run.
     m_had_error = false;
     m_modules_compiled = 0;
-    m_total_modules = 0; // Will be incremented by resolveModule
+    m_total_modules = 1; // Will be incremented by resolveModule
     m_module_cache.clear();
     m_compilation_stack.clear();
     m_compiled_c_files.clear();
@@ -118,25 +123,34 @@ bool CompilerDriver::compile(const std::string& root_file_path) {
     // 6. If all checks passed, link all the generated .c files into the final executable.
     log_step("Linking final executable...");
     std::string base_name = get_base_name(root_file_path);
-    std::string runtime_path = "src/runtime/angara_runtime.c"; // Adjust this path as needed
+    std::string runtime_c_path = std::filesystem::path(m_runtime_path) / "angara_runtime.c";
 
     std::stringstream command_ss;
     command_ss << "gcc -o " << base_name;
 
+    // Add our generated source files
     for (const auto& c_file : m_compiled_c_files) {
         command_ss << " " << c_file;
     }
+    command_ss << " " << runtime_c_path;
 
-    // Link against the runtime library and native modules
-    command_ss << " -L" << "lib"; // Assuming libs are in a 'lib' subdir
+    // Add include paths
+    command_ss << " -I. -I" << m_runtime_path;
 
+    // Add library search paths (includes the standard path and any relative ones)
+    m_native_lib_paths.insert(m_native_module_path);
+    for (const auto& lib_path : m_native_lib_paths) {
+        command_ss << " -L" << lib_path;
+    }
+
+    // Add libraries to link
     for (const auto& lib_name : m_native_lib_names) {
         command_ss << " -l" << lib_name;
     }
 
-    command_ss << " -langara_runtime";
-
-    command_ss << " -I. -pthread -lm -I src/runtime/";
+    // Add final flags
+    command_ss << " -pthread -lm";
+    // --- END OF FINAL FIX ---
     std::string command = command_ss.str();
 
     std::cout << YELLOW << "   $ " << command << RESET << std::endl;
@@ -183,13 +197,6 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
 std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& path_or_id, const Token& import_token) {
 
     std::string found_path = "";
-    // First, check if a full path was already resolved and cached.
-    if (m_module_cache.count(path_or_id)) {
-        return m_module_cache[path_or_id];
-    }
-
-    // --- THIS IS THE FIX ---
-    // 1. Determine if the input is a direct path or a logical module ID.
     bool is_direct_path = (path_or_id.find('/') != std::string::npos ||
                            path_or_id.find('\\') != std::string::npos ||
                            path_or_id.ends_with(".an") ||
@@ -198,22 +205,24 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
                            path_or_id.ends_with(".dll"));
 
     if (is_direct_path) {
-        // It's a path. Check if this specific path exists.
+        // It's a relative or absolute path, use it directly.
         std::ifstream f(path_or_id);
         if (f.good()) {
             found_path = path_or_id;
         }
     } else {
-        // It's a logical ID (like "fs"). Search for it in the search paths.
-        std::vector<std::string> search_paths;
-        // TODO: Add current file's directory and ANGARA_PATH dirs here.
-        search_paths.push_back(".");
-
+        // It's a logical ID (like "fs" or "utils"). Search for it.
+        std::vector<std::string> search_paths = {
+                ".", // 1. Current directory
+                m_angara_module_path, // 2. Standard Angara module path
+                m_native_module_path  // 3. Standard native module path
+        };
         for (const auto& dir : search_paths) {
+            // Check for both .an and .so/.dylib
             std::vector<std::string> potential_paths = {
-                    dir + "/" + path_or_id + ".an",
-                    dir + "/lib" + path_or_id + ".so",
-                    dir + "/lib" + path_or_id + ".dylib"
+                    std::filesystem::path(dir) / (path_or_id + ".an"),
+                    std::filesystem::path(dir) / ("lib" + path_or_id + ".so"),
+                    std::filesystem::path(dir) / ("lib" + path_or_id + ".dylib")
             };
             for (const auto& p : potential_paths) {
                 std::ifstream f(p);
@@ -231,7 +240,6 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
         m_had_error = true;
         return nullptr;
     }
-    // --- END OF FIX ---
 
     // 1. Check the cache first to avoid recompiling the same file.
     if (m_module_cache.count(path_or_id)) {
