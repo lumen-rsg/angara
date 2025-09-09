@@ -23,10 +23,6 @@ namespace angara {
             {"try",      TokenType::TRY},
             {"catch",    TokenType::CATCH},
             {"attach",   TokenType::ATTACH},
-            {"string",   TokenType::TYPE_STRING},
-            {"int",      TokenType::TYPE_INT},
-            {"float",    TokenType::TYPE_FLOAT},
-            {"bool",     TokenType::TYPE_BOOL},
             {"list",     TokenType::TYPE_LIST},
             {"map",      TokenType::TYPE_MAP},
             {"nil",      TokenType::NIL},
@@ -45,36 +41,37 @@ namespace angara {
             {"signs", TokenType::SIGNS},
 
             // Integer Types
-            {"i8",       TokenType::TYPE_I8},
-            {"i16",      TokenType::TYPE_I16},
-            {"i32",      TokenType::TYPE_I32},
-            {"i64",      TokenType::TYPE_I64},
-            {"int",      TokenType::TYPE_INT}, // Alias
-            {"u8",       TokenType::TYPE_U8},
-            {"u16",      TokenType::TYPE_U16},
-            {"u32",      TokenType::TYPE_U32},
-            {"u64",      TokenType::TYPE_U64},
-            {"uint",     TokenType::TYPE_UINT}, // Alias
+            // {"i8",       TokenType::TYPE_I8},
+            // {"i16",      TokenType::TYPE_I16},
+            // {"i32",      TokenType::TYPE_I32},
+            // {"i64",      TokenType::TYPE_I64},
+            // {"int",      TokenType::TYPE_INT}, // Alias
+            // {"u8",       TokenType::TYPE_U8},
+            // {"u16",      TokenType::TYPE_U16},
+            // {"u32",      TokenType::TYPE_U32},
+            // {"u64",      TokenType::TYPE_U64},
+            // {"uint",     TokenType::TYPE_UINT}, // Alias
+            //
+            // // Float Types
+            // {"f32",      TokenType::TYPE_F32},
+            // {"f64",      TokenType::TYPE_F64},
+            // {"float",    TokenType::TYPE_FLOAT}, // Alias
+            //
+            // // Other Primitives
+            // {"bool",     TokenType::TYPE_BOOL},
+            // {"string",   TokenType::TYPE_STRING},
+            // {"nil",      TokenType::TYPE_NIL},
+            //
+            // // Compound Types
+            // {"list",     TokenType::TYPE_LIST},
+            // {"record",   TokenType::TYPE_RECORD},
+            // {"function", TokenType::TYPE_FUNCTION},
+            // {"any",      TokenType::TYPE_ANY},
+            // {"void",     TokenType::TYPE_VOID},
+            // {"Thread", TokenType::TYPE_THREAD}
 
-            // Float Types
-            {"f32",      TokenType::TYPE_F32},
-            {"f64",      TokenType::TYPE_F64},
-            {"float",    TokenType::TYPE_FLOAT}, // Alias
-
-            // Other Primitives
-            {"bool",     TokenType::TYPE_BOOL},
-            {"string",   TokenType::TYPE_STRING},
-            {"nil",      TokenType::TYPE_NIL},
-
-            // Compound Types
-            {"list",     TokenType::TYPE_LIST},
-            {"record",   TokenType::TYPE_RECORD},
-            {"function", TokenType::TYPE_FUNCTION},
-            {"any",      TokenType::TYPE_ANY},
             {"private",  TokenType::PRIVATE},
             {"public",   TokenType::PUBLIC},
-            {"void",     TokenType::TYPE_VOID},
-            {"Thread", TokenType::TYPE_THREAD}
     };
 
     Lexer::Lexer(const std::string &source) : m_source(source) {}

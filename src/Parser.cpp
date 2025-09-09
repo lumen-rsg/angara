@@ -314,12 +314,6 @@ std::shared_ptr<Stmt> Parser::declaration() {
             return std::make_shared<Literal>(previous());
         }
 
-        // If we see a type keyword, treat it as a variable expression.
-        // This allows it to be the "callee" in a function call.
-        if (match({TokenType::TYPE_INT, TokenType::TYPE_FLOAT,
-                   TokenType::TYPE_STRING, TokenType::TYPE_BOOL})) {
-            return std::make_shared<VarExpr>(previous());
-        }
 
         if (match({TokenType::THIS})) {
             return std::make_shared<ThisExpr>(previous());
