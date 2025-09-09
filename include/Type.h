@@ -5,6 +5,8 @@
 #include <vector>
 #include <map>
 #include <sstream>
+#include <Token.h>
+
 #include "AccessLevel.h"
 
 namespace angara {
@@ -143,6 +145,7 @@ namespace angara {
         struct MemberInfo {
             std::shared_ptr<Type> type;
             AccessLevel access;
+            Token declaration_token;
             bool is_const;
         };
 
@@ -242,8 +245,16 @@ namespace angara {
         const std::string name;
         // A contract defines a set of required fields and methods.
         // We can reuse the MemberInfo struct from ClassType.
-        std::map<std::string, ClassType::MemberInfo> fields;
-        std::map<std::string, ClassType::MemberInfo> methods;
+
+
+        struct MemberInfo {
+            std::shared_ptr<Type> type;
+            Token declaration_token; // <-- The important addition
+            bool is_const;
+        };
+
+        std::map<std::string, MemberInfo> fields;
+        std::map<std::string, MemberInfo> methods;
 
         explicit ContractType(std::string name)
             : Type(TypeKind::CONTRACT), name(std::move(name)) {}

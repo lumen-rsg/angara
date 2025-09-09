@@ -4,7 +4,7 @@
 
 #include "TypeChecker.h"
 #include <stdexcept>
-
+#include "ErrorHandler.h"
 namespace angara {
 
 // --- Constructor and Main Entry Point ---
@@ -195,8 +195,6 @@ namespace angara {
 
 
     void TypeChecker::defineFunctionHeader(const FuncStmt& stmt) {
-        // This helper only resolves and declares the function signature for Pass 2.
-
         std::vector<std::shared_ptr<Type>> param_types;
 
         if (stmt.has_this) {
@@ -221,24 +219,13 @@ namespace angara {
 
         auto function_type = std::make_shared<FunctionType>(param_types, return_type);
 
-        // 1. Declare the function in the current symbol table so it can be used.
-        if (!m_symbols.declare(stmt.name, function_type, true)) {
-            error(stmt.name, "A symbol with this name already exists in this scope.");
-            // We can often continue even if the name is a duplicate.
+        // --- THE FIX IS HERE ---
+        if (auto conflicting_symbol = m_symbols.declare(stmt.name, function_type, true)) {
+            error(stmt.name, "re-declaration of symbol '" + stmt.name.lexeme + "'.");
+            note(conflicting_symbol->declaration_token, "previous declaration was here.");
         }
+        // --- END FIX ---
 
-        // 2. If the function was marked with 'export', add it to the module's public API.
-        if (stmt.is_exported) {
-            // We only allow top-level functions to be exported, not methods inside classes.
-            // The parser should enforce this, but we can double-check here.
-            if (m_current_class != nullptr) {
-                error(stmt.name, "Cannot use 'export' on a method inside a class. Make the class public instead.");
-            } else {
-                m_module_type->exports[stmt.name.lexeme] = function_type;
-            }
-        }
-
-        // If the function is EXPORTED or if its NAME IS "main", add it to the public API.
         if (stmt.is_exported || stmt.name.lexeme == "main") {
             if (m_current_class != nullptr) {
                 error(stmt.name, "'export' can only be used on top-level declarations.");
@@ -312,7 +299,7 @@ namespace angara {
                 if (class_type->fields.count(field_decl->name.lexeme)) {
                     error(field_decl->name, "A member with this name already exists in the class.");
                 }
-                class_type->fields[field_decl->name.lexeme] = {field_type, field_member->access, field_decl->is_const};
+                class_type->fields[field_decl->name.lexeme] = {field_type, field_member->access, field_decl->name, field_decl->is_const};
 
             } else if (auto method_member = std::dynamic_pointer_cast<const MethodMember>(member)) {
                 const auto& method_decl = method_member->declaration;
@@ -331,7 +318,7 @@ namespace angara {
                 if (class_type->methods.count(method_decl->name.lexeme) || class_type->fields.count(method_decl->name.lexeme)) {
                     error(method_decl->name, "A member with this name already exists in the class.");
                 }
-                class_type->methods[method_decl->name.lexeme] = {method_type, method_member->access, false}; // Methods aren't const
+                class_type->methods[method_decl->name.lexeme] = {method_type, method_member->access, method_decl->name, false}; // Methods aren't const
             }
         }
 
@@ -353,20 +340,25 @@ namespace angara {
             const auto* class_prop = class_type->findProperty(name);
             if (!class_prop) {
                 error(stmt.name, "Class '" + stmt.name.lexeme + "' does not fulfill contract '" + contract_type->name + "' because it is missing required field '" + name + "'.");
+                note(required_field.declaration_token, "requirement '" + name + "' is defined here.");
                 continue;
             }
             if (class_type->methods.count(name)) {
                 error(stmt.name, "Contract '" + contract_type->name + "' requires a field named '" + name + "', but class '" + stmt.name.lexeme + "' implements it as a method.");
+                note(required_field.declaration_token, "requirement '" + name + "' is defined here.");
                 continue;
             }
             if (class_prop->access != AccessLevel::PUBLIC) {
                 error(stmt.name, "Contract '" + contract_type->name + "' requires field '" + name + "' to be public, but it is private in class '" + stmt.name.lexeme + "'.");
+                note(required_field.declaration_token, "requirement '" + name + "' is defined here.");
             }
             if (class_prop->is_const != required_field.is_const) {
                 error(stmt.name, "Contract '" + contract_type->name + "' requires field '" + name + "' to be '" + (required_field.is_const ? "const" : "let") + "', but it is not in class '" + stmt.name.lexeme + "'.");
+                note(required_field.declaration_token, "requirement '" + name + "' is defined here.");
             }
             if (class_prop->type->toString() != required_field.type->toString()) {
                 error(stmt.name, "Type mismatch for field '" + name + "' required by contract '" + contract_type->name + "'. Expected '" + required_field.type->toString() + "', but got '" + class_prop->type->toString() + "'.");
+                note(required_field.declaration_token, "requirement '" + name + "' is defined here.");
             }
         }
 
@@ -375,19 +367,23 @@ namespace angara {
             const auto* class_prop = class_type->findProperty(name);
             if (!class_prop) {
                 error(stmt.name, "Class '" + stmt.name.lexeme + "' does not fulfill contract '" + contract_type->name + "' because it is missing required method '" + name + "'.");
+                note(required_method.declaration_token, "requirement '" + name + "' is defined here.");
                 continue;
             }
             if (class_type->fields.count(name)) {
                 error(stmt.name, "Contract '" + contract_type->name + "' requires a method named '" + name + "', but class '" + stmt.name.lexeme + "' implements it as a field.");
+                note(required_method.declaration_token, "requirement '" + name + "' is defined here.");
                 continue;
             }
             if (class_prop->access != AccessLevel::PUBLIC) {
                  error(stmt.name, "Contract '" + contract_type->name + "' requires method '" + name + "' to be public, but it is private in class '" + stmt.name.lexeme + "'.");
+                note(required_method.declaration_token, "requirement '" + name + "' is defined here.");
             }
             auto required_func_type = std::dynamic_pointer_cast<FunctionType>(required_method.type);
             auto class_func_type = std::dynamic_pointer_cast<FunctionType>(class_prop->type);
             if (!class_func_type->equals(*required_func_type)) {
                 error(stmt.name, "The signature of method '" + name + "' in class '" + stmt.name.lexeme + "' does not match the signature required by contract '" + contract_type->name + "'.\n  Required: " + required_func_type->toString() + "\n  Found:    " + class_func_type->toString());
+                note(required_method.declaration_token, "requirement '" + name + "' is defined here.");
             }
         }
     }
@@ -420,6 +416,7 @@ namespace angara {
                             "' does not match the signature required by trait '" + trait_type->name + "'.\n" +
                             "  Required: " + required_sig->toString() + "\n" +
                             "  Found:    " + implemented_sig->toString());
+
                     }
                 }
             }
@@ -446,19 +443,21 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         for (const auto& stmt : statements) {
             if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
                 auto class_type = std::make_shared<ClassType>(class_stmt->name.lexeme);
-                // If declare() returns false, the name already exists.
-                if (!m_symbols.declare(class_stmt->name, class_type, true)) {
-                    error(class_stmt->name, "A symbol with the name '" + class_stmt->name.lexeme + "' has already been declared in this scope.");
+                if (auto conflicting_symbol = m_symbols.declare(class_stmt->name, class_type, true)) {
+                    error(class_stmt->name, "re-declaration of symbol '" + class_stmt->name.lexeme + "'.");
+                    note(conflicting_symbol->declaration_token, "previous declaration was here.");
                 }
             } else if (auto trait_stmt = std::dynamic_pointer_cast<const TraitStmt>(stmt)) {
                 auto trait_type = std::make_shared<TraitType>(trait_stmt->name.lexeme);
-                if (!m_symbols.declare(trait_stmt->name, trait_type, true)) {
-                    error(trait_stmt->name, "A symbol with the name '" + trait_stmt->name.lexeme + "' has already been declared in this scope.");
+                if (auto conflicting_symbol = m_symbols.declare(trait_stmt->name, trait_type, true)) {
+                    error(trait_stmt->name, "re-declaration of symbol '" + trait_stmt->name.lexeme + "'.");
+                    note(conflicting_symbol->declaration_token, "previous declaration was here.");
                 }
             } else if (auto contract_stmt = std::dynamic_pointer_cast<const ContractStmt>(stmt)) {
                 auto contract_type = std::make_shared<ContractType>(contract_stmt->name.lexeme);
-                if (!m_symbols.declare(contract_stmt->name, contract_type, true)) {
-                    error(contract_stmt->name, "A symbol with the name '" + contract_stmt->name.lexeme + "' has already been declared in this scope.");
+                if (auto conflicting_symbol = m_symbols.declare(contract_stmt->name, contract_type, true)) {
+                    error(contract_stmt->name, "re-declaration of symbol '" + contract_stmt->name.lexeme + "'.");
+                    note(conflicting_symbol->declaration_token, "previous declaration was here.");
                 }
             }
         }
@@ -513,6 +512,10 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         if (m_hadError) return;
         m_hadError = true;
         m_errorHandler.report(token, message);
+    }
+
+    void TypeChecker::note(const Token& token, const std::string& message) {
+        m_errorHandler.note(token, message);
     }
 
     // Pops a type from our internal type stack.
@@ -635,35 +638,26 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         declared_type = resolveType(stmt->typeAnnotation);
     }
 
-    // --- Logic for type inference and error checking ---
+    // --- Logic for type inference and error checking (unchanged) ---
     if (!declared_type && initializer_type) {
-        // Infer type from initializer
         declared_type = initializer_type;
     } else if (declared_type && !initializer_type) {
-        // This is fine, e.g., `let x as i64;`
+        // This is fine
     } else if (!declared_type && !initializer_type) {
         error(stmt->name, "Cannot declare a variable without a type annotation or an initializer.");
         declared_type = m_type_error;
     } else if (declared_type && initializer_type) {
-        // Both exist. This is where we compare them.
-
         bool types_match = (declared_type->toString() == initializer_type->toString());
-
-        // Special Rule: An empty list literal (inferred as `list<any>`) can be
-        // assigned to a variable of any specific list type.
         if (!types_match && initializer_type->toString() == "list<any>" && declared_type->kind == TypeKind::LIST) {
-            // Check if the initializer was actually an empty list expression.
             if (auto list_expr = std::dynamic_pointer_cast<const ListExpr>(stmt->initializer)) {
                 if (list_expr->elements.empty()) {
                     types_match = true;
                 }
             }
         }
-
         if (!types_match && isInteger(declared_type) && initializer_type->toString() == "i64") {
             types_match = true;
         }
-
         if (!types_match) {
             error(stmt->name, "Type mismatch. Variable is annotated as '" +
                 declared_type->toString() + "' but is initialized with a value of type '" +
@@ -672,25 +666,23 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         }
     }
 
-    // Store the final canonical type for this variable declaration
     m_variable_types[stmt.get()] = declared_type;
 
-
+    // --- THE FIX IS HERE ---
     // Declare the symbol in the current scope
-    if (!m_symbols.declare(stmt->name, declared_type, stmt->is_const)) {
-        error(stmt->name, "A variable with this name already exists in this scope.");
+    if (auto conflicting_symbol = m_symbols.declare(stmt->name, declared_type, stmt->is_const)) {
+        error(stmt->name, "re-declaration of variable '" + stmt->name.lexeme + "'.");
+        note(conflicting_symbol->declaration_token, "previous declaration was here.");
     }
+    // --- END FIX ---
 
-        // If the variable is exported, add it to the module's public API.
-        // We only do this for global variables (scope depth 0).
-        if (stmt->is_exported) {
-            if (m_symbols.getScopeDepth() > 0) { // Assumes you add a getScopeDepth() helper
-                error(stmt->name, "'export' can only be used on top-level declarations.");
-            } else {
-                m_module_type->exports[stmt->name.lexeme] = declared_type;
-            }
+    if (stmt->is_exported) {
+        if (m_symbols.getScopeDepth() > 0) {
+            error(stmt->name, "'export' can only be used on top-level declarations.");
+        } else {
+            m_module_type->exports[stmt->name.lexeme] = declared_type;
         }
-
+    }
 }
 
     std::any TypeChecker::visit(const Literal& expr) {
@@ -1232,6 +1224,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                 error(expr.op, "Type mismatch. Cannot assign a value of type '" +
                                rhs_type->toString() + "' to a target of type '" +
                                lhs_type->toString() + "'.");
+
             }
         }
 
@@ -1240,6 +1233,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             auto symbol = m_symbols.resolve(var_target->name.lexeme);
             if (symbol && symbol->is_const) {
                 error(var_target->name, "Cannot assign to 'const' variable '" + symbol->name + "'.");
+                note(symbol->declaration_token, "'" + symbol->name + "' was declared 'const' here.");
             }
         }
         else if (auto subscript_target = std::dynamic_pointer_cast<const SubscriptExpr>(expr.target)) {
@@ -1358,9 +1352,16 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             } else {
                 // For non-variadic functions, the number must match exactly.
                 if (arg_types.size() != num_fixed_params) {
-                    error(expr.paren, "Incorrect number of arguments. Function expects " +
-                                      std::to_string(num_fixed_params) + ", but got " +
-                                      std::to_string(arg_types.size()) + ".");
+                    error(expr.paren, "incorrect number of arguments. Function expects " +
+                  std::to_string(num_fixed_params) + ", but got " +
+                  std::to_string(arg_types.size()) + ".");
+
+                    // Find the original declaration to add the note
+                    if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
+                        if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
+                            note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
+                        }
+                    }
                     result_type = m_type_error;
                 }
             }
@@ -1763,7 +1764,11 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                 continue;
             }
             // All contract members are implicitly public.
-            contract_type->fields[field_decl->name.lexeme] = {field_type, AccessLevel::PUBLIC, field_decl->is_const};
+            contract_type->fields[field_decl->name.lexeme] = {
+                field_type,
+                field_decl->name, // <-- Store the token
+                field_decl->is_const
+            };
 
         } else if (auto method_member = std::dynamic_pointer_cast<const MethodMember>(member)) {
             const auto& method_decl = method_member->declaration;
@@ -1782,53 +1787,60 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                 error(method_decl->name, "Duplicate member '" + method_decl->name.lexeme + "' in contract.");
                 continue;
             }
-            contract_type->methods[method_decl->name.lexeme] = {method_type, AccessLevel::PUBLIC, false};
+            contract_type->methods[method_decl->name.lexeme] = {
+                method_type,
+                method_decl->name, // <-- Store the token
+                false
+            };
         }
     }
 }
 
     void TypeChecker::resolveAttach(const AttachStmt& stmt) {
-        // 1. Ask the main driver to resolve this module path.
-        std::string module_path = stmt.modulePath.lexeme;
-        std::shared_ptr<ModuleType> module_type = m_driver.resolveModule(module_path, stmt.modulePath);
+    std::string module_path = stmt.modulePath.lexeme;
+    std::shared_ptr<ModuleType> module_type = m_driver.resolveModule(module_path, stmt.modulePath);
 
-        if (!module_type) {
-            // The driver already reported the error.
-            return;
-        }
+    if (!module_type) {
+        return;
+    }
 
-        m_module_resolutions[&stmt] = module_type;
+    m_module_resolutions[&stmt] = module_type;
 
-        // --- Logic for selective `from` import ---
-        if (!stmt.names.empty()) {
-            for (const auto& name_token : stmt.names) {
-                const std::string& name_str = name_token.lexeme;
-                auto export_it = module_type->exports.find(name_str);
-                if (export_it == module_type->exports.end()) {
-                    error(name_token, "Module '" + module_type->name + "' has no exported member named '" + name_str + "'.");
-                } else {
-                    if (!m_symbols.declare(name_token, export_it->second, true)) {
-                        error(name_token, "A symbol with this name already exists in this scope.");
-                    }
+    // --- Logic for selective `from` import ---
+    if (!stmt.names.empty()) {
+        for (const auto& name_token : stmt.names) {
+            const std::string& name_str = name_token.lexeme;
+            auto export_it = module_type->exports.find(name_str);
+            if (export_it == module_type->exports.end()) {
+                error(name_token, "Module '" + module_type->name + "' has no exported member named '" + name_str + "'.");
+            } else {
+                // --- THE FIX IS HERE ---
+                // `declare` returns the conflicting symbol on failure, and nullptr on success.
+                if (auto conflicting_symbol = m_symbols.declare(name_token, export_it->second, true)) {
+                    error(name_token, "re-declaration of symbol '" + name_str + "'.");
+                    note(conflicting_symbol->declaration_token, "previous declaration was here.");
                 }
             }
         }
-        // --- Logic for whole-module import (with optional alias) ---
-        else {
-            std::string symbol_name;
-            Token name_token;
+    }
+    // --- Logic for whole-module import (with optional alias) ---
+    else {
+        std::string symbol_name;
+        Token name_token;
 
-            if (stmt.alias) {
-                symbol_name = stmt.alias->lexeme;
-                name_token = *stmt.alias;
-            } else {
-                symbol_name = CompilerDriver::get_base_name(module_path);
-                name_token = Token(TokenType::IDENTIFIER, symbol_name, stmt.modulePath.line, 0);
-            }
+        if (stmt.alias) {
+            symbol_name = stmt.alias->lexeme;
+            name_token = *stmt.alias;
+        } else {
+            symbol_name = CompilerDriver::get_base_name(module_path);
+            name_token = Token(TokenType::IDENTIFIER, symbol_name, stmt.modulePath.line, 0);
+        }
 
-            if (!m_symbols.declare(name_token, module_type, true)) {
-                error(name_token, "A symbol with this name already exists in this scope.");
-            }
+        // Apply the same fix here for consistency.
+        if (auto conflicting_symbol = m_symbols.declare(name_token, module_type, true)) {
+             error(name_token, "re-declaration of symbol '" + symbol_name + "'.");
+             note(conflicting_symbol->declaration_token, "previous declaration was here.");
         }
     }
+}
 } // namespace angara

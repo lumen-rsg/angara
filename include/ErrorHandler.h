@@ -12,6 +12,7 @@ namespace angara {
         ErrorHandler(const std::string &source);
 
         void report(const Token &token, const std::string &message);
+        void note(const Token &token, const std::string &message);
 
         bool hadError() const;
 

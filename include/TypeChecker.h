@@ -84,6 +84,9 @@ namespace angara {
 
         // Error reporting
         void error(const Token& token, const std::string& message);
+
+        void note(const Token &token, const std::string &message);
+
         bool m_is_in_trait = false;
 
 

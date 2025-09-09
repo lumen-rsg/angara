@@ -17,6 +17,7 @@ namespace angara {
     struct Symbol {
         std::string name;
         std::shared_ptr<Type> type;
+        Token declaration_token;
         bool is_const;
         int depth;
     };
@@ -35,7 +36,7 @@ namespace angara {
         // Returns the symbol if found, otherwise nullptr.
         [[nodiscard]] std::shared_ptr<Symbol> resolve(const std::string& name) const;
 
-        bool declare(const Token &token, std::shared_ptr<Type> type, bool is_const);
+        [[nodiscard]] std::shared_ptr<Symbol> declare(const Token &token, std::shared_ptr<Type> type, bool is_const);
         const std::map<std::string, std::shared_ptr<Symbol>>& getGlobalScope() const;
         int getScopeDepth() const;
 
