@@ -14,6 +14,7 @@
 
 #include <dlfcn.h> // For dlopen, dlsym
 #include <filesystem>
+#include <thread>
 
 #include "AngaraABI.h"
 
@@ -168,7 +169,6 @@ bool CompilerDriver::compile(const std::string& root_file_path) {
     command_ss << " -pthread -lm";
     std::string command = command_ss.str();
 
-
         // --- NEW LOGIC: Redirect output and conditionally print ---
         std::string temp_log_file = "angara_build.log";
         std::string redirected_command = command + " > " + temp_log_file + " 2>&1";
@@ -189,15 +189,15 @@ bool CompilerDriver::compile(const std::string& root_file_path) {
 
             std::cerr << "\nThe command that failed was:\n" << "   $ " << command << std::endl;
 
-            remove(temp_log_file.c_str()); // Clean up the log file
-
-            for (const auto& c_file : m_compiled_c_files) {
-                remove(c_file.c_str());
-            }
-            for (const auto& h_file : m_compiled_h_files) {
-                remove(h_file.c_str());
-            }
             return false;
+        }
+
+
+        for (const auto& c_file : m_compiled_c_files) {
+            remove(c_file.c_str());
+        }
+        for (const auto& h_file : m_compiled_h_files) {
+            remove(h_file.c_str());
         }
 
         // On success, just clean up.
