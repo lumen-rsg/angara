@@ -189,7 +189,6 @@ namespace angara {
     std::any ASTPrinter::visit(const VarExpr& expr) {
         return parenthesize(expr.name.lexeme, {}, &expr);
     }
-
     std::any ASTPrinter::visit(const Unary& expr) {
         return parenthesize(expr.op.lexeme, {expr.right.get()}, &expr);
     }

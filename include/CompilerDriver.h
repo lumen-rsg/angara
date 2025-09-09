@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <string>
 #include <vector>
 #include <map>
@@ -46,6 +47,7 @@ namespace angara {
 
         // --- Track files for the final link step ---
         std::vector<std::string> m_compiled_c_files;
+        std::vector<std::string> m_compiled_h_files; // <-- ADD THIS
 
         int m_total_modules = 0;
         int m_modules_compiled = 0;
@@ -60,6 +62,12 @@ namespace angara {
         const std::string m_runtime_path;
         const std::string m_angara_module_path;
         const std::string m_native_module_path;
+
+        std::string m_last_progress_message;
+
+        std::chrono::time_point<std::chrono::high_resolution_clock> m_build_start_time;
+        std::vector<std::string> m_compiled_angara_files;
+        std::map<std::string, int> m_line_counts;
 
     };
 

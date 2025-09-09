@@ -427,7 +427,6 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
         for (const auto& stmt : statements) {
             if (auto attach = std::dynamic_pointer_cast<const AttachStmt>(stmt)) {
                 auto module_type = m_type_checker.m_module_resolutions.at(attach.get());
-                std::cout << "resolving module: " << module_type->name << ", is it native?: "<< module_type->is_native << std::endl;
                 // ONLY include headers for OTHER ANGARA modules.
                 if (!module_type->is_native) {
                     m_header_out << "#include \"" << module_type->name << ".h\"\n";
@@ -885,8 +884,6 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
 
     std::string CTranspiler::transpileRecordExpr(const RecordExpr& expr) {
         // Generates: angara_record_new_with_fields(count, (AngaraObject[]){"key1", val1, "key2", val2, ...})
-
-        std::cout << "falling into record expr transpile method..." << std::endl;
 
         // 1. Transpile all key/value pairs.
         std::stringstream kvs_ss;

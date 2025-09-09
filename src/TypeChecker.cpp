@@ -1369,10 +1369,30 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             // Rule: Check the type of each *fixed* argument.
             if (result_type->kind != TypeKind::ERROR) {
                 for (size_t i = 0; i < num_fixed_params; ++i) {
-                    if (arg_types[i]->toString() != func_type->param_types[i]->toString()) {
-                        std::cerr << "Incorrect type for argument " + std::to_string(i + 1) << std::endl;
+                    auto expected_type = func_type->param_types[i];
+                    auto actual_type = arg_types[i];
+
+                    // --- THE FIX IS HERE ---
+                    // If the expected type is 'any', then any actual type is valid.
+                    if (expected_type->kind == TypeKind::ANY) {
+                        continue; // This argument is valid, check the next one.
+                    }
+
+                    // If not 'any', the types must match exactly.
+                    if (actual_type->toString() != expected_type->toString()) {
+                        // Use the real error reporting system.
+                        error(expr.paren, "type mismatch for argument " + std::to_string(i + 1) + ". " +
+                                          "Function expects '" + expected_type->toString() + "', but got '" +
+                                          actual_type->toString() + "'.");
+
+                        if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
+                            if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
+                                note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
+                            }
+                        }
+
                         result_type = m_type_error;
-                        break;
+                        break; // Stop checking after the first error.
                     }
                 }
             }

@@ -27,31 +27,47 @@ typedef const AngaraFuncDef* (*AngaraModuleInitFn)(int*);
 
 namespace angara {
 
-void CompilerDriver::log_step(const std::string& message) {
-    std::cout << BOLD << GREEN << "-> " << RESET << BOLD << message << RESET << std::endl;
-}
+    void CompilerDriver::log_step(const std::string& message) {
+        // 1. Clear the current line (which has the progress bar on it).
+        std::cout << "\r\033[K";
+
+        // 2. Print the log message on its own line.
+        std::cout << BOLD << GREEN << "-> " << RESET << BOLD << message << RESET << std::endl;
+
+        // 3. Reprint the last known progress bar state on the new line.
+        print_progress(m_last_progress_message);
+    }
 
     CompilerDriver::CompilerDriver()
             : m_runtime_path("/opt/src/angara/runtime"),
               m_angara_module_path("/opt/src/angara/modules"),
-              m_native_module_path("/lib64/angara")
+              m_native_module_path("/opt/modules/angara/")
     {}
 
-void CompilerDriver::print_progress(const std::string& current_file) {
-    int bar_width = 20;
-    float progress = (m_total_modules > 0) ? (float)m_modules_compiled / m_total_modules : 0;
-    int pos = bar_width * progress;
+    void CompilerDriver::print_progress(const std::string& current_file) {
+        // Store the message so other functions can reprint it.
+        m_last_progress_message = current_file;
 
-    std::cout << "[";
-    for (int i = 0; i < bar_width; ++i) {
-        if (i < pos) std::cout << "=";
-        else if (i == pos) std::cout << ">";
-        else std::cout << " ";
-    }
-    std::cout << "] (" << m_modules_compiled << "/" << m_total_modules << ") "
-              << "Compiling: " << current_file << "\r";
-    std::cout << std::flush;
+        int bar_width = 20;
+        float progress = (m_total_modules > 0) ? (float)m_modules_compiled / m_total_modules : 0;
+        // Don't let the bar go to 100% until the very end.
+        if (m_modules_compiled == m_total_modules && current_file != "Done!") {
+            progress = 0.99;
+        }
+        int pos = bar_width * progress;
 
+        std::stringstream ss;
+        ss << BOLD << GREEN << "[" << RESET;
+        for (int i = 0; i < bar_width; ++i) {
+            if (i < pos) ss << BOLD << GREEN << "=" << RESET;
+            else if (i == pos && progress < 1.0) ss << BOLD << GREEN << ">" << RESET;
+            else ss << " ";
+        }
+        ss << BOLD << GREEN << "] " << RESET << "(" << m_modules_compiled << "/" << m_total_modules << ") "
+           << "Compiling: " << current_file;
+
+        // \r moves to the beginning. \033[K clears the line.
+        std::cout << "\r\033[K" << ss.str() << std::flush;
 }
 
     static std::string get_lib_name(const std::string& path) {
@@ -74,6 +90,7 @@ std::string CompilerDriver::read_file(const std::string& path) {
 }
 
 bool CompilerDriver::compile(const std::string& root_file_path) {
+    m_build_start_time = std::chrono::high_resolution_clock::now();
     // 1. Reset state for a fresh compilation run.
     m_had_error = false;
     m_modules_compiled = 0;
@@ -89,7 +106,6 @@ bool CompilerDriver::compile(const std::string& root_file_path) {
 
     // 3. Check if any stage of the recursive compilation failed.
     if (!root_module_type || m_had_error) {
-        std::cout << "\n" << BOLD << RED << "Build failed." << RESET << std::endl;
         return false;
     }
 
@@ -152,18 +168,72 @@ bool CompilerDriver::compile(const std::string& root_file_path) {
     command_ss << " -pthread -lm";
     std::string command = command_ss.str();
 
-    std::cout << YELLOW << "   $ " << command << RESET << std::endl;
-    int result = system(command.c_str());
 
-    if (result != 0) {
-        std::cerr << "\n" << RED << "Build failed: The C compiler/linker returned a non-zero exit code." << RESET << std::endl;
-        return false;
-    }
+        // --- NEW LOGIC: Redirect output and conditionally print ---
+        std::string temp_log_file = "angara_build.log";
+        std::string redirected_command = command + " > " + temp_log_file + " 2>&1";
+
+        int result = system(redirected_command.c_str());
+
+        if (result != 0) {
+            std::cout << "\r\033[K"; // Clear the progress bar line
+            std::cerr << BOLD << RED << "\nBuild failed." << RESET << " The system compiler returned an error." << std::endl;
+
+            // Read the contents of the log file to show the user the GCC error.
+            std::string gcc_output = read_file(temp_log_file);
+            if (!gcc_output.empty()) {
+                std::cerr << "\n" << YELLOW << "--- Compiler Output ---" << RESET << std::endl;
+                std::cerr << gcc_output;
+                std::cerr << YELLOW << "--- End Compiler Output ---" << RESET << std::endl;
+            }
+
+            std::cerr << "\nThe command that failed was:\n" << "   $ " << command << std::endl;
+
+            remove(temp_log_file.c_str()); // Clean up the log file
+
+            for (const auto& c_file : m_compiled_c_files) {
+                remove(c_file.c_str());
+            }
+            for (const auto& h_file : m_compiled_h_files) {
+                remove(h_file.c_str());
+            }
+            return false;
+        }
+
+        // On success, just clean up.
+        remove(temp_log_file.c_str());
 
     m_modules_compiled = m_total_modules > 0 ? m_total_modules : 1;
     print_progress("Done!");
-    std::cout << "\n" << BOLD << GREEN << "Build successful! Executable created: ./" << base_name << RESET << std::endl;
+    std::cout << "\n" << BOLD << GREEN << "Executable created: ./" << base_name << RESET << std::endl;
+
+    // Calculate build duration
+    auto build_end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> build_duration = build_end_time - m_build_start_time;
+
+    // Calculate total lines
+    int total_lines = 0;
+    for (const auto& [file, count] : m_line_counts) {
+        total_lines += count;
+    }
+
+    // Print the summary
+    std::cout << "\n" << BOLD << YELLOW << " -> Compilation Summary <- " << RESET << std::endl;
+    std::cout << " \n    • " << "Modules Compiled: " << m_compiled_angara_files.size() << " (";
+    for(size_t i = 0; i < m_compiled_angara_files.size(); ++i) {
+        std::cout << get_base_name(m_compiled_angara_files[i]) << (i == m_compiled_angara_files.size() - 1 ? "" : ", ");
+    }
+    std::cout << ")" << std::endl;
+    std::cout << "    • " << "Total Lines of Code: " << total_lines << std::endl;
+    std::cout << "    • " << "Generated C Files: ";
+    for(size_t i = 0; i < m_compiled_c_files.size(); ++i) {
+        std::cout << m_compiled_c_files[i] << (i == m_compiled_c_files.size() - 1 ? "" : ", ");
+    }
+    std::cout << std::endl;
+    std::cout << "    • " << "Build Time: " << std::fixed << std::setprecision(2) << build_duration.count() << "s" << std::endl;
+
     return true;
+
 }
 
 std::string CompilerDriver::get_base_name(const std::string& path) {
@@ -274,7 +344,14 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
 
     } else {
         // --- Path 2: Compile an Angara source file ---
+        m_compiled_angara_files.push_back(path_or_id);
         std::string source = read_file(path_or_id);
+
+        m_line_counts[path_or_id] = 1;
+        for(char c : source) {
+            if (c == '\n') m_line_counts[path_or_id]++;
+        }
+
         if (source.empty()) {
             std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Could not open source file '" << path_or_id << "'\n";
             m_had_error = true;
@@ -313,6 +390,7 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
 
         // Write the generated files to disk.
         std::string h_filename = module_name + ".h";
+        m_compiled_h_files.push_back(h_filename); // <-- ADD THIS LINE
         std::ofstream h_file(h_filename);
         h_file << header_code;
         h_file.close();
