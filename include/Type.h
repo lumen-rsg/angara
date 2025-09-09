@@ -17,6 +17,7 @@ namespace angara {
         FUNCTION,
         CLASS,
         TRAIT,
+        CONTRACT,
         INSTANCE,
         ANY,
         NIL,
@@ -234,6 +235,20 @@ namespace angara {
     struct AnyType : Type {
         AnyType() : Type(TypeKind::ANY) {}
         std::string toString() const override { return "any"; }
+    };
+
+    // The semantic representation of a contract.
+    struct ContractType : Type {
+        const std::string name;
+        // A contract defines a set of required fields and methods.
+        // We can reuse the MemberInfo struct from ClassType.
+        std::map<std::string, ClassType::MemberInfo> fields;
+        std::map<std::string, ClassType::MemberInfo> methods;
+
+        explicit ContractType(std::string name)
+            : Type(TypeKind::CONTRACT), name(std::move(name)) {}
+
+        [[nodiscard]] std::string toString() const override { return "contract<" + name + ">"; }
     };
 
 } // namespace angara

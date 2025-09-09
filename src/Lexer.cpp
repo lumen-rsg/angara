@@ -41,6 +41,8 @@ namespace angara {
             {"static",   TokenType::STATIC},
             {"export",   TokenType::EXPORT},
             {"as",       TokenType::AS},
+            {"contract", TokenType::CONTRACT},
+            {"signs", TokenType::SIGNS},
 
             // Integer Types
             {"i8",       TokenType::TYPE_I8},

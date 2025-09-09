@@ -226,4 +226,6 @@ void angara_throw_error(const char* message);
 AngaraObject angara_create_string_no_copy(char* chars, size_t length);
 AngaraObject angara_equals(AngaraObject a, AngaraObject b);
 
+AngaraObject angara_to_string(AngaraObject value);
+
 #endif //ANGARA_RUNTIME_H

@@ -600,3 +600,41 @@ AngaraObject angara_equals(AngaraObject a, AngaraObject b) {
     }
     return angara_create_bool(false);
 }
+
+AngaraObject angara_to_string(AngaraObject value) {
+    switch (value.type) {
+        case VAL_NIL:
+            return angara_string_from_c("nil");
+        case VAL_BOOL:
+            return angara_string_from_c(AS_BOOL(value) ? "true" : "false");
+        case VAL_I64: {
+            // Determine required size and allocate a buffer for the string.
+            // A 64-bit integer can be up to 20 digits long, plus sign and null terminator.
+            char buffer[22];
+            int len = snprintf(buffer, sizeof(buffer), "%lld", AS_I64(value));
+            return angara_create_string_no_copy(strdup(buffer), len);
+        }
+        case VAL_F64: {
+            // Use snprintf for safe float-to-string conversion.
+            char buffer[32]; // Sufficient for most float representations
+            int len = snprintf(buffer, sizeof(buffer), "%g", AS_F64(value));
+            return angara_create_string_no_copy(strdup(buffer), len);
+        }
+        case VAL_OBJ: {
+            // If it's already a string, just incref it and return a new reference.
+            if (OBJ_TYPE(value) == OBJ_STRING) {
+                angara_incref(value);
+                return value;
+            }
+            // For other object types, return a placeholder representation.
+            // We can expand this later.
+            AngaraObject type_name_obj = angara_typeof(value);
+            char buffer[64];
+            snprintf(buffer, sizeof(buffer), "<%s object>", AS_CSTRING(type_name_obj));
+            angara_decref(type_name_obj);
+            return angara_string_from_c(buffer);
+        }
+        default:
+            return angara_string_from_c("unknown");
+    }
+}

@@ -99,46 +99,58 @@ namespace angara {
 
 // declaration → letDecl | statement
     // declaration → "export"? (class_decl | trait_decl | func_decl | var_decl) | statement
-    std::shared_ptr<Stmt> Parser::declaration() {
-        try {
-            // Look for an optional 'export' keyword first.
-            bool is_exported = match({TokenType::EXPORT});
-            // Now, parse the actual declaration.
-            std::shared_ptr<Stmt> decl_stmt = nullptr;
-            if (match({TokenType::CLASS})) {
-                decl_stmt = classDeclaration();
-                // We need to downcast to set the flag.
-                std::static_pointer_cast<ClassStmt>(decl_stmt)->is_exported = is_exported;
-            } else if (match({TokenType::TRAIT})) {
-                decl_stmt = traitDeclaration();
-                std::static_pointer_cast<TraitStmt>(decl_stmt)->is_exported = is_exported;
-            } else if (match({TokenType::FUNC})) {
-                decl_stmt = function("function");
-                std::static_pointer_cast<FuncStmt>(decl_stmt)->is_exported = is_exported;
-            } else if (match({TokenType::CONST})) {
-                decl_stmt = varDeclaration(true);
-                std::static_pointer_cast<VarDeclStmt>(decl_stmt)->is_exported = is_exported;
-            } else if (match({TokenType::LET})) {
-                decl_stmt = varDeclaration(false);
-                std::static_pointer_cast<VarDeclStmt>(decl_stmt)->is_exported = is_exported;
-            } else if (match({TokenType::ATTACH})) return attachStatement();
+std::shared_ptr<Stmt> Parser::declaration() {
+    try {
+        // Look for an optional 'export' keyword first.
+        bool is_exported = match({TokenType::EXPORT});
 
-            else {
-                // If we saw 'export' but not a valid declaration, it's an error.
-                if (is_exported) {
-                    throw error(peek(), "Expect a class, trait, function, or variable declaration after 'export'.");
-                }
-                // Otherwise, it's just a regular statement.
-                return statement();
-            }
-
-            return decl_stmt;
-
-        } catch (const ParseError& error) {
-            synchronize();
-            return nullptr;
+        // Now, check for the actual declaration type.
+        // We handle `func` separately as it can appear with or without `export`.
+        if (match({TokenType::FUNC})) {
+            auto func_decl = std::static_pointer_cast<FuncStmt>(function("function"));
+            func_decl->is_exported = is_exported;
+            return func_decl;
         }
+
+        std::shared_ptr<Stmt> decl_stmt = nullptr;
+        if (match({TokenType::CONTRACT})) {
+            decl_stmt = contractDeclaration();
+            // We need to downcast to set the flag.
+            std::static_pointer_cast<ContractStmt>(decl_stmt)->is_exported = is_exported;
+        } else if (match({TokenType::CLASS})) {
+            decl_stmt = classDeclaration();
+            std::static_pointer_cast<ClassStmt>(decl_stmt)->is_exported = is_exported;
+        } else if (match({TokenType::TRAIT})) {
+            decl_stmt = traitDeclaration();
+            std::static_pointer_cast<TraitStmt>(decl_stmt)->is_exported = is_exported;
+        } else if (match({TokenType::CONST})) {
+            decl_stmt = varDeclaration(true);
+            std::static_pointer_cast<VarDeclStmt>(decl_stmt)->is_exported = is_exported;
+        } else if (match({TokenType::LET})) {
+            decl_stmt = varDeclaration(false);
+            std::static_pointer_cast<VarDeclStmt>(decl_stmt)->is_exported = is_exported;
+        } else if (match({TokenType::ATTACH})) {
+            // 'attach' cannot be exported, so if 'is_exported' is true, it's an error.
+            if (is_exported) {
+                throw error(previous(), "'attach' statements cannot be exported.");
+            }
+            return attachStatement();
+        } else {
+            // If we saw 'export' but not a valid declaration that can follow it, it's an error.
+            if (is_exported) {
+                throw error(peek(), "Expect a class, contract, trait, function, or variable declaration after 'export'.");
+            }
+            // Otherwise, it's just a regular statement.
+            return statement();
+        }
+
+        return decl_stmt;
+
+    } catch (const ParseError& error) {
+        synchronize();
+        return nullptr;
     }
+}
 
 // letDecl → "let" IDENTIFIER as <type> ( "=" expression )? ";"
     std::shared_ptr<Stmt> Parser::varDeclaration(bool is_const) {
@@ -803,6 +815,15 @@ namespace angara {
             } while (match({TokenType::COMMA}));
         }
 
+        // --- NEW: Parse optional contract signing ---
+        std::vector<std::shared_ptr<VarExpr>> contracts;
+        if (match({TokenType::SIGNS})) {
+            do {
+                consume(TokenType::IDENTIFIER, "Expect contract name.");
+                contracts.push_back(std::make_shared<VarExpr>(previous()));
+            } while (match({TokenType::COMMA}));
+        }
+
         consume(TokenType::LEFT_BRACE, "Expect '{' before class body.");
 
         std::vector<std::shared_ptr<ClassMember>> members;
@@ -842,7 +863,7 @@ namespace angara {
 
         consume(TokenType::RIGHT_BRACE, "Expect '}' after class body.");
 
-        return std::make_shared<ClassStmt>(std::move(name), std::move(superclass), std::move(traits), std::move(members));
+        return std::make_shared<ClassStmt>(std::move(name), std::move(superclass), std::move(contracts), std::move(traits), std::move(members));
     }
 
     std::shared_ptr<Stmt> Parser::traitDeclaration() {
@@ -865,4 +886,48 @@ namespace angara {
         consume(TokenType::RIGHT_BRACE, "Expect '}' after trait body.");
         return std::make_shared<TraitStmt>(std::move(name), std::move(methods));
     }
+
+    std::shared_ptr<Stmt> Parser::contractDeclaration() {
+    Token name = consume(TokenType::IDENTIFIER, "Expect contract name.");
+    consume(TokenType::LEFT_BRACE, "Expect '{' before contract body.");
+
+    std::vector<std::shared_ptr<ClassMember>> members;
+
+    while (!check(TokenType::RIGHT_BRACE) && !isAtEnd()) {
+        if (match({TokenType::PUBLIC})) {
+            consume(TokenType::COLON, "Expect ':' after 'public' specifier.");
+            // This is allowed, but does nothing as public is the default.
+            continue; // Continue to the next member declaration
+        }
+        if (match({TokenType::PRIVATE})) {
+            // This is an error. Contracts define a public interface.
+            throw error(previous(), "Cannot use 'private' access specifier in a contract. All members are implicitly public.");
+        }
+
+        if (match({TokenType::LET}) || match({TokenType::CONST})) {
+            bool is_const = (previous().type == TokenType::CONST);
+
+            Token field_name = consume(TokenType::IDENTIFIER, "Expect field name.");
+            consume(TokenType::AS, "Expect 'as' after field name for type annotation.");
+            std::shared_ptr<ASTType> type_ann = type();
+            consume(TokenType::SEMICOLON, "Expect ';' after contract field declaration.");
+
+            auto field_decl = std::make_shared<VarDeclStmt>(field_name, type_ann, nullptr, is_const);
+            members.push_back(std::make_shared<FieldMember>(field_decl, AccessLevel::PUBLIC));
+
+        } else if (match({TokenType::FUNC})) {
+            auto method_decl = std::static_pointer_cast<FuncStmt>(function("method"));
+            if (method_decl->body) {
+                throw error(method_decl->name, "A contract method cannot have a body.");
+            }
+            members.push_back(std::make_shared<MethodMember>(method_decl, AccessLevel::PUBLIC));
+        } else {
+            throw error(peek(), "Contract body can only contain 'public:', and field ('let', 'const') or method ('func') declarations.");
+        }
+    }
+
+    consume(TokenType::RIGHT_BRACE, "Expect '}' after contract body.");
+    return std::make_shared<ContractStmt>(std::move(name), std::move(members));
 }
+}
+

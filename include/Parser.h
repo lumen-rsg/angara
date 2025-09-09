@@ -75,6 +75,9 @@ namespace angara {
         std::shared_ptr<Expr> logic_or();
         std::shared_ptr<Expr> logic_and();
         std::shared_ptr<Stmt> traitDeclaration();
+
+        std::shared_ptr<Stmt> contractDeclaration();
+
         std::shared_ptr<Stmt> throwStatement();
         std::shared_ptr<Stmt> tryStatement();
         std::shared_ptr<Expr> ternary();

@@ -76,6 +76,8 @@ namespace angara {
 
         void transpileForInStmt(const ForInStmt &stmt);
 
+        std::string transpileSubscriptExpr(const SubscriptExpr &expr);
+
 
         // --- Expression Transpilation Helpers ---
         std::string transpileExpr(const std::shared_ptr<Expr>& expr);

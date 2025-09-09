@@ -83,6 +83,12 @@ namespace angara {
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "Mutex", 0, 0), mutex_constructor_type, true);
 
+        auto string_conv_type = std::make_shared<FunctionType>(
+            std::vector<std::shared_ptr<Type>>{m_type_any},
+            m_type_string
+        );
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "string", 0, 0), string_conv_type, true);
+
     }
 
     void TypeChecker::pushAndSave(const Expr* expr, std::shared_ptr<Type> type) {
@@ -306,6 +312,63 @@ namespace angara {
             }
         }
 
+            // --- NEW: VALIDATE SIGNED CONTRACTS ---
+    for (const auto& contract_expr : stmt.contracts) {
+        auto contract_symbol = m_symbols.resolve(contract_expr->name.lexeme);
+        if (!contract_symbol) {
+            error(contract_expr->name, "Undefined contract '" + contract_expr->name.lexeme + "'.");
+            continue;
+        }
+        if (contract_symbol->type->kind != TypeKind::CONTRACT) {
+            error(contract_expr->name, "'" + contract_expr->name.lexeme + "' is not a contract.");
+            continue;
+        }
+        auto contract_type = std::dynamic_pointer_cast<ContractType>(contract_symbol->type);
+
+        // Check for required FIELDS
+        for (const auto& [name, required_field] : contract_type->fields) {
+            const auto* class_prop = class_type->findProperty(name);
+            if (!class_prop) {
+                error(stmt.name, "Class '" + stmt.name.lexeme + "' does not fulfill contract '" + contract_type->name + "' because it is missing required field '" + name + "'.");
+                continue;
+            }
+            if (class_type->methods.count(name)) {
+                error(stmt.name, "Contract '" + contract_type->name + "' requires a field named '" + name + "', but class '" + stmt.name.lexeme + "' implements it as a method.");
+                continue;
+            }
+            if (class_prop->access != AccessLevel::PUBLIC) {
+                error(stmt.name, "Contract '" + contract_type->name + "' requires field '" + name + "' to be public, but it is private in class '" + stmt.name.lexeme + "'.");
+            }
+            if (class_prop->is_const != required_field.is_const) {
+                error(stmt.name, "Contract '" + contract_type->name + "' requires field '" + name + "' to be '" + (required_field.is_const ? "const" : "let") + "', but it is not in class '" + stmt.name.lexeme + "'.");
+            }
+            if (class_prop->type->toString() != required_field.type->toString()) {
+                error(stmt.name, "Type mismatch for field '" + name + "' required by contract '" + contract_type->name + "'. Expected '" + required_field.type->toString() + "', but got '" + class_prop->type->toString() + "'.");
+            }
+        }
+
+        // Check for required METHODS
+        for (const auto& [name, required_method] : contract_type->methods) {
+            const auto* class_prop = class_type->findProperty(name);
+            if (!class_prop) {
+                error(stmt.name, "Class '" + stmt.name.lexeme + "' does not fulfill contract '" + contract_type->name + "' because it is missing required method '" + name + "'.");
+                continue;
+            }
+            if (class_type->fields.count(name)) {
+                error(stmt.name, "Contract '" + contract_type->name + "' requires a method named '" + name + "', but class '" + stmt.name.lexeme + "' implements it as a field.");
+                continue;
+            }
+            if (class_prop->access != AccessLevel::PUBLIC) {
+                 error(stmt.name, "Contract '" + contract_type->name + "' requires method '" + name + "' to be public, but it is private in class '" + stmt.name.lexeme + "'.");
+            }
+            auto required_func_type = std::dynamic_pointer_cast<FunctionType>(required_method.type);
+            auto class_func_type = std::dynamic_pointer_cast<FunctionType>(class_prop->type);
+            if (!class_func_type->equals(*required_func_type)) {
+                error(stmt.name, "The signature of method '" + name + "' in class '" + stmt.name.lexeme + "' does not match the signature required by contract '" + contract_type->name + "'.\n  Required: " + required_func_type->toString() + "\n  Found:    " + class_func_type->toString());
+            }
+        }
+    }
+
         // 4. Resolve and validate traits.
         for (const auto& trait_expr : stmt.traits) {
             auto trait_symbol = m_symbols.resolve(trait_expr->name.lexeme);
@@ -346,7 +409,17 @@ namespace angara {
 bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     m_hadError = false;
 
-    // --- PASS 1: Declare all top-level type names (unchanged) ---
+        // --- NEW PRE-PASS: Resolve all module attachments FIRST ---
+        // This is critical. It populates the symbol table with imported types
+        // before any local types are analyzed.
+        for (const auto& stmt : statements) {
+            if (auto attach_stmt = std::dynamic_pointer_cast<const AttachStmt>(stmt)) {
+                resolveAttach(*attach_stmt);
+            }
+        }
+        if (m_hadError) return false;
+
+    // --- PASS 1: Declare all top-level type names ---
     for (const auto& stmt : statements) {
         if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
             auto class_type = std::make_shared<ClassType>(class_stmt->name.lexeme);
@@ -354,14 +427,24 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         } else if (auto trait_stmt = std::dynamic_pointer_cast<const TraitStmt>(stmt)) {
             auto trait_type = std::make_shared<TraitType>(trait_stmt->name.lexeme);
             if (!m_symbols.declare(trait_stmt->name, trait_type, true)) { /* error */ }
+        } else if (auto contract_stmt = std::dynamic_pointer_cast<const ContractStmt>(stmt)) { // TODO : errors.
+            auto contract_type = std::make_shared<ContractType>(contract_stmt->name.lexeme);
+            if (!m_symbols.declare(contract_stmt->name, contract_type, true)) { /* error */ }
         }
     }
     if (m_hadError) return false;
 
+    // --- PASS 2: Define all headers and signatures (Order is important!) ---
 
-    // --- PASS 2: Define all headers and signatures ---
+    // -- STAGE 2a: Define CONTRACT headers FIRST --
+    for (const auto& stmt : statements) {
+        if (auto contract_stmt = std::dynamic_pointer_cast<const ContractStmt>(stmt)) {
+            defineContractHeader(*contract_stmt);
+        }
+    }
+    if (m_hadError) return false;
 
-    // --- STAGE 2a: Define TRAIT headers FIRST ---
+    // -- STAGE 2b: Define TRAIT headers NEXT --
     for (const auto& stmt : statements) {
         if (auto trait_stmt = std::dynamic_pointer_cast<const TraitStmt>(stmt)) {
             defineTraitHeader(*trait_stmt);
@@ -369,7 +452,7 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     }
     if (m_hadError) return false;
 
-    // --- STAGE 2b: Define CLASS headers NEXT ---
+    // -- STAGE 2c: Define CLASS headers, which validates traits and contracts --
     for (const auto& stmt : statements) {
         if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
             defineClassHeader(*class_stmt);
@@ -377,14 +460,9 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     }
     if (m_hadError) return false;
 
-    // --- STAGE 2c: Define global FUNCTION headers LAST ---
+    // -- STAGE 2d: Define global FUNCTION headers LAST --
     for (const auto& stmt : statements) {
         if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
-            // We need to ensure we don't process methods, which are also FuncStmts
-            // but are part of a class. The simplest way is to check if it's already in the symbol table.
-            // A better way would be to check its parent in the AST if we had that link.
-
-            // TODO - refine
             if (m_symbols.resolve(func_stmt->name.lexeme) == nullptr) {
                  defineFunctionHeader(*func_stmt);
             }
@@ -392,8 +470,7 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     }
     if (m_hadError) return false;
 
-
-    // --- PASS 3: Check all implementation code (unchanged) ---
+    // --- PASS 3: Check all implementation code ---
     for (const auto& stmt : statements) {
         stmt->accept(*this, stmt);
     }
@@ -972,54 +1049,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
 
 
     void TypeChecker::visit(std::shared_ptr<const AttachStmt> stmt) {
-        // 1. Ask the main driver to resolve this module path.
-        //    This will handle caching and either compile the .an or load the .so.
-        std::string module_path = stmt->modulePath.lexeme;
-        std::shared_ptr<ModuleType> module_type = m_driver.resolveModule(module_path, stmt->modulePath);
 
-        if (!module_type) {
-            // The driver already reported the error (e.g., file not found, circular dependency).
-            return;
-        }
-
-        // Save the resolution result for the CTranspiler to use later.
-        m_module_resolutions[stmt.get()] = module_type;
-
-        // Determine the name to declare in the symbol table.
-        std::string symbol_name;
-        Token name_token;
-
-        if (stmt->alias) {
-            // If an alias exists, use it.
-            symbol_name = stmt->alias->lexeme;
-            name_token = *stmt->alias;
-        } else {
-            // Otherwise, use the base name of the module file.
-            symbol_name = CompilerDriver::get_base_name(module_path);
-            name_token = Token(TokenType::IDENTIFIER, symbol_name, stmt->modulePath.line, 0);
-        }
-
-        // Now, declare the symbol with the chosen name.
-        if (!m_symbols.declare(name_token, module_type, true)) {
-            error(name_token, "A symbol with this name already exists in this scope.");
-        }
-            // For `attach PI, circle_area from "utils.an"`
-        else {
-            // This is the `from ... import` syntax.
-            for (const auto& name_token : stmt->names) {
-                const std::string& name_str = name_token.lexeme;
-                // Find the symbol in the imported module's public API.
-                auto export_it = module_type->exports.find(name_str);
-                if (export_it == module_type->exports.end()) {
-                    error(name_token, "Module '" + module_type->name + "' has no exported member named '" + name_str + "'.");
-                } else {
-                    // Declare a new symbol in the current scope with the imported type.
-                    if (!m_symbols.declare(name_token, export_it->second, true)) {
-                        error(name_token, "A symbol with this name already exists in this scope.");
-                    }
-                }
-            }
-        }
     }
 
 
@@ -1673,5 +1703,102 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         // --- RULE 4: Success! The type is the method's FunctionType ---
         pushAndSave(&expr, method_it->second.type);
         return {};
+    }
+
+    void TypeChecker::visit(std::shared_ptr<const ContractStmt> stmt) {
+        // This is called during Pass 3.
+        // Contracts only contain declarations, not executable code or initializers,
+        // so there is nothing to check in this pass. All validation happens
+        // when a class signs the contract in `defineClassHeader`.
+    }
+
+    void TypeChecker::defineContractHeader(const ContractStmt& stmt) {
+    // 1. Get the placeholder ContractType that was created in Pass 1.
+    auto symbol = m_symbols.resolve(stmt.name.lexeme);
+    auto contract_type = std::dynamic_pointer_cast<ContractType>(symbol->type);
+
+    // 2. If the contract is exported, add it to the module's public API.
+    if (stmt.is_exported) {
+        m_module_type->exports[stmt.name.lexeme] = contract_type;
+    }
+
+    // 3. Resolve and define all members required by the contract.
+    for (const auto& member : stmt.members) {
+        if (auto field_member = std::dynamic_pointer_cast<const FieldMember>(member)) {
+            const auto& field_decl = field_member->declaration;
+            auto field_type = resolveType(field_decl->typeAnnotation);
+
+            if (contract_type->fields.count(field_decl->name.lexeme) || contract_type->methods.count(field_decl->name.lexeme)) {
+                error(field_decl->name, "Duplicate member '" + field_decl->name.lexeme + "' in contract.");
+                continue;
+            }
+            // All contract members are implicitly public.
+            contract_type->fields[field_decl->name.lexeme] = {field_type, AccessLevel::PUBLIC, field_decl->is_const};
+
+        } else if (auto method_member = std::dynamic_pointer_cast<const MethodMember>(member)) {
+            const auto& method_decl = method_member->declaration;
+
+            std::vector<std::shared_ptr<Type>> param_types;
+            for (const auto& p : method_decl->params) {
+                param_types.push_back(resolveType(p.type));
+            }
+            std::shared_ptr<Type> return_type = m_type_void;
+            if (method_decl->returnType) {
+                return_type = resolveType(method_decl->returnType);
+            }
+            auto method_type = std::make_shared<FunctionType>(param_types, return_type);
+
+            if (contract_type->methods.count(method_decl->name.lexeme) || contract_type->fields.count(method_decl->name.lexeme)) {
+                error(method_decl->name, "Duplicate member '" + method_decl->name.lexeme + "' in contract.");
+                continue;
+            }
+            contract_type->methods[method_decl->name.lexeme] = {method_type, AccessLevel::PUBLIC, false};
+        }
+    }
+}
+
+    void TypeChecker::resolveAttach(const AttachStmt& stmt) {
+        // 1. Ask the main driver to resolve this module path.
+        std::string module_path = stmt.modulePath.lexeme;
+        std::shared_ptr<ModuleType> module_type = m_driver.resolveModule(module_path, stmt.modulePath);
+
+        if (!module_type) {
+            // The driver already reported the error.
+            return;
+        }
+
+        m_module_resolutions[&stmt] = module_type;
+
+        // --- Logic for selective `from` import ---
+        if (!stmt.names.empty()) {
+            for (const auto& name_token : stmt.names) {
+                const std::string& name_str = name_token.lexeme;
+                auto export_it = module_type->exports.find(name_str);
+                if (export_it == module_type->exports.end()) {
+                    error(name_token, "Module '" + module_type->name + "' has no exported member named '" + name_str + "'.");
+                } else {
+                    if (!m_symbols.declare(name_token, export_it->second, true)) {
+                        error(name_token, "A symbol with this name already exists in this scope.");
+                    }
+                }
+            }
+        }
+        // --- Logic for whole-module import (with optional alias) ---
+        else {
+            std::string symbol_name;
+            Token name_token;
+
+            if (stmt.alias) {
+                symbol_name = stmt.alias->lexeme;
+                name_token = *stmt.alias;
+            } else {
+                symbol_name = CompilerDriver::get_base_name(module_path);
+                name_token = Token(TokenType::IDENTIFIER, symbol_name, stmt.modulePath.line, 0);
+            }
+
+            if (!m_symbols.declare(name_token, module_type, true)) {
+                error(name_token, "A symbol with this name already exists in this scope.");
+            }
+        }
     }
 } // namespace angara

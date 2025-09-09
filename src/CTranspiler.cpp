@@ -709,6 +709,8 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
             return transpileThisExpr(*this_expr);
         } else if (auto super = std::dynamic_pointer_cast<const SuperExpr>(expr)) {
             return transpileSuperExpr(*super);
+        } else if (auto subscript  = std::dynamic_pointer_cast<const SubscriptExpr>(expr)) {
+            return transpileSubscriptExpr(*subscript);
         }
         return "/* unknown expr */";
     }
@@ -883,6 +885,8 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
 
     std::string CTranspiler::transpileRecordExpr(const RecordExpr& expr) {
         // Generates: angara_record_new_with_fields(count, (AngaraObject[]){"key1", val1, "key2", val2, ...})
+
+        std::cout << "falling into record expr transpile method..." << std::endl;
 
         // 1. Transpile all key/value pairs.
         std::stringstream kvs_ss;
@@ -1077,6 +1081,12 @@ void CTranspiler::transpileWhileStmt(const WhileStmt& stmt) {
                 return "angara_spawn(angara_closure_new(" + wrapper_name + ", " + std::to_string(func_type->param_types.size()) + ", false))";
              }
         }
+
+        if (func_name == "string") {
+            // The type checker already verified it has exactly one argument.
+            return "angara_to_string(" + args_str + ")";
+        }
+
         if (func_name == "Mutex") {
             return "angara_mutex_new()";
         }
@@ -1110,6 +1120,31 @@ void CTranspiler::transpileWhileStmt(const WhileStmt& stmt) {
 std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
     auto rhs_str = transpileExpr(expr.value);
     auto lhs_str = transpileExpr(expr.target);
+
+        if (auto subscript_target = std::dynamic_pointer_cast<const SubscriptExpr>(expr.target)) {
+            // This is a special case that doesn't transpile to a simple C assignment.
+            // We must generate a call to a runtime setter function.
+
+            std::string object_str = transpileExpr(subscript_target->object);
+            std::string value_str = transpileExpr(expr.value);
+            auto collection_type = m_type_checker.m_expression_types.at(subscript_target->object.get());
+
+            if (collection_type->kind == TypeKind::LIST) {
+                std::string index_str = transpileExpr(subscript_target->index);
+                // Generates: angara_list_set(list, index, value);
+                return "angara_list_set(" + object_str + ", " + index_str + ", " + value_str + ")";
+            }
+
+            if (collection_type->kind == TypeKind::RECORD) {
+                // The type checker guarantees the index is a string literal.
+                if (auto key_literal = std::dynamic_pointer_cast<const Literal>(subscript_target->index)) {
+                    // Generates: angara_record_set(record, "key", value);
+                    return "angara_record_set(" + object_str + ", \"" + key_literal->token.lexeme + "\", " + value_str + ")";
+                }
+            }
+
+            return "/* unsupported subscript assignment */";
+        }
 
     if (expr.op.type == TokenType::EQUAL) {
         // Simple assignment: x = y
@@ -1305,6 +1340,29 @@ std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
     m_indent_level--;
     indent(); (*m_current_out) << "}\n";
 }
+
+    std::string CTranspiler::transpileSubscriptExpr(const SubscriptExpr& expr) {
+        // 1. Get the pre-computed type of the object being accessed.
+        auto collection_type = m_type_checker.m_expression_types.at(expr.object.get());
+        std::string object_str = transpileExpr(expr.object);
+
+        // 2. Dispatch based on the collection's type.
+        if (collection_type->kind == TypeKind::LIST) {
+            std::string index_str = transpileExpr(expr.index);
+            return "angara_list_get(" + object_str + ", " + index_str + ")";
+        }
+
+        if (collection_type->kind == TypeKind::RECORD) {
+            // The type checker guarantees the index is a string literal for records.
+            if (auto key_literal = std::dynamic_pointer_cast<const Literal>(expr.index)) {
+                // We need the raw lexeme for the C function call.
+                return "angara_record_get(" + object_str + ", \"" + key_literal->token.lexeme + "\")";
+            }
+        }
+
+        // Fallback if the type checker somehow let a non-subscriptable type through.
+        return "/* unsupported subscript */";
+    }
 
 
 } // namespace angara

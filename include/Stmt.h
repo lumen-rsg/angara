@@ -28,6 +28,7 @@ namespace angara {
     struct TryStmt;
     struct ClassStmt;
     struct TraitStmt;
+    struct ContractStmt;
 
 // Statement Visitor Interface (returns void)
     class StmtVisitor {
@@ -48,6 +49,7 @@ namespace angara {
         virtual void visit(std::shared_ptr<const TryStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const ClassStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const TraitStmt> stmt) = 0;
+        virtual void visit(std::shared_ptr<const ContractStmt> stmt) = 0;
     };
     // A simple struct to pair a parameter's name with its type annotation.
     struct Parameter {
@@ -285,19 +287,23 @@ namespace angara {
         const std::shared_ptr<Stmt> catchBlock;
     };
 
-    // Represents a "class Name { [let field...;] [func method...;] }" statement
+    // Represents a "class Name signs C1, C2 inherits S uses T1, T2 { ... }" statement
     struct ClassStmt : Stmt {
         const Token name;
         const std::shared_ptr<VarExpr> superclass;
+        const std::vector<std::shared_ptr<VarExpr>> contracts;
         const std::vector<std::shared_ptr<VarExpr>> traits;
         const std::vector<std::shared_ptr<ClassMember>> members;
         bool is_exported = false;
 
+        // Constructor updated to accept the contracts vector
         ClassStmt(Token name, std::shared_ptr<VarExpr> superclass,
+                  std::vector<std::shared_ptr<VarExpr>> contracts,
                   std::vector<std::shared_ptr<VarExpr>> traits,
                   std::vector<std::shared_ptr<ClassMember>> members)
                 : name(std::move(name)),
                   superclass(std::move(superclass)),
+                  contracts(std::move(contracts)),
                   traits(std::move(traits)),
                   members(std::move(members)) {}
 
@@ -317,6 +323,19 @@ namespace angara {
 
         void accept(StmtVisitor &visitor, std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const TraitStmt>(self));
+        }
+    };
+
+    struct ContractStmt : Stmt {
+        const Token name;
+        const std::vector<std::shared_ptr<ClassMember>> members;
+        bool is_exported = false;
+
+        ContractStmt(Token name, std::vector<std::shared_ptr<ClassMember>> members)
+                : name(std::move(name)), members(std::move(members)) {}
+
+        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+            visitor.visit(std::static_pointer_cast<const ContractStmt>(self));
         }
     };
 }
