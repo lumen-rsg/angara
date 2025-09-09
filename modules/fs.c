@@ -14,17 +14,17 @@
 AngaraObject Angara_fs_read_file(int arg_count, AngaraObject* args) {
     if (arg_count != 1) {
         angara_throw_error("read_file() expects 1 argument.");
-        return create_nil();
+        return angara_create_nil();
     }
     if (!ANGARA_IS_STRING(args[0])) { // Use the new macro
         angara_throw_error("read_file() argument must be a string.");
-        return create_nil();
+        return angara_create_nil();
     }
 
     const char* path = ANGARA_AS_CSTRING(args[0]); // This now works
 
     FILE* file = fopen(path, "rb");
-    if (!file) return create_nil();
+    if (!file) return angara_create_nil();
 
     fseek(file, 0L, SEEK_END);
     size_t file_size = ftell(file);

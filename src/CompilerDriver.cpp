@@ -32,8 +32,8 @@ void CompilerDriver::log_step(const std::string& message) {
 }
 
     CompilerDriver::CompilerDriver()
-            : m_runtime_path("/usr/src/angara/runtime"),
-              m_angara_module_path("/usr/src/angara/modules"),
+            : m_runtime_path("/opt/src/angara/runtime"),
+              m_angara_module_path("/opt/src/angara/modules"),
               m_native_module_path("/lib64/angara")
     {}
 

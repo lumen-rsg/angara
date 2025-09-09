@@ -12,11 +12,15 @@
 static void free_object(Object* object);
 void printObject(AngaraObject obj);
 
+// --- Internal Forward Declarations for Records ---
+static void grow_record_capacity(AngaraRecord* record);
+static void free_record(AngaraRecord* record);
+
 // --- Value Constructors ---
-AngaraObject create_nil(void) { return (AngaraObject){VAL_NIL, {.i64 = 0}}; }
-AngaraObject create_bool(bool value) { return (AngaraObject){VAL_BOOL, {.boolean = value}}; }
-AngaraObject create_i64(int64_t value) { return (AngaraObject){VAL_I64, {.i64 = value}}; }
-AngaraObject create_f64(double value) { return (AngaraObject){VAL_F64, {.f64 = value}}; }
+AngaraObject angara_create_nil(void) { return (AngaraObject){VAL_NIL, {.i64 = 0}}; }
+AngaraObject angara_create_bool(bool value) { return (AngaraObject){VAL_BOOL, {.boolean = value}}; }
+AngaraObject angara_create_i64(int64_t value) { return (AngaraObject){VAL_I64, {.i64 = value}}; }
+AngaraObject angara_create_f64(double value) { return (AngaraObject){VAL_F64, {.f64 = value}}; }
 
 // --- Memory Management ---
 void angara_incref(AngaraObject value) {
@@ -40,10 +44,10 @@ void angara_print(int arg_count, AngaraObject args[]) {
 
 AngaraObject angara_len(AngaraObject collection) {
     if (IS_OBJ(collection)) {
-        if (OBJ_TYPE(collection) == OBJ_STRING) return create_i64(AS_STRING(collection)->length);
-        if (OBJ_TYPE(collection) == OBJ_LIST) return create_i64(AS_LIST(collection)->count);
+        if (OBJ_TYPE(collection) == OBJ_STRING) return angara_create_i64(AS_STRING(collection)->length);
+        if (OBJ_TYPE(collection) == OBJ_LIST) return angara_create_i64(AS_LIST(collection)->count);
     }
-    return create_nil();
+    return angara_create_nil();
 }
 
 bool angara_is_truthy(AngaraObject value) {
@@ -128,7 +132,7 @@ void angara_list_push(AngaraObject list_obj, AngaraObject value) {
 AngaraObject angara_list_get(AngaraObject list_obj, AngaraObject index_obj) {
     AngaraList* list = AS_LIST(list_obj);
     int64_t index = AS_I64(index_obj);
-    if (index < 0 || index >= list->count) return create_nil();
+    if (index < 0 || index >= list->count) return angara_create_nil();
     AngaraObject value = list->elements[index];
     angara_incref(value);
     return value;
@@ -144,10 +148,105 @@ void angara_list_set(AngaraObject list_obj, AngaraObject index_obj, AngaraObject
 }
 
 // --- Record Implementation (STUBBED) ---
-AngaraObject angara_record_new(void) { /* ... */ return create_nil(); }
-AngaraObject angara_record_new_with_fields(size_t pair_count, AngaraObject kvs[]) { /* ... */ return create_nil(); }
-void angara_record_set(AngaraObject record, const char* key, AngaraObject value) { /* ... */ }
-AngaraObject angara_record_get(AngaraObject record, const char* key) { /* ... */ return create_nil(); }
+AngaraObject angara_record_new(void) {
+    AngaraRecord* record = (AngaraRecord*)malloc(sizeof(AngaraRecord));
+    if (record == NULL) {
+        // In a real-world scenario, handle allocation failure gracefully.
+        exit(1);
+    }
+    record->obj.type = OBJ_RECORD;
+    record->obj.ref_count = 1;
+    record->count = 0;
+    record->capacity = 0;
+    record->entries = NULL;
+    return (AngaraObject){VAL_OBJ, {.obj = (Object*)record}};
+}
+
+// Helper to grow the dynamic array of record entries.
+static void grow_record_capacity(AngaraRecord* record) {
+    size_t old_capacity = record->capacity;
+    record->capacity = old_capacity < 8 ? 8 : old_capacity * 2;
+    record->entries = (RecordEntry*)realloc(record->entries, sizeof(RecordEntry) * record->capacity);
+    if (record->entries == NULL) {
+        exit(1); // Handle allocation failure
+    }
+}
+
+// Sets a field on a record. If the key already exists, it updates the value.
+// Otherwise, it adds a new key-value pair.
+void angara_record_set(AngaraObject record_obj, const char* key, AngaraObject value) {
+    if (!IS_OBJ(record_obj) || OBJ_TYPE(record_obj) != OBJ_RECORD) return;
+    AngaraRecord* record = AS_RECORD(record_obj);
+
+    // 1. Check if the key already exists (linear search).
+    for (size_t i = 0; i < record->count; i++) {
+        if (strcmp(record->entries[i].key, key) == 0) {
+            // Key found. Decref the old value and update it.
+            angara_decref(record->entries[i].value);
+            record->entries[i].value = value;
+            angara_incref(value);
+            return;
+        }
+    }
+
+    // 2. Key not found. Add a new entry.
+    // Ensure there is enough capacity.
+    if (record->capacity < record->count + 1) {
+        grow_record_capacity(record);
+    }
+
+    // 3. Add the new entry to the end.
+    RecordEntry* entry = &record->entries[record->count];
+    record->count++;
+
+    // The record must own its keys. We must copy the provided string.
+    entry->key = strdup(key);
+    entry->value = value;
+    angara_incref(value);
+}
+
+// Gets a field from a record. Returns nil if the key is not found.
+AngaraObject angara_record_get(AngaraObject record_obj, const char* key) {
+    if (!IS_OBJ(record_obj) || OBJ_TYPE(record_obj) != OBJ_RECORD) return angara_create_nil();
+    AngaraRecord* record = AS_RECORD(record_obj);
+
+    // Linearly search for the key.
+    for (size_t i = 0; i < record->count; i++) {
+        if (strcmp(record->entries[i].key, key) == 0) {
+            // Found it. Incref the value before returning it.
+            angara_incref(record->entries[i].value);
+            return record->entries[i].value;
+        }
+    }
+
+    // Not found.
+    return angara_create_nil();
+}
+
+// The constructor used by the transpiler for record literals.
+// `kvs` is an array of [key1, value1, key2, value2, ...].
+AngaraObject angara_record_new_with_fields(size_t pair_count, AngaraObject kvs[]) {
+    AngaraObject record_obj = angara_record_new();
+
+    for (size_t i = 0; i < pair_count; i++) {
+        AngaraObject key_obj = kvs[i * 2];
+        AngaraObject value_obj = kvs[i * 2 + 1];
+
+        // The key from a literal is always an AngaraString. We need its C chars.
+        const char* key_cstr = AS_CSTRING(key_obj);
+
+        angara_record_set(record_obj, key_cstr, value_obj);
+    }
+
+    // The key and value objects in the kvs array were temporary and owned by the
+    // caller. `angara_record_set` has already incref'd the values and copied the
+    // keys, so we don't need to do anything with the kvs array itself.
+
+    return record_obj;
+}
+
+
+
 
 
 // --- Internal Helper Implementations ---
@@ -167,12 +266,26 @@ static void free_mutex(AngaraMutex* mutex) {
     free(mutex);
 }
 
+// The memory cleanup function for a record object.
+static void free_record(AngaraRecord* record) {
+    for (size_t i = 0; i < record->count; i++) {
+        // Free the copied key string.
+        free(record->entries[i].key);
+        // Decref the value AngaraObject.
+        angara_decref(record->entries[i].value);
+    }
+    // Free the array of entries itself.
+    free(record->entries);
+    // Free the record struct.
+    free(record);
+}
+
 static void free_object(Object* object) {
     // printf("-- freeing object of type %d --\n", object->type);
     switch (object->type) {
         case OBJ_STRING: free_string((AngaraString*)object); break;
         case OBJ_LIST: free_list((AngaraList*)object); break;
-        case OBJ_RECORD: /* TODO */ free(object); break;
+        case OBJ_RECORD: free_record((AngaraRecord*)object); break;
         case OBJ_INSTANCE:
             // For now, just free the memory. We'll need to handle
             // decref-ing all fields later.
@@ -215,7 +328,18 @@ void printObject(AngaraObject obj) {
                     printf("<instance of %s>", AS_INSTANCE(obj)->klass->name);
                     break;
                 case OBJ_THREAD: printf("<thread>"); break;
-                case OBJ_MUTEX: printf("<mutex>"); break; // <-- ADD THIS
+                case OBJ_MUTEX: printf("<mutex>"); break;
+                case OBJ_RECORD: {
+                    AngaraRecord* record = AS_RECORD(obj);
+                    printf("{");
+                    for (size_t i = 0; i < record->count; i++) {
+                        printf("%s: ", record->entries[i].key);
+                        printObject(record->entries[i].value);
+                        if (i < record->count - 1) printf(", ");
+                    }
+                    printf("}");
+                    break;
+                }
 
                 default: printf("<object>"); break;
             }
@@ -302,7 +426,7 @@ AngaraObject angara_spawn(AngaraObject closure) {
     thread_obj->obj.type = OBJ_THREAD;
     thread_obj->obj.ref_count = 1;
     thread_obj->closure_to_run = closure;
-    thread_obj->return_value = create_nil(); // Initialize return value to nil
+    thread_obj->return_value = angara_create_nil(); // Initialize return value to nil
     angara_incref(closure);
 
     // 2. Pass a pointer to the entire AngaraThread object to the new thread.
@@ -310,7 +434,7 @@ AngaraObject angara_spawn(AngaraObject closure) {
         printf("Error: Failed to create Angara thread.\n");
         angara_decref(closure);
         free(thread_obj);
-        return create_nil();
+        return angara_create_nil();
     }
 
     return (AngaraObject){VAL_OBJ, {.obj = (Object*)thread_obj}};
@@ -318,7 +442,7 @@ AngaraObject angara_spawn(AngaraObject closure) {
 
 AngaraObject angara_thread_join(AngaraObject thread_obj) {
     if (!IS_OBJ(thread_obj) || OBJ_TYPE(thread_obj) != OBJ_THREAD) {
-        return create_nil(); // Return nil on error
+        return angara_create_nil(); // Return nil on error
     }
     AngaraThread* thread = AS_THREAD(thread_obj);
 
@@ -345,7 +469,7 @@ AngaraObject angara_call(AngaraObject closure_obj, int arg_count, AngaraObject a
     if (!IS_OBJ(closure_obj) || OBJ_TYPE(closure_obj) != OBJ_CLOSURE) {
         // This would be a runtime error.
         printf("Runtime Error: Attempted to call a non-function.\n");
-        return create_nil();
+        return angara_create_nil();
     }
 
     AngaraClosure* closure = AS_CLOSURE(closure_obj);
@@ -353,7 +477,7 @@ AngaraObject angara_call(AngaraObject closure_obj, int arg_count, AngaraObject a
     // Arity check
     if (!closure->is_native && closure->arity != arg_count) {
         printf("Runtime Error: Expected %d arguments but got %d.\n", closure->arity, arg_count);
-        return create_nil();
+        return angara_create_nil();
     }
 
     // --- The actual call ---
@@ -370,7 +494,7 @@ AngaraObject angara_mutex_new(void) {
     if (pthread_mutex_init(&mutex->handle, NULL) != 0) {
         printf("Error: Failed to initialize mutex.\n");
         free(mutex);
-        return create_nil();
+        return angara_create_nil();
     }
 
     return (AngaraObject){VAL_OBJ, {.obj = (Object*)mutex}};
@@ -397,7 +521,7 @@ AngaraObject angara_pre_increment(AngaraObject* lvalue) {
 
 AngaraObject angara_post_increment(AngaraObject* lvalue) {
     // Returns the ORIGINAL value.
-    AngaraObject original_value = create_i64(lvalue->as.i64);
+    AngaraObject original_value = angara_create_i64(lvalue->as.i64);
     lvalue->as.i64++;
     // No incref needed, create_i64 returns a fresh value.
     return original_value;
@@ -410,7 +534,7 @@ AngaraObject angara_pre_decrement(AngaraObject* lvalue) {
 }
 
 AngaraObject angara_post_decrement(AngaraObject* lvalue) {
-    AngaraObject original_value = create_i64(lvalue->as.i64);
+    AngaraObject original_value = angara_create_i64(lvalue->as.i64);
     lvalue->as.i64--;
     return original_value;
 }
@@ -457,22 +581,22 @@ AngaraObject angara_equals(AngaraObject a, AngaraObject b) {
     if (a.type != b.type) {
         // Special case: allow comparing any number to any other number
         if ((IS_I64(a) || IS_F64(a)) && (IS_I64(b) || IS_F64(b))) {
-            return create_bool(AS_F64(a) == AS_F64(b));
+            return angara_create_bool(AS_F64(a) == AS_F64(b));
         }
-        return create_bool(false); // Different types are not equal
+        return angara_create_bool(false); // Different types are not equal
     }
 
     switch (a.type) {
-        case VAL_NIL: return create_bool(true);
-        case VAL_BOOL: return create_bool(AS_BOOL(a) == AS_BOOL(b));
-        case VAL_I64: return create_bool(AS_I64(a) == AS_I64(b));
-        case VAL_F64: return create_bool(AS_F64(a) == AS_F64(b));
+        case VAL_NIL: return angara_create_bool(true);
+        case VAL_BOOL: return angara_create_bool(AS_BOOL(a) == AS_BOOL(b));
+        case VAL_I64: return angara_create_bool(AS_I64(a) == AS_I64(b));
+        case VAL_F64: return angara_create_bool(AS_F64(a) == AS_F64(b));
         case VAL_OBJ:
             if (OBJ_TYPE(a) == OBJ_STRING) {
-                return create_bool(strcmp(AS_CSTRING(a), AS_CSTRING(b)) == 0);
+                return angara_create_bool(strcmp(AS_CSTRING(a), AS_CSTRING(b)) == 0);
             }
             // For other objects, compare pointers for now.
-            return create_bool(AS_OBJ(a) == AS_OBJ(b));
+            return angara_create_bool(AS_OBJ(a) == AS_OBJ(b));
     }
-    return create_bool(false);
+    return angara_create_bool(false);
 }

@@ -362,7 +362,7 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
         }
         (*m_current_out) << ");\n";
         indent();
-        (*m_current_out) << "return create_nil();\n";
+        (*m_current_out) << "return angara_create_nil();\n";
     } else {
         (*m_current_out) << "return " << mangled_impl_name << "(";
         for (int i = 0; i < stmt.params.size(); ++i) {
@@ -639,7 +639,7 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
         if (stmt.initializer) {
             (*m_current_out) << " = " << transpileExpr(stmt.initializer);
         } else {
-            (*m_current_out) << " = create_nil()";
+            (*m_current_out) << " = angara_create_nil()";
         }
         (*m_current_out) << ";\n";
     }
@@ -719,12 +719,12 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
 
     std::string CTranspiler::transpileLiteral(const Literal& expr) {
         auto type = m_type_checker.m_expression_types.at(&expr);
-        if (type->toString() == "i64") return "create_i64(" + expr.token.lexeme + "LL)";
-        if (type->toString() == "f64") return "create_f64(" + expr.token.lexeme + ")";
-        if (type->toString() == "bool") return "create_bool(" + expr.token.lexeme + ")";
+        if (type->toString() == "i64") return "angara_create_i64(" + expr.token.lexeme + "LL)";
+        if (type->toString() == "f64") return "angara_create_f64(" + expr.token.lexeme + ")";
+        if (type->toString() == "bool") return "angara_create_bool(" + expr.token.lexeme + ")";
         if (type->toString() == "string") return "angara_string_from_c(\"" + expr.token.lexeme + "\")";
-        if (type->toString() == "nil") return "create_nil()";
-        return "create_nil() /* unknown literal */";
+        if (type->toString() == "nil") return "angara_create_nil()";
+        return "angara_create_nil() /* unknown literal */";
     }
 
     std::string CTranspiler::transpileBinary(const Binary& expr) {
@@ -743,7 +743,7 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
             case TokenType::EQUAL_EQUAL:
                 return "angara_equals(" + lhs_str + ", " + rhs_str + ")";
             case TokenType::BANG_EQUAL:
-                return "create_bool(!AS_BOOL(angara_equals(" + lhs_str + ", " + rhs_str + ")))";
+                return "angara_create_bool(!AS_BOOL(angara_equals(" + lhs_str + ", " + rhs_str + ")))";
 
                 // --- Comparison Operators (numeric only) ---
             case TokenType::GREATER:
@@ -751,7 +751,7 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
             case TokenType::LESS:
             case TokenType::LESS_EQUAL:
                 // The Type Checker guarantees these are numeric. We promote to float for a safe comparison.
-                return "create_bool((AS_F64(" + lhs_str + ") " + op + " AS_F64(" + rhs_str + ")))";
+                return "angara_create_bool((AS_F64(" + lhs_str + ") " + op + " AS_F64(" + rhs_str + ")))";
 
                 // --- Arithmetic Operators (numeric only) ---
             case TokenType::PLUS:
@@ -759,22 +759,22 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
             case TokenType::STAR:
             case TokenType::SLASH:
                 if (isFloat(lhs_type) || isFloat(rhs_type)) {
-                    return "create_f64((AS_F64(" + lhs_str + ") " + op + " AS_F64(" + rhs_str + ")))";
+                    return "angara_create_f64((AS_F64(" + lhs_str + ") " + op + " AS_F64(" + rhs_str + ")))";
                 } else {
-                    return "create_i64((AS_I64(" + lhs_str + ") " + op + " AS_I64(" + rhs_str + ")))";
+                    return "angara_create_i64((AS_I64(" + lhs_str + ") " + op + " AS_I64(" + rhs_str + ")))";
                 }
 
             case TokenType::PERCENT:
                 if (isFloat(lhs_type) || isFloat(rhs_type)) {
-                    return "create_f64(fmod(AS_F64(" + lhs_str + "), AS_F64(" + rhs_str + ")))";
+                    return "angara_create_f64(fmod(AS_F64(" + lhs_str + "), AS_F64(" + rhs_str + ")))";
                 } else {
-                    return "create_i64((AS_I64(" + lhs_str + ") % AS_I64(" + rhs_str + ")))";
+                    return "angara_create_i64((AS_I64(" + lhs_str + ") % AS_I64(" + rhs_str + ")))";
                 }
 
             default:
                 // String concatenation is handled by the PLUS case if types match.
                 // Any other operator on non-numeric types would have been caught by the Type Checker.
-                return "create_nil() /* unreachable */";
+                return "angara_create_nil() /* unreachable */";
         }
     }
 
@@ -792,7 +792,7 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
 
         // The result of the C expression is a C bool (0 or 1), which we must
         // re-box into an AngaraObject.
-        return "create_bool((" + lhs + ") " + op + " (" + rhs + "))";
+        return "angara_create_bool((" + lhs + ") " + op + " (" + rhs + "))";
     }
 
     std::string CTranspiler::transpileUpdate(const UpdateExpr& expr) {
@@ -841,7 +841,7 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
                 // Transpiles `!some_expression`.
                 // The logic is: get the truthiness of the Angara object, invert the
                 // resulting C bool, and then re-box it as a new Angara bool object.
-                return "create_bool(!angara_is_truthy(" + operand_str + "))";
+                return "angara_create_bool(!angara_is_truthy(" + operand_str + "))";
             }
 
             case TokenType::MINUS: {
@@ -850,16 +850,16 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
                 // We just need to generate the correct C code for its specific type.
                 if (isFloat(operand_type)) {
                     // Unbox as a double, negate, and re-box as a new f64 AngaraObject.
-                    return "create_f64(-AS_F64(" + operand_str + "))";
+                    return "angara_create_f64(-AS_F64(" + operand_str + "))";
                 } else {
                     // Unbox as an int64, negate, and re-box as a new i64 AngaraObject.
-                    return "create_i64(-AS_I64(" + operand_str + "))";
+                    return "angara_create_i64(-AS_I64(" + operand_str + "))";
                 }
             }
 
             default:
                 // This should be unreachable if the parser and type checker are correct.
-                    return "create_nil() /* unsupported unary op */";
+                    return "angara_create_nil() /* unsupported unary op */";
         }
     }
 
@@ -1129,18 +1129,18 @@ std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
         std::string full_expression;
         if (isInteger(target_type)) {
             // e.g., create_i64((AS_I64(x) + AS_I64(y)))
-            full_expression = "create_i64((AS_I64(" + lhs_str + ") " + core_op + " AS_I64(" + rhs_str + ")))";
+            full_expression = "angara_create_i64((AS_I64(" + lhs_str + ") " + core_op + " AS_I64(" + rhs_str + ")))";
         } else if (isFloat(target_type)) {
             // e.g., create_f64((AS_F64(x) + AS_F64(y)))
             // Note: This correctly handles the case where one is an int and one is a float
             // because our AS_F64 macro performs the promotion.
-            full_expression = "create_f64((AS_F64(" + lhs_str + ") " + core_op + " AS_F64(" + rhs_str + ")))";
+            full_expression = "angara_create_f64((AS_F64(" + lhs_str + ") " + core_op + " AS_F64(" + rhs_str + ")))";
         } else if (target_type->toString() == "string" && expr.op.type == TokenType::PLUS_EQUAL) {
             // String concatenation: x = angara_string_concat(x, y)
             full_expression = "angara_string_concat(" + lhs_str + ", " + rhs_str + ")";
         } else {
             // Should be unreachable if the Type Checker is correct.
-            full_expression = "create_nil() /* unsupported compound assignment */";
+            full_expression = "angara_create_nil() /* unsupported compound assignment */";
         }
 
         // 4. Return the full assignment expression.
@@ -1240,7 +1240,7 @@ std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
         m_indent_level++;
 
         indent(); (*m_current_out) << "AngaraObject " << stmt.catchName.lexeme << " = g_current_exception;\n";
-        indent(); (*m_current_out) << "g_current_exception = create_nil();\n";
+        indent(); (*m_current_out) << "g_current_exception = angara_create_nil();\n";
 
         transpileStmt(stmt.catchBlock);
 
@@ -1263,11 +1263,11 @@ std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
 
     // 2. Create and initialize the hidden __index variable.
     indent();
-    (*m_current_out) << "AngaraObject __index_" << stmt.name.lexeme << " = create_i64(0LL);\n";
+    (*m_current_out) << "AngaraObject __index_" << stmt.name.lexeme << " = angara_create_i64(0LL);\n";
 
     // 3. Generate the `while` loop header.
     indent();
-    (*m_current_out) << "while (angara_is_truthy(create_bool(AS_I64(__index_" << stmt.name.lexeme << ") < AS_I64(angara_len(__collection_" << stmt.name.lexeme << "))))) {\n";
+    (*m_current_out) << "while (angara_is_truthy(angara_create_bool(AS_I64(__index_" << stmt.name.lexeme << ") < AS_I64(angara_len(__collection_" << stmt.name.lexeme << "))))) {\n";
     m_indent_level++;
 
     // 4. Generate the `let item = ...` declaration.
@@ -1282,8 +1282,8 @@ std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
     indent();
     (*m_current_out) << "{\n";
     m_indent_level++;
-    indent(); (*m_current_out) << "AngaraObject __temp_one = create_i64(1LL);\n";
-    indent(); (*m_current_out) << "AngaraObject __new_index = create_i64(AS_I64(__index_" << stmt.name.lexeme << ") + AS_I64(__temp_one));\n";
+    indent(); (*m_current_out) << "AngaraObject __temp_one = angara_create_i64(1LL);\n";
+    indent(); (*m_current_out) << "AngaraObject __new_index = angara_create_i64(AS_I64(__index_" << stmt.name.lexeme << ") + AS_I64(__temp_one));\n";
     indent(); (*m_current_out) << "angara_decref(__index_" << stmt.name.lexeme << ");\n";
     indent(); (*m_current_out) << "__index_" << stmt.name.lexeme << " = __new_index;\n";
     m_indent_level--;

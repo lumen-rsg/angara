@@ -1259,6 +1259,8 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         expr.callee->accept(*this);
         auto callee_type = popType();
 
+        std::cerr << "DEBUG: Checking call on callee of type: " << callee_type->toString() << " (kind: " << (int)callee_type->kind << ")\n";
+
         // 2. Type check all the arguments that are being passed.
         std::vector<std::shared_ptr<Type>> arg_types;
         for (const auto& arg_expr : expr.arguments) {
@@ -1309,7 +1311,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             if (result_type->kind != TypeKind::ERROR) {
                 for (size_t i = 0; i < num_fixed_params; ++i) {
                     if (arg_types[i]->toString() != func_type->param_types[i]->toString()) {
-                        // ... error reporting ...
+                        std::cerr << "Incorrect type for argument " + std::to_string(i + 1) << std::endl;
                         result_type = m_type_error;
                         break;
                     }
