@@ -442,19 +442,26 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         }
         if (m_hadError) return false;
 
-    // --- PASS 1: Declare all top-level type names ---
-    for (const auto& stmt : statements) {
-        if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
-            auto class_type = std::make_shared<ClassType>(class_stmt->name.lexeme);
-            if (!m_symbols.declare(class_stmt->name, class_type, true)) { /* error */ }
-        } else if (auto trait_stmt = std::dynamic_pointer_cast<const TraitStmt>(stmt)) {
-            auto trait_type = std::make_shared<TraitType>(trait_stmt->name.lexeme);
-            if (!m_symbols.declare(trait_stmt->name, trait_type, true)) { /* error */ }
-        } else if (auto contract_stmt = std::dynamic_pointer_cast<const ContractStmt>(stmt)) { // TODO : errors.
-            auto contract_type = std::make_shared<ContractType>(contract_stmt->name.lexeme);
-            if (!m_symbols.declare(contract_stmt->name, contract_type, true)) { /* error */ }
+        // --- PASS 1: Declare all top-level type names ---
+        for (const auto& stmt : statements) {
+            if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+                auto class_type = std::make_shared<ClassType>(class_stmt->name.lexeme);
+                // If declare() returns false, the name already exists.
+                if (!m_symbols.declare(class_stmt->name, class_type, true)) {
+                    error(class_stmt->name, "A symbol with the name '" + class_stmt->name.lexeme + "' has already been declared in this scope.");
+                }
+            } else if (auto trait_stmt = std::dynamic_pointer_cast<const TraitStmt>(stmt)) {
+                auto trait_type = std::make_shared<TraitType>(trait_stmt->name.lexeme);
+                if (!m_symbols.declare(trait_stmt->name, trait_type, true)) {
+                    error(trait_stmt->name, "A symbol with the name '" + trait_stmt->name.lexeme + "' has already been declared in this scope.");
+                }
+            } else if (auto contract_stmt = std::dynamic_pointer_cast<const ContractStmt>(stmt)) {
+                auto contract_type = std::make_shared<ContractType>(contract_stmt->name.lexeme);
+                if (!m_symbols.declare(contract_stmt->name, contract_type, true)) {
+                    error(contract_stmt->name, "A symbol with the name '" + contract_stmt->name.lexeme + "' has already been declared in this scope.");
+                }
+            }
         }
-    }
     if (m_hadError) return false;
 
     // --- PASS 2: Define all headers and signatures (Order is important!) ---
