@@ -638,3 +638,64 @@ AngaraObject angara_to_string(AngaraObject value) {
             return angara_string_from_c("unknown");
     }
 }
+
+// Converts any AngaraObject into a new AngaraObject of type VAL_I64.
+AngaraObject angara_to_i64(AngaraObject value) {
+    switch (value.type) {
+        case VAL_NIL:
+            return angara_create_i64(0);
+        case VAL_BOOL:
+            return angara_create_i64(AS_BOOL(value) ? 1 : 0);
+        case VAL_I64:
+            // No conversion needed, just return a new reference.
+            angara_incref(value);
+            return value;
+        case VAL_F64:
+            // Truncates the float.
+            return angara_create_i64((int64_t)AS_F64(value));
+        case VAL_OBJ: {
+            if (OBJ_TYPE(value) == OBJ_STRING) {
+                // Use standard C function to parse string to long long.
+                return angara_create_i64(strtoll(AS_CSTRING(value), NULL, 10));
+            }
+            // Other object types convert to 0 for now.
+            return angara_create_i64(0);
+        }
+        default:
+             return angara_create_i64(0);
+    }
+}
+
+// Converts any AngaraObject into a new AngaraObject of type VAL_F64.
+AngaraObject angara_to_f64(AngaraObject value) {
+    switch (value.type) {
+        case VAL_NIL:
+            return angara_create_f64(0.0);
+        case VAL_BOOL:
+            return angara_create_f64(AS_BOOL(value) ? 1.0 : 0.0);
+        case VAL_I64:
+            return angara_create_f64((double)AS_I64(value));
+        case VAL_F64:
+            // No conversion needed, return new reference.
+            angara_incref(value);
+            return value;
+        case VAL_OBJ: {
+            if (OBJ_TYPE(value) == OBJ_STRING) {
+                // Use standard C function to parse string to double.
+                return angara_create_f64(strtod(AS_CSTRING(value), NULL));
+            }
+            return angara_create_f64(0.0);
+        }
+        default:
+             return angara_create_f64(0.0);
+    }
+}
+
+// Explicitly converts a value to a boolean. This is different from
+// angara_is_truthy, which is used for implicit truthiness checks in `if`.
+// This function follows stricter rules for explicit `bool()` casts.
+AngaraObject angara_to_bool(AngaraObject value) {
+    // The explicit bool() conversion is identical to the implicit truthiness check.
+    // We can just reuse the existing function.
+    return angara_create_bool(angara_is_truthy(value));
+}

@@ -83,11 +83,34 @@ namespace angara {
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "Mutex", 0, 0), mutex_constructor_type, true);
 
+        // func string(any) -> string
         auto string_conv_type = std::make_shared<FunctionType>(
-            std::vector<std::shared_ptr<Type>>{m_type_any},
-            m_type_string
+            std::vector<std::shared_ptr<Type>>{m_type_any}, m_type_string
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "string", 0, 0), string_conv_type, true);
+
+        // func i64(any) -> i64
+        auto i64_conv_type = std::make_shared<FunctionType>(
+            std::vector<std::shared_ptr<Type>>{m_type_any}, m_type_i64
+        );
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "i64", 0, 0), i64_conv_type, true);
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "int", 0, 0), i64_conv_type, true); // Alias
+
+        // func f64(any) -> f64
+        auto f64_conv_type = std::make_shared<FunctionType>(
+            std::vector<std::shared_ptr<Type>>{m_type_any}, m_type_f64
+        );
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "f64", 0, 0), f64_conv_type, true);
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "float", 0, 0), f64_conv_type, true); // Alias
+
+        // func bool(any) -> bool
+        auto bool_conv_type = std::make_shared<FunctionType>(
+            std::vector<std::shared_ptr<Type>>{m_type_any}, m_type_bool
+        );
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "bool", 0, 0), bool_conv_type, true);
+
+
+        m_module_type = std::make_shared<ModuleType>(module_name);
 
     }
 

@@ -1091,6 +1091,16 @@ void CTranspiler::transpileWhileStmt(const WhileStmt& stmt) {
             return "angara_mutex_new()";
         }
 
+        if (func_name == "i64" || func_name == "int") {
+            return "angara_to_i64(" + args_str + ")";
+        }
+        if (func_name == "f64" || func_name == "float") {
+            return "angara_to_f64(" + args_str + ")";
+        }
+        if (func_name == "bool") {
+            return "angara_to_bool(" + args_str + ")";
+        }
+
 
         // Check if it's a class constructor call
         auto callee_type = m_type_checker.m_expression_types.at(expr.callee.get());
