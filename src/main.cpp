@@ -1,12 +1,8 @@
-// =======================================================================
-// REPLACE the entire contents of main.cpp with this new version.
-// =======================================================================
-
 #include <iostream>
 #include <random>
 #include <string>
 #include <thread>
-#include <__random/random_device.h>
+#include <random>
 
 #include "CompilerDriver.h"
 
