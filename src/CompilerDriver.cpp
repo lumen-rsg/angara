@@ -523,20 +523,36 @@ for (int i = 0; i < def_count; i++) {
             // Parse Parameters
             std::vector<std::shared_ptr<Type>> params;
             TypeStringParser param_parser(params_str);
+            bool is_variadic = false; // <-- NEW: Flag for variadic functions
+
             while (!param_parser.is_at_end()) {
                 params.push_back(param_parser.parse_type());
+
+                // --- NEW: Check for variadic syntax ---
+                if (param_parser.peek() == '.') {
+                    param_parser.advance(); // consume .
+                    param_parser.advance(); // consume .
+                    param_parser.advance(); // consume .
+                    is_variadic = true;
+                    // The variadic marker must be the last thing in the param string.
+                    if (!param_parser.is_at_end()) {
+                        throw std::runtime_error("Variadic '...' must be at the end of the parameter list.");
+                    }
+                }
+                // --- END NEW ---
             }
 
             // Parse Return Type
             TypeStringParser return_parser(return_str);
             auto return_type = return_parser.parse_type();
 
-            // Arity Check
-            if (def.arity != -1 && params.size() != def.arity) {
-                std::cerr << "\nWarning: Arity mismatch for '" << def.name << "'. Type string has " << params.size() << " params, but arity is " << def.arity << ".\n";
+            // Arity Check (Now respects variadic flag)
+            if (!is_variadic && def.arity != -1 && params.size() != def.arity) {
+                std::cerr << "\nWarning: Arity mismatch for '" << def.name << "'...\n";
             }
 
-            auto func_type = std::make_shared<FunctionType>(params, return_type, def.arity == -1);
+            // Pass the is_variadic flag to the FunctionType constructor
+            auto func_type = std::make_shared<FunctionType>(params, return_type, is_variadic);
             module_type->exports[def.name] = func_type;
 
         } catch (const std::runtime_error& e) {

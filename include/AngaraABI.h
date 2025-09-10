@@ -52,7 +52,7 @@ AngaraObject angara_create_nil(void);
 AngaraObject angara_create_bool(bool value);
 AngaraObject angara_create_i64(int64_t value);
 AngaraObject angara_create_f64(double value);
-AngaraObject create_string(const char* chars);
+AngaraObject angara_string_from_c(const char* chars);
 AngaraObject angara_create_string_no_copy(char* owned_chars, size_t length);
 void angara_throw_error(const char* message);
 
