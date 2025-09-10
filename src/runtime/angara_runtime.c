@@ -699,3 +699,25 @@ AngaraObject angara_to_bool(AngaraObject value) {
     // We can just reuse the existing function.
     return angara_create_bool(angara_is_truthy(value));
 }
+
+AngaraObject angara_string_concat(AngaraObject a, AngaraObject b) {
+    // This function assumes type checking has already been done.
+    AngaraString* s1 = AS_STRING(a);
+    AngaraString* s2 = AS_STRING(b);
+
+    size_t new_len = s1->length + s2->length;
+    char* new_chars = (char*)malloc(new_len + 1);
+    if (!new_chars) {
+        // In a real runtime, this should probably throw a proper out-of-memory error.
+        return angara_create_nil();
+    }
+
+    // Copy the first string's content
+    memcpy(new_chars, s1->chars, s1->length);
+    // Copy the second string's content right after the first
+    memcpy(new_chars + s1->length, s2->chars, s2->length);
+    new_chars[new_len] = '\0';
+
+    // The new string object takes ownership of the buffer.
+    return angara_create_string_no_copy(new_chars, new_len);
+}

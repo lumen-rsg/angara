@@ -42,15 +42,6 @@ namespace angara {
         m_type_mutex = std::make_shared<MutexType>();
         m_module_type = std::make_shared<ModuleType>(module_name);
 
-        auto print_type = std::make_shared<FunctionType>(
-                std::vector<std::shared_ptr<Type>>{}, // No fixed parameters
-                m_type_void,
-                true // <-- Set the variadic flag to true
-        );
-        // Note: A better model for variadics is a special flag in FunctionType.
-        // TODO: refine.
-        // For now, this is a good approximation.
-        m_symbols.declare(Token(TokenType::IDENTIFIER, "print", 0, 0), print_type, true);
         // func len(any) -> i64;
         auto len_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{m_type_any},

@@ -231,4 +231,6 @@ AngaraObject angara_to_i64(AngaraObject value);
 AngaraObject angara_to_f64(AngaraObject value);
 AngaraObject angara_to_bool(AngaraObject value);
 
+AngaraObject angara_string_concat(AngaraObject a, AngaraObject b);
+
 #endif //ANGARA_RUNTIME_H

@@ -756,6 +756,19 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
 
                 // --- Arithmetic Operators (numeric only) ---
             case TokenType::PLUS:
+                // --- MODIFIED LOGIC FOR '+' ---
+                if (lhs_type->toString() == "string") {
+                    // If the LHS is a string, the type checker guarantees the RHS is also a string.
+                    return "angara_string_concat(" + lhs_str + ", " + rhs_str + ")";
+                } else {
+                    // Otherwise, it's numeric addition.
+                    auto rhs_type = m_type_checker.m_expression_types.at(expr.right.get());
+                    if (isFloat(lhs_type) || isFloat(rhs_type)) {
+                        return "create_f64((AS_F64(" + lhs_str + ") " + op + " AS_F64(" + rhs_str + ")))";
+                    } else {
+                        return "create_i64((AS_I64(" + lhs_str + ") " + op + " AS_I64(" + rhs_str + ")))";
+                    }
+                }
             case TokenType::MINUS:
             case TokenType::STAR:
             case TokenType::SLASH:
@@ -1059,10 +1072,6 @@ void CTranspiler::transpileWhileStmt(const WhileStmt& stmt) {
             return "angara_call(angara_main_closure"  ", " + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
         }
 
-        // Handle built-in functions first
-        if (func_name == "print") {
-            return "angara_print(" + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
-        }
         if (func_name == "len") {
             return "angara_len(" + args_str + ")";
         }
@@ -1106,8 +1115,10 @@ void CTranspiler::transpileWhileStmt(const WhileStmt& stmt) {
         }
 
         // If it's not a built-in or a constructor, it must be a global function.
-        std::string c_name = (func_name == "main") ? "angara_main" : func_name;
-        return c_name + "(" + args_str + ")";
+        std::string closure_var = "g_" + func_name;
+        if (func_name == "main") closure_var = "g_angara_main_closure"; // Special case for main
+
+        return "angara_call(" + closure_var + ", " + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
     }
 
 
