@@ -1085,27 +1085,25 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     }
 
     void TypeChecker::visit(std::shared_ptr<const TryStmt> stmt) {
-        // 1. Type check the 'try' block. Any errors inside it will be reported.
+        // 1. Type check the 'try' block.
         stmt->tryBlock->accept(*this, stmt->tryBlock);
 
         // 2. Now, handle the 'catch' block. It introduces a new scope.
         m_symbols.enterScope();
 
         // 3. Declare the exception variable (e.g., 'e') in this new scope.
-        //    We assign it the special 'any' type. This is the safest and most
-        //    flexible option, as we can't know at compile time what type of
-        //    value might be thrown at runtime.
-        if (!m_symbols.declare(stmt->catchName, m_type_any, false)) {
-            // This should be unreachable if the parser works correctly.
-            error(stmt->catchName, "A variable with this name already exists in this scope.");
+        if (auto conflicting_symbol = m_symbols.declare(stmt->catchName, m_type_any, false)) {
+            // This is technically unreachable if the parser works correctly, but it's good practice.
+            error(stmt->catchName, "re-declaration of variable '" + stmt->catchName.lexeme + "'.");
+            note(conflicting_symbol->declaration_token, "previous declaration was here.");
         }
 
-        // 4. With the exception variable in scope, we can now type check the 'catch' block.
+        // 4. With the exception variable in scope, type check the 'catch' block.
         stmt->catchBlock->accept(*this, stmt->catchBlock);
 
-        // 5. Exit the scope for the catch block.
+        // 5. --- THE FIX ---
+        // Exit the scope for the catch block, destroying the exception variable 'e'.
         m_symbols.exitScope();
-
     }
 
     void TypeChecker::visit(std::shared_ptr<const ClassStmt> stmt) {

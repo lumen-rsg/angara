@@ -28,6 +28,47 @@ typedef const AngaraFuncDef* (*AngaraModuleInitFn)(int*);
 
 namespace angara {
 
+    class TypeStringParser {
+    public:
+        explicit TypeStringParser(const std::string& str);
+        std::shared_ptr<Type> parse_type();
+        char peek();
+        char advance();
+        bool is_at_end();
+    private:
+        std::string m_source;
+        size_t m_current = 0;
+
+    };
+
+    TypeStringParser::TypeStringParser(const std::string& str) : m_source(str) {}
+
+    bool TypeStringParser::is_at_end() { return m_current >= m_source.length(); }
+    char TypeStringParser::peek() { return is_at_end() ? '\0' : m_source[m_current]; }
+    char TypeStringParser::advance() { return is_at_end() ? '\0' : m_source[m_current++]; }
+
+    std::shared_ptr<Type> TypeStringParser::parse_type() {
+        if (is_at_end()) return std::make_shared<AnyType>(); // Should not happen in valid strings
+
+        char c = advance();
+        switch (c) {
+            case 'i': return std::make_shared<PrimitiveType>("i64");
+            case 'd': return std::make_shared<PrimitiveType>("f64");
+            case 's': return std::make_shared<PrimitiveType>("string");
+            case 'b': return std::make_shared<PrimitiveType>("bool");
+            case 'a': return std::make_shared<AnyType>();
+            case 'n': return std::make_shared<NilType>();
+            case 'l': {
+                if (advance() != '<') throw std::runtime_error("Expected '<' after 'l' in type string.");
+                auto element_type = parse_type();
+                if (advance() != '>') throw std::runtime_error("Expected '>' to close generic type in type string.");
+                return std::make_shared<ListType>(element_type);
+            }
+            default:
+                throw std::runtime_error("Invalid character in type string: " + std::string(1, c));
+        }
+    }
+
     void CompilerDriver::log_step(const std::string& message) {
         // 1. Clear the current line (which has the progress bar on it).
         std::cout << "\r\033[K";
@@ -167,6 +208,7 @@ bool CompilerDriver::compile(const std::string& root_file_path) {
 
     // Add final flags
     command_ss << " -pthread -lm";
+        command_ss << " -Wl,-rpath," << m_native_module_path;
     std::string command = command_ss.str();
 
         // --- NEW LOGIC: Redirect output and conditionally print ---
@@ -262,39 +304,50 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
 
 
 std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& path_or_id, const Token& import_token) {
+    // 1. Determine the canonical cache key for this import.
+    // For logical names like "fs", the key is "fs".
+    // For direct paths like "./utils.an", the key is the absolute path to ensure uniqueness.
+    std::string cache_key;
+    bool is_direct_path = path_or_id.find('/') != std::string::npos || path_or_id.find('\\') != std::string::npos;
+    if (is_direct_path || path_or_id.ends_with(".an") || path_or_id.ends_with(".so") || path_or_id.ends_with(".dylib") || path_or_id.ends_with(".dll")) {
+        cache_key = std::filesystem::absolute(path_or_id).string();
+    } else {
+        cache_key = path_or_id;
+    }
 
+    // 2. Check the cache first. If found, we are done.
+    if (m_module_cache.count(cache_key)) {
+        return m_module_cache[cache_key];
+    }
+
+    // --- CACHE MISS: We must find and process the module file ---
+
+    // 3. Check for circular dependencies.
+    for (const auto& p : m_compilation_stack) {
+        if (p == cache_key) {
+            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Circular dependency detected for module '" << path_or_id << "'.\n";
+            m_had_error = true;
+            return nullptr;
+        }
+    }
+
+    // 4. Find the absolute path to the module file.
     std::string found_path = "";
-    bool is_direct_path = (path_or_id.find('/') != std::string::npos ||
-                           path_or_id.find('\\') != std::string::npos ||
-                           path_or_id.ends_with(".an") ||
-                           path_or_id.ends_with(".so") ||
-                           path_or_id.ends_with(".dylib") ||
-                           path_or_id.ends_with(".dll"));
-
-    if (is_direct_path) {
-        // It's a relative or absolute path, use it directly.
-        std::ifstream f(path_or_id);
-        if (f.good()) {
-            found_path = path_or_id;
+    if (is_direct_path || path_or_id.ends_with(".an") || path_or_id.ends_with(".so") || path_or_id.ends_with(".dylib") || path_or_id.ends_with(".dll")) {
+        if (std::filesystem::exists(path_or_id)) {
+            found_path = std::filesystem::absolute(path_or_id).string();
         }
     } else {
-        // It's a logical ID (like "fs" or "utils"). Search for it.
-        std::vector<std::string> search_paths = {
-                ".", // 1. Current directory
-                m_angara_module_path, // 2. Standard Angara module path
-                m_native_module_path  // 3. Standard native module path
-        };
+        // Search standard locations for the logical name.
+        const std::vector<std::string> search_paths = { ".", m_angara_module_path, m_native_module_path };
         for (const auto& dir : search_paths) {
-            // Check for both .an and .so/.dylib
-            std::vector<std::string> potential_paths = {
-                    std::filesystem::path(dir) / (path_or_id + ".an"),
-                    std::filesystem::path(dir) / ("lib" + path_or_id + ".so"),
-                    std::filesystem::path(dir) / ("lib" + path_or_id + ".dylib")
+            std::vector<std::string> potential_filenames = {
+                path_or_id + ".an", "lib" + path_or_id + ".so", "lib" + path_or_id + ".dylib", "lib" + path_or_id + ".dll"
             };
-            for (const auto& p : potential_paths) {
-                std::ifstream f(p);
-                if (f.good()) {
-                    found_path = p;
+            for (const auto& filename : potential_filenames) {
+                std::filesystem::path potential_path = std::filesystem::path(dir) / filename;
+                if (std::filesystem::exists(potential_path)) {
+                    found_path = std::filesystem::absolute(potential_path).string();
                     break;
                 }
             }
@@ -328,9 +381,9 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
 
     // --- DISPATCHER: Decide how to handle the file based on its extension ---
     std::shared_ptr<ModuleType> module_type = nullptr;
-    if (path_or_id.ends_with(".so") || path_or_id.ends_with(".dylib") || path_or_id.ends_with(".dll")) {
+    if (found_path.ends_with(".so") || found_path.ends_with(".dylib") || found_path.ends_with(".dll")) {
         // --- Path 1: Load a pre-compiled native module ---
-        module_type = loadNativeModule(path_or_id, import_token);
+        module_type = loadNativeModule(found_path, import_token);
 
         if (module_type) {
             // 1. Extract the directory path.
@@ -340,6 +393,7 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
             }
             // 2. Extract the clean library name.
             m_native_lib_names.push_back(get_lib_name(path_or_id));
+            module_type->is_native = true;
         }
 
     } else {
@@ -390,7 +444,7 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
 
         // Write the generated files to disk.
         std::string h_filename = module_name + ".h";
-        m_compiled_h_files.push_back(h_filename); // <-- ADD THIS LINE
+        m_compiled_h_files.push_back(h_filename);
         std::ofstream h_file(h_filename);
         h_file << header_code;
         h_file.close();
@@ -411,7 +465,7 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
         m_module_cache[path_or_id] = module_type;
         m_modules_compiled++;
     }
-
+    std::cout << module_type->is_native << std::endl;
     return module_type;
 }
 
@@ -443,32 +497,54 @@ std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& pat
 
     auto module_type = std::make_shared<ModuleType>(module_name);
 
-    // 4. Populate the module's public API.
-    for (int i = 0; i < def_count; i++) {
+for (int i = 0; i < def_count; i++) {
         const AngaraFuncDef& def = defs[i];
-        // For now, we don't have the types of the parameters, so we'll have to
-        // represent them as 'any'. This is a limitation of a pure C ABI.
-        // A more advanced ABI might have a type description string.
-        std::vector<std::shared_ptr<Type>> params;
-        if (def.arity != -1) { // -1 is variadic
-             for (int j = 0; j < def.arity; ++j) {
-                 params.push_back(std::make_shared<PrimitiveType>("any"));
-             }
+
+        if (!def.type_string) {
+            std::cerr << "\nWarning: Native function '" << def.name << "' in module '" << path << "' is missing a type string. Defaulting to any().\n";
+            // Fallback to old behavior if type string is missing
+            module_type->exports[def.name] = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{}, std::make_shared<AnyType>(), true
+            );
+            continue;
         }
-        auto return_type = std::make_shared<PrimitiveType>("any");
-        auto func_type = std::make_shared<FunctionType>(params, return_type, def.arity == -1);
 
-        module_type->is_native = true;
+        std::string full_sig = def.type_string;
+        size_t arrow_pos = full_sig.find("->");
+        if (arrow_pos == std::string::npos) {
+             std::cerr << "\nWarning: Invalid type string for '" << def.name << "': missing '->'. Defaulting to any().\n";
+             continue; // Skip this malformed definition
+        }
 
-        module_type->exports[def.name] = func_type;
+        std::string params_str = full_sig.substr(0, arrow_pos);
+        std::string return_str = full_sig.substr(arrow_pos + 2);
+
+        try {
+            // Parse Parameters
+            std::vector<std::shared_ptr<Type>> params;
+            TypeStringParser param_parser(params_str);
+            while (!param_parser.is_at_end()) {
+                params.push_back(param_parser.parse_type());
+            }
+
+            // Parse Return Type
+            TypeStringParser return_parser(return_str);
+            auto return_type = return_parser.parse_type();
+
+            // Arity Check
+            if (def.arity != -1 && params.size() != def.arity) {
+                std::cerr << "\nWarning: Arity mismatch for '" << def.name << "'. Type string has " << params.size() << " params, but arity is " << def.arity << ".\n";
+            }
+
+            auto func_type = std::make_shared<FunctionType>(params, return_type, def.arity == -1);
+            module_type->exports[def.name] = func_type;
+
+        } catch (const std::runtime_error& e) {
+            std::cerr << "\nWarning: Could not parse type string for '" << def.name << "': " << e.what() << ". Defaulting to any().\n";
+        }
     }
 
-    // We don't need to add this to a link list. The OS linker will handle it.
-    // We just needed the type information.
-    // dlclose(handle); // Don't close it, we need the symbols at runtime!
-
-    m_module_cache[path] = module_type;
-    m_modules_compiled++; // Count it as a "compiled" unit
+    m_modules_compiled++;
     return module_type;
 }
 

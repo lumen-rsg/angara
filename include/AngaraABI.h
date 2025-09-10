@@ -77,6 +77,7 @@ typedef struct {
     const char* name;
     AngaraNativeFn function;
     int arity; // Use -1 for variadic functions
+    const char* type_string; // e.g. ss->b for (string, string) -> bool
 } AngaraFuncDef;
 
 // Helper macros for token pasting
