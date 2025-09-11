@@ -1,5 +1,5 @@
 attach http;
-attach json;
+attach "json.an";
 attach io;
 
 func println(s as string) -> void {

@@ -614,9 +614,6 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
                                        const std::string& module_name,
                                        const std::vector<std::string>& all_module_names) {
 
-        for (std::string item : all_module_names){
-            std::cout << "module: " << item << " is present." << std::endl;
-        }
         m_current_out = &m_main_body;
         m_indent_level = 0;
 
