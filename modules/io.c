@@ -34,6 +34,32 @@ AngaraObject Angara_io_write(int arg_count, AngaraObject* args) {
     return angara_create_nil();
 }
 
+AngaraObject Angara_io_println(int arg_count, AngaraObject* args) {
+    if (arg_count != 2 || !ANGARA_IS_I64(args[0]) || !ANGARA_IS_STRING(args[1])) {
+        angara_throw_error("println(stream_id, content) expects an integer and a string.");
+        return angara_create_nil();
+    }
+
+    int64_t stream_id = ANGARA_AS_I64(args[0]);
+    const char* content = ANGARA_AS_CSTRING(args[1]);
+
+    FILE* stream = NULL;
+    if (stream_id == 1) {
+        stream = stdout;
+    } else if (stream_id == 2) {
+        stream = stderr;
+    } else {
+        angara_throw_error("Invalid stream ID for println(). Use 1 for stdout or 2 for stderr.");
+        return angara_create_nil();
+    }
+
+    // Use puts, which is efficient and automatically adds a newline.
+    fputs(content, stream);
+    fputc('\n', stream);
+
+    return angara_create_nil();
+}
+
 // Flushes a stream's buffer.
 AngaraObject Angara_io_flush(int arg_count, AngaraObject* args) {
     if (arg_count != 1 || !ANGARA_IS_I64(args[0])) {
@@ -121,6 +147,7 @@ static const AngaraFuncDef IO_FUNCTIONS[] = {
         {"flush",        Angara_io_flush,        1,     "i->n"},  // int -> nil
         {"read_line",    Angara_io_read_line,    0,     "->s"},   // () -> string (can be nil)
         {"read_all",     Angara_io_read_all,     0,     "->s"},   // () -> string
+        {"println",      Angara_io_println,      2,     "is->n"},
         {NULL, NULL, 0, NULL}
 };
 

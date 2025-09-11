@@ -4,20 +4,6 @@
 
 attach adv_string;
 
-// A helper class for parsing errors.
-class _ParseError {
-  let message as string;
-
-  func init(this, msg as string) -> void {
-    this.message = msg;
-  }
-
-  // NEW: Add a toString method for better error reporting.
-  func toString(this) -> string {
-    return "ParseError: " + this.message;
-  }
-}
-
 class _Parser {
 public:
   let source as string;
@@ -33,12 +19,12 @@ public:
   // --- Main Parsing Logic ---
   func parse_value(this) -> any {
     this.skip_whitespace();
-    if (this.is_at_end()) { throw _ParseError("Unexpected end of JSON input."); }
+    if (this.is_at_end()) { throw Exception("Unexpected end of JSON input."); }
 
     let char = this.peek();
     if (char == "{") { return this.parse_object(); }
     if (char == "[") { return this.parse_array(); }
-    if (char == "\") { return this.parse_string(); }
+    if (char == "\"") { return this.parse_string(); }
     if (char == "t") { return this.parse_literal("true", true); }
     if (char == "f") { return this.parse_literal("false", false); }
     if (char == "n") { return this.parse_literal("null", nil); }
@@ -46,7 +32,7 @@ public:
     if (adv_string.is_digit(char) || char == "-") {
       return this.parse_number();
     }
-    throw _ParseError("Unexpected character in JSON: '" + char + "'");
+    throw Exception("Unexpected character in JSON: '" + char + "'");
   }
 
   func parse_object(this) -> any {
@@ -98,15 +84,15 @@ public:
   }
 
   func parse_string(this) -> string {
-    this.consume("\");
+    this.consume("\"");
     let start = this.current;
-    while (this.peek() != "\") {
-      if (this.is_at_end()) { throw _ParseError("Unterminated string in JSON."); }
+    while (this.peek() != "\"") {
+      if (this.is_at_end()) { throw Exception("Unterminated string in JSON."); }
       // TODO: Handle escaped quotes like \"
       this.advance();
     }
     let value = adv_string.substring(this.source, start, this.current);
-    this.consume("\");
+    this.consume("\"");
     return value;
   }
 
@@ -126,7 +112,7 @@ public:
     let i = 0;
     while (i < len(literal_text)) {
       if (this.is_at_end() || this.peek() != adv_string.get(literal_text, i)) {
-        throw _ParseError("Invalid literal. Expected '" + literal_text + "'.");
+        throw Exception("Invalid literal. Expected '" + literal_text + "'.");
       }
       this.advance();
       i = i + 1;
@@ -146,10 +132,17 @@ public:
     }
   }
 
-  func consume(this, expected as string) -> void {
+func consume(this, expected as string) -> void {
     this.skip_whitespace();
     if (this.peek() != expected) {
-      throw _ParseError("Expected '" + expected + "' but found '" + this.peek() + "'.");
+      let context_start = i64(f64(this.current) - 10.0);
+      if (context_start < 0) { context_start = 0; }
+      let context = adv_string.substring(this.source, context_start, this.current + 10);
+
+      throw Exception(
+        "Parse Error: Expected '" + expected + "', but found '" + this.peek() + "'." +
+        "Context: ..." + context + "..."
+      );
     }
     this.advance();
   }

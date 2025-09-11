@@ -4,6 +4,7 @@
 
 #include "../include/Lexer.h"
 #include <iostream> // For error reporting
+#include <sstream>
 
 namespace angara {
 // Initialize the static keywords map
@@ -109,13 +110,37 @@ namespace angara {
     }
 
     void Lexer::string() {
+        std::stringstream value; // Use a stringstream to build the final value
+
         while (peek() != '"' && !isAtEnd()) {
-            if (peek() == '\n') {
-                // A regular string cannot contain a raw newline.
-                std::cerr << "Line " << m_line << ": Unterminated string (found newline).\n";
+            char c = advance();
+
+            if (c == '\\') { // --- HANDLE ESCAPE SEQUENCE ---
+                if (isAtEnd()) {
+                    std::cerr << "Line " << m_line << ": Unterminated escape sequence.\n";
+                    return;
+                }
+                char escaped = advance();
+                switch (escaped) {
+                    case '"':  value << '"'; break;
+                    case '\\': value << '\\'; break;
+                    case 'n':  value << '\n'; break;
+                    case 'r':  value << '\r'; break;
+                    case 't':  value << '\t'; break;
+                        // You can add more escapes like \b, \f, etc. here
+                    default:
+                        // For now, if we see an unknown escape, we'll just treat it literally
+                        // e.g., "\c" will become "c". A stricter lexer could error here.
+                        value << escaped;
+                        break;
+                }
+            } else if (c == '\n') {
+                std::cerr << "Line " << m_line << ": Unterminated string (found unescaped newline).\n";
                 return;
             }
-            advance();
+            else { // --- REGULAR CHARACTER ---
+                value << c;
+            }
         }
 
         if (isAtEnd()) {
@@ -123,10 +148,10 @@ namespace angara {
             return;
         }
 
-        advance(); // The closing ".
+        advance(); // Consume the closing ".
 
-        std::string value = m_source.substr(m_start + 1, m_current - m_start - 2);
-        addToken(TokenType::STRING, value);
+        // The stringstream now holds the correctly unescaped string content.
+        addToken(TokenType::STRING, value.str());
     }
 
     void Lexer::multilineString() {

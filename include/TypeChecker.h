@@ -112,10 +112,12 @@ namespace angara {
         std::shared_ptr<Type> m_type_void;
         std::shared_ptr<Type> m_type_thread;
         std::shared_ptr<Type> m_type_mutex;
+        std::shared_ptr<Type> m_type_exception;
         CompilerDriver& m_driver;
         std::shared_ptr<ModuleType> m_module_type;
         std::stack<std::shared_ptr<Type>> m_function_return_types;
         std::shared_ptr<ClassType> m_current_class = nullptr;
+
 
         void defineClassHeader(const ClassStmt &stmt);
         void defineFunctionHeader(const FuncStmt &stmt);

@@ -1183,6 +1183,10 @@ void CTranspiler::transpileWhileStmt(const WhileStmt& stmt) {
             return "angara_to_bool(" + args_str + ")";
         }
 
+        if (func_name == "Exception") {
+            return "angara_exception_new(" + args_str + ")";
+        }
+
 
         // Check if it's a class constructor call
         auto callee_type = m_type_checker.m_expression_types.at(expr.callee.get());

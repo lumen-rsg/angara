@@ -1,13 +1,10 @@
-attach json;
+attach "json.an";
 attach io;
 attach adv_string; // The json module depends on this
 
-func println(s as string) -> void {
-  io.write(1, s + "\n");
-}
 
 export func main() -> i64 {
-  println("--- Angara JSON Module Unit Test ---");
+  io.println(1, "--- Angara JSON Module Unit Test ---");
 
   // A hardcoded, multi-line JSON string for our test case.
 const JSON_SOURCE = """{
@@ -22,15 +19,41 @@ const JSON_SOURCE = """{
     }
   }""";
 
-  println("Parsing the following JSON:\n" + JSON_SOURCE);
+  io.println(1, "Parsing the following JSON:" + JSON_SOURCE);
 
   try {
     let data_any = json.parse(JSON_SOURCE);
 
+    io.println(1, "--- Parse Successful! Verifying structure... ---");
+
+    // 1. Assert the top-level object's shape
+    let pokemon as {
+      name: string,
+      id: f64,
+      is_legendary: bool,
+      types: list<any>,
+      stats: {} // Assert 'stats' is a record of unknown shape
+    } = data_any;
+
+    // 2. Verify top-level values
+    io.println(1, "Name: " + pokemon["name"]);
+    io.println(1, "ID: " + string(i64(pokemon["id"])));
+    io.println(1, "Is Legendary: " + string(pokemon["is_legendary"]));
+
+    // 3. Verify the array
+    let types_list = pokemon["types"];
+    io.println(1, "First type: " + string(types_list[0]));
+
+    // 4. Assert the shape of the nested 'stats' object
+    let stats_data as { hp: f64, attack: f64 } = pokemon["stats"];
+    io.println(1, "HP: " + string(i64(stats_data["hp"])));
+    io.println(1, "Attack: " + string(i64(stats_data["attack"])));
+
+    io.println(1, "--- Verification Complete. All tests passed! ---");
 
   } catch (e) {
-    println("\n!!! TEST FAILED !!!");
-    println("An error occurred during parsing: " + string(e));
+    io.println(1, "!!! TEST FAILED !!!");
+    io.println(1, "An error occurred during parsing: " + string(e));
     return 1;
   }
 

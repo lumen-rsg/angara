@@ -19,6 +19,7 @@ typedef enum {
     OBJ_INSTANCE,
     OBJ_THREAD,
     OBJ_MUTEX,
+    OBJ_EXCEPTION,
 } ObjectType;
 
 // The base struct for all heap-allocated Angara objects.
@@ -123,6 +124,7 @@ typedef struct {
 #define AS_CSTRING(value) (AS_STRING(value)->chars)
 #define AS_LIST(value)    ((AngaraList*)AS_OBJ(value))
 #define AS_RECORD(value)  ((AngaraRecord*)AS_OBJ(value))
+#define AS_EXCEPTION(value) ((AngaraException*)AS_OBJ(value))
 
 #define AS_CLASS(value)    ((AngaraClass*)AS_OBJ(value))
 #define AS_INSTANCE(value) ((AngaraInstance*)AS_OBJ(value))
@@ -211,6 +213,12 @@ typedef struct {
     pthread_mutex_t handle;
 } AngaraMutex;
 
+typedef struct {
+    Object obj;
+    AngaraObject message; // The message is an AngaraString
+    // We can add a stack trace here later
+} AngaraException;
+
 // --- Mutex API functions ---
 AngaraObject angara_mutex_new(void);
 void angara_mutex_lock(AngaraObject mutex_obj);
@@ -236,5 +244,7 @@ AngaraObject angara_string_concat(AngaraObject a, AngaraObject b);
 
 void angara_record_set_with_angara_key(AngaraObject, AngaraObject, AngaraObject);
 AngaraObject angara_record_get_with_angara_key(AngaraObject, AngaraObject);
+
+AngaraObject angara_exception_new(AngaraObject message);
 
 #endif //ANGARA_RUNTIME_H

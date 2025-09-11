@@ -26,6 +26,7 @@ namespace angara {
         THREAD,
         MUTEX,
         MODULE,
+        EXCEPTION,
         ERROR // A special type to prevent cascading error messages
     };
 
@@ -260,6 +261,11 @@ namespace angara {
             : Type(TypeKind::CONTRACT), name(std::move(name)) {}
 
         [[nodiscard]] std::string toString() const override { return "contract<" + name + ">"; }
+    };
+
+    struct ExceptionType : Type {
+        ExceptionType() : Type(TypeKind::EXCEPTION) {}
+        std::string toString() const override { return "Exception"; }
     };
 
 } // namespace angara

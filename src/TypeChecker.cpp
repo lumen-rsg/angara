@@ -41,6 +41,8 @@ namespace angara {
         m_type_thread = std::make_shared<ThreadType>();
         m_type_mutex = std::make_shared<MutexType>();
         m_module_type = std::make_shared<ModuleType>(module_name);
+        m_type_exception = std::make_shared<ExceptionType>();
+
 
         // func len(any) -> i64;
         auto len_type = std::make_shared<FunctionType>(
@@ -100,6 +102,11 @@ namespace angara {
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "bool", 0, 0), bool_conv_type, true);
 
+        auto exception_constructor_type = std::make_shared<FunctionType>(
+            std::vector<std::shared_ptr<Type>>{m_type_string},
+            m_type_exception
+        );
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "Exception", 0, 0), exception_constructor_type, true);
 
         m_module_type = std::make_shared<ModuleType>(module_name);
 
@@ -1096,12 +1103,14 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
 
 
     void TypeChecker::visit(std::shared_ptr<const ThrowStmt> stmt) {
-        // 1. Type check the expression whose value is being thrown.
         stmt->expression->accept(*this);
+        auto thrown_type = popType();
 
-        // 2. The value of the expression is used, but its type doesn't affect
-        //    the flow of the type checker, so we pop it.
-        popType();
+        // --- THE FIX ---
+        // Rule: You can only throw objects of type Exception.
+        if (thrown_type->kind != TypeKind::EXCEPTION) {
+            error(stmt->keyword, "Can only throw objects of type 'Exception', but got '" + thrown_type->toString() + "'.");
+        }
     }
 
     void TypeChecker::visit(std::shared_ptr<const TryStmt> stmt) {

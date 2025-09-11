@@ -245,10 +245,6 @@ AngaraObject angara_record_new_with_fields(size_t pair_count, AngaraObject kvs[]
     return record_obj;
 }
 
-
-
-
-
 // --- Internal Helper Implementations ---
 static void free_string(AngaraString* string) {
     free(string->chars);
@@ -280,6 +276,12 @@ static void free_record(AngaraRecord* record) {
     free(record);
 }
 
+// 2. Update the memory manager
+static void free_exception(AngaraException* exc) {
+    angara_decref(exc->message); // Release the reference to the message string
+    free(exc);
+}
+
 static void free_object(Object* object) {
     // printf("-- freeing object of type %d --\n", object->type);
     switch (object->type) {
@@ -298,6 +300,7 @@ static void free_object(Object* object) {
             free(object);
             break;
         case OBJ_MUTEX: free_mutex((AngaraMutex*)object); break; // <-- ADD THIS
+        case OBJ_EXCEPTION: free_exception((AngaraException*)object); break;
         default: break;
     }
 }
@@ -340,6 +343,12 @@ void printObject(AngaraObject obj) {
                     printf("}");
                     break;
                 }
+
+            case OBJ_EXCEPTION: { // <-- ADD THIS
+                    AngaraException* exc = AS_EXCEPTION(obj);
+                    printf("Exception: %s", AS_CSTRING(exc->message));
+                    break;
+            }
 
                 default: printf("<object>"); break;
             }
@@ -555,6 +564,7 @@ AngaraObject angara_typeof(AngaraObject value) {
                 case OBJ_INSTANCE: return angara_string_from_c("instance");
                 case OBJ_THREAD:   return angara_string_from_c("Thread");
                 case OBJ_MUTEX:    return angara_string_from_c("Mutex");
+                case OBJ_EXCEPTION:return angara_string_from_c("Exception");
                 default:           return angara_string_from_c("unknown object");
             }
         default:
@@ -626,6 +636,14 @@ AngaraObject angara_to_string(AngaraObject value) {
                 angara_incref(value);
                 return value;
             }
+            // --- NEW: Special handling for Exception objects ---
+            if (OBJ_TYPE(value) == OBJ_EXCEPTION) {
+                AngaraException* exc = AS_EXCEPTION(value);
+                // The message is already an AngaraString, so we can just return it.
+                angara_incref(exc->message);
+                return exc->message;
+            }
+            // --- END NEW ---
             // For other object types, return a placeholder representation.
             // We can expand this later.
             AngaraObject type_name_obj = angara_typeof(value);
@@ -634,6 +652,8 @@ AngaraObject angara_to_string(AngaraObject value) {
             angara_decref(type_name_obj);
             return angara_string_from_c(buffer);
         }
+
+
         default:
             return angara_string_from_c("unknown");
     }
@@ -733,4 +753,19 @@ void angara_record_set_with_angara_key(AngaraObject record_obj, AngaraObject key
     if (IS_STRING(key_obj)) {
         angara_record_set(record_obj, AS_CSTRING(key_obj), value_obj);
     }
+}
+
+AngaraObject angara_exception_new(AngaraObject message) {
+    if (!IS_STRING(message)) {
+        // Fallback for safety, should be caught by type checker
+        message = angara_string_from_c("Non-string value provided to Exception constructor.");
+    }
+
+    AngaraException* exc = (AngaraException*)malloc(sizeof(AngaraException));
+    exc->obj.type = OBJ_EXCEPTION;
+    exc->obj.ref_count = 1;
+    exc->message = message;
+    angara_incref(message); // The exception now holds a reference to the message
+
+    return (AngaraObject){VAL_OBJ, {.obj = (Object*)exc}};
 }
