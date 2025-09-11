@@ -1,0 +1,34 @@
+attach Identifiable, Loggable from "contracts.an";
+attach io;
+
+// This User class signs two contracts.
+export class User signs Identifiable, Loggable {
+  public:
+    // --- Fulfills the 'Identifiable' contract ---
+    let id as i64 = 0;
+
+    // --- Other public members of the User class ---
+    let name as string;
+
+    // The constructor
+    func init(this, id_val as i64, name_val as string) -> void {
+      this.id = id_val;
+      this.name = name_val;
+    }
+
+    // --- Fulfills the 'Loggable' contract ---
+    func to_log_string(this) -> string {
+      // A more complex implementation could exist here.
+      return "User(id: " + string(this.id) + ", name: " + this.name + ")";
+    }
+}
+
+export func main() -> i64 {
+  let u = User(101, "Alice");
+
+  // We can trust that 'u' has these members because it signed the contracts.
+  io.println(1, "User ID: " + string(u.id));
+  io.println(1, "Log string: " + u.to_log_string());
+
+  return 0;
+}

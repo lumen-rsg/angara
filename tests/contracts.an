@@ -1,0 +1,13 @@
+// A contract for objects that can be uniquely identified.
+export contract Identifiable {
+  // It requires any signing class to have a public, constant 'id' field.
+  public:
+    let id as i64;
+}
+
+// A contract for objects that can be represented as a string for logging.
+export contract Loggable {
+  public:
+    // Requires a method that returns a string representation.
+    func to_log_string(this) -> string;
+}
