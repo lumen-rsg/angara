@@ -38,11 +38,23 @@ typedef struct {
     char* chars;
 } AngaraString;
 
+// A single key-value entry in a record
+typedef struct {
+    char* key; // Owns the key string
+    AngaraObject value;
+} RecordEntry;
+
+typedef struct {
+    Object obj;
+    size_t count;
+    size_t capacity;
+    RecordEntry* entries;
+} AngaraRecord;
+
 
 // --- C ABI Function Signature ---
 // Every native function exposed to Angara MUST have this signature.
 typedef AngaraObject (*AngaraNativeFn)(int arg_count, AngaraObject* args);
-
 
 // --- API Provided by the Angara Host ---
 // These are the functions a module can call. They are exported by the
@@ -56,18 +68,32 @@ AngaraObject angara_string_from_c(const char* chars);
 AngaraObject angara_create_string_no_copy(char* owned_chars, size_t length);
 void angara_throw_error(const char* message);
 
+// --- Memory Management API ---
+void angara_incref(AngaraObject value);
+void angara_decref(AngaraObject value);
+
 
 // --- Helper Macros for Module Developers ---
+#define ANGARA_IS_OBJ(value)     ((value).type == VAL_OBJ)
 #define ANGARA_IS_NIL(value)     ((value).type == VAL_NIL)
 #define ANGARA_IS_BOOL(value)    ((value).type == VAL_BOOL)
 #define ANGARA_IS_I64(value)     ((value).type == VAL_I64)
 #define ANGARA_IS_F64(value)     ((value).type == VAL_F64)
 #define ANGARA_IS_STRING(value)  ((value).type == VAL_OBJ && ((Object*)((value).as.obj))->type == OBJ_STRING)
+#define ANGARA_IS_RECORD(value)  (ANGARA_IS_OBJ(value) && ANGARA_AS_OBJ(value)->type == OBJ_RECORD)
+
 
 #define ANGARA_AS_BOOL(value)    ((value).as.boolean)
 #define ANGARA_AS_I64(value)     ((value).as.i64)
 #define ANGARA_AS_F64(value)     ((value).as.f64)
 #define ANGARA_AS_CSTRING(value) (((AngaraString*)(value).as.obj)->chars)
+#define ANGARA_AS_OBJ(value)     ((value).as.obj)
+#define ANGARA_AS_RECORD(value)  ((AngaraRecord*)ANGARA_AS_OBJ(value))
+
+AngaraObject angara_record_new(void);
+AngaraObject angara_record_new_with_fields(size_t pair_count, AngaraObject kvs[]);
+void angara_record_set(AngaraObject record, const char* key, AngaraObject value);
+AngaraObject angara_record_get(AngaraObject record, const char* key);
 
 
 // --- API Provided by the Module ---

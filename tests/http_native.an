@@ -1,0 +1,44 @@
+attach http;
+attach io;
+
+func println(s as string) -> void {
+  io.write(1, s + "\n");
+}
+
+export func main() -> i64 {
+  println("--- Angara HTTP Module Test ---");
+
+  let request_options = {
+    "method": "GET",
+    "url": "https://jsonplaceholder.typicode.com/todos/1"
+  };
+
+  try {
+    println("Making request to: " + request_options["url"]);
+
+    // 1. The return value is now 'any'.
+    let any_response = http.request(request_options);
+
+    // 2. The programmer asserts the expected shape.
+    // This is a powerful feature: we are casting/assigning the dynamic 'any'
+    // value to a statically-typed local variable.
+    let response as {status_code: i64, body: string, headers: {}} = any_response;
+
+    // 3. From this point on, all access is statically type-checked and safe.
+    println("\n--- Response ---");
+    println("Status Code: " + string(response["status_code"]));
+    println("Body:");
+    println(response["body"]);
+
+    if (response["status_code"] != 200) {
+      println("\nRequest failed!");
+      return 1;
+    }
+
+  } catch (e) {
+    println("\nAn error occurred: " + string(e));
+    return 1;
+  }
+
+  return 0;
+}

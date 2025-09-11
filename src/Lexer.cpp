@@ -39,39 +39,9 @@ namespace angara {
             {"as",       TokenType::AS},
             {"contract", TokenType::CONTRACT},
             {"signs", TokenType::SIGNS},
-
-            // Integer Types
-            // {"i8",       TokenType::TYPE_I8},
-            // {"i16",      TokenType::TYPE_I16},
-            // {"i32",      TokenType::TYPE_I32},
-            // {"i64",      TokenType::TYPE_I64},
-            // {"int",      TokenType::TYPE_INT}, // Alias
-            // {"u8",       TokenType::TYPE_U8},
-            // {"u16",      TokenType::TYPE_U16},
-            // {"u32",      TokenType::TYPE_U32},
-            // {"u64",      TokenType::TYPE_U64},
-            // {"uint",     TokenType::TYPE_UINT}, // Alias
-            //
-            // // Float Types
-            // {"f32",      TokenType::TYPE_F32},
-            // {"f64",      TokenType::TYPE_F64},
-            // {"float",    TokenType::TYPE_FLOAT}, // Alias
-            //
-            // // Other Primitives
-            // {"bool",     TokenType::TYPE_BOOL},
-            // {"string",   TokenType::TYPE_STRING},
-            // {"nil",      TokenType::TYPE_NIL},
-            //
-            // // Compound Types
-            // {"list",     TokenType::TYPE_LIST},
-            // {"record",   TokenType::TYPE_RECORD},
-            // {"function", TokenType::TYPE_FUNCTION},
-            // {"any",      TokenType::TYPE_ANY},
-            // {"void",     TokenType::TYPE_VOID},
-            // {"Thread", TokenType::TYPE_THREAD}
-
             {"private",  TokenType::PRIVATE},
             {"public",   TokenType::PUBLIC},
+            {"break", TokenType::BREAK},
     };
 
     Lexer::Lexer(const std::string &source) : m_source(source) {}
@@ -140,7 +110,11 @@ namespace angara {
 
     void Lexer::string() {
         while (peek() != '"' && !isAtEnd()) {
-            if (peek() == '\n') m_line++;
+            if (peek() == '\n') {
+                // A regular string cannot contain a raw newline.
+                std::cerr << "Line " << m_line << ": Unterminated string (found newline).\n";
+                return;
+            }
             advance();
         }
 
@@ -149,11 +123,35 @@ namespace angara {
             return;
         }
 
-        // The closing ".
+        advance(); // The closing ".
+
+        std::string value = m_source.substr(m_start + 1, m_current - m_start - 2);
+        addToken(TokenType::STRING, value);
+    }
+
+    void Lexer::multilineString() {
+        // We've already consumed the first triple-quote.
+        while (!(peek() == '"' && peekNext() == '"' && m_source[m_current + 2] == '"') && !isAtEnd()) {
+            if (peek() == '\n') {
+                m_line++;
+                m_column = 0; // Reset column on newline
+            }
+            advance();
+        }
+
+        if (isAtEnd()) {
+            // Using std::cerr for lexer-level errors as we don't have ErrorHandler here.
+            std::cerr << "Line " << m_line << ": Unterminated multi-line string.\n";
+            return;
+        }
+
+        // Consume the closing triple-quote """
+        advance();
+        advance();
         advance();
 
-        // Trim the surrounding quotes to get the actual string value.
-        std::string value = m_source.substr(m_start + 1, m_current - m_start - 2);
+        // The value is the content between the delimiters.
+        std::string value = m_source.substr(m_start + 3, m_current - m_start - 6);
         addToken(TokenType::STRING, value);
     }
 
@@ -193,6 +191,7 @@ namespace angara {
     void Lexer::scanToken() {
         char c = advance();
         switch (c) {
+
             // Single-character tokens
             case '(':
                 addToken(TokenType::LEFT_PAREN);
@@ -287,7 +286,14 @@ namespace angara {
                 }
                 break;
             case '"':
-                string();
+                // --- THE FIX IS HERE ---
+                if (peek() == '"' && peekNext() == '"') {
+                    advance(); // consume the second "
+                    advance(); // consume the third "
+                    multilineString();
+                } else {
+                    string();
+                }
                 break;
 
             case ' ':

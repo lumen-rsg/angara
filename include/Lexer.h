@@ -38,5 +38,7 @@ namespace angara {
 
         // Map to hold all reserved keywords
         static const std::map<std::string, TokenType> keywords;
+
+        void multilineString();
     };
 }

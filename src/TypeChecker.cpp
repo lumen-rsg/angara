@@ -588,16 +588,18 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         }
 
         // --- Handle the FunctionTypeExpr AST node ---
-        if (auto func_type_expr = std::dynamic_pointer_cast<const FunctionTypeExpr>(ast_type)) {
-            std::vector<std::shared_ptr<Type>> param_types;
-            for (const auto& p_ast_type : func_type_expr->param_types) {
-                param_types.push_back(resolveType(p_ast_type));
+        if (auto record_type_expr = std::dynamic_pointer_cast<const RecordTypeExpr>(ast_type)) {
+            std::map<std::string, std::shared_ptr<Type>> fields;
+            for (const auto& field_def : record_type_expr->fields) {
+                const std::string& field_name = field_def.name.lexeme;
+                if (fields.count(field_name)) {
+                    error(field_def.name, "Duplicate field name '" + field_name + "' in record type definition.");
+                }
+                // Recursively resolve the type of the field
+                fields[field_name] = resolveType(field_def.type);
             }
-
-            auto return_type = resolveType(func_type_expr->return_type);
-
-            // Return our internal FunctionType representation.
-            return std::make_shared<FunctionType>(param_types, return_type);
+            // Return our internal RecordType representation.
+            return std::make_shared<RecordType>(fields);
         }
 
         // --- Handle the RecordTypeExpr AST node ---
@@ -649,6 +651,19 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         if (!types_match && isInteger(declared_type) && initializer_type->toString() == "i64") {
             types_match = true;
         }
+        if (!types_match && initializer_type->kind == TypeKind::ANY) {
+            types_match = true; // It's always safe to assign 'any' to a typed variable.
+        }
+
+        // Rule 2: It's safe to assign a generic record '{}' from a native
+        // function to a specifically typed record variable. This is a type assertion.
+        if (!types_match && declared_type->kind == TypeKind::RECORD && initializer_type->kind == TypeKind::RECORD) {
+            auto initializer_record = std::dynamic_pointer_cast<RecordType>(initializer_type);
+            if (initializer_record->fields.empty()) {
+                types_match = true;
+            }
+        }
+
         if (!types_match) {
             error(stmt->name, "Type mismatch. Variable is annotated as '" +
                 declared_type->toString() + "' but is initialized with a value of type '" +
@@ -911,7 +926,9 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         }
 
         // 3. Type check the loop body.
+        m_loop_depth++; // <-- ENTER a loop
         stmt->body->accept(*this, stmt->body);
+        m_loop_depth--; // <-- EXIT a loop
     }
 
     void TypeChecker::visit(std::shared_ptr<const ForStmt> stmt) {
@@ -940,46 +957,51 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             popType(); // The resulting value of the increment expression is not used.
         }
 
-        // 5. Type check the loop body.
+        m_loop_depth++; // <-- ENTER a loop
         stmt->body->accept(*this, stmt->body);
+        m_loop_depth--; // <-- EXIT a loop
 
         // 6. Exit the scope, destroying the initializer variable.
         m_symbols.exitScope();
     }
 
     void TypeChecker::visit(std::shared_ptr<const ForInStmt> stmt) {
-        // 1. The for..in loop also introduces a new scope.
-        m_symbols.enterScope();
-
-        // 2. Type check the collection expression.
+        // 1. First, type check the expression that provides the collection.
         stmt->collection->accept(*this);
         auto collection_type = popType();
 
-        std::shared_ptr<Type> item_type = m_type_error; // The inferred type of 'item'.
-
-        // 3. Enforce the iteration rules. The collection must be iterable (a list or string for now).
+        // 2. Determine the type of the items IN the collection.
+        std::shared_ptr<Type> item_type = m_type_error; // Default to error
         if (collection_type->kind == TypeKind::LIST) {
-            // If the collection is list<T>, then the item's type is T.
-            auto list_type = std::dynamic_pointer_cast<ListType>(collection_type);
-            item_type = list_type->element_type;
+            // If it's a list<T>, the item type is T.
+            item_type = std::dynamic_pointer_cast<ListType>(collection_type)->element_type;
         } else if (collection_type->toString() == "string") {
-            // If the collection is a string, then the item is also a string (a single character).
+            // If it's a string, the item type is also string (for each character).
             item_type = m_type_string;
         } else {
             error(stmt->name, "The 'for..in' loop can only iterate over a list or a string, but got '" +
                               collection_type->toString() + "'.");
         }
 
-        // 4. Declare the loop variable ('item') in the new scope with its inferred type.
-        if (!m_symbols.declare(stmt->name, item_type, false)) {
-            // This should be unreachable if the parser prevents duplicate declarations.
-            error(stmt->name, "A variable with this name already exists in this scope.");
+        // 3. The entire loop introduces a new scope for the loop variable.
+        m_symbols.enterScope();
+
+        // 4. Declare the loop variable (e.g., 'ability_obj') inside this new scope.
+        //    It is a constant for each iteration.
+        if (auto conflicting_symbol = m_symbols.declare(stmt->name, item_type, true)) {
+            // This case should be logically impossible if enterScope() works correctly,
+            // as the scope has just been created. But we handle it for robustness.
+            error(stmt->name, "compiler internal error: re-declaration of loop variable '" + stmt->name.lexeme + "'.");
+            note(conflicting_symbol->declaration_token, "previous declaration was here.");
         }
 
-        // 5. Now that 'item' is in scope, we can type check the loop body.
+        // 5. Now that the loop variable is in scope, type check the body of the loop.
+        //    The body executes within the new scope.
+        m_loop_depth++;
         stmt->body->accept(*this, stmt->body);
+        m_loop_depth--;
 
-        // 6. Exit the scope.
+        // 6. When the loop is finished, exit its scope, destroying the loop variable.
         m_symbols.exitScope();
     }
 
@@ -1040,22 +1062,29 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         auto expected_return_type = m_function_return_types.top();
 
         if (stmt->value) {
-            // A value is being returned.
             stmt->value->accept(*this);
             auto actual_return_type = popType();
 
-            // Check if the returned value's type matches the function's signature.
-            if (actual_return_type->toString() != expected_return_type->toString()) {
+            // --- THE FIX: Allow returning a specific type where 'any' is expected ---
+            bool types_match = (actual_return_type->toString() == expected_return_type->toString());
+
+            // Covariance Rule: A more specific type can be used where a more general 'any' is expected.
+            if (!types_match && expected_return_type->kind == TypeKind::ANY) {
+                types_match = true;
+            }
+            // --- END FIX ---
+
+            if (!types_match) {
                 error(stmt->keyword, "Type mismatch. This function is declared to return '" +
                                      expected_return_type->toString() + "', but is returning a value of type '" +
                                      actual_return_type->toString() + "'.");
             }
         } else {
-            // No value is returned ('return;'). This is only valid if the function
-            // is supposed to return 'nil'.
+            // No value is returned. This is only valid for 'void' functions.
+            // (Note: nil is a value, so `return nil;` would be in the block above)
             if (expected_return_type->toString() != "void") {
                 error(stmt->keyword, "This function must return a value of type '" +
-                                     expected_return_type->toString() + "'.");
+                                     expected_return_type->toString() + "'. Use 'return nil;' if applicable.");
             }
         }
     }
@@ -1188,6 +1217,49 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         expr.value->accept(*this);
         auto rhs_type = popType();
 
+        if (auto subscript_target = std::dynamic_pointer_cast<const SubscriptExpr>(expr.target)) {
+            // We need to get the types of the collection and index before proceeding.
+            subscript_target->object->accept(*this);
+            auto collection_type = popType();
+            subscript_target->index->accept(*this);
+            auto index_type = popType();
+
+            if (collection_type->kind == TypeKind::ERROR || index_type->kind == TypeKind::ERROR) {
+                pushAndSave(&expr, m_type_error); return {};
+            }
+
+            if (collection_type->kind == TypeKind::LIST) {
+                auto list_type = std::dynamic_pointer_cast<ListType>(collection_type);
+                if (!isInteger(index_type)) {
+                    error(subscript_target->bracket, "List index for assignment must be an integer, but got '" + index_type->toString() + "'.");
+                }
+                if (list_type->element_type->toString() != rhs_type->toString()) {
+                    error(expr.op, "Type mismatch. Cannot assign value of type '" + rhs_type->toString() + "' to an element of a list of type '" + list_type->toString() + "'.");
+                }
+            }
+            else if (collection_type->kind == TypeKind::RECORD) {
+                if (index_type->toString() != "string") {
+                    error(subscript_target->bracket, "Record key for assignment must be a string, but got '" + index_type->toString() + "'.");
+                } else {
+                    if (auto key_literal = std::dynamic_pointer_cast<const Literal>(subscript_target->index)) {
+                        // STATIC ASSIGNMENT: Key is known.
+                        auto record_type = std::dynamic_pointer_cast<RecordType>(collection_type);
+                        auto field_it = record_type->fields.find(key_literal->token.lexeme);
+                        if (field_it == record_type->fields.end()) {
+                            error(key_literal->token, "Record of type '" + record_type->toString() + "' has no statically-known field named '" + key_literal->token.lexeme + "'. Use a variable key to add a new field.");
+                        } else if (field_it->second->toString() != rhs_type->toString()) {
+                            error(expr.op, "Type mismatch. Cannot assign value of type '" + rhs_type->toString() + "' to field '" + key_literal->token.lexeme + "' of type '" + field_it->second->toString() + "'.");
+                        }
+                    }
+                    // DYNAMIC ASSIGNMENT (key is a variable): This is allowed.
+                }
+            }
+
+            // Subscript assignment expression evaluates to the RHS value.
+            pushAndSave(&expr, rhs_type);
+            return {};
+        }
+
         // 2. Determine the type of the target being assigned to (LHS).
         expr.target->accept(*this);
         auto lhs_type = popType();
@@ -1225,10 +1297,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                 note(symbol->declaration_token, "'" + symbol->name + "' was declared 'const' here.");
             }
         }
-        else if (auto subscript_target = std::dynamic_pointer_cast<const SubscriptExpr>(expr.target)) {
-            // Subscript assignments (`list[i] = ...`) are always considered mutable for now.
-            // No const check is needed here.
-        }
+
         else if (auto get_target = std::dynamic_pointer_cast<const GetExpr>(expr.target)) {
             // We need to re-evaluate the object type to get the ClassType.
             get_target->object->accept(*this);
@@ -1361,10 +1430,18 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                     auto expected_type = func_type->param_types[i];
                     auto actual_type = arg_types[i];
 
-                    // --- THE FIX IS HERE ---
                     // If the expected type is 'any', then any actual type is valid.
                     if (expected_type->kind == TypeKind::ANY) {
                         continue; // This argument is valid, check the next one.
+                    }
+
+                    // Case 2: Expected type is a generic record '{}'. Any specific record is allowed.
+                    if (expected_type->kind == TypeKind::RECORD && actual_type->kind == TypeKind::RECORD) {
+                        auto expected_record = std::dynamic_pointer_cast<RecordType>(expected_type);
+                        // An empty fields map signifies the generic "any record" type from our native ABI.
+                        if (expected_record->fields.empty()) {
+                            continue; // This argument is valid.
+                        }
                     }
 
                     // If not 'any', the types must match exactly.
@@ -1579,26 +1656,24 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             // --- Case 2: Accessing a record field ---
         else if (collection_type->kind == TypeKind::RECORD) {
             auto record_type = std::dynamic_pointer_cast<RecordType>(collection_type);
-
-            // Rule: Record keys must be strings.
             if (index_type->toString() != "string") {
-                error(expr.bracket, "Record key must be a string, but got '" +
-                                    index_type->toString() + "'.");
+                error(expr.bracket, "Record key must be a string, but got '" + index_type->toString() + "'.");
             } else {
-                // Rule: The key must be a string LITERAL for compile-time checking.
+                // --- REVISED LOGIC ---
                 if (auto key_literal = std::dynamic_pointer_cast<const Literal>(expr.index)) {
+                    // STATIC ACCESS: Key is a literal, so we check it at compile time.
                     const std::string& key_name = key_literal->token.lexeme;
-
                     auto field_it = record_type->fields.find(key_name);
                     if (field_it == record_type->fields.end()) {
-                        error(key_literal->token, "Record of type '" + record_type->toString() +
-                                                  "' has no field named '" + key_name + "'.");
+                        error(key_literal->token, "Record of type '" + record_type->toString() + "' has no statically-known field named '" + key_name + "'.");
+                        result_type = m_type_error;
                     } else {
-                        // Success! The result type is the field's type.
-                        result_type = field_it->second;
+                        result_type = field_it->second; // Success!
                     }
                 } else {
-                    error(expr.bracket, "Record fields can only be accessed with a string literal key for static type checking.");
+                    // DYNAMIC ACCESS: Key is a variable. The compiler cannot check the key's value.
+                    // The result of a dynamic access is always 'any' because we don't know which field will be accessed.
+                    result_type = m_type_any;
                 }
             }
         }
@@ -1852,4 +1927,10 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         }
     }
 }
+
+    void TypeChecker::visit(std::shared_ptr<const BreakStmt> stmt) {
+        if (m_loop_depth == 0) {
+            error(stmt->keyword, "Cannot use 'break' outside of a loop.");
+        }
+    }
 } // namespace angara

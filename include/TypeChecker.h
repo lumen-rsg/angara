@@ -98,6 +98,7 @@ namespace angara {
         std::stack<std::shared_ptr<Type>> m_type_stack;
 
         bool m_hadError = false;
+        int m_loop_depth = 0;
 
         // Pre-create canonical primitive types to avoid repeated allocations
         std::shared_ptr<Type> m_type_i8, m_type_i16, m_type_i32, m_type_i64;
@@ -129,6 +130,8 @@ namespace angara {
         void pushAndSave(const Expr *expr, std::shared_ptr<Type> type);
 
         static bool isTruthy(const std::shared_ptr<Type> &type);
+
+        void visit(std::shared_ptr<const BreakStmt> stmt);
     };
 
 } // namespace angara

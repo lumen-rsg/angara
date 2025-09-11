@@ -1,0 +1,178 @@
+// =======================================================================
+// REPLACE the entire contents of json.an with this complete and correct version.
+// =======================================================================
+
+attach adv_string;
+
+// A helper class for parsing errors.
+class _ParseError {
+  let message as string;
+
+  func init(this, msg as string) -> void {
+    this.message = msg;
+  }
+
+  // NEW: Add a toString method for better error reporting.
+  func toString(this) -> string {
+    return "ParseError: " + this.message;
+  }
+}
+
+class _Parser {
+public:
+  let source as string;
+  let length as i64;
+  let current as i64;
+
+  func init(this, src as string) -> void {
+    this.source = src;
+    this.length = len(src);
+    this.current = 0;
+  }
+
+  // --- Main Parsing Logic ---
+  func parse_value(this) -> any {
+    this.skip_whitespace();
+    if (this.is_at_end()) { throw _ParseError("Unexpected end of JSON input."); }
+
+    let char = this.peek();
+    if (char == "{") { return this.parse_object(); }
+    if (char == "[") { return this.parse_array(); }
+    if (char == "\") { return this.parse_string(); }
+    if (char == "t") { return this.parse_literal("true", true); }
+    if (char == "f") { return this.parse_literal("false", false); }
+    if (char == "n") { return this.parse_literal("null", nil); }
+
+    if (adv_string.is_digit(char) || char == "-") {
+      return this.parse_number();
+    }
+    throw _ParseError("Unexpected character in JSON: '" + char + "'");
+  }
+
+  func parse_object(this) -> any {
+    this.consume("{");
+    let obj = {};
+
+    this.skip_whitespace();
+    if (this.peek() == "}") {
+      this.consume("}");
+      return obj;
+    }
+
+    while (true) {
+      this.skip_whitespace();
+      let key = this.parse_string();
+      this.skip_whitespace();
+      this.consume(":");
+      let value = this.parse_value();
+
+      obj[key] = value;
+
+      this.skip_whitespace();
+      if (this.peek() == "}") { break; }
+      this.consume(",");
+    }
+
+    this.consume("}");
+    return obj;
+  }
+
+  func parse_array(this) -> any {
+    this.consume("[");
+    let arr = [];
+
+    this.skip_whitespace();
+    if (this.peek() == "]") {
+      this.consume("]");
+      return arr;
+    }
+
+    while (true) {
+      arr.push(this.parse_value());
+      this.skip_whitespace();
+      if (this.peek() == "]") { break; }
+      this.consume(",");
+    }
+    this.consume("]");
+    return arr;
+  }
+
+  func parse_string(this) -> string {
+    this.consume("\");
+    let start = this.current;
+    while (this.peek() != "\") {
+      if (this.is_at_end()) { throw _ParseError("Unterminated string in JSON."); }
+      // TODO: Handle escaped quotes like \"
+      this.advance();
+    }
+    let value = adv_string.substring(this.source, start, this.current);
+    this.consume("\");
+    return value;
+  }
+
+  func parse_number(this) -> f64 {
+    let start = this.current;
+    if (this.peek() == "-") { this.advance(); }
+    while (adv_string.is_digit(this.peek())) { this.advance(); }
+    if (this.peek() == ".") {
+      this.advance();
+      while(adv_string.is_digit(this.peek())) { this.advance(); }
+    }
+    let num_str = adv_string.substring(this.source, start, this.current);
+    return f64(num_str);
+  }
+
+  func parse_literal(this, literal_text as string, value as any) -> any {
+    let i = 0;
+    while (i < len(literal_text)) {
+      if (this.is_at_end() || this.peek() != adv_string.get(literal_text, i)) {
+        throw _ParseError("Invalid literal. Expected '" + literal_text + "'.");
+      }
+      this.advance();
+      i = i + 1;
+    }
+    return value;
+  }
+
+  // --- Utility Methods ---
+  func peek(this) -> string {
+    if (this.is_at_end()) { return "\0"; }
+    return adv_string.get(this.source, this.current);
+  }
+
+  func advance(this) -> void {
+    if (!this.is_at_end()) {
+      this.current = this.current + 1;
+    }
+  }
+
+  func consume(this, expected as string) -> void {
+    this.skip_whitespace();
+    if (this.peek() != expected) {
+      throw _ParseError("Expected '" + expected + "' but found '" + this.peek() + "'.");
+    }
+    this.advance();
+  }
+
+  func is_at_end(this) -> bool {
+    return this.current >= this.length;
+  }
+
+  func skip_whitespace(this) -> void {
+    while (!this.is_at_end()) {
+      let char = this.peek();
+      // Use the native adv_string.is_whitespace function
+      if (adv_string.is_whitespace(char)) {
+        this.advance();
+      } else {
+        break;
+      }
+    }
+  }
+}
+
+// Public API
+export func parse(source as string) -> any {
+  let p = _Parser(source);
+  return p.parse_value();
+}

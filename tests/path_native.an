@@ -1,0 +1,29 @@
+attach path;
+
+export func main() -> i64 {
+  print("--- Angara Path Module Test ---");
+
+  // 1. Test path.join
+  let p1 = path.join("/home", "user", "docs", "report.pdf");
+  print("Joined path:", p1);
+
+  let p2 = path.join("relative", "path");
+  print("Joined relative path:", p2);
+
+  // 2. Test path.basename
+  print("\nBasename of '" + p1 + "':", path.basename(p1));
+  print("Basename of 'file':", path.basename("file"));
+
+  // 3. Test path.dirname
+  print("\nDirname of '" + p1 + "':", path.dirname(p1));
+  print("Dirname of '/file':", path.dirname("/file"));
+  print("Dirname of 'file':", path.dirname("file"));
+
+  // 4. Test path.extension
+  print("\nExtension of '" + p1 + "':", path.extension(p1));
+  print("Extension of '.bashrc':", path.extension(".bashrc"));
+  print("Extension of 'no-ext':", path.extension("no-ext"));
+  print("Extension of 'archive.v1/file':", path.extension("archive.v1/file"));
+
+  return 0;
+}

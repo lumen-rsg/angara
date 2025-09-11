@@ -21,8 +21,9 @@ namespace angara {
          * @return A string containing the complete, compilable C source code.
          */
 
-        TranspileResult generate(const std::vector<std::shared_ptr<Stmt>>& statements, const std::string& module_name, std::vector<std::string>& all_module_names);
-
+        TranspileResult generate(const std::vector<std::shared_ptr<Stmt>>& statements,
+                                 const std::shared_ptr<ModuleType>& module_type,
+                                 std::vector<std::string>& all_module_names);
     private:
         // --- Main Pass Methods ---
         void pass_1_generate_structs(const std::vector<std::shared_ptr<Stmt>>& statements);
@@ -133,6 +134,12 @@ namespace angara {
         // An empty string means we are in the global scope.
         std::string m_current_class_name;
         std::string m_current_module_name;
+
+        void transpileBreakStmt(const BreakStmt &stmt);
+
+        std::string sanitize_name(const std::string &name);
+
+        std::string escape_c_string(const std::string &str);
     };
 
 } // namespace angara

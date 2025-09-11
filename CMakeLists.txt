@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 project(angara CXX C) # Project is now 'angara'
 set(CMAKE_CXX_STANDARD 23)
 
+find_package(CURL REQUIRED)
+
 # --- 1. Build libangara_runtime.so ---
 # The runtime is now a SHARED library that everything else will link against.
 add_library(angara_runtime SHARED src/runtime/angara_runtime.c)
@@ -12,6 +14,7 @@ set_target_properties(angara_runtime PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
 
+
 # --- 2. Build Native Modules (like libfs.so) ---
 file(GLOB_RECURSE NATIVE_MODULE_SOURCES "${CMAKE_SOURCE_DIR}/modules/*.c")
 foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
@@ -20,6 +23,14 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
 
     # Modules link against the CORE RUNTIME LIBRARY
     target_link_libraries(${MODULE_NAME} PRIVATE angara_runtime)
+
+    # --- THE FIX: Conditional Linking ---
+    # If this specific module needs an external library, link it here.
+    if (MODULE_NAME STREQUAL "http")
+        message(STATUS "Module 'http' requires libcurl. Linking...")
+        target_link_libraries(${MODULE_NAME} PRIVATE CURL::libcurl)
+    endif()
+    # --- END FIX ---
 
     target_include_directories(${MODULE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     set_target_properties(${MODULE_NAME} PROPERTIES

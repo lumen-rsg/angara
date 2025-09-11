@@ -129,6 +129,7 @@ typedef struct {
 #define AS_CLOSURE(value) ((AngaraClosure*)AS_OBJ(value))
 #define AS_THREAD(value) ((AngaraThread*)AS_OBJ(value))
 #define AS_MUTEX(value) ((AngaraMutex*)AS_OBJ(value))
+#define IS_STRING(value)  ((value).type == VAL_OBJ && ((Object*)((value).as.obj))->type == OBJ_STRING)
 
 // --- Value Constructor Functions ---
 AngaraObject angara_create_nil(void);
@@ -232,5 +233,8 @@ AngaraObject angara_to_f64(AngaraObject value);
 AngaraObject angara_to_bool(AngaraObject value);
 
 AngaraObject angara_string_concat(AngaraObject a, AngaraObject b);
+
+void angara_record_set_with_angara_key(AngaraObject, AngaraObject, AngaraObject);
+AngaraObject angara_record_get_with_angara_key(AngaraObject, AngaraObject);
 
 #endif //ANGARA_RUNTIME_H

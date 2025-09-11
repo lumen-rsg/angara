@@ -1,0 +1,1 @@
+Angara II : hello from native module! (fs) - compiled as static .so library for the runtime.

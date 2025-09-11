@@ -721,3 +721,16 @@ AngaraObject angara_string_concat(AngaraObject a, AngaraObject b) {
     // The new string object takes ownership of the buffer.
     return angara_create_string_no_copy(new_chars, new_len);
 }
+
+AngaraObject angara_record_get_with_angara_key(AngaraObject record_obj, AngaraObject key_obj) {
+    if (!IS_STRING(key_obj)) return angara_create_nil();
+    return angara_record_get(record_obj, AS_CSTRING(key_obj));
+}
+
+void angara_record_set_with_angara_key(AngaraObject record_obj, AngaraObject key_obj, AngaraObject value_obj) {
+    // This is safe because the transpiler will only generate calls to this
+    // if the key is a string. We can add a check for safety.
+    if (IS_STRING(key_obj)) {
+        angara_record_set(record_obj, AS_CSTRING(key_obj), value_obj);
+    }
+}

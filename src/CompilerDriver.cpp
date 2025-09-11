@@ -48,7 +48,7 @@ namespace angara {
     char TypeStringParser::advance() { return is_at_end() ? '\0' : m_source[m_current++]; }
 
     std::shared_ptr<Type> TypeStringParser::parse_type() {
-        if (is_at_end()) return std::make_shared<AnyType>(); // Should not happen in valid strings
+        if (is_at_end()) return std::make_shared<AnyType>();
 
         char c = advance();
         switch (c) {
@@ -59,13 +59,24 @@ namespace angara {
             case 'a': return std::make_shared<AnyType>();
             case 'n': return std::make_shared<NilType>();
             case 'l': {
-                if (advance() != '<') throw std::runtime_error("Expected '<' after 'l' in type string.");
+                if (advance() != '<') throw std::runtime_error("Expected '<' after 'l' for list type.");
                 auto element_type = parse_type();
-                if (advance() != '>') throw std::runtime_error("Expected '>' to close generic type in type string.");
+                if (advance() != '>') throw std::runtime_error("Expected '>' to close list generic type.");
                 return std::make_shared<ListType>(element_type);
             }
+            case '{': { // <-- NEW: Handle records
+                // A simple {} means a generic record.
+                if (peek() == '}') {
+                    advance(); // consume '}'
+                    return std::make_shared<RecordType>(std::map<std::string, std::shared_ptr<Type>>{});
+                }
+
+                // This is where logic for more complex records like {s:i} would go.
+                // For now, we'll consider that an error.
+                throw std::runtime_error("Detailed record type strings like '{s:i}' are not yet supported.");
+            }
             default:
-                throw std::runtime_error("Invalid character in type string: " + std::string(1, c));
+                throw std::runtime_error("Invalid character in type string: '" + std::string(1, c) + "'");
         }
     }
 
@@ -303,171 +314,124 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
 }
 
 
-std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& path_or_id, const Token& import_token) {
-    // 1. Determine the canonical cache key for this import.
-    // For logical names like "fs", the key is "fs".
-    // For direct paths like "./utils.an", the key is the absolute path to ensure uniqueness.
-    std::string cache_key;
-    bool is_direct_path = path_or_id.find('/') != std::string::npos || path_or_id.find('\\') != std::string::npos;
-    if (is_direct_path || path_or_id.ends_with(".an") || path_or_id.ends_with(".so") || path_or_id.ends_with(".dylib") || path_or_id.ends_with(".dll")) {
-        cache_key = std::filesystem::absolute(path_or_id).string();
-    } else {
-        cache_key = path_or_id;
-    }
+    std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& path_or_id, const Token& import_token) {
+        // 1. Find the absolute path to the module file.
+        std::string found_path;
+        bool is_direct_path = path_or_id.find('/') != std::string::npos || path_or_id.find('\\') != std::string::npos;
 
-    // 2. Check the cache first. If found, we are done.
-    if (m_module_cache.count(cache_key)) {
-        return m_module_cache[cache_key];
-    }
+        if (is_direct_path || path_or_id.ends_with(".an") || path_or_id.ends_with(".so") || path_or_id.ends_with(".dylib") || path_or_id.ends_with(".dll")) {
+            // It's a direct path.
+            if (std::filesystem::exists(path_or_id)) {
+                found_path = std::filesystem::absolute(path_or_id).string();
+            }
+        } else {
+            // It's a logical name, like "json" or "fs". Search for it.
+            const std::vector<std::string> search_paths = { ".", m_angara_module_path, m_native_module_path };
+            for (const auto& dir : search_paths) {
+                // Check for Angara source file: e.g., ./json.an or /opt/src/angara/modules/json.an
+                std::filesystem::path an_path = std::filesystem::path(dir) / (path_or_id + ".an");
+                if (std::filesystem::exists(an_path)) {
+                    found_path = std::filesystem::absolute(an_path).string();
+                    break;
+                }
 
-    // --- CACHE MISS: We must find and process the module file ---
+                // Check for native library: e.g., ./libfs.so or /opt/modules/angara/libfs.so
+                std::filesystem::path so_path = std::filesystem::path(dir) / ("lib" + path_or_id + ".so");
+                if (std::filesystem::exists(so_path)) {
+                    found_path = std::filesystem::absolute(so_path).string();
+                    break;
+                }
 
-    // 3. Check for circular dependencies.
-    for (const auto& p : m_compilation_stack) {
-        if (p == cache_key) {
-            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Circular dependency detected for module '" << path_or_id << "'.\n";
-            m_had_error = true;
-            return nullptr;
-        }
-    }
-
-    // 4. Find the absolute path to the module file.
-    std::string found_path = "";
-    if (is_direct_path || path_or_id.ends_with(".an") || path_or_id.ends_with(".so") || path_or_id.ends_with(".dylib") || path_or_id.ends_with(".dll")) {
-        if (std::filesystem::exists(path_or_id)) {
-            found_path = std::filesystem::absolute(path_or_id).string();
-        }
-    } else {
-        // Search standard locations for the logical name.
-        const std::vector<std::string> search_paths = { ".", m_angara_module_path, m_native_module_path };
-        for (const auto& dir : search_paths) {
-            std::vector<std::string> potential_filenames = {
-                path_or_id + ".an", "lib" + path_or_id + ".so", "lib" + path_or_id + ".dylib", "lib" + path_or_id + ".dll"
-            };
-            for (const auto& filename : potential_filenames) {
-                std::filesystem::path potential_path = std::filesystem::path(dir) / filename;
-                if (std::filesystem::exists(potential_path)) {
-                    found_path = std::filesystem::absolute(potential_path).string();
+                // Add other native extensions if needed (.dylib, .dll)
+                std::filesystem::path dylib_path = std::filesystem::path(dir) / ("lib" + path_or_id + ".dylib");
+                if (std::filesystem::exists(dylib_path)) {
+                    found_path = std::filesystem::absolute(dylib_path).string();
                     break;
                 }
             }
-            if (!found_path.empty()) break;
         }
-    }
 
-    if (found_path.empty()) {
-        std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Cannot find module '" << path_or_id << "'.\n";
-        m_had_error = true;
-        return nullptr;
-    }
-
-    // 1. Check the cache first to avoid recompiling the same file.
-    if (m_module_cache.count(path_or_id)) {
-        return m_module_cache[path_or_id];
-    }
-
-    // 2. Check for circular dependencies by seeing if the path is already in our call stack.
-    for (const auto& p : m_compilation_stack) {
-        if (p == path_or_id) {
-            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Circular dependency detected. Module '" << path_or_id << "' is already being compiled in this chain.\n";
+        if (found_path.empty()) {
+            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Cannot find module '" << path_or_id << "'.\n";
             m_had_error = true;
             return nullptr;
         }
-    }
 
-    m_compilation_stack.push_back(path_or_id);
-    m_total_modules++;
-    print_progress(path_or_id);
+        // 2. Use the canonical, absolute path as the cache key.
+        const std::string& cache_key = found_path;
+        if (m_module_cache.count(cache_key)) {
+            return m_module_cache[cache_key];
+        }
 
-    // --- DISPATCHER: Decide how to handle the file based on its extension ---
-    std::shared_ptr<ModuleType> module_type = nullptr;
-    if (found_path.ends_with(".so") || found_path.ends_with(".dylib") || found_path.ends_with(".dll")) {
-        // --- Path 1: Load a pre-compiled native module ---
-        module_type = loadNativeModule(found_path, import_token);
-
-        if (module_type) {
-            // 1. Extract the directory path.
-            size_t last_slash = path_or_id.find_last_of("/\\");
-            if (last_slash != std::string::npos) {
-                m_native_lib_paths.insert(path_or_id.substr(0, last_slash));
+        // 3. Check for circular dependencies.
+        for (const auto& p : m_compilation_stack) {
+            if (p == cache_key) {
+                std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Circular dependency detected for module '" << path_or_id << "'.\n";
+                m_had_error = true;
+                return nullptr;
             }
-            // 2. Extract the clean library name.
-            m_native_lib_names.push_back(get_lib_name(path_or_id));
-            module_type->is_native = true;
         }
 
-    } else {
-        // --- Path 2: Compile an Angara source file ---
-        m_compiled_angara_files.push_back(path_or_id);
-        std::string source = read_file(path_or_id);
+        // 4. Now that we have the path, compile or load it.
+        m_compilation_stack.push_back(cache_key);
+        m_total_modules++;
+        print_progress(path_or_id);
 
-        m_line_counts[path_or_id] = 1;
-        for(char c : source) {
-            if (c == '\n') m_line_counts[path_or_id]++;
+        std::shared_ptr<ModuleType> module_type = nullptr;
+        if (found_path.ends_with(".so") || found_path.ends_with(".dylib") || found_path.ends_with(".dll")) {
+            module_type = loadNativeModule(found_path, import_token);
+            if (module_type) {
+                m_native_lib_paths.insert(std::filesystem::path(found_path).parent_path().string());
+                m_native_lib_names.push_back(get_base_name(found_path));
+                module_type->is_native = true;
+            }
+        } else {
+
+            // --- Compile an Angara source file ---
+            m_compiled_angara_files.push_back(found_path);
+            std::string source = read_file(found_path);
+
+            int line_count = 1;
+            for(char c : source) { if (c == '\n') line_count++; }
+            m_line_counts[found_path] = line_count;
+
+            ErrorHandler errorHandler(source);
+            Lexer lexer(source);
+            auto tokens = lexer.scanTokens();
+            Parser parser(tokens, errorHandler);
+            auto statements = parser.parseStmts();
+            if (errorHandler.hadError()) { m_had_error = true; m_compilation_stack.pop_back(); return nullptr; }
+
+            std::string module_name = get_base_name(found_path);
+            TypeChecker typeChecker(*this, errorHandler, module_name);
+            if (!typeChecker.check(statements)) { m_had_error = true; m_compilation_stack.pop_back(); return nullptr; }
+            auto module_type_obj = typeChecker.getModuleType();
+            m_angara_module_names.push_back(module_name);
+            CTranspiler transpiler(typeChecker, errorHandler);
+            auto [header_code, source_code] = transpiler.generate(statements, module_type_obj, m_angara_module_names);
+            if (errorHandler.hadError()) { m_had_error = true; m_compilation_stack.pop_back(); return nullptr; }
+
+            std::string h_filename = module_name + ".h";
+            m_compiled_h_files.push_back(h_filename);
+            std::ofstream h_file(h_filename);
+            h_file << header_code;
+
+            std::string c_filename = module_name + ".c";
+            m_compiled_c_files.push_back(c_filename);
+            std::ofstream c_file(c_filename);
+            c_file << source_code;
+
+            module_type = typeChecker.getModuleType();
         }
 
-        if (source.empty()) {
-            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Could not open source file '" << path_or_id << "'\n";
-            m_had_error = true;
-            m_compilation_stack.pop_back();
-            return nullptr;
+        // 5. Clean up, cache the result, and return.
+        m_compilation_stack.pop_back();
+        if (module_type) {
+            m_module_cache[cache_key] = module_type;
+            m_modules_compiled++;
         }
-
-        // Run the full pipeline: Lexer -> Parser -> TypeChecker
-        ErrorHandler errorHandler(source);
-        Lexer lexer(source);
-        auto tokens = lexer.scanTokens();
-        Parser parser(tokens, errorHandler);
-        auto statements = parser.parseStmts();
-        if (errorHandler.hadError()) {
-            m_had_error = true;
-            m_compilation_stack.pop_back();
-            return nullptr;
-        }
-
-        std::string module_name = get_base_name(path_or_id);
-        TypeChecker typeChecker(*this, errorHandler, module_name);
-        if (!typeChecker.check(statements)) {
-            m_had_error = true;
-            m_compilation_stack.pop_back();
-            return nullptr;
-        }
-
-        // Transpile the type-checked AST to C header and source files.
-        CTranspiler transpiler(typeChecker, errorHandler);
-        auto [header_code, source_code] = transpiler.generate(statements, module_name, m_compiled_module_names);
-
-        if (m_had_error || (header_code.empty() && source_code.empty())) {
-             m_compilation_stack.pop_back();
-             return nullptr;
-        }
-
-        // Write the generated files to disk.
-        std::string h_filename = module_name + ".h";
-        m_compiled_h_files.push_back(h_filename);
-        std::ofstream h_file(h_filename);
-        h_file << header_code;
-        h_file.close();
-
-        std::string c_filename = module_name + ".c";
-        std::ofstream c_file(c_filename);
-        c_file << source_code;
-        c_file.close();
-
-        // Get the public API of the compiled module.
-        module_type = typeChecker.getModuleType();
-        m_compiled_c_files.push_back(c_filename);
+        return module_type;
     }
-
-    // 3. Clean up and cache the result.
-    m_compilation_stack.pop_back();
-    if (module_type) {
-        m_module_cache[path_or_id] = module_type;
-        m_modules_compiled++;
-    }
-    std::cout << module_type->is_native << std::endl;
-    return module_type;
-}
 
 
     std::shared_ptr<ModuleType> CompilerDriver::loadNativeModule(const std::string& path, const Token& import_token) {

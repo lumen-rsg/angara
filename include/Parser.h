@@ -85,5 +85,7 @@ namespace angara {
 
         bool isSelectiveAttach();
         std::shared_ptr<Stmt> classDeclaration();
+
+        std::shared_ptr<Stmt> breakStatement();
     };
 }

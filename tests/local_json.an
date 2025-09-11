@@ -1,0 +1,38 @@
+attach json;
+attach io;
+attach adv_string; // The json module depends on this
+
+func println(s as string) -> void {
+  io.write(1, s + "\n");
+}
+
+export func main() -> i64 {
+  println("--- Angara JSON Module Unit Test ---");
+
+  // A hardcoded, multi-line JSON string for our test case.
+const JSON_SOURCE = """{
+    "name": "Pikachu",
+    "id": 25,
+    "is_legendary": false,
+    "types": ["electric"],
+    "stats": {
+      "hp": 35,
+      "attack": 55,
+      "defense": 40
+    }
+  }""";
+
+  println("Parsing the following JSON:\n" + JSON_SOURCE);
+
+  try {
+    let data_any = json.parse(JSON_SOURCE);
+
+
+  } catch (e) {
+    println("\n!!! TEST FAILED !!!");
+    println("An error occurred during parsing: " + string(e));
+    return 1;
+  }
+
+  return 0;
+}

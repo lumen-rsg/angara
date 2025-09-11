@@ -51,7 +51,7 @@ namespace angara {
 
         int m_total_modules = 0;
         int m_modules_compiled = 0;
-        std::vector<std::string> m_compiled_module_names;
+        std::vector<std::string> m_angara_module_names; // Stores names like "json", "main"
         std::shared_ptr<ModuleType> loadNativeModule(const std::string& path, const Token& import_token);
         SymbolTable m_global_symbols;
         // Use a set to automatically store only unique library directories.

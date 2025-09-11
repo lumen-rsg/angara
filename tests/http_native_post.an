@@ -1,0 +1,56 @@
+attach http;
+attach json;
+attach io;
+
+func println(s as string) -> void {
+  io.write(1, s + "\n");
+}
+
+export func main() -> i64 {
+  println("--- Angara JSON Parser Test ---");
+
+  const POKE_API_URL = "https://pokeapi.co/api/v2/pokemon/pikachu";
+
+  let request_options = { "method": "GET", "url": POKE_API_URL };
+
+  try {
+    println("Fetching JSON from: " + POKE_API_URL);
+    let response_any = http.request(request_options);
+    let response as {status_code: i64, body: string} = response_any;
+
+    if (response["status_code"] != 200) {
+      println("HTTP request failed!");
+      return 1;
+    }
+
+    println("Successfully received JSON. Parsing...");
+
+    // --- Use the new JSON parser! ---
+    let data_any = json.parse(response["body"]);
+
+    // --- Assert the shape of the data we care about ---
+    let pokemon_data as {
+      name: string,
+      id: f64, // JSON numbers are parsed as f64
+      abilities: list<any>
+    } = data_any;
+
+    println("\n--- Parsed Pokémon Data ---");
+    println("Name: " + pokemon_data["name"]);
+    println("National Dex ID: " + string(i64(pokemon_data["id"])));
+
+    println("\nAbilities:");
+    for (ability_obj in pokemon_data["abilities"]) {
+      // Assert the shape of the objects inside the list
+      let ability_info as {ability: {name: string}} = ability_obj;
+      println(" - " + ability_info["ability"]["name"]);
+    }
+
+  } catch (e) {
+    // This will catch errors from http.request OR json.parse
+    println("\nAn error occurred: " + string(e));
+    return 1;
+  }
+
+  return 0;
+}

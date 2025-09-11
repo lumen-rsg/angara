@@ -8,6 +8,39 @@ namespace angara {
         return std::dynamic_pointer_cast<const T>(ptr) != nullptr;
     }
 
+    std::string CTranspiler::escape_c_string(const std::string& str) {
+        std::stringstream ss;
+        for (char c : str) {
+            switch (c) {
+                case '\\': ss << "\\\\"; break;
+                case '"':  ss << "\\\""; break;
+                case '\n': ss << "\\n"; break;
+                case '\r': ss << "\\r"; break;
+                case '\t': ss << "\\t"; break;
+                    // Add other standard C escapes as needed
+                default:
+                    ss << c;
+                    break;
+            }
+        }
+        return ss.str();
+    }
+
+    std::string CTranspiler::sanitize_name(const std::string& name) {
+        // A simple set of C keywords to avoid.
+        static const std::set<std::string> c_keywords = {
+                "auto", "break", "case", "char", "const", "continue", "default",
+                "do", "double", "else", "enum", "extern", "float", "for", "goto",
+                "if", "int", "long", "register", "return", "short", "signed",
+                "sizeof", "static", "struct", "switch", "typedef", "union",
+                "unsigned", "void", "volatile", "while"
+        };
+        if (c_keywords.count(name)) {
+            return name + "_";
+        }
+        return name;
+    }
+
 // --- Constructor ---
     CTranspiler::CTranspiler(TypeChecker& type_checker, ErrorHandler& errorHandler)
             : m_type_checker(type_checker), m_errorHandler(errorHandler), m_current_out(&m_main_body) {}
@@ -166,87 +199,111 @@ void CTranspiler::pass_2_generate_declarations(const std::vector<std::shared_ptr
     (*m_current_out) << "void Angara_" << module_name << "_init_globals(void);\n";
 }
 
-void CTranspiler::pass_3_generate_globals_and_implementations(const std::vector<std::shared_ptr<Stmt>>& statements, const std::string& module_name) {
-    // --- Stage A: Define Storage for all global symbols ---
-    (*m_current_out) << "// --- Global Variable & Function Closure Storage ---\n";
-    for (const auto& stmt : statements) {
-        if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
-             (*m_current_out) << "AngaraClass g_" << class_stmt->name.lexeme << "_class;\n";
-        } else if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
-            (*m_current_out) << "AngaraObject " << module_name << "_" << var_decl->name.lexeme << ";\n";
-        } else if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
-            std::string var_name = "g_" + func_stmt->name.lexeme;
-            if (func_stmt->name.lexeme == "main") var_name = "g_angara_main_closure";
-            (*m_current_out) << "AngaraObject " << var_name << ";\n";
+    void CTranspiler::pass_3_generate_globals_and_implementations(
+            const std::vector<std::shared_ptr<Stmt>>& statements,
+            const std::string& module_name
+    ) {
+        // === Stage A: Global Variable & Function Closure Storage ===
+        (*m_current_out) << "// --- Global Variable & Function Closure Storage ---\n";
+        for (const auto& stmt : statements) {
+            if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+                (*m_current_out) << "AngaraClass g_" << class_stmt->name.lexeme << "_class;\n";
+            } else if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
+                (*m_current_out) << "AngaraObject " << module_name << "_" << var_decl->name.lexeme << ";\n";
+            } else if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
+                std::string var_name = "g_" + func_stmt->name.lexeme;
+                if (func_stmt->name.lexeme == "main") var_name = "g_angara_main_closure";
+                (*m_current_out) << "AngaraObject " << var_name << ";\n";
+            }
         }
-    }
-    (*m_current_out) << "\n";
+        (*m_current_out) << "\n";
 
-        // --- Stage B: Internal Forward Declarations (in the .c file) ---
+        // === Stage B: COMPLETE Forward Declarations for ALL Functions/Methods ===
         (*m_current_out) << "\n// --- Internal Forward Declarations ---\n";
+
+        // Pass B.1: Declare all global functions AND their wrappers
         for (const auto& stmt : statements) {
             if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
-                // Determine the C linkage based on the 'export' keyword.
+                std::string mangled_name = "angara_f_" + module_name + "_" + func_stmt->name.lexeme;
+                if (func_stmt->name.lexeme == "main") mangled_name = "angara_f_main";
+
+                // Always use 'static' for prototypes of non-exported functions inside the .c file
                 std::string linkage = (func_stmt->is_exported || func_stmt->name.lexeme == "main") ? "" : "static ";
 
-                // Generate the prototype for the real function with the correct linkage.
                 (*m_current_out) << linkage;
                 transpileFunctionSignature(*func_stmt, module_name);
                 (*m_current_out) << ";\n";
-
-                // Generate the prototype for the wrapper with the correct linkage.
-                std::string mangled_name = "angara_f_" + module_name + "_" + func_stmt->name.lexeme;
-                if (func_stmt->name.lexeme == "main") mangled_name = "angara_f_main";
                 (*m_current_out) << linkage << "AngaraObject angara_w_" << mangled_name << "(int arg_count, AngaraObject args[]);\n";
             }
         }
-    (*m_current_out) << "\n";
 
-    // --- Stage C: Global Initializer Function ---
-    std::string init_func_name = "Angara_" + module_name + "_init_globals";
-    (*m_current_out) << "void " << init_func_name << "(void) {\n";
-    m_indent_level = 1;
-    for (const auto& stmt : statements) {
-         if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
-            indent();
-            (*m_current_out) << module_name << "_" << var_decl->name.lexeme << " = " << transpileExpr(var_decl->initializer) << ";\n";
-         } else if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
-            std::string var_name = "g_" + func_stmt->name.lexeme;
-            if (func_stmt->name.lexeme == "main") var_name = "g_angara_main_closure";
-            std::string mangled_name = "angara_f_" + module_name + "_" + func_stmt->name.lexeme;
-            if (func_stmt->name.lexeme == "main") mangled_name = "angara_f_main";
-            indent();
-            (*m_current_out) << var_name << " = angara_closure_new(&angara_w_" << mangled_name << ", " << func_stmt->params.size() << ", false);\n";
-         } else if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
-             indent();
-             (*m_current_out) << "g_" << class_stmt->name.lexeme << "_class = (AngaraClass){{OBJ_CLASS, 1}, \"" << class_stmt->name.lexeme << "\"};\n";
-         }
-    }
-    m_indent_level = 0;
-    (*m_current_out) << "}\n\n";
+        // Pass B.2: Declare all class methods (they are never static in the C file)
+        for (const auto& stmt : statements) {
+            if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+                // Forward declare the _new constructor
+                auto class_type = std::dynamic_pointer_cast<ClassType>(m_type_checker.m_symbols.resolve(class_stmt->name.lexeme)->type);
+                (*m_current_out) << "AngaraObject Angara_" << class_stmt->name.lexeme << "_new(";
+                auto init_it = class_type->methods.find("init");
+                if (init_it != class_type->methods.end()) {
+                    auto init_func_type = std::dynamic_pointer_cast<FunctionType>(init_it->second.type);
+                    for (size_t i = 0; i < init_func_type->param_types.size(); ++i) {
+                        (*m_current_out) << getCType(init_func_type->param_types[i]) << (i == init_func_type->param_types.size() - 1 ? "" : ", ");
+                    }
+                }
+                (*m_current_out) << ");\n";
 
-    // --- Stage D: Function Implementations ---
-    (*m_current_out) << "// --- Function Implementations ---\n";
-    for (const auto& stmt : statements) {
-        if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
-            transpileGlobalFunction(*func_stmt, module_name);
-        } else if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
-            m_current_class_name = class_stmt->name.lexeme;
-            auto class_type = std::dynamic_pointer_cast<ClassType>(m_type_checker.m_symbols.resolve(class_stmt->name.lexeme)->type);
-
-            // Generate _new constructor implementation
-            transpileClassNew(*class_stmt);
-
-            // Generate Method Implementations
-            for (const auto& member : class_stmt->members) {
-                if (auto method_member = std::dynamic_pointer_cast<const MethodMember>(member)) {
-                    transpileMethodBody(*class_type, *method_member->declaration);
+                // Forward declare all methods
+                for (const auto& member : class_stmt->members) {
+                    if (auto method_member = std::dynamic_pointer_cast<const MethodMember>(member)) {
+                        transpileMethodSignature(class_stmt->name.lexeme, *method_member->declaration);
+                        (*m_current_out) << ";\n";
+                    }
                 }
             }
-            m_current_class_name = "";
+        }
+        (*m_current_out) << "\n";
+
+        // === Stage C: Global Initializer Function ===
+        std::string init_func_name = "Angara_" + module_name + "_init_globals";
+        (*m_current_out) << "void " << init_func_name << "(void) {\n";
+        m_indent_level = 1;
+        for (const auto& stmt : statements) {
+            if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
+                indent();
+                (*m_current_out) << module_name << "_" << var_decl->name.lexeme << " = " << transpileExpr(var_decl->initializer) << ";\n";
+            } else if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
+                std::string var_name = "g_" + func_stmt->name.lexeme;
+                if (func_stmt->name.lexeme == "main") var_name = "g_angara_main_closure";
+                std::string mangled_name = "angara_f_" + module_name + "_" + func_stmt->name.lexeme;
+                if (func_stmt->name.lexeme == "main") mangled_name = "angara_f_main";
+                indent();
+                (*m_current_out) << var_name << " = angara_closure_new(&angara_w_" << mangled_name << ", " << func_stmt->params.size() << ", false);\n";
+            } else if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+                indent();
+                (*m_current_out) << "g_" << class_stmt->name.lexeme << "_class = (AngaraClass){{OBJ_CLASS, 1}, \"" << class_stmt->name.lexeme << "\"};\n";
+            }
+        }
+        m_indent_level = 0;
+        (*m_current_out) << "}\n\n";
+
+        // === Stage D: Function and Method Implementations ===
+        (*m_current_out) << "// --- Function Implementations ---\n";
+        for (const auto& stmt : statements) {
+            if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
+                transpileGlobalFunction(*func_stmt, module_name);
+            } else if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
+                m_current_class_name = class_stmt->name.lexeme;
+                auto class_type = std::dynamic_pointer_cast<ClassType>(m_type_checker.m_symbols.resolve(class_stmt->name.lexeme)->type);
+                transpileClassNew(*class_stmt);
+                for (const auto& member : class_stmt->members) {
+                    if (auto method_member = std::dynamic_pointer_cast<const MethodMember>(member)) {
+                        transpileMethodBody(*class_type, *method_member->declaration);
+                    }
+                }
+                m_current_class_name = "";
+            }
         }
     }
-}
 
     void CTranspiler::transpileClassNew(const ClassStmt& stmt) {
     // This helper generates the implementation for the public `_new` constructor function.
@@ -415,9 +472,13 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
 // --- Main Orchestrator ---
 
 
-    TranspileResult CTranspiler::generate(const std::vector<std::shared_ptr<Stmt>>& statements, const std::string& module_name, std::vector<std::string>& all_module_names) {
+    TranspileResult CTranspiler::generate(
+            const std::vector<std::shared_ptr<Stmt>>& statements,
+            const std::shared_ptr<ModuleType>& module_type, // <-- New parameter
+            std::vector<std::string>& all_module_names
+    ) {
         if (m_hadError) return {};
-
+        const std::string& module_name = module_type->name; // <-- Get the canonical name
         this->m_current_module_name = module_name;
 
         // --- Pass 0: Handle Attachments ---
@@ -498,7 +559,7 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
 
         // Generate the mangled name, e.g., "Angara_Point_move"
         (*m_current_out) << getCType(func_type->return_type) << " "
-                         << "Angara_" << class_name << "_" << stmt.name.lexeme << "(";
+                         << "Angara_" << class_name << "_" << sanitize_name(stmt.name.lexeme) << "(";
 
         // The first parameter is always 'this'.
         if (stmt.has_this) {
@@ -552,6 +613,10 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
     void CTranspiler::pass_5_generate_main(const std::vector<std::shared_ptr<Stmt>>& statements,
                                        const std::string& module_name,
                                        const std::vector<std::string>& all_module_names) {
+
+        for (std::string item : all_module_names){
+            std::cout << "module: " << item << " is present." << std::endl;
+        }
         m_current_out = &m_main_body;
         m_indent_level = 0;
 
@@ -620,6 +685,8 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
             transpileThrowStmt(*throw_stmt);
         } else if (auto for_in_stmt = std::dynamic_pointer_cast<const ForInStmt>(stmt)) { // <-- ADD THIS
             transpileForInStmt(*for_in_stmt);
+        } else if (auto break_stmt = std::dynamic_pointer_cast<const BreakStmt>(stmt)) { // <-- ADD THIS
+            transpileBreakStmt(*break_stmt);
         }
 
         else {
@@ -633,7 +700,7 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
         auto var_type = m_type_checker.m_variable_types.at(&stmt);
 
         if (stmt.is_const) (*m_current_out) << "const ";
-        (*m_current_out) << "AngaraObject " << stmt.name.lexeme;
+        (*m_current_out) << "AngaraObject " << sanitize_name(stmt.name.lexeme) ;
 
         if (stmt.initializer) {
             (*m_current_out) << " = " << transpileExpr(stmt.initializer);
@@ -659,17 +726,30 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
     }
 
     std::string CTranspiler::transpileVarExpr(const VarExpr& expr) {
-        // 1. Look up the result of the Type Checker's resolution for this node.
-        auto symbol = m_type_checker.m_variable_resolutions.at(&expr);
+        // This visitor is now much more powerful.
+        auto symbol_resolution = m_type_checker.m_variable_resolutions.find(&expr);
+        if (symbol_resolution == m_type_checker.m_variable_resolutions.end()) {
+            // This could be a reference to a module itself.
+            auto symbol = m_type_checker.m_symbols.resolve(expr.name.lexeme);
+            if (symbol && symbol->type->kind == TypeKind::MODULE) {
+                // It's the module object. The transpiler doesn't need to do anything
+                // special with it here; the GetExpr transpiler will handle it.
+                return sanitize_name(expr.name.lexeme);
+            }
+            return "/* unresolved var: " + expr.name.lexeme + " */";
+        }
 
-        // 2. Check the symbol's scope depth.
-        if (symbol->depth == 0) {
-            // It's a global variable. It needs to be mangled.
-            // We assume the transpiler has the current module name.
-            return m_current_module_name + "_" + expr.name.lexeme;
+        auto symbol = symbol_resolution->second;
+        if (symbol->depth > 0) {
+            // It's a local variable or a parameter.
+            return sanitize_name(symbol->name);
         } else {
-            // It's a local or a parameter. No mangling needed.
-            return expr.name.lexeme;
+            // It's a global variable in the CURRENT module. Mangle it.
+            // The closure for a function `parse` is `g_parse`. A global var `x` is `main_x`.
+            if (symbol->type->kind == TypeKind::FUNCTION) {
+                return "g_" + sanitize_name(symbol->name);
+            }
+            return m_current_module_name + "_" + sanitize_name(symbol->name);
         }
     }
 
@@ -723,7 +803,9 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
         if (type->toString() == "i64") return "angara_create_i64(" + expr.token.lexeme + "LL)";
         if (type->toString() == "f64") return "angara_create_f64(" + expr.token.lexeme + ")";
         if (type->toString() == "bool") return "angara_create_bool(" + expr.token.lexeme + ")";
-        if (type->toString() == "string") return "angara_string_from_c(\"" + expr.token.lexeme + "\")";
+        if (type->toString() == "string") {
+            return "angara_string_from_c(\"" + escape_c_string(expr.token.lexeme) + "\")";
+        }
         if (type->toString() == "nil") return "angara_create_nil()";
         return "angara_create_nil() /* unknown literal */";
     }
@@ -756,18 +838,15 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
 
                 // --- Arithmetic Operators (numeric only) ---
             case TokenType::PLUS:
-                // --- MODIFIED LOGIC FOR '+' ---
-                if (lhs_type->toString() == "string") {
-                    // If the LHS is a string, the type checker guarantees the RHS is also a string.
+                // --- THE FIX IS HERE ---
+                if (lhs_type->toString() == "string" && rhs_type->toString() == "string") {
                     return "angara_string_concat(" + lhs_str + ", " + rhs_str + ")";
+                }
+                // Fallthrough for numeric types
+                if (isFloat(lhs_type) || isFloat(rhs_type)) {
+                    return "angara_create_f64((AS_F64(" + lhs_str + ") " + op + " AS_F64(" + rhs_str + ")))";
                 } else {
-                    // Otherwise, it's numeric addition.
-                    auto rhs_type = m_type_checker.m_expression_types.at(expr.right.get());
-                    if (isFloat(lhs_type) || isFloat(rhs_type)) {
-                        return "create_f64((AS_F64(" + lhs_str + ") " + op + " AS_F64(" + rhs_str + ")))";
-                    } else {
-                        return "create_i64((AS_I64(" + lhs_str + ") " + op + " AS_I64(" + rhs_str + ")))";
-                    }
+                    return "angara_create_i64((AS_I64(" + lhs_str + ") " + op + " AS_I64(" + rhs_str + ")))";
                 }
             case TokenType::MINUS:
             case TokenType::STAR:
@@ -878,9 +957,11 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
     }
 
     std::string CTranspiler::transpileListExpr(const ListExpr& expr) {
-        // Generates: angara_list_new_with_elements(count, (AngaraObject[]){...})
+        // --- THE FIX ---
+        if (expr.elements.empty()) {
+            return "angara_list_new()";
+        }
 
-        // 1. Transpile all the element expressions first.
         std::stringstream elements_ss;
         for (size_t i = 0; i < expr.elements.size(); ++i) {
             elements_ss << transpileExpr(expr.elements[i]);
@@ -888,31 +969,26 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
                 elements_ss << ", ";
             }
         }
-
-        // 2. Assemble the call to the runtime constructor function.
         return "angara_list_new_with_elements(" +
                std::to_string(expr.elements.size()) + ", " +
                "(AngaraObject[]){" + elements_ss.str() + "})";
     }
 
     std::string CTranspiler::transpileRecordExpr(const RecordExpr& expr) {
-        // Generates: angara_record_new_with_fields(count, (AngaraObject[]){"key1", val1, "key2", val2, ...})
+        // --- THE FIX ---
+        if (expr.keys.empty()) {
+            return "angara_record_new()";
+        }
 
-        // 1. Transpile all key/value pairs.
         std::stringstream kvs_ss;
         for (size_t i = 0; i < expr.keys.size(); ++i) {
-            // Key (always a C string)
-            kvs_ss << "angara_string_from_c(\"" << expr.keys[i].lexeme << "\")";
+            kvs_ss << "angara_string_from_c(\"" << escape_c_string(expr.keys[i].lexeme) << "\")";
             kvs_ss << ", ";
-            // Value (recursively transpiled expression)
             kvs_ss << transpileExpr(expr.values[i]);
-
             if (i < expr.keys.size() - 1) {
                 kvs_ss << ", ";
             }
         }
-
-        // 2. Assemble the call to the runtime constructor function.
         return "angara_record_new_with_fields(" +
                std::to_string(expr.keys.size()) + ", " +
                "(AngaraObject[]){" + kvs_ss.str() + "})";
@@ -1154,11 +1230,8 @@ std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
             }
 
             if (collection_type->kind == TypeKind::RECORD) {
-                // The type checker guarantees the index is a string literal.
-                if (auto key_literal = std::dynamic_pointer_cast<const Literal>(subscript_target->index)) {
-                    // Generates: angara_record_set(record, "key", value);
-                    return "angara_record_set(" + object_str + ", \"" + key_literal->token.lexeme + "\", " + value_str + ")";
-                }
+                std::string index_str = transpileExpr(subscript_target->index);
+                return "angara_record_set_with_angara_key(" + object_str + ", " + index_str + ", " + value_str + ")";
             }
 
             return "/* unsupported subscript assignment */";
@@ -1309,24 +1382,24 @@ std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
 
     // 1. Create and initialize the hidden __collection variable.
     indent();
-    (*m_current_out) << "AngaraObject __collection_" << stmt.name.lexeme << " = "
+    (*m_current_out) << "AngaraObject __collection_" << sanitize_name(stmt.name.lexeme)  << " = "
                      << transpileExpr(stmt.collection) << ";\n";
     indent();
-    (*m_current_out) << "angara_incref(__collection_" << stmt.name.lexeme << ");\n";
+    (*m_current_out) << "angara_incref(__collection_" << sanitize_name(stmt.name.lexeme)  << ");\n";
 
     // 2. Create and initialize the hidden __index variable.
     indent();
-    (*m_current_out) << "AngaraObject __index_" << stmt.name.lexeme << " = angara_create_i64(0LL);\n";
+    (*m_current_out) << "AngaraObject __index_" << sanitize_name(stmt.name.lexeme)  << " = angara_create_i64(0LL);\n";
 
     // 3. Generate the `while` loop header.
     indent();
-    (*m_current_out) << "while (angara_is_truthy(angara_create_bool(AS_I64(__index_" << stmt.name.lexeme << ") < AS_I64(angara_len(__collection_" << stmt.name.lexeme << "))))) {\n";
+    (*m_current_out) << "while (angara_is_truthy(angara_create_bool(AS_I64(__index_" << sanitize_name(stmt.name.lexeme)  << ") < AS_I64(angara_len(__collection_" << sanitize_name(stmt.name.lexeme)  << "))))) {\n";
     m_indent_level++;
 
     // 4. Generate the `let item = ...` declaration.
     indent();
-    (*m_current_out) << "AngaraObject " << stmt.name.lexeme << " = angara_list_get(__collection_"
-                     << stmt.name.lexeme << ", __index_" << stmt.name.lexeme << ");\n";
+    (*m_current_out) << "AngaraObject " << sanitize_name(stmt.name.lexeme)  << " = angara_list_get(__collection_"
+                     << sanitize_name(stmt.name.lexeme)  << ", __index_" << sanitize_name(stmt.name.lexeme)  << ");\n";
 
     // 5. Transpile the user's loop body.
     transpileStmt(stmt.body);
@@ -1336,14 +1409,14 @@ std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
     (*m_current_out) << "{\n";
     m_indent_level++;
     indent(); (*m_current_out) << "AngaraObject __temp_one = angara_create_i64(1LL);\n";
-    indent(); (*m_current_out) << "AngaraObject __new_index = angara_create_i64(AS_I64(__index_" << stmt.name.lexeme << ") + AS_I64(__temp_one));\n";
-    indent(); (*m_current_out) << "angara_decref(__index_" << stmt.name.lexeme << ");\n";
-    indent(); (*m_current_out) << "__index_" << stmt.name.lexeme << " = __new_index;\n";
+    indent(); (*m_current_out) << "AngaraObject __new_index = angara_create_i64(AS_I64(__index_" << sanitize_name(stmt.name.lexeme)  << ") + AS_I64(__temp_one));\n";
+    indent(); (*m_current_out) << "angara_decref(__index_" << sanitize_name(stmt.name.lexeme)  << ");\n";
+    indent(); (*m_current_out) << "__index_" << sanitize_name(stmt.name.lexeme)  << " = __new_index;\n";
     m_indent_level--;
     indent(); (*m_current_out) << "}\n";
 
     // 7. Decref the user's loop variable at the end of the iteration.
-    indent(); (*m_current_out) << "angara_decref(" << stmt.name.lexeme << ");\n";
+    indent(); (*m_current_out) << "angara_decref(" << sanitize_name(stmt.name.lexeme)  << ");\n";
 
     m_indent_level--;
     indent();
@@ -1351,9 +1424,9 @@ std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
 
     // 8. Decref the hidden variables at the end of the scope.
     indent();
-    (*m_current_out) << "angara_decref(__collection_" << stmt.name.lexeme << ");\n";
+    (*m_current_out) << "angara_decref(__collection_" << sanitize_name(stmt.name.lexeme) << ");\n";
     indent();
-    (*m_current_out) << "angara_decref(__index_" << stmt.name.lexeme << ");\n";
+    (*m_current_out) << "angara_decref(__index_" << sanitize_name(stmt.name.lexeme)  << ");\n";
 
     m_indent_level--;
     indent(); (*m_current_out) << "}\n";
@@ -1371,15 +1444,18 @@ std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
         }
 
         if (collection_type->kind == TypeKind::RECORD) {
-            // The type checker guarantees the index is a string literal for records.
-            if (auto key_literal = std::dynamic_pointer_cast<const Literal>(expr.index)) {
-                // We need the raw lexeme for the C function call.
-                return "angara_record_get(" + object_str + ", \"" + key_literal->token.lexeme + "\")";
-            }
+            std::string index_str = transpileExpr(expr.index);
+            // This now works for both literals (which become Angara strings) and variables.
+            return "angara_record_get_with_angara_key(" + object_str + ", " + index_str + ")";
         }
 
         // Fallback if the type checker somehow let a non-subscriptable type through.
         return "/* unsupported subscript */";
+    }
+
+    void CTranspiler::transpileBreakStmt(const BreakStmt& stmt) {
+        indent();
+        (*m_current_out) << "break;\n";
     }
 
 

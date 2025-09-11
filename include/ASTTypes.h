@@ -78,8 +78,9 @@ namespace angara {
         }
     };
 
+
     struct RecordTypeExpr : ASTType {
-        const Token keyword;
+        const Token keyword; // The opening '{' token for location info
         const std::vector<RecordFieldType> fields;
 
         RecordTypeExpr(Token keyword, std::vector<RecordFieldType> fields)

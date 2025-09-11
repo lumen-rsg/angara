@@ -1,0 +1,22 @@
+// --- Test for Attaching Native C ABI Modules ---
+
+// On Linux/macOS, the path would typically be "./libfs.so" or "./libfs.dylib"
+// This path is relative to where you run the final executable.
+// Let's assume the compiled module is in a `modules` subdirectory.
+attach "lib/libfs.so" as filesystem;
+
+func main() -> i64 {
+  print("--- Testing Native Module Attachment ---");
+
+  // Call the native function imported from the fs module.
+  let content = filesystem.read_file("data.txt");
+
+  if (content == nil) {
+    print("Failed to read file.");
+  } else {
+    print("Content of data.txt:");
+    print(content);
+  }
+
+  return 0;
+}

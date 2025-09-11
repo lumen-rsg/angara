@@ -9,83 +9,75 @@ namespace angara {
     Parser::Parser(const std::vector<Token> &tokens, ErrorHandler &errorHandler)
             : m_tokens(tokens), m_errorHandler(errorHandler), m_panicMode(false) {}
 
-    const std::vector<TokenType> TYPE_START_TOKENS = {
-            TokenType::TYPE_I8, TokenType::TYPE_I16, TokenType::TYPE_I32, TokenType::TYPE_I64,
-            TokenType::TYPE_INT, TokenType::TYPE_U8, TokenType::TYPE_U16, TokenType::TYPE_U32,
-            TokenType::TYPE_U64, TokenType::TYPE_UINT, TokenType::TYPE_F32, TokenType::TYPE_F64,
-            TokenType::TYPE_FLOAT, TokenType::TYPE_BOOL, TokenType::TYPE_STRING, TokenType::TYPE_NIL,
-            TokenType::TYPE_LIST, TokenType::TYPE_RECORD, TokenType::TYPE_ANY, TokenType::TYPE_VOID, TokenType::TYPE_THREAD
-    };
 
     std::shared_ptr<ASTType> Parser::type() {
-        if (match({TokenType::TYPE_FUNCTION})) {
-            Token keyword = previous(); // Capture the 'function' token.
+        // --- Step 1: Define all possible tokens that can start a named type ---
+        // This includes user-defined types (IDENTIFIER) and all built-in type names.
+        const static std::vector<TokenType> name_based_type_starters = {
+                TokenType::IDENTIFIER, TokenType::TYPE_STRING, TokenType::TYPE_INT,
+                TokenType::TYPE_FLOAT, TokenType::TYPE_BOOL, TokenType::TYPE_LIST,
+                TokenType::TYPE_MAP, TokenType::TYPE_VOID, TokenType::TYPE_I8,
+                TokenType::TYPE_I16, TokenType::TYPE_I32, TokenType::TYPE_I64,
+                TokenType::TYPE_U8, TokenType::TYPE_U16, TokenType::TYPE_U32,
+                TokenType::TYPE_U64, TokenType::TYPE_UINT, TokenType::TYPE_F32,
+                TokenType::TYPE_F64, TokenType::TYPE_NIL, TokenType::TYPE_ANY,
+                TokenType::TYPE_THREAD
+        };
 
+        // --- Step 2: Check for complex, token-based types first ---
+        if (match({TokenType::LEFT_BRACE})) {
+            Token keyword = previous();
+            std::vector<RecordFieldType> fields;
+            if (!check(TokenType::RIGHT_BRACE)) {
+                do {
+                    if (check(TokenType::RIGHT_BRACE)) break;
+                    Token field_name;
+                    if (match({TokenType::IDENTIFIER})) field_name = previous();
+                    else if (match({TokenType::STRING})) field_name = previous();
+                    else throw error(peek(), "Expect field name (identifier or string) in record type definition.");
+                    consume(TokenType::COLON, "Expect ':' after field name.");
+                    fields.push_back({field_name, type()});
+                } while (match({TokenType::COMMA}));
+            }
+            consume(TokenType::RIGHT_BRACE, "Expect '}' after record type fields.");
+            return std::make_shared<RecordTypeExpr>(keyword, std::move(fields));
+        }
+
+        if (match({TokenType::TYPE_FUNCTION})) {
+            Token keyword = previous();
             consume(TokenType::LEFT_PAREN, "Expect '(' after 'function' in type annotation.");
             std::vector<std::shared_ptr<ASTType>> params;
             if (!check(TokenType::RIGHT_PAREN)) {
                 do {
-                    // Recursively call type() to parse each parameter's type.
                     params.push_back(type());
                 } while (match({TokenType::COMMA}));
             }
             consume(TokenType::RIGHT_PAREN, "Expect ')' after function type parameters.");
-
-            consume(TokenType::MINUS_GREATER, "Expect '->' for return type in function annotation.");
-            auto return_type = type(); // Recursively call type() for the return type.
-
+            consume(TokenType::MINUS_GREATER, "Expect '->' for return type.");
+            auto return_type = type();
             return std::make_shared<FunctionTypeExpr>(keyword, std::move(params), return_type);
         }
 
-        if (match({TokenType::TYPE_RECORD})) {
-            Token keyword = previous();
+        // --- Step 3: Check for any kind of name-based type ---
+        if (match(name_based_type_starters)) {
+            Token type_name_token = previous();
 
-            consume(TokenType::LESS, "Expect '<' after 'record' for type definition.");
-            std::vector<RecordFieldType> fields;
-            if (!check(TokenType::GREATER)) {
-                do {
-                    Token field_name = consume(TokenType::IDENTIFIER, "Expect field name in record type.");
-                    consume(TokenType::COLON, "Expect ':' after field name.");
-                    std::shared_ptr<ASTType> field_type = type(); // Recursively parse the type
-                    fields.push_back({field_name, field_type});
-                } while (match({TokenType::COMMA}));
-            }
-            consume(TokenType::GREATER, "Expect '>' after record type fields.");
-
-            return std::make_shared<RecordTypeExpr>(keyword, std::move(fields));
-        }
-
-        Token type_name = previous();
-
-        if (match({TokenType::LESS})) {
-            std::vector<std::shared_ptr<ASTType>> arguments;
-            do {
-                arguments.push_back(type());
-            } while (match({TokenType::COMMA}));
-
-            consume(TokenType::GREATER, "Expect '>' after generic type arguments.");
-            return std::make_shared<GenericType>(type_name, std::move(arguments));
-        }
-
-        if (match(TYPE_START_TOKENS) || match({TokenType::IDENTIFIER})) {
-            Token type_name = previous();
-
-            // Check for generic parameters (e.g., list<string>)
+            // --- Step 3a: Check if it's a generic type ---
             if (match({TokenType::LESS})) {
                 std::vector<std::shared_ptr<ASTType>> arguments;
                 do {
                     arguments.push_back(type());
                 } while (match({TokenType::COMMA}));
-
                 consume(TokenType::GREATER, "Expect '>' after generic type arguments.");
-                return std::make_shared<GenericType>(type_name, std::move(arguments));
+                return std::make_shared<GenericType>(type_name_token, std::move(arguments));
             }
 
-            // If no generics, it's a simple type.
-            return std::make_shared<SimpleType>(type_name);
+            // --- Step 3b: Otherwise, it was just a simple type ---
+            return std::make_shared<SimpleType>(type_name_token);
         }
 
-        return std::make_shared<SimpleType>(type_name);
+        // --- Step 4: If nothing matched, it's an error ---
+        throw error(peek(), "Expect a type name (like 'i64' or 'list'), a function type, or a record type definition.");
     }
 
 
@@ -185,6 +177,7 @@ std::shared_ptr<Stmt> Parser::declaration() {
         if (match({TokenType::LEFT_BRACE})) return std::make_shared<BlockStmt>(block());
         if (match({TokenType::SEMICOLON})) return std::make_shared<EmptyStmt>();
         if (match({TokenType::TRY})) return tryStatement();
+        if (match({TokenType::BREAK})) return breakStatement();
 
         return expressionStatement();
     }
@@ -934,5 +927,11 @@ std::shared_ptr<Stmt> Parser::contractDeclaration() {
     consume(TokenType::RIGHT_BRACE, "Expect '}' after contract body.");
     return std::make_shared<ContractStmt>(std::move(name), std::move(members));
 }
+
+    std::shared_ptr<Stmt> Parser::breakStatement() {
+        Token keyword = previous(); // The 'break' token we just matched
+        consume(TokenType::SEMICOLON, "Expect ';' after 'break'.");
+        return std::make_shared<BreakStmt>(std::move(keyword));
+    }
 }
 

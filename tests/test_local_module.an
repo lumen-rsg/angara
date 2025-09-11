@@ -1,0 +1,5 @@
+attach "dummy.an";
+
+func main() -> i64 {
+    dummy.test();
+}

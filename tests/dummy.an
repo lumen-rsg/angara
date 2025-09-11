@@ -1,0 +1,4 @@
+attach io;
+export func test() -> void {
+    io.write(1, "testing dummy module");
+}

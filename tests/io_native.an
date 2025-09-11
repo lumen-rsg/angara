@@ -1,0 +1,52 @@
+attach io;
+
+// A user-defined helper function for convenience. This is now standard practice in Angara.
+func println(content as string) -> void {
+  const STDOUT = 1;
+  io.write(STDOUT, content + "\n");
+}
+
+func main() -> i64 {
+  println("--- Angara IO Module Test ---");
+
+  const STDOUT = 1;
+  const STDERR = 2;
+
+  // 1. Test writing to stdout and stderr
+  io.write(STDOUT, "This is a message to standard output.\n");
+  io.write(STDERR, "This is an error message to standard error.\n");
+  io.write(STDOUT, "This line is not flushed yet...");
+
+  // 2. Test flushing
+  try {
+    io.flush(STDOUT);
+    println(" (OK, now it is.)");
+  } catch (e) {
+    println("Error flushing stream: " + string(e));
+  }
+
+  // 3. Test reading a single line
+  io.write(STDOUT, "\nPlease enter your name: ");
+  io.flush(STDOUT);
+
+  let name = io.read_line();
+
+  if (name == nil) {
+    println("\nNo input received (EOF).");
+  } else {
+    // This is the line that was failing. It will now work correctly.
+    println("\nHello, " + name + "!");
+  }
+
+  // 4. Test read_all()
+  println("\n--- Testing read_all() ---");
+  println("Reading all of stdin. Use a pipe to test.");
+  let all_input = io.read_all();
+  if (all_input == "") {
+    println("stdin was empty.");
+  } else {
+    println("Received from stdin:\n---\n" + all_input + "\n---");
+  }
+
+  return 0;
+}
