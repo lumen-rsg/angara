@@ -1376,18 +1376,18 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     }
 
     std::any TypeChecker::visit(const CallExpr& expr) {
-        // 1. Type check the callee to see what is being called.
+        // 1. Recursively visit the callee expression to determine its type.
         expr.callee->accept(*this);
         auto callee_type = popType();
 
-        // 2. Type check all the arguments that are being passed.
+        // 2. Recursively visit all argument expressions to determine their types.
         std::vector<std::shared_ptr<Type>> arg_types;
         for (const auto& arg_expr : expr.arguments) {
             arg_expr->accept(*this);
             arg_types.push_back(popType());
         }
 
-        // Stop immediately if the callee or any argument had a type error.
+        // 3. Bail out immediately if any sub-expression had a type error.
         if (callee_type->kind == TypeKind::ERROR) {
             pushAndSave(&expr, m_type_error);
             return {};
@@ -1401,143 +1401,98 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
 
         std::shared_ptr<Type> result_type = m_type_error; // Default to error
 
-        // --- Case 1: Calling a function ---
-
+        // --- Case A: The callee is a FUNCTION (e.g., `println(...)` or `websocket.connect(...)`) ---
         if (callee_type->kind == TypeKind::FUNCTION) {
             auto func_type = std::dynamic_pointer_cast<FunctionType>(callee_type);
-
             size_t num_fixed_params = func_type->param_types.size();
+
+            // Check arity (number of arguments)
             if (func_type->is_variadic) {
-                // For a variadic function, the number of arguments must be
-                // AT LEAST the number of fixed parameters.
                 if (arg_types.size() < num_fixed_params) {
                     error(expr.paren, "Incorrect number of arguments. Function expects at least " +
-                                      std::to_string(num_fixed_params) + ", but got " +
-                                      std::to_string(arg_types.size()) + ".");
-                    result_type = m_type_error;
+                                      std::to_string(num_fixed_params) + ", but got " + std::to_string(arg_types.size()) + ".");
                 }
             } else {
-                // For non-variadic functions, the number must match exactly.
                 if (arg_types.size() != num_fixed_params) {
-                    error(expr.paren, "incorrect number of arguments. Function expects " +
-                  std::to_string(num_fixed_params) + ", but got " +
-                  std::to_string(arg_types.size()) + ".");
-
-                    // Find the original declaration to add the note
-                    if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
-                        if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
-                            note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
-                        }
-                    }
-                    result_type = m_type_error;
+                    error(expr.paren, "Incorrect number of arguments. Function expects " +
+                                      std::to_string(num_fixed_params) + ", but got " + std::to_string(arg_types.size()) + ".");
                 }
             }
 
-            // Rule: Check the type of each *fixed* argument.
-            if (result_type->kind != TypeKind::ERROR) {
+            // If arity is correct, check the type of each argument.
+            if (!m_hadError) {
                 for (size_t i = 0; i < num_fixed_params; ++i) {
                     auto expected_type = func_type->param_types[i];
                     auto actual_type = arg_types[i];
+                    bool types_match = (actual_type->toString() == expected_type->toString());
 
-                    // If the expected type is 'any', then any actual type is valid.
-                    if (expected_type->kind == TypeKind::ANY) {
-                        continue; // This argument is valid, check the next one.
+                    // Special compatibility rules
+                    if (!types_match && (expected_type->kind == TypeKind::ANY)) types_match = true;
+                    if (!types_match && expected_type->kind == TypeKind::RECORD && actual_type->kind == TypeKind::RECORD) {
+                        if (std::dynamic_pointer_cast<RecordType>(expected_type)->fields.empty()) types_match = true;
                     }
 
-                    // Case 2: Expected type is a generic record '{}'. Any specific record is allowed.
-                    if (expected_type->kind == TypeKind::RECORD && actual_type->kind == TypeKind::RECORD) {
-                        auto expected_record = std::dynamic_pointer_cast<RecordType>(expected_type);
-                        // An empty fields map signifies the generic "any record" type from our native ABI.
-                        if (expected_record->fields.empty()) {
-                            continue; // This argument is valid.
-                        }
-                    }
-
-                    // If not 'any', the types must match exactly.
-                    if (actual_type->toString() != expected_type->toString()) {
-                        // Use the real error reporting system.
-                        error(expr.paren, "type mismatch for argument " + std::to_string(i + 1) + ". " +
+                    if (!types_match) {
+                        error(expr.paren, "Type mismatch for argument " + std::to_string(i + 1) + ". " +
                                           "Function expects '" + expected_type->toString() + "', but got '" +
                                           actual_type->toString() + "'.");
-
-                        if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
-                            if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
-                                note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
-                            }
-                        }
-
-                        result_type = m_type_error;
-                        break; // Stop checking after the first error.
+                        break; // Stop after first error
                     }
                 }
             }
-            // Note: The types of the variadic arguments are not checked here.
-            // They are effectively treated as 'any'.
 
-            if (result_type->kind != TypeKind::ERROR) {
+            // If all checks passed, the result of the call is the function's return type.
+            if (!m_hadError) {
                 result_type = func_type->return_type;
             }
         }
-            // --- Case 2: Calling a class (constructing an instance) ---
+            // --- Case B: The callee is a CLASS (e.g., `_Parser(...)` or `counter.Counter(...)`) ---
+            // Note: The CompilerDriver now ensures that native constructors are represented as a call to a ClassType.
         else if (callee_type->kind == TypeKind::CLASS) {
             auto class_type = std::dynamic_pointer_cast<ClassType>(callee_type);
-
-            // The logic is now unified. For both native and Angara classes, the constructor
-            // signature is stored in a method called "init".
             auto init_it = class_type->methods.find("init");
 
             if (init_it == class_type->methods.end()) {
-                // No constructor ('init') found. This is only valid if zero arguments are provided.
                 if (!arg_types.empty()) {
                     error(expr.paren, "Class '" + class_type->name + "' has no constructor that accepts arguments.");
-                    result_type = m_type_error;
                 }
             } else {
-                // A constructor signature exists. Validate the call against it.
                 auto init_sig = std::dynamic_pointer_cast<FunctionType>(init_it->second.type);
-
-                // 1. Check arity (number of arguments)
                 if (arg_types.size() != init_sig->param_types.size()) {
                     error(expr.paren, "Incorrect number of arguments for constructor of '" + class_type->name +
                                       "'. Expected " + std::to_string(init_sig->param_types.size()) +
                                       ", but got " + std::to_string(arg_types.size()) + ".");
-                    result_type = m_type_error;
                 } else {
-                    // 2. Check the type of each argument
                     for (size_t i = 0; i < arg_types.size(); ++i) {
+                        // (Argument type checking logic is identical to the function case above)
                         auto expected_type = init_sig->param_types[i];
                         auto actual_type = arg_types[i];
                         bool types_match = (actual_type->toString() == expected_type->toString());
-
-                        // Add our special compatibility rules
-                        // Rule: `any` is compatible with anything.
-                        if (!types_match && (expected_type->kind == TypeKind::ANY || actual_type->kind == TypeKind::ANY)) {
-                            types_match = true;
-                        }
-                        // Rule: A generic record `{}` is compatible with a specific record `{...}`.
+                        if (!types_match && (expected_type->kind == TypeKind::ANY)) types_match = true;
                         if (!types_match && expected_type->kind == TypeKind::RECORD && actual_type->kind == TypeKind::RECORD) {
-                            if (std::dynamic_pointer_cast<RecordType>(expected_type)->fields.empty()) {
-                                types_match = true;
-                            }
+                            if (std::dynamic_pointer_cast<RecordType>(expected_type)->fields.empty()) types_match = true;
                         }
-
                         if (!types_match) {
                             error(expr.paren, "Type mismatch for constructor argument " + std::to_string(i + 1) +
                                               ". Expected '" + expected_type->toString() +
                                               "', but got '" + actual_type->toString() + "'.");
-                            result_type = m_type_error;
-                            break; // Stop after first error
+                            break;
                         }
                     }
                 }
             }
 
-            // If all checks passed, the result of a constructor call is an instance of the class.
-            if (result_type->kind != TypeKind::ERROR) {
+            // If all checks passed, the result of the call is an instance of the class.
+            if (!m_hadError) {
                 result_type = std::make_shared<InstanceType>(class_type);
             }
         }
+            // --- Case C: The callee is not a callable type ---
+        else {
+            error(expr.paren, "This expression is not callable. Can only call functions and classes.");
+        }
 
+        // Finally, push the single, determined result type onto the stack.
         pushAndSave(&expr, result_type);
         return {};
     }

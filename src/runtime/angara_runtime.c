@@ -626,6 +626,25 @@ AngaraObject angara_create_string_no_copy(char* chars, size_t length) {
     return (AngaraObject){VAL_OBJ, {.obj = (Object*)string}};
 }
 
+AngaraObject angara_create_string(const char* chars) {
+    size_t length = strlen(chars);
+
+    // 1. Allocate a new buffer and copy the string data into it.
+    //    The new AngaraString will own this new buffer.
+    char* heap_chars = (char*)malloc(length + 1);
+    if (!heap_chars) {
+        // In a real-world scenario, you might want a more graceful
+        // out-of-memory error, but for now this is okay.
+        return angara_create_nil();
+    }
+    memcpy(heap_chars, chars, length);
+    heap_chars[length] = '\0';
+
+    // 2. Call the no-copy version to do the final object creation.
+    //    This avoids duplicating the object allocation logic.
+    return angara_create_string_no_copy(heap_chars, length);
+}
+
 AngaraObject angara_equals(AngaraObject a, AngaraObject b) {
     if (a.type != b.type) {
         // Special case: allow comparing any number to any other number

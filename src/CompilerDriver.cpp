@@ -548,7 +548,12 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
                         }
                     }
 
-                    // The final return type of the constructor function is an INSTANCE of this class.
+                    // --- THE FIX ---
+                    // 1. Export the fully constructed ClassType itself. This makes the type name
+                    //    (e.g., "WebSocket") available for type annotations in Angara.
+                    module_type->exports[class_def->name] = class_type;
+
+                    // 2. The return type of the constructor FUNCTION is an INSTANCE of this class.
                     return_type = std::make_shared<InstanceType>(class_type);
 
                 } else {

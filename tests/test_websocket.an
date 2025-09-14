@@ -1,4 +1,5 @@
-attach websocket as ws;
+attach websocket;
+attach WebSocket from websocket;
 attach io;
 
 // A global variable to signal when the test is complete.
@@ -7,14 +8,14 @@ let is_done = false;
 // --- WebSocket Callback Functions ---
 
 // This will be called when the connection is successfully established.
-func on_open(ws as any) -> void {
+func on_open(ws as WebSocket) -> void {
   io.println(1, "[SUCCESS] WebSocket connection established!");
   io.println(1, "Sending message: 'Hello from Angara!'");
   ws.send("Hello from Angara!");
 }
 
 // This will be called for every message received from the server.
-func on_message(ws as any, message as string) -> void {
+func on_message(ws as WebSocket, message as string) -> void {
   io.println(1, "[MESSAGE] Received from server: '" + message + "'");
 
   // If we got our own message back, the test is successful.
@@ -28,13 +29,13 @@ func on_message(ws as any, message as string) -> void {
 }
 
 // This will be called when the connection is closed, either by us or the server.
-func on_close(ws as any) -> void {
+func on_close(ws as WebSocket) -> void {
   io.println(1, "[CLOSED] WebSocket connection closed.");
   is_done = true; // Signal the main loop to exit.
 }
 
 // This will be called if the connection fails to establish.
-func on_error(ws as any, error_message as string) -> void {
+func on_error(ws as WebSocket, error_message as string) -> void {
   io.println(2, "[ERROR] WebSocket connection failed: " + error_message);
   is_done = true; // Signal the main loop to exit.
 }
@@ -44,7 +45,7 @@ export func main() -> i64 {
   io.println(1, "--- Angara WebSocket Module Test ---");
 
   // A well-known public WebSocket echo server.
-  const WEBSOCKET_URL = "wss://echo.websocket.events";
+  const WEBSOCKET_URL = "wss://ws.postman-echo.com/raw";
 
   // The record of Angara closures that will handle events.
   let callbacks = {
@@ -67,7 +68,7 @@ export func main() -> i64 {
       // For now, it will spin, which is acceptable for a short test.
     }
 
-    println("\nEvent loop finished.");
+    io.println(1, "\nEvent loop finished.");
 
   } catch (e) {
     io.println(2, "An unhandled exception occurred: " + string(e));

@@ -308,4 +308,6 @@ AngaraObject angara_list_get(AngaraObject list_obj, AngaraObject index_obj);
 void angara_list_set(AngaraObject list_obj, AngaraObject index_obj, AngaraObject value);
 AngaraObject angara_to_i64(AngaraObject value);
 AngaraObject angara_to_string(AngaraObject value);
+AngaraObject angara_typeof(AngaraObject value);
+AngaraObject angara_create_string(const char* chars);
 #endif // ANGARA_H

@@ -170,35 +170,35 @@ void CTranspiler::pass_2_generate_declarations(const std::vector<std::shared_ptr
     (*m_current_out) << "\n// --- Imported Symbol Declarations ---\n";
     for (const auto& stmt : statements) {
         if (auto attach_stmt = std::dynamic_pointer_cast<const AttachStmt>(stmt)) {
-            auto module_type = m_type_checker.m_module_resolutions.at(attach_stmt.get());
-            if (!module_type->is_native) continue;
+            auto imported_module_type = m_type_checker.m_module_resolutions.at(attach_stmt.get());
+            if (!imported_module_type->is_native) continue;
 
-            (*m_current_out) << "// --- Prototypes for Native Module: " << module_type->name << " ---\n";
-            for (const auto& [export_name, type] : module_type->exports) {
-                if (type->kind == TypeKind::FUNCTION) {
-                    auto func_type = std::dynamic_pointer_cast<FunctionType>(type);
+            (*m_current_out) << "// --- Prototypes for Native Module: " << imported_module_type->name << " ---\n";
+            for (const auto& [export_name, type] : imported_module_type->exports) {
+                if (type->kind != TypeKind::FUNCTION) continue;
 
-                    if (func_type->return_type->kind == TypeKind::INSTANCE) {
-                        // This is a NATIVE CLASS CONSTRUCTOR
-                        auto instance_type = std::dynamic_pointer_cast<InstanceType>(func_type->return_type);
-                        auto class_type = instance_type->class_type;
+                auto func_type = std::dynamic_pointer_cast<FunctionType>(type);
+                std::string mangled_name = "Angara_" + imported_module_type->name + "_" + export_name;
 
-// 1. Generate the constructor prototype. It ALWAYS has the generic signature.
-                        (*m_current_out) << "extern AngaraObject Angara_" << module_type->name << "_" << class_type->name
+                if (func_type->return_type->kind == TypeKind::INSTANCE) {
+                    // --- THIS IS A NATIVE CLASS CONSTRUCTOR ---
+                    auto instance_type = std::dynamic_pointer_cast<InstanceType>(func_type->return_type);
+                    auto class_type = instance_type->class_type;
+
+                    // 1. Generate the constructor prototype. It ALWAYS has the generic signature.
+                    (*m_current_out) << "extern AngaraObject " << mangled_name
+                                     << "(int arg_count, AngaraObject* args);\n";
+
+                    // 2. Generate prototypes for all of its methods.
+                    for (const auto& [method_name, method_info] : class_type->methods) {
+                        (*m_current_out) << "extern AngaraObject Angara_" << class_type->name << "_" << method_name
                                          << "(int arg_count, AngaraObject* args);\n";
-
-// 2. Generate prototypes for all of its methods. They ALWAYS have the generic signature.
-                        for (const auto& [method_name, method_info] : class_type->methods) {
-                            (*m_current_out) << "extern AngaraObject Angara_" << class_type->name << "_" << method_name
-                                             << "(int arg_count, AngaraObject* args);\n";
-                        }
-
-                    } else {
-                        // This is a regular NATIVE GLOBAL FUNCTION (this part was correct)
-                        std::string mangled_name = "Angara_" + module_type->name + "_" + export_name;
-                        (*m_current_out) << "extern AngaraObject " << mangled_name
-                                         << "(int arg_count, AngaraObject args[]);\n";
                     }
+
+                } else {
+                    // --- THIS IS A REGULAR NATIVE GLOBAL FUNCTION ---
+                    (*m_current_out) << "extern AngaraObject " << mangled_name
+                                     << "(int arg_count, AngaraObject args[]);\n";
                 }
             }
         }

@@ -9,8 +9,8 @@ find_package(PkgConfig REQUIRED)
 # This will find libcurl and set variables like CURL_INCLUDE_DIRS and CURL_LIBRARIES
 pkg_check_modules(CURL REQUIRED libcurl)
 
-# This will find libwebsockets and set LWS_INCLUDE_DIRS and LWS_LIBRARIES
-pkg_check_modules(LWS REQUIRED libwebsockets)
+pkg_check_modules(LWS REQUIRED libwslay)    # <-- CHANGE to libwslay
+pkg_check_modules(SSL REQUIRED openssl)   # <-- ADD openssl
 
 # --- 1. Build libangara_runtime.so ---
 # The runtime is now a SHARED library that everything else will link against.
@@ -41,10 +41,9 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
         target_link_libraries(${MODULE_NAME} PRIVATE ${CURL_LIBRARIES})
 
     elseif (MODULE_NAME STREQUAL "websocket")
-        message(STATUS "Module 'websocket' requires libwebsockets. Linking...")
-        # Use the variables found by pkg-config
-        target_include_directories(${MODULE_NAME} PRIVATE ${LWS_INCLUDE_DIRS})
-        target_link_libraries(${MODULE_NAME} PRIVATE ${LWS_LIBRARIES})
+        message(STATUS "Module 'websocket' requires libwslay and openssl. Linking...")
+        # --- THE FIX ---
+        target_link_libraries(${MODULE_NAME} PRIVATE ${LWS_LIBRARIES} ${SSL_LIBRARIES})
     endif()
     # --- END FIX ---
 
