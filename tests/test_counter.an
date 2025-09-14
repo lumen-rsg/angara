@@ -1,0 +1,9 @@
+attach counter;
+attach io;
+
+func main() -> i64 {
+    let c = counter.Counter(10); // Create a counter starting at 10
+    c.increment();
+    c.increment();
+    io.println(1, "Current value: " + string(c.value())); // Expected: 12
+}

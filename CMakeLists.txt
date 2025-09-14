@@ -2,7 +2,15 @@ cmake_minimum_required(VERSION 3.16)
 project(angara CXX C) # Project is now 'angara'
 set(CMAKE_CXX_STANDARD 23)
 
-find_package(CURL REQUIRED)
+# --- NEW: Tell CMake to use pkg-config ---
+find_package(PkgConfig REQUIRED)
+
+# --- Find libraries using pkg-config ---
+# This will find libcurl and set variables like CURL_INCLUDE_DIRS and CURL_LIBRARIES
+pkg_check_modules(CURL REQUIRED libcurl)
+
+# This will find libwebsockets and set LWS_INCLUDE_DIRS and LWS_LIBRARIES
+pkg_check_modules(LWS REQUIRED libwebsockets)
 
 # --- 1. Build libangara_runtime.so ---
 # The runtime is now a SHARED library that everything else will link against.
@@ -28,7 +36,15 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
     # If this specific module needs an external library, link it here.
     if (MODULE_NAME STREQUAL "http")
         message(STATUS "Module 'http' requires libcurl. Linking...")
-        target_link_libraries(${MODULE_NAME} PRIVATE CURL::libcurl)
+        # Use the variables found by pkg-config
+        target_include_directories(${MODULE_NAME} PRIVATE ${CURL_INCLUDE_DIRS})
+        target_link_libraries(${MODULE_NAME} PRIVATE ${CURL_LIBRARIES})
+
+    elseif (MODULE_NAME STREQUAL "websocket")
+        message(STATUS "Module 'websocket' requires libwebsockets. Linking...")
+        # Use the variables found by pkg-config
+        target_include_directories(${MODULE_NAME} PRIVATE ${LWS_INCLUDE_DIRS})
+        target_link_libraries(${MODULE_NAME} PRIVATE ${LWS_LIBRARIES})
     endif()
     # --- END FIX ---
 

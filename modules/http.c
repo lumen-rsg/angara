@@ -2,12 +2,12 @@
 // Create a new file: http.c
 // =======================================================================
 
-#include "AngaraABI.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <curl/curl.h>
 #include <ctype.h> // For isspace
+#include "../src/runtime/angara_runtime.h"
 
 // --- libcurl callback helpers ---
 
@@ -48,7 +48,7 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
 // --- Main Module Function ---
 
 AngaraObject Angara_http_request(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ANGARA_IS_RECORD(args[0])) { // Macro needed!
+    if (arg_count != 1 || !IS_RECORD(args[0])) { // Macro needed!
         angara_throw_error("request(options) expects one record argument.");
         return angara_create_nil();
     }
@@ -56,24 +56,24 @@ AngaraObject Angara_http_request(int arg_count, AngaraObject* args) {
 
     // --- Extract options from the record ---
     AngaraObject url_obj = angara_record_get(options, "url");
-    if (!ANGARA_IS_STRING(url_obj)) {
+    if (!IS_STRING(url_obj)) {
         angara_throw_error("request options must include a 'url' string field.");
         return angara_create_nil();
     }
-    const char* url = ANGARA_AS_CSTRING(url_obj);
+    const char* url = AS_CSTRING(url_obj);
 
     AngaraObject method_obj = angara_record_get(options, "method");
-    if (!ANGARA_IS_STRING(method_obj)) {
+    if (!IS_STRING(method_obj)) {
         angara_throw_error("request options must include a 'method' string field.");
         return angara_create_nil();
     }
-    const char* method = ANGARA_AS_CSTRING(method_obj);
+    const char* method = AS_CSTRING(method_obj);
 
     // Optional: Request body
     AngaraObject body_obj = angara_record_get(options, "body");
     const char* request_body_data = NULL;
-    if (ANGARA_IS_STRING(body_obj)) {
-        request_body_data = ANGARA_AS_CSTRING(body_obj);
+    if (IS_STRING(body_obj)) {
+        request_body_data = AS_CSTRING(body_obj);
     }
 
     // Optional: Request headers
@@ -99,13 +99,13 @@ AngaraObject Angara_http_request(int arg_count, AngaraObject* args) {
     }
 
     // --- NEW: Handle Request Headers ---
-    if (ANGARA_IS_RECORD(headers_obj)) {
-        AngaraRecord* headers_record = ANGARA_AS_RECORD(headers_obj);
+    if (IS_RECORD(headers_obj)) {
+        AngaraRecord* headers_record = AS_RECORD(headers_obj);
         for (size_t i = 0; i < headers_record->count; i++) {
             const char* key = headers_record->entries[i].key;
             AngaraObject val_obj = headers_record->entries[i].value;
-            if (ANGARA_IS_STRING(val_obj)) {
-                const char* value = ANGARA_AS_CSTRING(val_obj);
+            if (IS_STRING(val_obj)) {
+                const char* value = AS_CSTRING(val_obj);
                 char header_string[1024];
                 snprintf(header_string, sizeof(header_string), "%s: %s", key, value);
                 header_list = curl_slist_append(header_list, header_string);
@@ -195,16 +195,13 @@ AngaraObject Angara_http_request(int arg_count, AngaraObject* args) {
 
 // --- Module Definition ---
 
-static const AngaraFuncDef HTTP_FUNCTIONS[] = {
-        // name,      c_function,          arity, type_string
-        {"request",   Angara_http_request, 1,     "{}->a"}, // record -> record
-        {NULL, NULL, 0, NULL}
+static const AngaraFuncDef HTTP_EXPORTS[] = {
+        {"request", Angara_http_request, "{}->a", NULL},
+        {NULL, NULL, NULL, NULL}
 };
 
 ANGARA_MODULE_INIT(http) {
-        // Initialize libcurl globally
-        curl_global_init(CURL_GLOBAL_ALL);
-
-        *def_count = (sizeof(HTTP_FUNCTIONS) / sizeof(AngaraFuncDef)) - 1;
-        return HTTP_FUNCTIONS;
+    curl_global_init(CURL_GLOBAL_ALL);
+    *def_count = (sizeof(HTTP_EXPORTS) / sizeof(AngaraFuncDef)) - 1;
+    return HTTP_EXPORTS;
 }

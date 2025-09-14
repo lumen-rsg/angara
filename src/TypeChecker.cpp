@@ -1482,45 +1482,60 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         else if (callee_type->kind == TypeKind::CLASS) {
             auto class_type = std::dynamic_pointer_cast<ClassType>(callee_type);
 
-            // Find the constructor ('init' method).
+            // The logic is now unified. For both native and Angara classes, the constructor
+            // signature is stored in a method called "init".
             auto init_it = class_type->methods.find("init");
+
             if (init_it == class_type->methods.end()) {
-                // No explicit 'init' method, so we expect zero arguments for the default constructor.
+                // No constructor ('init') found. This is only valid if zero arguments are provided.
                 if (!arg_types.empty()) {
-                    error(expr.paren, "Class '" + class_type->name + "' has no 'init' method and cannot be called with arguments.");
+                    error(expr.paren, "Class '" + class_type->name + "' has no constructor that accepts arguments.");
                     result_type = m_type_error;
                 }
             } else {
-                // An 'init' method exists. Validate the call against its signature.
+                // A constructor signature exists. Validate the call against it.
                 auto init_sig = std::dynamic_pointer_cast<FunctionType>(init_it->second.type);
 
+                // 1. Check arity (number of arguments)
                 if (arg_types.size() != init_sig->param_types.size()) {
                     error(expr.paren, "Incorrect number of arguments for constructor of '" + class_type->name +
                                       "'. Expected " + std::to_string(init_sig->param_types.size()) +
                                       ", but got " + std::to_string(arg_types.size()) + ".");
                     result_type = m_type_error;
                 } else {
+                    // 2. Check the type of each argument
                     for (size_t i = 0; i < arg_types.size(); ++i) {
-                        if (arg_types[i]->toString() != init_sig->param_types[i]->toString()) {
+                        auto expected_type = init_sig->param_types[i];
+                        auto actual_type = arg_types[i];
+                        bool types_match = (actual_type->toString() == expected_type->toString());
+
+                        // Add our special compatibility rules
+                        // Rule: `any` is compatible with anything.
+                        if (!types_match && (expected_type->kind == TypeKind::ANY || actual_type->kind == TypeKind::ANY)) {
+                            types_match = true;
+                        }
+                        // Rule: A generic record `{}` is compatible with a specific record `{...}`.
+                        if (!types_match && expected_type->kind == TypeKind::RECORD && actual_type->kind == TypeKind::RECORD) {
+                            if (std::dynamic_pointer_cast<RecordType>(expected_type)->fields.empty()) {
+                                types_match = true;
+                            }
+                        }
+
+                        if (!types_match) {
                             error(expr.paren, "Type mismatch for constructor argument " + std::to_string(i + 1) +
-                                              ". Expected '" + init_sig->param_types[i]->toString() +
-                                              "', but got '" + arg_types[i]->toString() + "'.");
+                                              ". Expected '" + expected_type->toString() +
+                                              "', but got '" + actual_type->toString() + "'.");
                             result_type = m_type_error;
-                            break;
+                            break; // Stop after first error
                         }
                     }
                 }
             }
 
-            // If no errors, the result of constructing a class is an instance of that class.
+            // If all checks passed, the result of a constructor call is an instance of the class.
             if (result_type->kind != TypeKind::ERROR) {
                 result_type = std::make_shared<InstanceType>(class_type);
             }
-
-        } else {
-            // The callee is not a function or a class.
-            error(expr.paren, "This expression is not callable. Can only call functions and classes.");
-            result_type = m_type_error;
         }
 
         pushAndSave(&expr, result_type);

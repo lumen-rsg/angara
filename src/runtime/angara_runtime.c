@@ -276,6 +276,24 @@ static void free_record(AngaraRecord* record) {
     free(record);
 }
 
+AngaraObject angara_create_native_instance(void* data, AngaraFinalizerFn finalizer) {
+    AngaraNativeInstance* instance = (AngaraNativeInstance*)malloc(sizeof(AngaraNativeInstance));
+    instance->obj.type = OBJ_NATIVE_INSTANCE;
+    instance->obj.ref_count = 1;
+    instance->data = data;
+    instance->finalizer = finalizer;
+    return (AngaraObject){VAL_OBJ, {.obj = (Object*)instance}};
+}
+
+static void free_native_instance(AngaraNativeInstance* instance) {
+    // If the module provided a finalizer, call it with the custom data pointer.
+    if (instance->finalizer) {
+        instance->finalizer(instance->data);
+    }
+    // Then, free the container struct itself.
+    free(instance);
+}
+
 // 2. Update the memory manager
 static void free_exception(AngaraException* exc) {
     angara_decref(exc->message); // Release the reference to the message string
@@ -288,6 +306,7 @@ static void free_object(Object* object) {
         case OBJ_STRING: free_string((AngaraString*)object); break;
         case OBJ_LIST: free_list((AngaraList*)object); break;
         case OBJ_RECORD: free_record((AngaraRecord*)object); break;
+        case OBJ_NATIVE_INSTANCE: free_native_instance((AngaraNativeInstance*)object); break;
         case OBJ_INSTANCE:
             // For now, just free the memory. We'll need to handle
             // decref-ing all fields later.
@@ -349,6 +368,9 @@ void printObject(AngaraObject obj) {
                     printf("Exception: %s", AS_CSTRING(exc->message));
                     break;
             }
+                case OBJ_NATIVE_INSTANCE:
+                    printf("<native instance at %p>", AS_NATIVE_INSTANCE(obj)->data);
+                    break;
 
                 default: printf("<object>"); break;
             }
@@ -386,15 +408,32 @@ void angara_try_end(void) {
 
 ExceptionFrame* g_exception_chain_head = NULL;
 
+void angara_debug_print(const char* message) {
+    // We use fprintf to stderr to make sure it's not buffered
+    // and doesn't interfere with the program's stdout.
+    fprintf(stderr, "[DEBUG] %s\n", message);
+}
+
+// 2. Enhance the angara_throw function
 void angara_throw(AngaraObject exception) {
+    // --- NEW DEBUGGING LOGIC ---
+    fprintf(stderr, "[FATAL] Unhandled Angara Exception thrown.\n");
+    if (IS_OBJ(exception) && OBJ_TYPE(exception) == OBJ_EXCEPTION) {
+        fprintf(stderr, "        Message: %s\n", AS_CSTRING(AS_EXCEPTION(exception)->message));
+    } else {
+        fprintf(stderr, "        (Exception object was not a standard Exception type)\n");
+    }
+    // --- END NEW LOGIC ---
+
     if (g_exception_chain_head == NULL) {
-        printf("Unhandled exception\n");
+        // The original "Unhandled exception" message can now be more specific.
+        fprintf(stderr, "        No active `try` blocks. Terminating.\n");
         exit(1);
     }
     g_current_exception = exception;
     angara_incref(g_current_exception);
     ExceptionFrame* frame = g_exception_chain_head;
-    g_exception_chain_head = frame->prev; // Unlink
+    g_exception_chain_head = frame->prev;
     longjmp(frame->buffer, 1);
 }
 
@@ -728,7 +767,7 @@ AngaraObject angara_string_concat(AngaraObject a, AngaraObject b) {
     size_t new_len = s1->length + s2->length;
     char* new_chars = (char*)malloc(new_len + 1);
     if (!new_chars) {
-        // In a real runtime, this should probably throw a proper out-of-memory error.
+        // this should probably throw a proper out-of-memory error.
         return angara_create_nil();
     }
 
@@ -769,3 +808,4 @@ AngaraObject angara_exception_new(AngaraObject message) {
 
     return (AngaraObject){VAL_OBJ, {.obj = (Object*)exc}};
 }
+

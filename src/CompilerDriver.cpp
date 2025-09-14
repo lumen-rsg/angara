@@ -16,7 +16,7 @@
 #include <filesystem>
 #include <thread>
 
-#include "AngaraABI.h"
+#include "../src/runtime/angara_runtime.h"
 
 const char* const RESET = "\033[0m";
 const char* const BOLD = "\033[1m";
@@ -98,29 +98,29 @@ namespace angara {
     {}
 
     void CompilerDriver::print_progress(const std::string& current_file) {
-        // Store the message so other functions can reprint it.
-        m_last_progress_message = current_file;
-
-        int bar_width = 20;
-        float progress = (m_total_modules > 0) ? (float)m_modules_compiled / m_total_modules : 0;
-        // Don't let the bar go to 100% until the very end.
-        if (m_modules_compiled == m_total_modules && current_file != "Done!") {
-            progress = 0.99;
-        }
-        int pos = bar_width * progress;
-
-        std::stringstream ss;
-        ss << BOLD << GREEN << "[" << RESET;
-        for (int i = 0; i < bar_width; ++i) {
-            if (i < pos) ss << BOLD << GREEN << "=" << RESET;
-            else if (i == pos && progress < 1.0) ss << BOLD << GREEN << ">" << RESET;
-            else ss << " ";
-        }
-        ss << BOLD << GREEN << "] " << RESET << "(" << m_modules_compiled << "/" << m_total_modules << ") "
-           << "Compiling: " << current_file;
-
-        // \r moves to the beginning. \033[K clears the line.
-        std::cout << "\r\033[K" << ss.str() << std::flush;
+//        // Store the message so other functions can reprint it.
+//        m_last_progress_message = current_file;
+//
+//        int bar_width = 20;
+//        float progress = (m_total_modules > 0) ? (float)m_modules_compiled / m_total_modules : 0;
+//        // Don't let the bar go to 100% until the very end.
+//        if (m_modules_compiled == m_total_modules && current_file != "Done!") {
+//            progress = 0.99;
+//        }
+//        int pos = bar_width * progress;
+//
+//        std::stringstream ss;
+//        ss << BOLD << GREEN << "[" << RESET;
+//        for (int i = 0; i < bar_width; ++i) {
+//            if (i < pos) ss << BOLD << GREEN << "=" << RESET;
+//            else if (i == pos && progress < 1.0) ss << BOLD << GREEN << ">" << RESET;
+//            else ss << " ";
+//        }
+//        ss << BOLD << GREEN << "] " << RESET << "(" << m_modules_compiled << "/" << m_total_modules << ") "
+//           << "Compiling: " << current_file;
+//
+//        // \r moves to the beginning. \033[K clears the line.
+//        std::cout << ss.str() << std::endl;
 }
 
     static std::string get_lib_name(const std::string& path) {
@@ -435,97 +435,150 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
 
 
     std::shared_ptr<ModuleType> CompilerDriver::loadNativeModule(const std::string& path, const Token& import_token) {
-    print_progress("Loading native module: " + path);
+        print_progress("Loading native module: " + path);
 
-    // 1. Open the dynamic library.
-    void* handle = dlopen(path.c_str(), RTLD_LAZY);
-    if (!handle) {
-        std::cerr << "\nError at line " << import_token.line << ": Could not load native module '" << path << "'. Reason: " << dlerror() << "\n";
-        m_had_error = true;
-        return nullptr;
-    }
+        void* handle = dlopen(path.c_str(), RTLD_LAZY);
+        if (!handle) {
+            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET
+                      << ": Could not load native module '" << path << "'. Reason: " << dlerror() << "\n";
+            m_had_error = true;
+            return nullptr;
+        }
 
         std::string module_name = get_base_name(path);
         std::string init_func_name = "Angara_" + module_name + "_Init";
+
+        // The init function returns a simple array of AngaraFuncDef.
+        typedef const AngaraFuncDef* (*AngaraModuleInitFn)(int*);
         AngaraModuleInitFn init_fn = (AngaraModuleInitFn)dlsym(handle, init_func_name.c_str());
-    if (!init_fn) {
-        std::cerr << "\nError at line " << import_token.line << ": Invalid native module '" << path << "'. Missing " << init_func_name << " entry point.\n";
-        m_had_error = true;
-        dlclose(handle);
-        return nullptr;
-    }
 
-    // 3. Call the init function to get the API definitions.
-    int def_count = 0;
-    const AngaraFuncDef* defs = init_fn(&def_count);
-
-    auto module_type = std::make_shared<ModuleType>(module_name);
-
-for (int i = 0; i < def_count; i++) {
-        const AngaraFuncDef& def = defs[i];
-
-        if (!def.type_string) {
-            std::cerr << "\nWarning: Native function '" << def.name << "' in module '" << path << "' is missing a type string. Defaulting to any().\n";
-            // Fallback to old behavior if type string is missing
-            module_type->exports[def.name] = std::make_shared<FunctionType>(
-                std::vector<std::shared_ptr<Type>>{}, std::make_shared<AnyType>(), true
-            );
-            continue;
+        if (!init_fn) {
+            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET
+                      << ": Invalid native module '" << path << "'. Missing entry point: " << init_func_name << "\n";
+            m_had_error = true;
+            dlclose(handle);
+            return nullptr;
         }
 
-        std::string full_sig = def.type_string;
-        size_t arrow_pos = full_sig.find("->");
-        if (arrow_pos == std::string::npos) {
-             std::cerr << "\nWarning: Invalid type string for '" << def.name << "': missing '->'. Defaulting to any().\n";
-             continue; // Skip this malformed definition
-        }
+        int def_count = 0;
+        const AngaraFuncDef* defs = init_fn(&def_count);
 
-        std::string params_str = full_sig.substr(0, arrow_pos);
-        std::string return_str = full_sig.substr(arrow_pos + 2);
+        auto module_type = std::make_shared<ModuleType>(module_name);
+        module_type->is_native = true;
 
-        try {
-            // Parse Parameters
-            std::vector<std::shared_ptr<Type>> params;
-            TypeStringParser param_parser(params_str);
-            bool is_variadic = false; // <-- NEW: Flag for variadic functions
+        // Iterate through all exported functions in the module.
+        for (int i = 0; i < def_count; i++) {
+            const AngaraFuncDef& func_def = defs[i];
+            if (!func_def.name || !func_def.type_string) continue;
 
-            while (!param_parser.is_at_end()) {
-                params.push_back(param_parser.parse_type());
+            try {
+                std::string full_sig = func_def.type_string;
+                size_t arrow_pos = full_sig.find("->");
+                if (arrow_pos == std::string::npos) {
+                    throw std::runtime_error("Signature for '" + std::string(func_def.name) + "' is missing '->'.");
+                }
 
-                // --- NEW: Check for variadic syntax ---
-                if (param_parser.peek() == '.') {
-                    param_parser.advance(); // consume .
-                    param_parser.advance(); // consume .
-                    param_parser.advance(); // consume .
-                    is_variadic = true;
-                    // The variadic marker must be the last thing in the param string.
-                    if (!param_parser.is_at_end()) {
-                        throw std::runtime_error("Variadic '...' must be at the end of the parameter list.");
+                std::string params_str = full_sig.substr(0, arrow_pos);
+                std::string return_str = full_sig.substr(arrow_pos + 2);
+
+                // Parse the parameter types from the signature string.
+                TypeStringParser param_parser(params_str);
+                std::vector<std::shared_ptr<Type>> params;
+                bool is_variadic = false;
+                while (!param_parser.is_at_end()) {
+                    params.push_back(param_parser.parse_type());
+                    if (param_parser.peek() == '.') {
+                        param_parser.advance(); param_parser.advance(); param_parser.advance();
+                        is_variadic = true;
+                        if (!param_parser.is_at_end()) {
+                            throw std::runtime_error("Variadic '...' must be at the end of the parameter list.");
+                        }
                     }
                 }
-                // --- END NEW ---
+
+                std::shared_ptr<Type> return_type;
+
+                // --- This is the key logic for distinguishing constructors from global functions ---
+                if (func_def.constructs != NULL) {
+                    // This function is a constructor for a native class.
+                    const AngaraClassDef* class_def = func_def.constructs;
+
+                    if (return_str != class_def->name) {
+                        throw std::runtime_error("Constructor return type '" + return_str + "' in ABI does not match class name '" + std::string(class_def->name) + "'.");
+                    }
+
+                    auto class_type = std::make_shared<ClassType>(class_def->name);
+                    class_type->is_native = true;
+                    Token dummy_token;
+
+                    // Populate the class's methods.
+                    if (class_def->methods) {
+                        for (int m = 0; class_def->methods[m].name != NULL; ++m) {
+                            const AngaraMethodDef& method_def = class_def->methods[m];
+                            if (!method_def.name || !method_def.type_string) continue;
+
+                            std::string m_full_sig = method_def.type_string;
+                            size_t m_arrow_pos = m_full_sig.find("->");
+                            if (m_arrow_pos == std::string::npos) continue; // Skip malformed method
+
+                            std::string m_params_str = m_full_sig.substr(0, m_arrow_pos);
+                            std::string m_return_str = m_full_sig.substr(m_arrow_pos + 2);
+
+                            TypeStringParser m_param_parser(m_params_str);
+                            std::vector<std::shared_ptr<Type>> m_params;
+                            while(!m_param_parser.is_at_end()) m_params.push_back(m_param_parser.parse_type());
+
+                            TypeStringParser m_return_parser(m_return_str);
+                            auto m_return_type = m_return_parser.parse_type();
+
+                            auto method_type = std::make_shared<FunctionType>(m_params, m_return_type);
+                            class_type->methods[method_def.name] = {method_type,  AccessLevel::PUBLIC, dummy_token, false};
+                        }
+                    }
+
+                    // Populate the class's fields.
+                    if (class_def->fields) {
+                        for (int f = 0; class_def->fields[f].name != NULL; ++f) {
+                            const AngaraFieldDef& field_def = class_def->fields[f];
+                            if (!field_def.name || !field_def.type_string) continue;
+
+                            TypeStringParser field_parser(field_def.type_string);
+                            auto field_type = field_parser.parse_type();
+                            class_type->fields[field_def.name] = {field_type,  AccessLevel::PUBLIC, dummy_token, field_def.is_const};
+                        }
+                    }
+
+                    // The final return type of the constructor function is an INSTANCE of this class.
+                    return_type = std::make_shared<InstanceType>(class_type);
+
+                } else {
+                    // This is a regular global function, not a constructor.
+                    TypeStringParser return_parser(return_str);
+                    return_type = return_parser.parse_type();
+                }
+
+                // Create the final FunctionType for the exported symbol.
+                auto func_type = std::make_shared<FunctionType>(params, return_type, is_variadic);
+                module_type->exports[func_def.name] = func_type;
+
+            } catch (const std::runtime_error& e) {
+                std::cerr << "\n" << BOLD << RED << "Warning:" << RESET << " FATAL error while parsing ABI for '"
+                          << (func_def.name ? func_def.name : "unknown")
+                          << "' in module '" << path << "'.\n";
+                std::cerr << "        REASON: " << e.what() << "\n";
+                // Let's make this a hard error for now to be sure.
+                m_had_error = true;
+                return nullptr; // Stop compilation
             }
-
-            // Parse Return Type
-            TypeStringParser return_parser(return_str);
-            auto return_type = return_parser.parse_type();
-
-            // Arity Check (Now respects variadic flag)
-            if (!is_variadic && def.arity != -1 && params.size() != def.arity) {
-                std::cerr << "\nWarning: Arity mismatch for '" << def.name << "'...\n";
-            }
-
-            // Pass the is_variadic flag to the FunctionType constructor
-            auto func_type = std::make_shared<FunctionType>(params, return_type, is_variadic);
-            module_type->exports[def.name] = func_type;
-
-        } catch (const std::runtime_error& e) {
-            std::cerr << "\nWarning: Could not parse type string for '" << def.name << "': " << e.what() << ". Defaulting to any().\n";
         }
+
+        m_modules_compiled++;
+        std::cerr << "DEBUG: Finished loading native module '" << module_name << "'. Found exports:\n";
+        for (const auto& [name, type] : module_type->exports) {
+            std::cerr << "  - " << name << " : " << type->toString() << "\n";
+        }
+        return module_type;
     }
 
-    m_modules_compiled++;
-    return module_type;
-}
 
 } // namespace angara
