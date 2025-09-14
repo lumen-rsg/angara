@@ -44,6 +44,10 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
         message(STATUS "Module 'websocket' requires libwslay and openssl. Linking...")
         # --- THE FIX ---
         target_link_libraries(${MODULE_NAME} PRIVATE ${LWS_LIBRARIES} ${SSL_LIBRARIES})
+    elseif (MODULE_NAME STREQUAL "time") # <-- ADD THIS BLOCK
+        message(STATUS "Module 'time' requires the real-time library. Linking...")
+        # On many systems, clock_gettime requires linking with librt
+        target_link_libraries(${MODULE_NAME} PRIVATE rt)
     endif()
     # --- END FIX ---
 
