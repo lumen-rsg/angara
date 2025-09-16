@@ -560,17 +560,17 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
             if (name == "any") return m_type_any;
             if (name == "Thread") return m_type_thread;
 
-            // If it's not a primitive, it must be a user-defined type (class or trait).
-            // We look it up in the symbol table.
+            // If it's not a primitive, it must be a user-defined type (class, trait, contract).
             auto symbol = m_symbols.resolve(name);
             if (symbol) {
+                // If the resolved symbol is a ClassType...
                 if (symbol->type->kind == TypeKind::CLASS) {
-                    // When a class name is used as a type annotation, it refers to
-                    // an INSTANCE of that class.
+                    // ... then using its name as a type annotation means we want an INSTANCE of it.
                     return std::make_shared<InstanceType>(std::dynamic_pointer_cast<ClassType>(symbol->type));
                 }
-                if (symbol->type->kind == TypeKind::TRAIT) {
-                    return symbol->type; // Traits can be used as types directly.
+                // For traits and contracts, using the name directly as a type is fine.
+                if (symbol->type->kind == TypeKind::TRAIT || symbol->type->kind == TypeKind::CONTRACT) {
+                    return symbol->type;
                 }
             }
 
@@ -1607,6 +1607,7 @@ for (size_t i = 0; i < spawn_args.size(); ++i) {
     expr.object->accept(*this);
     auto object_type = popType();
 
+
     if (object_type->kind == TypeKind::ERROR) {
         pushAndSave(&expr, m_type_error);
         return {};
@@ -1631,7 +1632,13 @@ for (size_t i = 0; i < spawn_args.size(); ++i) {
             }
         }
     }
-    if (object_type->kind == TypeKind::MODULE) {
+    else if (object_type->kind == TypeKind::CLASS) {
+        // THIS IS AN ERROR. You can't call a method on a class, only on an instance.
+        error(expr.name, "Cannot access property on a class type. Did you mean to use an instance of the class?");
+        pushAndSave(&expr, m_type_error);
+        return {};
+    }
+    else if (object_type->kind == TypeKind::MODULE) {
         auto module_type = std::dynamic_pointer_cast<ModuleType>(object_type);
         auto member_it = module_type->exports.find(property_name);
         if (member_it != module_type->exports.end()) {
@@ -1670,6 +1677,7 @@ for (size_t i = 0; i < spawn_args.size(); ++i) {
     else {
         // Update the error message to be fully comprehensive.
         error(expr.name, "Only instances, modules, lists, threads, or mutexes have properties. Cannot access property on type '" + object_type->toString() + "'.");
+        exit(-1);
     }
 
     pushAndSave(&expr, result_type);

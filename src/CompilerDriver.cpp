@@ -98,29 +98,29 @@ namespace angara {
     {}
 
     void CompilerDriver::print_progress(const std::string& current_file) {
-//        // Store the message so other functions can reprint it.
-//        m_last_progress_message = current_file;
-//
-//        int bar_width = 20;
-//        float progress = (m_total_modules > 0) ? (float)m_modules_compiled / m_total_modules : 0;
-//        // Don't let the bar go to 100% until the very end.
-//        if (m_modules_compiled == m_total_modules && current_file != "Done!") {
-//            progress = 0.99;
-//        }
-//        int pos = bar_width * progress;
-//
-//        std::stringstream ss;
-//        ss << BOLD << GREEN << "[" << RESET;
-//        for (int i = 0; i < bar_width; ++i) {
-//            if (i < pos) ss << BOLD << GREEN << "=" << RESET;
-//            else if (i == pos && progress < 1.0) ss << BOLD << GREEN << ">" << RESET;
-//            else ss << " ";
-//        }
-//        ss << BOLD << GREEN << "] " << RESET << "(" << m_modules_compiled << "/" << m_total_modules << ") "
-//           << "Compiling: " << current_file;
-//
-//        // \r moves to the beginning. \033[K clears the line.
-//        std::cout << ss.str() << std::endl;
+        // Store the message so other functions can reprint it.
+        m_last_progress_message = current_file;
+
+        int bar_width = 20;
+        float progress = (m_total_modules > 0) ? (float)m_modules_compiled / m_total_modules : 0;
+        // Don't let the bar go to 100% until the very end.
+        if (m_modules_compiled == m_total_modules && current_file != "Done!") {
+            progress = 0.99;
+        }
+        int pos = bar_width * progress;
+
+        std::stringstream ss;
+        ss << BOLD << GREEN << "[" << RESET;
+        for (int i = 0; i < bar_width; ++i) {
+            if (i < pos) ss << BOLD << GREEN << "=" << RESET;
+            else if (i == pos && progress < 1.0) ss << BOLD << GREEN << ">" << RESET;
+            else ss << " ";
+        }
+        ss << BOLD << GREEN << "] " << RESET << "(" << m_modules_compiled << "/" << m_total_modules << ") "
+           << "Compiling: " << current_file;
+
+        // \r moves to the beginning. \033[K clears the line.
+        std::cout << ss.str() << "\r\033[K" << std::flush;
 }
 
     static std::string get_lib_name(const std::string& path) {
@@ -450,7 +450,7 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
 
         // The init function returns a simple array of AngaraFuncDef.
         typedef const AngaraFuncDef* (*AngaraModuleInitFn)(int*);
-        AngaraModuleInitFn init_fn = (AngaraModuleInitFn)dlsym(handle, init_func_name.c_str());
+        auto init_fn = (AngaraModuleInitFn)dlsym(handle, init_func_name.c_str());
 
         if (!init_fn) {
             std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET
@@ -499,7 +499,7 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
                 std::shared_ptr<Type> return_type;
 
                 // --- This is the key logic for distinguishing constructors from global functions ---
-                if (func_def.constructs != NULL) {
+                if (func_def.constructs != nullptr) {
                     // This function is a constructor for a native class.
                     const AngaraClassDef* class_def = func_def.constructs;
 
@@ -513,7 +513,7 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
 
                     // Populate the class's methods.
                     if (class_def->methods) {
-                        for (int m = 0; class_def->methods[m].name != NULL; ++m) {
+                        for (int m = 0; class_def->methods[m].name != nullptr; ++m) {
                             const AngaraMethodDef& method_def = class_def->methods[m];
                             if (!method_def.name || !method_def.type_string) continue;
 
@@ -538,7 +538,7 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
 
                     // Populate the class's fields.
                     if (class_def->fields) {
-                        for (int f = 0; class_def->fields[f].name != NULL; ++f) {
+                        for (int f = 0; class_def->fields[f].name != nullptr; ++f) {
                             const AngaraFieldDef& field_def = class_def->fields[f];
                             if (!field_def.name || !field_def.type_string) continue;
 
@@ -547,8 +547,6 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
                             class_type->fields[field_def.name] = {field_type,  AccessLevel::PUBLIC, dummy_token, field_def.is_const};
                         }
                     }
-
-                    // --- THE FIX IS HERE ---
 
                     // 3. Parse the constructor's parameters (the part before '->').
                     //    We already did this to get the `params` variable.
@@ -563,7 +561,6 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
                     // 6. Export the ClassType itself, making the type name available in Angara.
                     module_type->exports[class_def->name] = class_type;
 
-                    // --- END FIX ---
 
                     // The return type of the exported *function* symbol is an INSTANCE of the class.
                     return_type = std::make_shared<InstanceType>(class_type);
@@ -590,10 +587,6 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
         }
 
         m_modules_compiled++;
-        std::cerr << "DEBUG: Finished loading native module '" << module_name << "'. Found exports:\n";
-        for (const auto& [name, type] : module_type->exports) {
-            std::cerr << "  - " << name << " : " << type->toString() << "\n";
-        }
         return module_type;
     }
 
