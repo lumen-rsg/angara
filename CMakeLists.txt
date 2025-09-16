@@ -9,7 +9,7 @@ find_package(PkgConfig REQUIRED)
 # This will find libcurl and set variables like CURL_INCLUDE_DIRS and CURL_LIBRARIES
 pkg_check_modules(CURL REQUIRED libcurl)
 
-pkg_check_modules(LWS REQUIRED libwslay)    # <-- CHANGE to libwslay
+pkg_check_modules(LWS REQUIRED libwebsockets)
 pkg_check_modules(SSL REQUIRED openssl)   # <-- ADD openssl
 
 # --- 1. Build libangara_runtime.so ---
@@ -41,7 +41,7 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
         target_link_libraries(${MODULE_NAME} PRIVATE ${CURL_LIBRARIES})
 
     elseif (MODULE_NAME STREQUAL "websocket")
-        message(STATUS "Module 'websocket' requires libwslay and openssl. Linking...")
+        message(STATUS "Module 'websocket' requires libwebsocket and openssl. Linking...")
         # --- THE FIX ---
         target_link_libraries(${MODULE_NAME} PRIVATE ${LWS_LIBRARIES} ${SSL_LIBRARIES})
     elseif (MODULE_NAME STREQUAL "time") # <-- ADD THIS BLOCK

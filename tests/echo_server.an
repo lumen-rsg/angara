@@ -1,5 +1,4 @@
-attach Server from websocket;
-attach WebSocket from websocket;
+attach Server, WebSocket, createServer from websocket;
 attach io;
 attach time;
 attach adv_string; // Used by our list_remove helper
@@ -18,9 +17,9 @@ func remove_client_from_list(client_to_remove as WebSocket) -> void {
     let found = false;
 
     // Angara objects are compared by reference, so this works.
-    for (client in clients) {
-        if (client != client_to_remove) {
-            new_clients.push(client);
+    for (c in clients) {
+        if (c != client_to_remove) {
+            new_clients.push(c);
         } else {
             found = true;
         }
@@ -84,7 +83,7 @@ export func main() -> i64 {
     };
 
     try {
-        let server = Server("0.0.0.0", 8080, callbacks);
+        let server = createServer(8080, callbacks);
         io.println(1, "--- Angara WebSocket Echo Server ---");
         io.println(1, "Listening on ws://0.0.0.0:8080");
 

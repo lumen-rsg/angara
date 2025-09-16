@@ -552,21 +552,24 @@ AngaraObject angara_closure_new(GenericAngaraFn fn, int arity, bool is_native) {
 
 AngaraObject angara_call(AngaraObject closure_obj, int arg_count, AngaraObject args[]) {
     if (!IS_OBJ(closure_obj) || OBJ_TYPE(closure_obj) != OBJ_CLOSURE) {
-        // This would be a runtime error.
-        printf("Runtime Error: Attempted to call a non-function.\n");
+        angara_throw_error("Runtime Error: Attempted to call a non-function value.");
         return angara_create_nil();
     }
 
     AngaraClosure* closure = AS_CLOSURE(closure_obj);
 
-    // Arity check
-    if (!closure->is_native && closure->arity != arg_count) {
-        printf("Runtime Error: Expected %d arguments but got %d.\n", closure->arity, arg_count);
+    // --- THE FIX ---
+    // Arity check for non-native, non-variadic functions.
+    // A native function's arity check is handled by the C code itself.
+    // An arity of -1 means it's variadic.
+    if (!closure->is_native && closure->arity != -1 && closure->arity != arg_count) {
+        char error_buf[256];
+        sprintf(error_buf, "Runtime Error: Arity mismatch. Function expected %d argument(s) but received %d.",
+                closure->arity, arg_count);
+        angara_throw_error(error_buf);
         return angara_create_nil();
     }
 
-    // --- The actual call ---
-    // We can call the function pointer directly.
     return closure->fn(arg_count, args);
 }
 

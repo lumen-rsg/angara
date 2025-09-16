@@ -167,35 +167,48 @@ void CTranspiler::pass_2_generate_declarations(const std::vector<std::shared_ptr
         }
     }
 
-        (*m_current_out) << "\n// --- Imported Native Symbol Declarations ---\n";
-        for (const auto& used_symbol : m_type_checker.m_used_native_symbols) {
-            auto module_type = used_symbol.from_module;
-            const std::string& export_name = used_symbol.symbol_name;
-            auto type = used_symbol.symbol_type;
+    (*m_current_out) << "\n// --- Imported Symbol Declarations ---\n";
+    for (const auto& stmt : statements) {
+        if (auto attach_stmt = std::dynamic_pointer_cast<const AttachStmt>(stmt)) {
+            auto imported_module_type = m_type_checker.m_module_resolutions.at(attach_stmt.get());
+            if (!imported_module_type->is_native) continue;
 
-            if (type->kind == TypeKind::CLASS) {
-                // It's a NATIVE CLASS TYPE (like `WebSocket` or `Server`)
-                auto class_type = std::dynamic_pointer_cast<ClassType>(type);
+            (*m_current_out) << "// --- Prototypes for Native Module: " << imported_module_type->name << " ---\n";
+            for (const auto& [export_name, type] : imported_module_type->exports) {
 
-                // Generate prototypes for all of its methods.
-                for (const auto& [method_name, method_info] : class_type->methods) {
-                    (*m_current_out) << "extern AngaraObject Angara_" << class_type->name << "_" << method_name
-                                     << "(int arg_count, AngaraObject* args);\n";
-                }
-            }
-            else if (type->kind == TypeKind::FUNCTION) {
+                // We only generate prototypes for functions, not for ClassTypes that are also exported.
+                if (type->kind != TypeKind::FUNCTION) continue;
+
                 auto func_type = std::dynamic_pointer_cast<FunctionType>(type);
-                std::string mangled_name = "Angara_" + module_type->name + "_" + export_name;
+                std::string mangled_name = "Angara_" + imported_module_type->name + "_" + export_name;
 
-                // It's a NATIVE GLOBAL FUNCTION or a NATIVE CONSTRUCTOR
+                // All native global functions AND constructors use the generic signature.
                 (*m_current_out) << "extern AngaraObject " << mangled_name
                                  << "(int arg_count, AngaraObject* args);\n";
+
+                // --- THE FIX IS HERE ---
+                // If this function is a constructor, its return type will be an InstanceType.
+                // We use this to find the class and generate prototypes for its methods.
+                if (func_type->return_type->kind == TypeKind::INSTANCE) {
+                    auto instance_type = std::dynamic_pointer_cast<InstanceType>(func_type->return_type);
+                    auto class_type = instance_type->class_type;
+
+                    for (const auto& [method_name, method_info] : class_type->methods) {
+                        // Method mangled name is Angara_ClassName_MethodName
+                        std::string method_mangled_name = "Angara_" + class_type->name + "_" + method_name;
+                        // All native methods also use the generic signature.
+                        (*m_current_out) << "extern AngaraObject " << method_mangled_name
+                                         << "(int arg_count, AngaraObject* args);\n";
+                    }
+                }
             }
         }
+    }
 
-    // --- Add the module initializer prototype ---
+    // --- Add the current module's initializer prototype (Unchanged) ---
     (*m_current_out) << "\n// --- Module Initializer ---\n";
     (*m_current_out) << "void Angara_" << module_name << "_init_globals(void);\n";
+
 }
 
     void CTranspiler::pass_3_generate_globals_and_implementations(
