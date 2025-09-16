@@ -1,0 +1,35 @@
+
+attach time;
+attach io;
+
+// This function will be executed in the new thread.
+func sleepy_worker() -> void {
+  io.println(1, "[WORKER] Worker thread has started.");
+  io.println(1, "[WORKER] Now sleeping for 1.5 seconds...");
+
+  // The potentially crashing call is now inside the thread.
+  time.sleep(1.5);
+
+  io.println(1, "[WORKER] Woke up successfully!");
+  io.println(1, "[WORKER] Worker thread is finished.");
+}
+
+
+export func main() -> i64 {
+  io.println(1, "--- Angara Threading + Sleep Test ---");
+
+  io.println(1, "[MAIN] Spawning the sleepy_worker thread...");
+
+  // Spawn the new thread. It takes no arguments.
+  let worker_thread = spawn(sleepy_worker);
+
+  io.println(1, "[MAIN] Thread has been spawned. Waiting for it to complete...");
+
+  // The join() method will pause the main thread until the worker thread finishes.
+  worker_thread.join();
+
+  io.println(1, "[MAIN] Worker thread has been joined.");
+  io.println(1, "\n--- Test Passed ---");
+
+  return 0;
+}

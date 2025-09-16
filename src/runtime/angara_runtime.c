@@ -458,65 +458,70 @@ typedef struct {
 // The generic C function that a new pthread will execute.
 // It's a simple wrapper that calls our Angara function.
 void* thread_starter_routine(void* arg) {
-    ThreadStartData* start_data = (ThreadStartData*)arg;
-    AngaraThread* thread_obj = (AngaraThread*)start_data->args[0].as.obj; // The thread object is passed as the first arg
+    const auto start_data = (ThreadStartData*)arg;
+    const auto thread_obj = (AngaraThread*)start_data->args[0].as.obj;
 
-    // Call the user's closure with the provided arguments.
-    // Note: The first argument is the thread object itself, which the user's
-    // function doesn't see. The real arguments start at index 1.
-    AngaraObject result = angara_call(start_data->closure, start_data->arg_count - 1, start_data->args + 1);
-
-    // Store the result in the thread object.
+    const AngaraObject result = angara_call(start_data->closure, start_data->arg_count - 1, start_data->args + 1);
     thread_obj->return_value = result;
 
-    // --- Cleanup ---
-    // We are done with our references to the closure and all arguments.
+    // Cleanup
     angara_decref(start_data->closure);
     for (int i = 0; i < start_data->arg_count; ++i) {
         angara_decref(start_data->args[i]);
     }
     free(start_data->args);
-    free(start_data); // Free the container struct
-
+    free(start_data);
     return NULL;
 }
 
 AngaraObject angara_spawn_thread(AngaraObject closure, int arg_count, AngaraObject args[]) {
     // 1. Create the ThreadStartData struct that will be passed to the new thread.
     ThreadStartData* start_data = (ThreadStartData*)malloc(sizeof(ThreadStartData));
+    if (!start_data) { /* out of memory */ return angara_create_nil(); }
+
     start_data->closure = closure;
     start_data->arg_count = arg_count + 1; // +1 for the thread object itself
-
-    // We must own the closure and arguments for the lifetime of the thread.
     angara_incref(closure);
 
+    // --- THE FIX IS HERE ---
+    // 2. Allocate a NEW array on the HEAP for the arguments.
     start_data->args = (AngaraObject*)malloc(sizeof(AngaraObject) * start_data->arg_count);
+    if (!start_data->args) { /* out of memory */ free(start_data); return angara_create_nil(); }
 
-    // 2. Create the AngaraThread object that we will return to the user.
+    // 3. Create the AngaraThread object that we will return to the user.
     AngaraThread* thread_obj = (AngaraThread*)malloc(sizeof(AngaraThread));
+    // ... (check malloc) ...
     thread_obj->obj.type = OBJ_THREAD;
     thread_obj->obj.ref_count = 1;
     thread_obj->return_value = angara_create_nil();
     AngaraObject thread_angara_obj = { VAL_OBJ, { .obj = (Object*)thread_obj }};
 
-    // The first argument to the starter routine is always the thread object itself.
-    start_data->args[0] = thread_angara_obj;
-    angara_incref(thread_angara_obj);
+    // 4. Copy the arguments from the temporary stack array into our new heap array.
 
-    // Copy the rest of the arguments.
+    // The first argument is always the thread object itself.
+    start_data->args[0] = thread_angara_obj;
+    angara_incref(thread_angara_obj); // The start_data now holds a reference
+
+    // Copy the rest of the arguments from the caller.
     for (int i = 0; i < arg_count; ++i) {
         start_data->args[i + 1] = args[i];
-        angara_incref(args[i]);
+        angara_incref(args[i]); // The start_data now holds a reference
     }
+    // --- END FIX ---
 
-    // 2. Pass a pointer to the entire AngaraThread object to the new thread.
-    if (pthread_create(&thread_obj->handle, NULL, &thread_starter_routine, thread_obj) != 0) {
-        printf("Error: Failed to create Angara thread.\n");
-        angara_decref(closure);
-        free(thread_obj);
+    // 5. Create the C pthread, passing the HEAP-allocated start_data.
+    if (pthread_create(&thread_obj->handle, NULL, &thread_starter_routine, start_data) != 0) {
+        // Complex cleanup required here on failure
+        angara_decref(start_data->closure);
+        for(int i = 0; i < start_data->arg_count; ++i) angara_decref(start_data->args[i]);
+        free(start_data->args);
+        free(start_data);
+        free(thread_obj); // Not an Angara object yet, just free it
+        angara_throw_error("Failed to create new thread.");
         return angara_create_nil();
     }
 
+    // The thread is running. Return the handle to the user.
     return thread_angara_obj;
 }
 

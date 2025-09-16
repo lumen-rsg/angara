@@ -116,7 +116,6 @@ export func main() -> i64 {
 
       // Process any pending network events. This is non-blocking.
       ws.service();
-
       // Sleep for a very short time to prevent the loop from
       // consuming 100% CPU. This is called "yielding".
       time.sleep(0.01);
