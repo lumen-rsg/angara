@@ -1174,6 +1174,14 @@ std::string CTranspiler::transpileCallExpr(const CallExpr& expr) {
     if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
         const std::string& name = var_expr->name.lexeme;
 
+        // --- NEW: Check if this is a selectively imported native function ---
+        auto symbol = m_type_checker.m_variable_resolutions.at(var_expr.get());
+        if (symbol && symbol->from_module && symbol->from_module->is_native) {
+            // It's a native function! Generate the correct mangled call.
+            std::string mangled_name = "Angara_" + symbol->from_module->name + "_" + name;
+            return mangled_name + "(" + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
+        }
+
         // A) Check for BUILT-IN global functions first.
         if (name == "len") return "angara_len(" + args_str + ")";
         if (name == "typeof") return "angara_typeof(" + args_str + ")";

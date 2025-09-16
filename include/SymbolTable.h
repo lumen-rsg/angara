@@ -12,6 +12,7 @@
 #include "Token.h"
 
 namespace angara {
+    struct ModuleType;
 
     // Represents a single entry in the symbol table (a declared variable)
     struct Symbol {
@@ -20,6 +21,7 @@ namespace angara {
         Token declaration_token;
         bool is_const;
         int depth;
+        std::shared_ptr<ModuleType> from_module = nullptr;
     };
 
     class SymbolTable {
@@ -36,7 +38,12 @@ namespace angara {
         // Returns the symbol if found, otherwise nullptr.
         [[nodiscard]] std::shared_ptr<Symbol> resolve(const std::string& name) const;
 
-        [[nodiscard]] std::shared_ptr<Symbol> declare(const Token &token, std::shared_ptr<Type> type, bool is_const);
+        [[nodiscard]] std::shared_ptr<Symbol> declare(
+            const Token &token,
+            std::shared_ptr<Type> type,
+            bool is_const,
+            std::shared_ptr<ModuleType> from_module = nullptr
+        );
         const std::map<std::string, std::shared_ptr<Symbol>>& getGlobalScope() const;
         int getScopeDepth() const;
 

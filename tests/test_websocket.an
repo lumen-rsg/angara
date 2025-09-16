@@ -3,8 +3,7 @@
 // =======================================================================
 
 // Import all necessary modules.
-attach WebSocket from websocket;
-attach websocket;
+attach WebSocket, connect from websocket;
 attach time;
 attach io;
 attach adv_string; // Required by json, good practice to be explicit
@@ -95,7 +94,7 @@ export func main() -> i64 {
 
   try {
     // 1. Establish the connection in the main thread.
-    ./tes
+    let ws = connect(WEBSOCKET_URL, callbacks);
 
     io.println(1, "[MAIN] WebSocket object created. Spawning sender thread...");
 

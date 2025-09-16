@@ -25,27 +25,28 @@ namespace angara {
         }
     }
 
-    std::shared_ptr<Symbol> SymbolTable::declare(const Token &token, std::shared_ptr<Type> type, bool is_const) {
+    std::shared_ptr<Symbol> SymbolTable::declare(
+        const Token &token,
+        std::shared_ptr<Type> type,
+        bool is_const,
+        std::shared_ptr<ModuleType> from_module
+    ) {
         auto& current_scope = m_scopes.back();
-
-        // Check if a symbol with this name already exists in the CURRENT scope.
         auto it = current_scope.find(token.lexeme);
         if (it != current_scope.end()) {
-            // It already exists. Return the conflicting symbol.
-            return it->second;
+            return it->second; // Return conflicting symbol
         }
 
-        // It doesn't exist, so we can declare it.
         auto symbol = std::make_shared<Symbol>();
         symbol->name = token.lexeme;
         symbol->type = std::move(type);
-        symbol->declaration_token = token; // Store the origin token
+        symbol->declaration_token = token;
         symbol->is_const = is_const;
         symbol->depth = getScopeDepth();
-        current_scope[token.lexeme] = symbol;
+        symbol->from_module = std::move(from_module); // Store the origin module
 
-        // Return nullptr to signify success.
-        return nullptr;
+        current_scope[token.lexeme] = symbol;
+        return nullptr; // Success
     }
 
     std::shared_ptr<Symbol> SymbolTable::resolve(const std::string& name) const {
