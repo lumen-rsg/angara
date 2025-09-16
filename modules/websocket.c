@@ -1,8 +1,3 @@
-// =======================================================================
-// Create or replace the file: websocket.c
-// This is the complete, final version using wslay and OpenSSL.
-// =======================================================================
-
 #include "../src/runtime/angara_runtime.h"
 #include <wslay/wslay.h>
 #include <sys/socket.h>

@@ -1,50 +1,88 @@
-attach websocket;
-attach WebSocket from websocket;
-attach io;
+// =======================================================================
+// The complete, final test program for multi-threaded WebSockets.
+// =======================================================================
 
-// A global variable to signal when the test is complete.
-let is_done = false;
+// Import all necessary modules.
+attach WebSocket from websocket;
+attach websocket;
+attach time;
+attach io;
+attach adv_string; // Required by json, good practice to be explicit
+
+// A global flag, protected by a mutex, to signal when the program should exit.
+// This is the correct way to share state between threads.
+let should_exit = false;
+let exit_mutex = Mutex();
 
 // --- WebSocket Callback Functions ---
 
-// This will be called when the connection is successfully established.
+// This will be called by the main thread's service loop when the connection opens.
 func on_open(ws as WebSocket) -> void {
-  io.println(1, "[SUCCESS] WebSocket connection established!");
-  io.println(1, "Sending message: 'Hello from Angara!'");
-  ws.send("Hello from Angara!");
+  io.println(1, "[CLIENT] Connection established to echo server.");
 }
 
-// This will be called for every message received from the server.
+// This will be called by the main thread's service loop for every message.
 func on_message(ws as WebSocket, message as string) -> void {
-  io.println(1, "[MESSAGE] Received from server: '" + message + "'");
+  io.println(1, "[CLIENT] Received echo: '" + message + "'");
+}
 
-  // If we got our own message back, the test is successful.
-  if (message == "Hello from Angara!") {
-    io.println(1, "Echo successful. Closing connection...");
-    ws.close();
-  } else {
-    io.println(1, "Error: Received unexpected message!");
+// This will be called by the main thread when the connection is finally closed.
+func on_close(ws as WebSocket) -> void {
+  io.println(1, "[CLIENT] Connection closed.");
+
+  // Safely set the global flag to signal the main loop to exit.
+  exit_mutex.lock();
+  should_exit = true;
+  exit_mutex.unlock();
+}
+
+// This will be called if the connection fails.
+func on_error(ws as WebSocket, error_message as string) -> void {
+  io.println(2, "[CLIENT] Connection error: " + error_message);
+
+  // Safely set the global flag to signal the main loop to exit.
+  exit_mutex.lock();
+  should_exit = true;
+  exit_mutex.unlock();
+}
+
+
+// --- Sender Thread Logic ---
+
+// This function will be executed in a separate thread.
+// It receives the WebSocket object as an argument.
+func message_sender(ws as WebSocket) -> any {
+  io.println(1, "[SENDER] Sender thread has started.");
+  let count = 0;
+
+  while (count < 5) {
+    // Check if the connection is still open before sleeping and sending.
+    if (!ws.is_open()) {
+      break;
+    }
+
+    time.sleep(1.0);
+
+    let message = "Ping #" + string(count + 1);
+    io.println(1, "[SENDER] Sending: '" + message + "'");
+    ws.send(message);
+    count = count + 1;
+  }
+
+  // After sending all messages, the sender's job is done.
+  // It tells the server it's closing the connection.
+  if (ws.is_open()) {
+    io.println(1, "[SENDER] All messages sent. Closing connection.");
     ws.close();
   }
-}
 
-// This will be called when the connection is closed, either by us or the server.
-func on_close(ws as WebSocket) -> void {
-  io.println(1, "[CLOSED] WebSocket connection closed.");
-  is_done = true; // Signal the main loop to exit.
-}
-
-// This will be called if the connection fails to establish.
-func on_error(ws as WebSocket, error_message as string) -> void {
-  io.println(2, "[ERROR] WebSocket connection failed: " + error_message);
-  is_done = true; // Signal the main loop to exit.
+  io.println(1, "[SENDER] Sender thread has finished.");
 }
 
 
 export func main() -> i64 {
-  io.println(1, "--- Angara WebSocket Module Test ---");
+  io.println(1, "--- Angara Multi-threaded WebSocket Test ---");
 
-  // A well-known public WebSocket echo server.
   const WEBSOCKET_URL = "wss://ws.postman-echo.com/raw";
 
   // The record of Angara closures that will handle events.
@@ -56,22 +94,44 @@ export func main() -> i64 {
   };
 
   try {
-    io.println(1, "Attempting to connect to " + WEBSOCKET_URL);
-    let ws = websocket.connect(WEBSOCKET_URL, callbacks);
+    // 1. Establish the connection in the main thread.
+    ./tes
 
-    // This is the event loop. We must periodically call `ws.service()`
-    // to allow libwebsockets to process network events.
-    while (!is_done) {
+    io.println(1, "[MAIN] WebSocket object created. Spawning sender thread...");
+
+    // 2. Spawn the sender function in a new thread and pass it the `ws` object.
+    let sender_thread = spawn(message_sender, ws);
+
+    // 3. The main thread's only job is now to run the event loop,
+    //    processing incoming messages and connection events.
+    io.println(1, "[MAIN] Entering event loop...");
+    while (true) {
+      // Check the shared flag to see if we should exit.
+      exit_mutex.lock();
+      let done = should_exit;
+      exit_mutex.unlock();
+
+      if (done) {
+        break;
+      }
+
+      // Process any pending network events. This is non-blocking.
       ws.service();
-      // A short sleep is good practice to prevent the loop from
-      // spinning and consuming 100% CPU. A `time` module would be needed for this.
-      // For now, it will spin, which is acceptable for a short test.
+
+      // Sleep for a very short time to prevent the loop from
+      // consuming 100% CPU. This is called "yielding".
+      time.sleep(0.01);
     }
 
-    io.println(1, "\nEvent loop finished.");
+    io.println(1, "\n[MAIN] Event loop finished. Joining sender thread...");
+
+    // 4. Wait for the sender thread to finish its execution completely.
+    sender_thread.join();
+
+    io.println(1, "[MAIN] Test complete.");
 
   } catch (e) {
-    io.println(2, "An unhandled exception occurred: " + string(e));
+    io.println(2, "[MAIN] An unhandled exception occurred: " + string(e));
     return 1;
   }
 

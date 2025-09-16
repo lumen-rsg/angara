@@ -1100,97 +1100,116 @@ void CTranspiler::transpileWhileStmt(const WhileStmt& stmt) {
 
 
 
-    std::string CTranspiler::transpileCallExpr(const CallExpr& expr) {
-        // First, transpile all arguments, as they are needed in almost every case.
-        std::vector<std::string> arg_strs;
-        for (const auto& arg : expr.arguments) {
-            arg_strs.push_back(transpileExpr(arg));
-        }
-        std::string args_str = join_strings(arg_strs, ", ");
+    // =======================================================================
+// REPLACE the entire transpileCallExpr function in CTranspiler.cpp with this
+// definitive "gold standard" version.
+// =======================================================================
 
-        auto callee_type = m_type_checker.m_expression_types.at(expr.callee.get());
-
-        // ---
-        // Case 1: The callee is a property access, e.g., `object.method(...)` or `module.function(...)`.
-        // ---
-        if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(expr.callee)) {
-            std::string object_str = transpileExpr(get_expr->object);
-            const std::string& name = get_expr->name.lexeme;
-            auto object_type = m_type_checker.m_expression_types.at(get_expr->object.get());
-
-            // A) Method call on a class instance (e.g., `my_counter.increment()`).
-            if (object_type->kind == TypeKind::INSTANCE) {
-                auto instance_type = std::dynamic_pointer_cast<InstanceType>(object_type);
-                auto class_type = instance_type->class_type;
-
-                if (class_type->is_native) {
-                    // NATIVE METHOD: Transpile to a generic (argc, argv) call with `self` as the first argument.
-                    std::string final_args = object_str + (args_str.empty() ? "" : ", " + args_str);
-                    return "Angara_" + class_type->name + "_" + name + "(" +
-                                                                   std::to_string(expr.arguments.size() + 1) + ", (AngaraObject[]){" + final_args + "})";
-                }  else {
-                    // ANGARA METHOD: Transpile to a direct, strongly-typed C call.
-                    std::string final_args = object_str + (args_str.empty() ? "" : ", " + args_str);
-                    return "Angara_" + class_type->name + "_" + name + "(" + final_args + ")";
-                }
-            }
-
-            // B) Method call on a built-in type (e.g., `my_list.push(...)`).
-            if (object_type->kind == TypeKind::LIST && name == "push") {
-                return "angara_list_push(" + object_str + ", " + args_str + ")";
-            }
-            // ... (add other built-in method calls for thread, mutex etc. here) ...
-
-            // C) Call on a symbol imported from a module (e.g., `fs.read_file(...)` or `counter.Counter(...)`).
-            if (object_type->kind == TypeKind::MODULE) {
-                auto module_type = std::dynamic_pointer_cast<ModuleType>(object_type);
-
-                if (module_type->is_native) {
-                    // NATIVE GLOBAL FUNCTION or NATIVE CONSTRUCTOR: Transpile to a generic (argc, argv) call.
-                    std::string mangled_name = "Angara_" + module_type->name + "_" + name;
-                    return mangled_name + "(" + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
-                } else {
-                    // ANGARA GLOBAL FUNCTION or CLASS from another module: Call via its global closure.
-                    std::string closure_var = "g_" + name;
-                    return "angara_call(" + closure_var + ", " + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
-                }
-            }
-        }
-
-        // ---
-        // Case 2: The callee is a simple name in the current module scope, e.g., `_Parser(...)` or `println(...)`.
-        // ---
-        if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
-            const std::string& name = var_expr->name.lexeme;
-
-            // A) Check for BUILT-IN global functions first. These have special C function names.
-            if (name == "len") return "angara_len(" + args_str + ")";
-            if (name == "typeof") return "angara_typeof(" + args_str + ")";
-            if (name == "string") return "angara_to_string(" + args_str + ")";
-            if (name == "i64" || name == "int") return "angara_to_i64(" + args_str + ")";
-            if (name == "f64" || name == "float") return "angara_to_f64(" + args_str + ")";
-            if (name == "bool") return "angara_to_bool(" + args_str + ")";
-            if (name == "Mutex") return "angara_mutex_new()";
-            if (name == "Exception") return "angara_exception_new(" + args_str + ")";
-            // `spawn` is a special case that we'd need to handle carefully.
-
-            // B) Check if it's an ANGARA CLASS CONSTRUCTOR defined in the current module.
-            if (callee_type->kind == TypeKind::CLASS) {
-                return "Angara_" + name + "_new(" + args_str + ")";
-            }
-
-            // C) If not a built-in or constructor, it's an ANGARA GLOBAL FUNCTION defined in the current module. Call via closure.
-            std::string closure_var = "g_" + name;
-            if (name == "main") closure_var = "g_angara_main_closure";
-            return "angara_call(" + closure_var + ", " + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
-        }
-
-        // ---
-        // Case 3: Fallback for dynamic calls (e.g., calling a function stored in a variable).
-        // ---
-        std::string callee_str = transpileExpr(expr.callee);
-        return "angara_call(" + callee_str + ", " + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
+std::string CTranspiler::transpileCallExpr(const CallExpr& expr) {
+    // 1. Transpile all arguments first, as they are needed in almost every case.
+    std::vector<std::string> arg_strs;
+    for (const auto& arg : expr.arguments) {
+        arg_strs.push_back(transpileExpr(arg));
     }
+    std::string args_str = join_strings(arg_strs, ", ");
+
+    auto callee_type = m_type_checker.m_expression_types.at(expr.callee.get());
+
+    // ---
+    // Case 1: The callee is a property access, e.g., `object.method(...)`.
+    // This is the most complex case, covering methods and module functions.
+    // ---
+    if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(expr.callee)) {
+        std::string object_str = transpileExpr(get_expr->object);
+        const std::string& name = get_expr->name.lexeme;
+        auto object_type = m_type_checker.m_expression_types.at(get_expr->object.get());
+
+        // A) Method call on a built-in primitive type. This has the highest priority.
+        if (object_type->kind == TypeKind::LIST && name == "push") {
+            return "angara_list_push(" + object_str + ", " + args_str + ")";
+        }
+        if (object_type->kind == TypeKind::THREAD && name == "join") {
+            return "angara_thread_join(" + object_str + ")";
+        }
+        if (object_type->kind == TypeKind::MUTEX && (name == "lock" || name == "unlock")) {
+            // Note: These need to be implemented in the runtime C code.
+            // Assuming `angara_mutex_lock(mutex_obj)` and `angara_mutex_unlock(mutex_obj)`.
+            return "angara_mutex_" + name + "(" + object_str + ")";
+        }
+
+        // B) Method call on a user-defined class instance (both native and Angara).
+        if (object_type->kind == TypeKind::INSTANCE) {
+            auto instance_type = std::dynamic_pointer_cast<InstanceType>(object_type);
+            auto class_type = instance_type->class_type;
+            if (class_type->is_native) {
+                // NATIVE METHOD: Transpile to a generic (argc, argv) call with `self` as the first argument.
+                std::string final_args = object_str + (args_str.empty() ? "" : ", " + args_str);
+                return "Angara_" + class_type->name + "_" + name + "(" +
+                       std::to_string(expr.arguments.size() + 1) + ", (AngaraObject[]){" + final_args + "})";
+            } else {
+                // ANGARA METHOD: Transpile to a direct, strongly-typed C call.
+                std::string final_args = object_str + (args_str.empty() ? "" : ", " + args_str);
+                return "Angara_" + class_type->name + "_" + name + "(" + final_args + ")";
+            }
+        }
+
+        // C) Call on a symbol imported from a module.
+        if (object_type->kind == TypeKind::MODULE) {
+            auto module_type = std::dynamic_pointer_cast<ModuleType>(object_type);
+            std::string mangled_name = "Angara_" + module_type->name + "_" + name;
+            if (module_type->is_native) {
+                // NATIVE GLOBAL FUNCTION or NATIVE CONSTRUCTOR: Always use generic call.
+                return mangled_name + "(" + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
+            } else {
+                // ANGARA symbol from another module: Call its global closure.
+                std::string closure_var = "g_" + name;
+                return "angara_call(" + closure_var + ", " + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
+            }
+        }
+    }
+
+    // ---
+    // Case 2: The callee is a simple name in the current module scope.
+    // ---
+    if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
+        const std::string& name = var_expr->name.lexeme;
+
+        // A) Check for BUILT-IN global functions first.
+        if (name == "len") return "angara_len(" + args_str + ")";
+        if (name == "typeof") return "angara_typeof(" + args_str + ")";
+        if (name == "string") return "angara_to_string(" + args_str + ")";
+        if (name == "i64" || name == "int") return "angara_to_i64(" + args_str + ")";
+        if (name == "f64" || name == "float") return "angara_to_f64(" + args_str + ")";
+        if (name == "bool") return "angara_to_bool(" + args_str + ")";
+        if (name == "Mutex") return "angara_mutex_new()";
+        if (name == "Exception") return "angara_exception_new(" + args_str + ")";
+        if (name == "spawn") {
+            std::string closure_str = transpileExpr(expr.arguments[0]);
+            std::vector<std::string> rest_arg_strs;
+            for (size_t i = 1; i < expr.arguments.size(); ++i) {
+                rest_arg_strs.push_back(transpileExpr(expr.arguments[i]));
+            }
+            std::string rest_args_str = join_strings(rest_arg_strs, ", ");
+            return "angara_spawn_thread(" + closure_str + ", " + std::to_string(rest_arg_strs.size()) + ", (AngaraObject[]){" + rest_args_str + "})";
+        }
+
+        // B) Check if it's an ANGARA CLASS CONSTRUCTOR.
+        if (callee_type->kind == TypeKind::CLASS) {
+            return "Angara_" + name + "_new(" + args_str + ")";
+        }
+
+        // C) If not a built-in or constructor, it's an ANGARA GLOBAL FUNCTION. Call via closure.
+        std::string closure_var = "g_" + name;
+        if (name == "main") closure_var = "g_angara_main_closure";
+        return "angara_call(" + closure_var + ", " + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
+    }
+
+    // ---
+    // Case 3: Fallback for dynamic calls (e.g., calling a function stored in a variable).
+    // ---
+    std::string callee_str = transpileExpr(expr.callee);
+    return "angara_call(" + callee_str + ", " + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
+}
 
 std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
     auto rhs_str = transpileExpr(expr.value);

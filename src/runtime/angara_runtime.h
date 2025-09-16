@@ -101,7 +101,6 @@ typedef struct AngaraThread {
     Object obj;
     pthread_t handle;
     AngaraObject return_value;
-    AngaraObject closure_to_run;
 } AngaraThread;
 
 typedef struct AngaraMutex {
@@ -310,4 +309,8 @@ AngaraObject angara_to_i64(AngaraObject value);
 AngaraObject angara_to_string(AngaraObject value);
 AngaraObject angara_typeof(AngaraObject value);
 AngaraObject angara_create_string(const char* chars);
+void angara_mutex_lock(AngaraObject mutex_obj);
+void angara_mutex_unlock(AngaraObject mutex_obj);
+AngaraObject angara_thread_join(AngaraObject thread_obj);
+AngaraObject angara_spawn_thread(AngaraObject closure, int arg_count, AngaraObject args[]);
 #endif // ANGARA_H

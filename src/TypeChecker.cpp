@@ -65,8 +65,11 @@ namespace angara {
 
         // Define the signature for `spawn` itself: function(function() -> void) -> Thread
         auto spawn_type = std::make_shared<FunctionType>(
-            std::vector<std::shared_ptr<Type>>{worker_fn_type},
-            std::make_shared<ThreadType>() // Returns our new Thread type
+            std::vector<std::shared_ptr<Type>>{std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{}, std::make_shared<AnyType>(), true // A generic function
+            )},
+            m_type_thread,
+            true // spawn itself is variadic
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "spawn", 0, 0), spawn_type, true);
 
@@ -1398,6 +1401,100 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                 return {};
             }
         }
+
+        // 2. Check if the callee is the special built-in `spawn` function.
+    if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
+        if (var_expr->name.lexeme == "spawn") {
+            // --- SPECIAL VALIDATION LOGIC FOR spawn(...) ---
+            if (expr.arguments.empty()) {
+                error(expr.paren, "spawn() requires at least one argument: the function to run.");
+                pushAndSave(&expr, m_type_error); return {};
+            }
+
+            // The first argument must be a closure.
+            expr.arguments[0]->accept(*this);
+            auto closure_type = popType();
+            if (closure_type->kind != TypeKind::FUNCTION) {
+                error(expr.paren, "The first argument to spawn() must be a function, but got '" + closure_type->toString() + "'.");
+                pushAndSave(&expr, m_type_error); return {};
+            }
+            auto func_type = std::dynamic_pointer_cast<FunctionType>(closure_type);
+
+            // The rest of the arguments to spawn(...) must match the parameters of the closure.
+            std::vector<std::shared_ptr<Type>> spawn_args;
+            for (size_t i = 1; i < expr.arguments.size(); ++i) {
+                expr.arguments[i]->accept(*this);
+                spawn_args.push_back(popType());
+            }
+
+            // Now, validate the provided arguments against the closure's signature.
+if (spawn_args.size() != func_type->param_types.size()) {
+    error(expr.paren, "Incorrect number of arguments provided for the spawned function. "
+                      "The function expects " + std::to_string(func_type->param_types.size()) +
+                      " argument(s), but received " + std::to_string(spawn_args.size()) + ".");
+
+    // Add a note pointing to the function being spawned.
+    if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.arguments[0])) {
+        if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
+            note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
+        }
+    }
+
+    pushAndSave(&expr, m_type_error);
+    return {};
+}
+
+// Check the type of each argument.
+for (size_t i = 0; i < spawn_args.size(); ++i) {
+    auto expected_type = func_type->param_types[i];
+    auto actual_type = spawn_args[i];
+    bool types_match = (actual_type->toString() == expected_type->toString());
+
+    // --- Apply our standard type compatibility rules ---
+    // Rule: `any` is compatible with anything.
+    if (!types_match && (expected_type->kind == TypeKind::ANY || actual_type->kind == TypeKind::ANY)) {
+        types_match = true;
+    }
+    // Rule: A generic record `{}` is compatible with a specific record `{...}`.
+    if (!types_match && expected_type->kind == TypeKind::RECORD && actual_type->kind == TypeKind::RECORD) {
+        if (std::dynamic_pointer_cast<RecordType>(expected_type)->fields.empty()) {
+            types_match = true;
+        }
+    }
+    // Rule: A more specific type can be assigned to a more general type (`any`).
+    if (!types_match && expected_type->kind == TypeKind::ANY) {
+        types_match = true;
+    }
+
+
+    if (!types_match) {
+        // Find the specific argument expression in the AST to underline the right token.
+        // The +1 accounts for the closure argument itself.
+        const auto& error_arg_expr = expr.arguments[i + 1];
+
+        // We need a token from the expression to report the error accurately.
+        // This is a bit tricky, so we'll just use the main parenthesis for now.
+        // A more advanced implementation would get a token from the specific argument expression.
+        error(expr.paren, "Type mismatch for argument " + std::to_string(i + 1) + " of spawned function. "
+                          "Expected '" + expected_type->toString() + "', but got '" + actual_type->toString() + "'.");
+
+        // Add a note pointing to the function being spawned.
+        if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.arguments[0])) {
+            if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
+                note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
+            }
+        }
+
+        pushAndSave(&expr, m_type_error);
+        return {};
+    }
+}
+
+            // The result of a spawn call is always a Thread.
+            pushAndSave(&expr, m_type_thread);
+            return {};
+        }
+    }
 
         std::shared_ptr<Type> result_type = m_type_error; // Default to error
 
