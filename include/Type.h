@@ -149,7 +149,7 @@ namespace angara {
             Token declaration_token;
             bool is_const;
         };
-
+        bool is_native;
         const std::string name;
         std::shared_ptr<ClassType> superclass = nullptr;
         std::map<std::string, MemberInfo> fields;

@@ -1,10 +1,11 @@
-#include "AngaraABI.h" // The official C ABI for Angara
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>    // Required for `errno`
 #include <unistd.h>   // Required for link, symlink, rmdir
 #include <sys/stat.h> // Required for mkdir
+#include "../src/runtime/angara_runtime.h"
 
 // --- Helper for formatting error messages ---
 // This prevents us from needing a large static buffer.
@@ -23,11 +24,11 @@ static void throw_fs_error(const char* message, const char* path) {
 // --- Function Implementations ---
 
 AngaraObject Angara_fs_read_file(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ANGARA_IS_STRING(args[0])) {
+    if (arg_count != 1 || !IS_STRING(args[0])) {
         angara_throw_error("read_file(path) expects one string argument.");
         return angara_create_nil();
     }
-    const char* path = ANGARA_AS_CSTRING(args[0]);
+    const char* path = AS_CSTRING(args[0]);
 
     FILE* file = fopen(path, "rb");
     if (!file) {
@@ -54,12 +55,12 @@ AngaraObject Angara_fs_read_file(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_write_file(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ANGARA_IS_STRING(args[0]) || !ANGARA_IS_STRING(args[1])) {
+    if (arg_count != 2 || !IS_STRING(args[0]) || !IS_STRING(args[1])) {
         angara_throw_error("write_file(path, content) expects two string arguments.");
         return angara_create_nil();
     }
-    const char* path = ANGARA_AS_CSTRING(args[0]);
-    const char* content = ANGARA_AS_CSTRING(args[1]);
+    const char* path = AS_CSTRING(args[0]);
+    const char* content = AS_CSTRING(args[1]);
     size_t content_len = ((AngaraString*)args[1].as.obj)->length;
 
     FILE* file = fopen(path, "wb");
@@ -80,11 +81,11 @@ AngaraObject Angara_fs_write_file(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_remove_file(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ANGARA_IS_STRING(args[0])) {
+    if (arg_count != 1 || !IS_STRING(args[0])) {
         angara_throw_error("remove_file(path) expects one string argument.");
         return angara_create_nil();
     }
-    const char* path = ANGARA_AS_CSTRING(args[0]);
+    const char* path = AS_CSTRING(args[0]);
 
     if (remove(path) != 0) {
         throw_fs_error("Failed to remove file", path);
@@ -94,11 +95,11 @@ AngaraObject Angara_fs_remove_file(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_create_dir(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ANGARA_IS_STRING(args[0])) {
+    if (arg_count != 1 || !IS_STRING(args[0])) {
         angara_throw_error("create_dir(path) expects one string argument.");
         return angara_create_nil();
     }
-    const char* path = ANGARA_AS_CSTRING(args[0]);
+    const char* path = AS_CSTRING(args[0]);
 
     // 0777 are standard permissions, modified by the system's umask.
     if (mkdir(path, 0777) != 0) {
@@ -109,11 +110,11 @@ AngaraObject Angara_fs_create_dir(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_remove_dir(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ANGARA_IS_STRING(args[0])) {
+    if (arg_count != 1 || !IS_STRING(args[0])) {
         angara_throw_error("remove_dir(path) expects one string argument.");
         return angara_create_nil();
     }
-    const char* path = ANGARA_AS_CSTRING(args[0]);
+    const char* path = AS_CSTRING(args[0]);
 
     if (rmdir(path) != 0) {
         throw_fs_error("Failed to remove directory", path);
@@ -123,12 +124,12 @@ AngaraObject Angara_fs_remove_dir(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_rename_path(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ANGARA_IS_STRING(args[0]) || !ANGARA_IS_STRING(args[1])) {
+    if (arg_count != 2 || !IS_STRING(args[0]) || !IS_STRING(args[1])) {
         angara_throw_error("rename_path(old_path, new_path) expects two string arguments.");
         return angara_create_nil();
     }
-    const char* old_path = ANGARA_AS_CSTRING(args[0]);
-    const char* new_path = ANGARA_AS_CSTRING(args[1]);
+    const char* old_path = AS_CSTRING(args[0]);
+    const char* new_path = AS_CSTRING(args[1]);
 
     if (rename(old_path, new_path) != 0) {
         throw_fs_error("Failed to rename path", old_path);
@@ -138,12 +139,12 @@ AngaraObject Angara_fs_rename_path(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_create_symlink(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ANGARA_IS_STRING(args[0]) || !ANGARA_IS_STRING(args[1])) {
+    if (arg_count != 2 || !IS_STRING(args[0]) || !IS_STRING(args[1])) {
         angara_throw_error("create_symlink(target_path, link_path) expects two string arguments.");
         return angara_create_nil();
     }
-    const char* target = ANGARA_AS_CSTRING(args[0]);
-    const char* link_path = ANGARA_AS_CSTRING(args[1]);
+    const char* target = AS_CSTRING(args[0]);
+    const char* link_path = AS_CSTRING(args[1]);
 
     if (symlink(target, link_path) != 0) {
         throw_fs_error("Failed to create symbolic link", link_path);
@@ -153,12 +154,12 @@ AngaraObject Angara_fs_create_symlink(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_create_hardlink(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ANGARA_IS_STRING(args[0]) || !ANGARA_IS_STRING(args[1])) {
+    if (arg_count != 2 || !IS_STRING(args[0]) || !IS_STRING(args[1])) {
         angara_throw_error("create_hardlink(target_path, link_path) expects two string arguments.");
         return angara_create_nil();
     }
-    const char* target = ANGARA_AS_CSTRING(args[0]);
-    const char* link_path = ANGARA_AS_CSTRING(args[1]);
+    const char* target = AS_CSTRING(args[0]);
+    const char* link_path = AS_CSTRING(args[1]);
 
     if (link(target, link_path) != 0) {
         throw_fs_error("Failed to create hard link", link_path);
@@ -178,22 +179,22 @@ static int get_stat(const char* path, struct stat* st, bool follow_symlinks) {
 }
 
 AngaraObject Angara_fs_exists(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ANGARA_IS_STRING(args[0])) {
+    if (arg_count != 1 || !IS_STRING(args[0])) {
         angara_throw_error("exists(path) expects one string argument.");
         return angara_create_nil();
     }
-    const char* path = ANGARA_AS_CSTRING(args[0]);
+    const char* path = AS_CSTRING(args[0]);
     struct stat st;
     // stat returns 0 if the file exists.
     return angara_create_bool(stat(path, &st) == 0);
 }
 
 AngaraObject Angara_fs_is_file(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ANGARA_IS_STRING(args[0])) {
+    if (arg_count != 1 || !IS_STRING(args[0])) {
         angara_throw_error("is_file(path) expects one string argument.");
         return angara_create_nil();
     }
-    const char* path = ANGARA_AS_CSTRING(args[0]);
+    const char* path = AS_CSTRING(args[0]);
     struct stat st;
     if (get_stat(path, &st, true) != 0) {
         return angara_create_bool(false); // Doesn't exist, so can't be a file.
@@ -203,11 +204,11 @@ AngaraObject Angara_fs_is_file(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_is_dir(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ANGARA_IS_STRING(args[0])) {
+    if (arg_count != 1 || !IS_STRING(args[0])) {
         angara_throw_error("is_dir(path) expects one string argument.");
         return angara_create_nil();
     }
-    const char* path = ANGARA_AS_CSTRING(args[0]);
+    const char* path = AS_CSTRING(args[0]);
     struct stat st;
     if (get_stat(path, &st, true) != 0) {
         return angara_create_bool(false);
@@ -217,11 +218,11 @@ AngaraObject Angara_fs_is_dir(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_is_symlink(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ANGARA_IS_STRING(args[0])) {
+    if (arg_count != 1 || !IS_STRING(args[0])) {
         angara_throw_error("is_symlink(path) expects one string argument.");
         return angara_create_nil();
     }
-    const char* path = ANGARA_AS_CSTRING(args[0]);
+    const char* path = AS_CSTRING(args[0]);
     struct stat st;
     // Use lstat (follow_symlinks = false) to check the link itself.
     if (get_stat(path, &st, false) != 0) {
@@ -231,28 +232,23 @@ AngaraObject Angara_fs_is_symlink(int arg_count, AngaraObject* args) {
     return angara_create_bool(S_ISLNK(st.st_mode));
 }
 
-// --- Module Definition ---
-
-// The array of function definitions that this module exports.
-static const AngaraFuncDef FS_FUNCTIONS[] = {
-    // name,                            c_function,                arity,      type_string
-    {"read_file",       Angara_fs_read_file,       1,     "s->s"}, // string -> string
-    {"write_file",      Angara_fs_write_file,      2,     "ss->n"},// string, string -> nil
-    {"remove_file",     Angara_fs_remove_file,     1,     "s->n"}, // string -> nil
-    {"create_dir",      Angara_fs_create_dir,      1,     "s->n"},
-    {"remove_dir",      Angara_fs_remove_dir,      1,     "s->n"},
-    {"rename_path",     Angara_fs_rename_path,     2,     "ss->n"},
-    {"create_symlink",  Angara_fs_create_symlink,  2,     "ss->n"},
-    {"create_hardlink", Angara_fs_create_hardlink, 2,     "ss->n"},
-    {"exists",          Angara_fs_exists,          1,     "s->b"},
-    {"is_file",         Angara_fs_is_file,         1,     "s->b"},
-    {"is_dir",          Angara_fs_is_dir,          1,     "s->b"},
-    {"is_symlink",      Angara_fs_is_symlink,      1,     "s->b"},
-    {NULL, NULL, 0, NULL} // Sentinel
+static const AngaraFuncDef FS_EXPORTS[] = {
+        {"read_file",       Angara_fs_read_file,       "s->s",    NULL},
+        {"write_file",      Angara_fs_write_file,      "ss->n",   NULL},
+        {"remove_file",     Angara_fs_remove_file,     "s->n",    NULL},
+        {"create_dir",      Angara_fs_create_dir,      "s->n",    NULL},
+        {"remove_dir",      Angara_fs_remove_dir,      "s->n",    NULL},
+        {"rename_path",     Angara_fs_rename_path,     "ss->n",   NULL},
+        {"create_symlink",  Angara_fs_create_symlink,  "ss->n",   NULL},
+        {"create_hardlink", Angara_fs_create_hardlink, "ss->n",   NULL},
+        {"exists",          Angara_fs_exists,          "s->b",    NULL},
+        {"is_file",         Angara_fs_is_file,         "s->b",    NULL},
+        {"is_dir",          Angara_fs_is_dir,          "s->b",    NULL},
+        {"is_symlink",      Angara_fs_is_symlink,      "s->b",    NULL},
+        {NULL, NULL, NULL, NULL}
 };
 
-// The official entry point that the Angara compiler looks for.
 ANGARA_MODULE_INIT(fs) {
-    *def_count = (sizeof(FS_FUNCTIONS) / sizeof(AngaraFuncDef)) - 1;
-    return FS_FUNCTIONS;
+    *def_count = (sizeof(FS_EXPORTS) / sizeof(AngaraFuncDef)) - 1;
+    return FS_EXPORTS;
 }

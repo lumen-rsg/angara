@@ -2,22 +2,22 @@
 // Created by cv2 on 9/11/25.
 //
 
-#include "AngaraABI.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h> // For isdigit, isspace
+#include "../src/runtime/angara_runtime.h"
 
 // --- Function Implementations ---
 
 // Gets the character (as a new string) at a given index.
 AngaraObject Angara_adv_string_get(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ANGARA_IS_STRING(args[0]) || !ANGARA_IS_I64(args[1])) {
+    if (arg_count != 2 || !IS_STRING(args[0]) || !IS_I64(args[1])) {
         angara_throw_error("get(string, index) expects a string and an integer.");
         return angara_create_nil();
     }
     AngaraString* str = (AngaraString*)args[0].as.obj;
-    int64_t index = ANGARA_AS_I64(args[1]);
+    int64_t index = AS_I64(args[1]);
 
     if (index < 0 || (size_t)index >= str->length) {
         angara_throw_error("String index out of bounds.");
@@ -34,13 +34,13 @@ AngaraObject Angara_adv_string_get(int arg_count, AngaraObject* args) {
 
 // Extracts a substring. Handles bounds checking.
 AngaraObject Angara_adv_string_substring(int arg_count, AngaraObject* args) {
-    if (arg_count != 3 || !ANGARA_IS_STRING(args[0]) || !ANGARA_IS_I64(args[1]) || !ANGARA_IS_I64(args[2])) {
+    if (arg_count != 3 || !IS_STRING(args[0]) || !IS_I64(args[1]) || !IS_I64(args[2])) {
         angara_throw_error("substring(string, start, end) expects a string and two integers.");
         return angara_create_nil();
     }
     AngaraString* str = (AngaraString*)args[0].as.obj;
-    int64_t start = ANGARA_AS_I64(args[1]);
-    int64_t end = ANGARA_AS_I64(args[2]);
+    int64_t start = AS_I64(args[1]);
+    int64_t end = AS_I64(args[2]);
 
     if (start < 0 || (size_t)end > str->length || start > end) {
         angara_throw_error("Substring indices are out of bounds or invalid.");
@@ -57,7 +57,7 @@ AngaraObject Angara_adv_string_substring(int arg_count, AngaraObject* args) {
 
 // Checks if a single-character string is a digit.
 AngaraObject Angara_adv_string_is_digit(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ANGARA_IS_STRING(args[0])) {
+    if (arg_count != 1 || !IS_STRING(args[0])) {
         angara_throw_error("is_digit(char) expects a string.");
         return angara_create_nil();
     }
@@ -70,7 +70,7 @@ AngaraObject Angara_adv_string_is_digit(int arg_count, AngaraObject* args) {
 
 // Checks if a single-character string is whitespace.
 AngaraObject Angara_adv_string_is_whitespace(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ANGARA_IS_STRING(args[0])) {
+    if (arg_count != 1 || !IS_STRING(args[0])) {
         angara_throw_error("is_whitespace(char) expects a string.");
         return angara_create_nil();
     }
@@ -84,15 +84,16 @@ AngaraObject Angara_adv_string_is_whitespace(int arg_count, AngaraObject* args) 
 
 // --- Module Definition ---
 
-static const AngaraFuncDef STRING_FUNCTIONS[] = {
-        {"get",           Angara_adv_string_get,           2, "si->s"},
-        {"substring",     Angara_adv_string_substring,     3, "sii->s"},
-        {"is_digit",      Angara_adv_string_is_digit,      1, "s->b"},
-        {"is_whitespace", Angara_adv_string_is_whitespace, 1, "s->b"},
-        {NULL, NULL, 0, NULL}
+
+static const AngaraFuncDef STRING_EXPORTS[] = {
+        {"get",           Angara_adv_string_get,           "si->s",  NULL},
+        {"substring",     Angara_adv_string_substring,     "sii->s", NULL},
+        {"is_digit",      Angara_adv_string_is_digit,      "s->b",   NULL},
+        {"is_whitespace", Angara_adv_string_is_whitespace, "s->b",   NULL},
+        {NULL, NULL, NULL, NULL}
 };
 
 ANGARA_MODULE_INIT(adv_string) {
-    *def_count = (sizeof(STRING_FUNCTIONS) / sizeof(AngaraFuncDef)) - 1;
-    return STRING_FUNCTIONS;
+    *def_count = (sizeof(STRING_EXPORTS) / sizeof(AngaraFuncDef)) - 1;
+    return STRING_EXPORTS;
 }

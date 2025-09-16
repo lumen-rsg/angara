@@ -2,23 +2,22 @@
 // Created by cv2 on 9/11/25.
 //
 
-
-#include "AngaraABI.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../src/runtime/angara_runtime.h"
 
 // --- Function Implementations ---
 
 // Writes content to a specific stream (stdout or stderr).
 AngaraObject Angara_io_write(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ANGARA_IS_I64(args[0]) || !ANGARA_IS_STRING(args[1])) {
+    if (arg_count != 2 || !IS_I64(args[0]) || !IS_STRING(args[1])) {
         angara_throw_error("write(stream_id, content) expects an integer and a string.");
         return angara_create_nil();
     }
 
-    int64_t stream_id = ANGARA_AS_I64(args[0]);
-    const char* content = ANGARA_AS_CSTRING(args[1]);
+    int64_t stream_id = AS_I64(args[0]);
+    const char* content = AS_CSTRING(args[1]);
 
     FILE* stream = NULL;
     if (stream_id == 1) {
@@ -35,13 +34,13 @@ AngaraObject Angara_io_write(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_io_println(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ANGARA_IS_I64(args[0]) || !ANGARA_IS_STRING(args[1])) {
+    if (arg_count != 2 || !IS_I64(args[0]) || !IS_STRING(args[1])) {
         angara_throw_error("println(stream_id, content) expects an integer and a string.");
         return angara_create_nil();
     }
 
-    int64_t stream_id = ANGARA_AS_I64(args[0]);
-    const char* content = ANGARA_AS_CSTRING(args[1]);
+    int64_t stream_id = AS_I64(args[0]);
+    const char* content = AS_CSTRING(args[1]);
 
     FILE* stream = NULL;
     if (stream_id == 1) {
@@ -62,11 +61,11 @@ AngaraObject Angara_io_println(int arg_count, AngaraObject* args) {
 
 // Flushes a stream's buffer.
 AngaraObject Angara_io_flush(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ANGARA_IS_I64(args[0])) {
+    if (arg_count != 1 || !IS_I64(args[0])) {
         angara_throw_error("flush(stream_id) expects an integer stream ID.");
         return angara_create_nil();
     }
-    int64_t stream_id = ANGARA_AS_I64(args[0]);
+    int64_t stream_id = AS_I64(args[0]);
 
     if (stream_id == 1) {
         fflush(stdout);
@@ -141,17 +140,19 @@ AngaraObject Angara_io_read_all(int arg_count, AngaraObject* args) {
 
 // --- Module Definition ---
 
-static const AngaraFuncDef IO_FUNCTIONS[] = {
-        // name,         c_function,             arity, type_string
-        {"write",        Angara_io_write,        2,     "is->n"}, // int, string -> nil
-        {"flush",        Angara_io_flush,        1,     "i->n"},  // int -> nil
-        {"read_line",    Angara_io_read_line,    0,     "->s"},   // () -> string (can be nil)
-        {"read_all",     Angara_io_read_all,     0,     "->s"},   // () -> string
-        {"println",      Angara_io_println,      2,     "is->n"},
-        {NULL, NULL, 0, NULL}
+// --- ABI Definition ---
+static const AngaraFuncDef IO_EXPORTS[] = {
+        // Angara Name | C Function Pointer  | Angara Type String | constructs
+        {"write",        Angara_io_write,        "is->n",             NULL},
+        {"println",      Angara_io_println,      "is->n",             NULL},
+        {"flush",        Angara_io_flush,        "i->n",              NULL},
+        {"read_line",    Angara_io_read_line,    "->s",               NULL},
+        {"read_all",     Angara_io_read_all,     "->s",               NULL},
+        {NULL, NULL, NULL, NULL} // Sentinel
 };
 
+// --- Module Entry Point ---
 ANGARA_MODULE_INIT(io) {
-        *def_count = (sizeof(IO_FUNCTIONS) / sizeof(AngaraFuncDef)) - 1;
-        return IO_FUNCTIONS;
+    *def_count = (sizeof(IO_EXPORTS) / sizeof(AngaraFuncDef)) - 1;
+    return IO_EXPORTS;
 }

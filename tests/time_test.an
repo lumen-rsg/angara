@@ -1,0 +1,41 @@
+attach time;
+attach io;
+
+export func main() -> i64 {
+  io.println(1, "--- Angara Time Module Test ---");
+
+  // 1. Test time.now() and time.format_iso()
+  io.println(1, "\nTesting current time and formatting:");
+  let timestamp = time.now();
+  io.println(1, "Current Unix timestamp: " + string(timestamp));
+  let formatted_time = time.format_iso(timestamp);
+  io.println(1, "Current time (UTC): " + formatted_time);
+
+  // 2. Test time.sleep()
+  io.println(1, "\nTesting sleep for 1.2 seconds...");
+  time.sleep(1.2);
+  io.println(1, "Awake!");
+
+  // 3. Test the Stopwatch class
+  io.println(1, "\nTesting Stopwatch:");
+  let sw = time.Stopwatch();
+
+  // Do some trivial work
+  let i = 0;
+  while (i < 1000000) { i = i + 1; }
+
+  let duration1 = sw.elapsed();
+  io.println(1, "Trivial work took: " + string(duration1) + " seconds.");
+
+  // Do some more work
+  time.sleep(0.5);
+  let duration2 = sw.elapsed();
+  io.println(1, "Total time after sleeping: " + string(duration2) + " seconds.");
+
+  sw.reset();
+  io.println(1, "Stopwatch reset.");
+  let duration3 = sw.elapsed();
+  io.println(1, "Time immediately after reset: " + string(duration3) + " seconds.");
+
+  return 0;
+}
