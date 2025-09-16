@@ -1,0 +1,104 @@
+attach Server from websocket;
+attach WebSocket from websocket;
+attach io;
+attach time;
+attach adv_string; // Used by our list_remove helper
+
+// --- Global State ---
+// This list will store a handle to every connected client.
+let clients as list<WebSocket> = [];
+// A mutex is crucial to prevent race conditions if we were to service
+// clients in multiple threads in the future. It's good practice now.
+let clients_mutex = Mutex();
+
+// --- Helper function to remove a client from our list ---
+// (This reveals the need for a `list.remove(index)` function in the stdlib)
+func remove_client_from_list(client_to_remove as WebSocket) -> void {
+    let new_clients as list<WebSocket> = [];
+    let found = false;
+
+    // Angara objects are compared by reference, so this works.
+    for (client in clients) {
+        if (client != client_to_remove) {
+            new_clients.push(client);
+        } else {
+            found = true;
+        }
+    }
+
+    if (found) {
+        clients = new_clients;
+        io.println(1, "[SERVER] A client was removed from the list.");
+    }
+}
+
+
+// --- Server Callback Functions ---
+
+// Called by the `service` loop when a new client's handshake is successful.
+func on_connect(server as Server, new_client as WebSocket) -> void {
+    io.println(1, "[SERVER] New client connected.");
+
+    clients_mutex.lock();
+    clients.push(new_client);
+    clients_mutex.unlock();
+
+    let count_str = string(len(clients));
+    io.println(1, "         Total clients: " + count_str);
+    new_client.send("Welcome to the Angara Echo Server!");
+}
+
+// Called by the `service` loop when a message is received from any client.
+func on_message(server as Server, client as WebSocket, message as string) -> void {
+    io.println(1, "[SERVER] Received message: '" + message + "'");
+    io.println(1, "         Broadcasting to all connected clients...");
+
+    // Lock the list while we iterate to prevent another thread from
+    // adding/removing clients while we are using it.
+    clients_mutex.lock();
+    for (c in clients) {
+        // Echo the message to every client.
+        c.send("echo: " + message);
+    }
+    clients_mutex.unlock();
+}
+
+// Called by the `service` loop when a client connection is terminated.
+func on_close(server as Server, client as WebSocket) -> void {
+    io.println(1, "[SERVER] A client has disconnected.");
+
+    clients_mutex.lock();
+    remove_client_from_list(client);
+    clients_mutex.unlock();
+
+    let count_str = string(len(clients));
+    io.println(1, "         Total clients: " + count_str);
+}
+
+
+export func main() -> i64 {
+    let callbacks = {
+        "on_connect": on_connect,
+        "on_message": on_message,
+        "on_close": on_close
+    };
+
+    try {
+        let server = Server("0.0.0.0", 8080, callbacks);
+        io.println(1, "--- Angara WebSocket Echo Server ---");
+        io.println(1, "Listening on ws://0.0.0.0:8080");
+
+        // The main server event loop.
+        while (true) {
+            server.service();
+            // Yield the CPU briefly to prevent this loop from consuming 100% CPU.
+            time.sleep(0.01);
+        }
+
+    } catch (e) {
+        io.println(2, "[FATAL] Server error: " + string(e));
+        return 1;
+    }
+
+    return 0;
+}

@@ -434,54 +434,116 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
     }
 
 
-    std::shared_ptr<ModuleType> CompilerDriver::loadNativeModule(const std::string& path, const Token& import_token) {
-        print_progress("Loading native module: " + path);
+// =======================================================================
+// REPLACE the entire loadNativeModule function in CompilerDriver.cpp with this
+// definitive "gold standard" version.
+// =======================================================================
 
-        void* handle = dlopen(path.c_str(), RTLD_LAZY);
-        if (!handle) {
-            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET
-                      << ": Could not load native module '" << path << "'. Reason: " << dlerror() << "\n";
-            m_had_error = true;
-            return nullptr;
-        }
+std::shared_ptr<ModuleType> CompilerDriver::loadNativeModule(const std::string& path, const Token& import_token) {
+    print_progress("Loading native module: " + path);
 
-        std::string module_name = get_base_name(path);
-        std::string init_func_name = "Angara_" + module_name + "_Init";
+    void* handle = dlopen(path.c_str(), RTLD_LAZY);
+    if (!handle) {
+        std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET
+                  << ": Could not load native module '" << path << "'. Reason: " << dlerror() << "\n";
+        m_had_error = true;
+        return nullptr;
+    }
 
-        // The init function returns a simple array of AngaraFuncDef.
-        typedef const AngaraFuncDef* (*AngaraModuleInitFn)(int*);
-        AngaraModuleInitFn init_fn = (AngaraModuleInitFn)dlsym(handle, init_func_name.c_str());
+    std::string module_name = get_base_name(path);
+    std::string init_func_name = "Angara_" + module_name + "_Init";
 
-        if (!init_fn) {
-            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET
-                      << ": Invalid native module '" << path << "'. Missing entry point: " << init_func_name << "\n";
-            m_had_error = true;
-            dlclose(handle);
-            return nullptr;
-        }
+    typedef const AngaraFuncDef* (*AngaraModuleInitFn)(int*);
+    AngaraModuleInitFn init_fn = (AngaraModuleInitFn)dlsym(handle, init_func_name.c_str());
 
-        int def_count = 0;
-        const AngaraFuncDef* defs = init_fn(&def_count);
+    if (!init_fn) {
+        std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET
+                  << ": Invalid native module '" << path << "'. Missing entry point: " << init_func_name << "\n";
+        m_had_error = true;
+        dlclose(handle);
+        return nullptr;
+    }
 
-        auto module_type = std::make_shared<ModuleType>(module_name);
-        module_type->is_native = true;
+    int def_count = 0;
+    const AngaraFuncDef* defs = init_fn(&def_count);
 
-        // Iterate through all exported functions in the module.
-        for (int i = 0; i < def_count; i++) {
-            const AngaraFuncDef& func_def = defs[i];
-            if (!func_def.name || !func_def.type_string) continue;
+    auto module_type = std::make_shared<ModuleType>(module_name);
+    module_type->is_native = true;
 
-            try {
+    for (int i = 0; i < def_count; i++) {
+        const AngaraFuncDef& func_def = defs[i];
+        if (!func_def.name || !func_def.type_string) continue;
+
+        try {
+            if (func_def.constructs != NULL) {
+                // --- This function defines and constructs a NATIVE CLASS ---
+                const AngaraClassDef* class_def = func_def.constructs;
+
+                // 1. Build the ClassType object. This represents the class itself.
+                auto class_type = std::make_shared<ClassType>(class_def->name);
+                class_type->is_native = true;
+                Token dummy_token;
+
+                // 2. Populate the class's methods from the ABI definition.
+                if (class_def->methods) {
+                    for (int m = 0; class_def->methods[m].name != NULL; ++m) {
+                        const AngaraMethodDef& method_def = class_def->methods[m];
+                        if (!method_def.name || !method_def.type_string) continue;
+
+                        std::string m_full_sig = method_def.type_string;
+                        size_t m_arrow_pos = m_full_sig.find("->");
+                        if (m_arrow_pos == std::string::npos) continue;
+
+                        TypeStringParser m_param_parser(m_full_sig.substr(0, m_arrow_pos));
+                        std::vector<std::shared_ptr<Type>> m_params;
+                        while(!m_param_parser.is_at_end()) m_params.push_back(m_param_parser.parse_type());
+
+                        TypeStringParser m_return_parser(m_full_sig.substr(m_arrow_pos + 2));
+                        auto m_return_type = m_return_parser.parse_type();
+
+                        auto method_type = std::make_shared<FunctionType>(m_params, m_return_type);
+                        class_type->methods[method_def.name] = {method_type, AccessLevel::PUBLIC, dummy_token, false};
+                    }
+                }
+
+                // 3. Populate the class's fields.
+                if (class_def->fields) {
+                    for (int f = 0; class_def->fields[f].name != NULL; ++f) {
+                        const AngaraFieldDef& field_def = class_def->fields[f];
+                        if (!field_def.name || !field_def.type_string) continue;
+                        TypeStringParser field_parser(field_def.type_string);
+                        auto field_type = field_parser.parse_type();
+                        class_type->fields[field_def.name] = {field_type, AccessLevel::PUBLIC, dummy_token, field_def.is_const};
+                    }
+                }
+
+                // 4. Parse the constructor's signature and store it as the conventional "init" method.
+                std::string ctor_sig_str = func_def.type_string;
+                size_t ctor_arrow = ctor_sig_str.find("->");
+                if (ctor_arrow == std::string::npos) throw std::runtime_error("constructor signature for '" + std::string(class_def->name) + "' is missing '->'.");
+
+                TypeStringParser ctor_param_parser(ctor_sig_str.substr(0, ctor_arrow));
+                std::vector<std::shared_ptr<Type>> ctor_params;
+                while(!ctor_param_parser.is_at_end()) ctor_params.push_back(ctor_param_parser.parse_type());
+
+                // The return type of the conceptual "init" method is an instance of the class.
+                auto ctor_return_type = std::make_shared<InstanceType>(class_type);
+                auto ctor_func_type = std::make_shared<FunctionType>(ctor_params, ctor_return_type);
+                class_type->methods["init"] = {ctor_func_type, AccessLevel::PUBLIC, dummy_token, false};
+
+                // 5. Export the single, unified ClassType object under the FUNCTION's export name.
+                // This makes `counter.Counter` and `websocket.connect` resolve to the ClassType.
+                module_type->exports[func_def.name] = class_type;
+
+            } else {
+                // --- This is a REGULAR NATIVE GLOBAL FUNCTION ---
                 std::string full_sig = func_def.type_string;
                 size_t arrow_pos = full_sig.find("->");
-                if (arrow_pos == std::string::npos) {
-                    throw std::runtime_error("Signature for '" + std::string(func_def.name) + "' is missing '->'.");
-                }
+                if (arrow_pos == std::string::npos) throw std::runtime_error("Signature for '" + std::string(func_def.name) + "' is missing '->'.");
 
                 std::string params_str = full_sig.substr(0, arrow_pos);
                 std::string return_str = full_sig.substr(arrow_pos + 2);
 
-                // Parse the parameter types from the signature string.
                 TypeStringParser param_parser(params_str);
                 std::vector<std::shared_ptr<Type>> params;
                 bool is_variadic = false;
@@ -495,95 +557,22 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
                         }
                     }
                 }
-
-                std::shared_ptr<Type> return_type;
-
-                // --- This is the key logic for distinguishing constructors from global functions ---
-                if (func_def.constructs != NULL) {
-                    // This function is a constructor for a native class.
-                    const AngaraClassDef* class_def = func_def.constructs;
-
-                    if (return_str != class_def->name) {
-                        throw std::runtime_error("Constructor return type '" + return_str + "' in ABI does not match class name '" + std::string(class_def->name) + "'.");
-                    }
-
-                    auto class_type = std::make_shared<ClassType>(class_def->name);
-                    class_type->is_native = true;
-                    Token dummy_token;
-
-                    // Populate the class's methods.
-                    if (class_def->methods) {
-                        for (int m = 0; class_def->methods[m].name != NULL; ++m) {
-                            const AngaraMethodDef& method_def = class_def->methods[m];
-                            if (!method_def.name || !method_def.type_string) continue;
-
-                            std::string m_full_sig = method_def.type_string;
-                            size_t m_arrow_pos = m_full_sig.find("->");
-                            if (m_arrow_pos == std::string::npos) continue; // Skip malformed method
-
-                            std::string m_params_str = m_full_sig.substr(0, m_arrow_pos);
-                            std::string m_return_str = m_full_sig.substr(m_arrow_pos + 2);
-
-                            TypeStringParser m_param_parser(m_params_str);
-                            std::vector<std::shared_ptr<Type>> m_params;
-                            while(!m_param_parser.is_at_end()) m_params.push_back(m_param_parser.parse_type());
-
-                            TypeStringParser m_return_parser(m_return_str);
-                            auto m_return_type = m_return_parser.parse_type();
-
-                            auto method_type = std::make_shared<FunctionType>(m_params, m_return_type);
-                            class_type->methods[method_def.name] = {method_type,  AccessLevel::PUBLIC, dummy_token, false};
-                        }
-                    }
-
-                    // Populate the class's fields.
-                    if (class_def->fields) {
-                        for (int f = 0; class_def->fields[f].name != NULL; ++f) {
-                            const AngaraFieldDef& field_def = class_def->fields[f];
-                            if (!field_def.name || !field_def.type_string) continue;
-
-                            TypeStringParser field_parser(field_def.type_string);
-                            auto field_type = field_parser.parse_type();
-                            class_type->fields[field_def.name] = {field_type,  AccessLevel::PUBLIC, dummy_token, field_def.is_const};
-                        }
-                    }
-
-                    // --- THE FIX ---
-                    // 1. Export the fully constructed ClassType itself. This makes the type name
-                    //    (e.g., "WebSocket") available for type annotations in Angara.
-                    module_type->exports[class_def->name] = class_type;
-
-                    // 2. The return type of the constructor FUNCTION is an INSTANCE of this class.
-                    return_type = std::make_shared<InstanceType>(class_type);
-
-                } else {
-                    // This is a regular global function, not a constructor.
-                    TypeStringParser return_parser(return_str);
-                    return_type = return_parser.parse_type();
-                }
-
-                // Create the final FunctionType for the exported symbol.
+                TypeStringParser return_parser(return_str);
+                auto return_type = return_parser.parse_type();
                 auto func_type = std::make_shared<FunctionType>(params, return_type, is_variadic);
                 module_type->exports[func_def.name] = func_type;
-
-            } catch (const std::runtime_error& e) {
-                std::cerr << "\n" << BOLD << RED << "Warning:" << RESET << " FATAL error while parsing ABI for '"
-                          << (func_def.name ? func_def.name : "unknown")
-                          << "' in module '" << path << "'.\n";
-                std::cerr << "        REASON: " << e.what() << "\n";
-                // Let's make this a hard error for now to be sure.
-                m_had_error = true;
-                return nullptr; // Stop compilation
             }
+        } catch (const std::runtime_error& e) {
+            std::cerr << "\n" << BOLD << YELLOW << "Warning:" << RESET << " Could not parse ABI definition for '"
+                      << (func_def.name ? func_def.name : "unknown")
+                      << "' in module '" << path << "': " << e.what() << "\n";
         }
-
-        m_modules_compiled++;
-        std::cerr << "DEBUG: Finished loading native module '" << module_name << "'. Found exports:\n";
-        for (const auto& [name, type] : module_type->exports) {
-            std::cerr << "  - " << name << " : " << type->toString() << "\n";
-        }
-        return module_type;
     }
+
+    m_modules_compiled++;
+    // (Debug print for exports can be added here if needed)
+    return module_type;
+}
 
 
 } // namespace angara

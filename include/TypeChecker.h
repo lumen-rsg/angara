@@ -16,6 +16,18 @@
 
 namespace angara {
 
+    struct UsedNativeSymbol {
+        std::shared_ptr<ModuleType> from_module;
+        std::string symbol_name;
+        std::shared_ptr<Type> symbol_type;
+
+        // For sorting and uniqueness
+        bool operator<(const UsedNativeSymbol& other) const {
+            if (from_module->name != other.from_module->name) return from_module->name < other.from_module->name;
+            return symbol_name < other.symbol_name;
+        }
+    };
+
     class TypeChecker : public ExprVisitor, public StmtVisitor {
     public:
         TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler, std::string module_name);
@@ -31,6 +43,7 @@ namespace angara {
         [[nodiscard]] std::shared_ptr<ModuleType> getModuleType() const;
         std::map<const VarExpr*, std::shared_ptr<Symbol>> m_variable_resolutions;
         std::map<const AttachStmt*, std::shared_ptr<ModuleType>> m_module_resolutions;
+        std::set<UsedNativeSymbol> m_used_native_symbols;
     private:
         // --- Visitor Methods ---
         // Statements (return void)

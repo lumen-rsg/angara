@@ -13,6 +13,7 @@
 #include <openssl/sha.h>  // For SHA-1 hashing
 #include <openssl/evp.h>  // For Base64 encoding
 #include <ctype.h>
+#include <arpa/inet.h>  // For inet_addr
 
 
 // --- Private Data Structure ---
@@ -30,6 +31,19 @@ typedef struct {
     AngaraObject on_close_closure;
     AngaraObject on_error_closure;
 } WebSocketData;
+
+// NEW: Struct for the server's state.
+typedef struct {
+    struct wslay_event_context *ctx;
+    int listen_fd;
+    AngaraObject on_connect_closure;
+    AngaraObject on_message_closure;
+    AngaraObject on_close_closure;
+
+    WebSocketData** clients;
+    size_t client_count;
+    size_t client_capacity;
+} ServerData;
 
 // wslay calls this function to get 4 random bytes for the frame mask.
 // We use OpenSSL's cryptographically secure random number generator.
@@ -120,6 +134,17 @@ void finalize_websocket(void* data_ptr) {
     angara_decref(data->on_close_closure);
     angara_decref(data->on_error_closure);
     // self_obj is not decref'd here to prevent double-free cycles.
+    free(data);
+}
+
+void finalize_server(void* data_ptr) {
+    ServerData* data = (ServerData*)data_ptr;
+    angara_debug_print("Finalizing WebSocket Server object.");
+    if (data->listen_fd >= 0) close(data->listen_fd);
+    wslay_event_context_free(data->ctx);
+    angara_decref(data->on_connect_closure);
+    angara_decref(data->on_message_closure);
+    angara_decref(data->on_close_closure);
     free(data);
 }
 
@@ -316,6 +341,182 @@ AngaraObject Angara_websocket_connect(int arg_count, AngaraObject* args) {
     return self;
 }
 
+AngaraObject Angara_websocket_Server(int arg_count, AngaraObject* args) {
+    angara_debug_print("Entering C constructor: Angara_websocket_Server");
+    if (arg_count != 3 || !IS_STRING(args[0]) || !IS_I64(args[1]) || !IS_RECORD(args[2])) {
+        angara_throw_error("Server(host, port, callbacks) expects a string, an integer, and a record.");
+        return angara_create_nil();
+    }
+    const char* host = AS_CSTRING(args[0]);
+    int64_t port = AS_I64(args[1]);
+    AngaraObject callbacks_record = args[2];
+
+    // 1. Allocate the private data struct for the server.
+    ServerData* data = (ServerData*)calloc(1, sizeof(ServerData));
+    data->listen_fd = -1; // Initialize to invalid
+
+    // 2. Create the Angara object container that will be returned.
+    AngaraObject self = angara_create_native_instance(data, finalize_server);
+
+    // 3. Extract and take ownership of the Angara callback closures.
+    data->on_connect_closure = angara_record_get(callbacks_record, "on_connect");
+    data->on_message_closure = angara_record_get(callbacks_record, "on_message");
+    data->on_close_closure = angara_record_get(callbacks_record, "on_close");
+    angara_incref(data->on_connect_closure);
+    angara_incref(data->on_message_closure);
+    angara_incref(data->on_close_closure);
+
+    // --- 4. Create and configure the TCP listening socket ---
+    struct sockaddr_in serv_addr;
+
+    // 4a. Create the socket file descriptor.
+    data->listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (data->listen_fd < 0) {
+        angara_throw_error("Failed to create server socket.");
+        angara_decref(self); // Trigger cleanup
+        return angara_create_nil();
+    }
+
+    // 4b. Set the SO_REUSEADDR option. This is crucial for servers, as it allows
+    //     the program to restart quickly without waiting for old sockets to time out.
+    int optval = 1;
+    setsockopt(data->listen_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
+    // 4c. Prepare the sockaddr_in structure.
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    // Use inet_addr to convert the string host IP to the correct network format.
+    // INADDR_ANY (0.0.0.0) is a special value to listen on all available interfaces.
+    serv_addr.sin_addr.s_addr = (strcmp(host, "0.0.0.0") == 0) ? INADDR_ANY : inet_addr(host);
+    // Use htons (host to network short) to convert the port to network byte order.
+    serv_addr.sin_port = htons(port);
+
+    // 4d. Bind the socket to the address and port.
+    if (bind(data->listen_fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+        angara_throw_error("Failed to bind WebSocket server socket to address.");
+        angara_decref(self); // Trigger cleanup
+        return angara_create_nil();
+    }
+
+    // 4e. Start listening for incoming connections. The '5' is the backlog queue size.
+    listen(data->listen_fd, 5);
+
+    // 4f. Set the listening socket to non-blocking mode. This ensures that the
+    //     `accept()` call in the `service()` loop will not block the whole program.
+    fcntl(data->listen_fd, F_SETFL, O_NONBLOCK);
+
+    angara_debug_print("Exiting C constructor: Angara_websocket_Server. Socket is listening.");
+    return self;
+}
+
+int perform_server_handshake(int client_fd) {
+    // Read the client's GET request
+    char request_buf[2048];
+    ssize_t len = read(client_fd, request_buf, sizeof(request_buf) - 1);
+    if (len <= 0) return -1;
+    request_buf[len] = '\0';
+
+    // Find the client's key
+    const char* key_header = "Sec-WebSocket-Key: ";
+    char* client_key = strcasestr(request_buf, key_header);
+    if (!client_key) return -1;
+    client_key += strlen(key_header);
+    char* eol = strstr(client_key, "\r\n");
+    if (eol) *eol = '\0';
+
+    // Calculate the accept key
+    const char* magic_string = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    char challenge[256];
+    sprintf(challenge, "%s%s", client_key, magic_string);
+    unsigned char sha1_result[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char*)challenge, strlen(challenge), sha1_result);
+    char* accept_key = base64_encode(sha1_result, SHA_DIGEST_LENGTH);
+
+    // Build and send the 101 response
+    char response_buf[512];
+    sprintf(response_buf, "HTTP/1.1 101 Switching Protocols\r\n"
+                          "Upgrade: websocket\r\n"
+                          "Connection: Upgrade\r\n"
+                          "Sec-WebSocket-Accept: %s\r\n\r\n", accept_key);
+    free(accept_key);
+    write(client_fd, response_buf, strlen(response_buf));
+    return 0; // Success
+}
+
+AngaraObject Angara_Server_service(int arg_count, AngaraObject* args) {
+    AngaraObject self = args[0];
+    ServerData* data = (ServerData*)AS_NATIVE_INSTANCE(self)->data;
+
+    // --- 1. Accept New Connections ---
+    struct sockaddr_in cli_addr;
+    socklen_t clilen = sizeof(cli_addr);
+    int new_client_fd = accept(data->listen_fd, (struct sockaddr *) &cli_addr, &clilen);
+
+    if (new_client_fd >= 0) {
+        // A new client is trying to connect.
+        if (perform_server_handshake(new_client_fd) == 0) {
+            // Handshake successful! Create the Angara object for this client.
+            WebSocketData* client_data = (WebSocketData*)calloc(1, sizeof(WebSocketData));
+            client_data->fd = new_client_fd;
+            client_data->is_connected = true;
+            // Note: Server-side connections are not using SSL in this simple example.
+
+            // Create a wslay context for the new client.
+            struct wslay_event_callbacks cbs = { wslay_recv_callback, wslay_send_callback, wslay_genmask_callback, NULL, NULL, NULL, wslay_on_msg_recv_callback };
+            wslay_event_context_server_init(&client_data->ctx, &cbs, client_data);
+
+            AngaraObject client_obj = angara_create_native_instance(client_data, finalize_websocket);
+            client_data->self_obj = client_obj;
+            angara_incref(client_obj);
+
+            // Add to our list of clients
+            if (data->client_count >= data->client_capacity) {
+                data->client_capacity = (data->client_capacity == 0) ? 8 : data->client_capacity * 2;
+                data->clients = (WebSocketData**)realloc(data->clients, data->client_capacity * sizeof(WebSocketData*));
+            }
+            data->clients[data->client_count++] = client_data;
+
+            // Call the user's on_connect callback
+            if (!IS_NIL(data->on_connect_closure)) {
+                angara_call(data->on_connect_closure, 2, (AngaraObject[]){ self, client_obj });
+            }
+        } else {
+            // Handshake failed, close the socket.
+            close(new_client_fd);
+        }
+    }
+
+    // --- 2. Service Existing Connections ---
+    for (size_t i = 0; i < data->client_count; ++i) {
+        WebSocketData* client_data = data->clients[i];
+        if (client_data && client_data->is_connected) {
+            if (wslay_event_recv(client_data->ctx) != 0 || wslay_event_send(client_data->ctx) != 0) {
+                // Client disconnected or an error occurred.
+                client_data->is_connected = false;
+                if (!IS_NIL(data->on_close_closure)) {
+                    angara_call(data->on_close_closure, 2, (AngaraObject[]){ self, client_data->self_obj });
+                }
+                // We will remove it from the list on the next pass.
+            }
+        }
+    }
+
+    // --- 3. Clean up disconnected clients (simple cleanup) ---
+    // A more efficient implementation would not involve shifting the array.
+    size_t live_clients = 0;
+    for (size_t i = 0; i < data->client_count; ++i) {
+        if (data->clients[i]->is_connected) {
+            data->clients[live_clients++] = data->clients[i];
+        } else {
+            // This client is disconnected, release our reference to its Angara object.
+            angara_decref(data->clients[i]->self_obj);
+        }
+    }
+    data->client_count = live_clients;
+
+    return angara_create_nil();
+}
+
 // --- Methods ---
 AngaraObject Angara_WebSocket_send(int arg_count, AngaraObject* args) {
 
@@ -431,11 +632,19 @@ static const AngaraMethodDef WEBSOCKET_METHODS[] = {
         {NULL, NULL, NULL}
 };
 
+static const AngaraMethodDef SERVER_METHODS[] = {
+    {"service", (AngaraMethodFn)Angara_Server_service, "->n"},
+    {NULL, NULL, NULL}
+};
+static const AngaraClassDef SERVER_CLASS_DEF = { "Server", NULL, SERVER_METHODS };
+
 static const AngaraClassDef WEBSOCKET_CLASS_DEF = { "WebSocket", NULL, WEBSOCKET_METHODS };
 
 static const AngaraFuncDef WEBSOCKET_EXPORTS[] = {
-        { "connect", Angara_websocket_connect, "s{}->WebSocket", &WEBSOCKET_CLASS_DEF },
-        { NULL, NULL, NULL, NULL }
+    // The exported name is "WebSocket", it constructs the "WebSocket" class.
+    { "WebSocket", Angara_websocket_connect, "s{}->WebSocket", &WEBSOCKET_CLASS_DEF },
+    { "Server",    Angara_websocket_Server,  "si{}->Server",   &SERVER_CLASS_DEF },
+    { NULL, NULL, NULL, NULL }
 };
 
 ANGARA_MODULE_INIT(websocket) {

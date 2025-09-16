@@ -1402,6 +1402,14 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             }
         }
 
+        if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
+            auto symbol = m_symbols.resolve(var_expr->name.lexeme);
+            if (symbol && symbol->from_module && symbol->from_module->is_native) {
+                // This is a direct call to a native symbol. Record its usage.
+                m_used_native_symbols.insert({symbol->from_module, symbol->name, symbol->type});
+            }
+        }
+
         // 2. Check if the callee is the special built-in `spawn` function.
     if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
         if (var_expr->name.lexeme == "spawn") {
@@ -1623,17 +1631,15 @@ for (size_t i = 0; i < spawn_args.size(); ++i) {
             }
         }
     }
-    else if (object_type->kind == TypeKind::MODULE) {
+    if (object_type->kind == TypeKind::MODULE) {
         auto module_type = std::dynamic_pointer_cast<ModuleType>(object_type);
-
-        // Look for the property in the module's public API (its exports).
         auto member_it = module_type->exports.find(property_name);
-
-        if (member_it == module_type->exports.end()) {
-            error(expr.name, "Module '" + module_type->name + "' has no exported member named '" + property_name + "'.");
-        } else {
-            // Success! The result is the type of the exported symbol.
+        if (member_it != module_type->exports.end()) {
             result_type = member_it->second;
+            // --- THE FIX ---
+            if (module_type->is_native) {
+                m_used_native_symbols.insert({module_type, property_name, result_type});
+            }
         }
     }
     else if (object_type->kind == TypeKind::LIST) {
