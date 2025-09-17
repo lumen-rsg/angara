@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+
 static int angara_lws_callback(struct lws *wsi, enum lws_callback_reasons reason,
                                void *user, void *in, size_t len);
 void finalize_server(void* data);
@@ -213,7 +214,7 @@ AngaraObject Angara_websocket_connect(int arg_count, AngaraObject* args) {
         angara_throw_error("connect(url, callbacks) expects a string and a record.");
         return angara_create_nil();
     }
-    AngaraLwsClient* client_data = (AngaraLwsClient*)calloc(1, sizeof(AngaraLwsClient));
+    const auto client_data = (AngaraLwsClient*)calloc(1, sizeof(AngaraLwsClient));
     client_data->header.type = NATIVE_TYPE_CLIENT;
     client_data->self_obj = angara_create_native_instance(client_data, finalize_client);
     angara_incref(client_data->self_obj);
@@ -223,34 +224,70 @@ AngaraObject Angara_websocket_connect(int arg_count, AngaraObject* args) {
     client_data->on_error_closure = angara_record_get(args[1], "on_error");
     angara_incref(client_data->on_open_closure); angara_incref(client_data->on_message_closure);
     angara_incref(client_data->on_close_closure); angara_incref(client_data->on_error_closure);
-    struct lws_context_creation_info info;
-    memset(&info, 0, sizeof(info));
+    struct lws_context_creation_info info = {nullptr};
     info.port = CONTEXT_PORT_NO_LISTEN;
     info.user = client_data;
     info.protocols = (struct lws_protocols[]){ {"http", angara_lws_callback, 0, 4096}, {nullptr, nullptr, 0, 0} };
     info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
     client_data->context = lws_create_context(&info);
-    if (!client_data->context) { /* error */ }
-    char* url_copy = strdup(AS_CSTRING(args[0]));
-    const char *protocol, *host, *path;
-    int port;
-    if (lws_parse_uri(url_copy, &protocol, &host, &port, &path)) {
-        angara_throw_error("Invalid WebSocket URL"); free(url_copy); finalize_client(client_data); return angara_create_nil();
+    if (!client_data->context) {
+        angara_throw_error("Failed to create libwebsockets client context.");
+        finalize_client(client_data);
+        return angara_create_nil();
     }
+    // --- FIX STARTS HERE ---
+    char* url_copy = strdup(AS_CSTRING(args[0]));
+    const char *protocol, *host, *parsed_path;
+    int port;
+
+    if (lws_parse_uri(url_copy, &protocol, &host, &port, &parsed_path)) {
+        angara_throw_error("Invalid WebSocket URL");
+        free(url_copy);
+        finalize_client(client_data);
+        return angara_create_nil();
+    }
+
+    // Ensure the path is valid. lws_parse_uri can return an empty string ""
+    // for a URL like "ws://example.com", which is not a valid HTTP request path.
+    char path[256] = "/";
+    if (parsed_path && *parsed_path) {
+        strncpy(path, parsed_path, sizeof(path) - 1);
+        path[sizeof(path) - 1] = '\0';
+    }
+
     struct lws_client_connect_info conn_info;
     memset(&conn_info, 0, sizeof(conn_info));
-    conn_info.context = client_data->context; conn_info.address = host; conn_info.port = port;
-    conn_info.path = path; conn_info.host = conn_info.address; conn_info.origin = conn_info.address;
+    conn_info.context = client_data->context;
+    conn_info.address = host;
+    conn_info.port = port;
+    conn_info.path = path; // Use our guaranteed-valid path
+    conn_info.host = conn_info.address;
+    conn_info.origin = conn_info.address;
     conn_info.protocol = "http";
-    if (strcmp(protocol, "wss") == 0) { conn_info.ssl_connection = LCCSCF_USE_SSL; }
+    if (strcmp(protocol, "wss") == 0) {
+        conn_info.ssl_connection = LCCSCF_USE_SSL;
+    }
     conn_info.pwsi = &client_data->wsi;
-    lws_client_connect_via_info(&conn_info);
+
+    // Start the connection attempt
+    if (!lws_client_connect_via_info(&conn_info)) {
+        // This is a fatal error, the connection could not even be started.
+        // We need to clean up and inform the user.
+        angara_throw_error("Failed to start WebSocket client connection.");
+        free(url_copy);
+        finalize_client(client_data); // This will decref self_obj
+        return angara_create_nil();
+    }
+
     free(url_copy);
+    // --- FIX ENDS HERE ---
+
     return client_data->self_obj;
 }
 
 AngaraObject Angara_WebSocket_send(__attribute__((unused)) int arg_count, AngaraObject* args) {
     void* native_data = AS_NATIVE_INSTANCE(args[0])->data; AngaraObject message = args[1];
+    printf( "wsc // sending:");
     size_t msg_len = AS_STRING(message)->length;
     void* msg_payload = malloc(LWS_PRE + msg_len);
     memcpy((char*)msg_payload + LWS_PRE, AS_CSTRING(message), msg_len);
@@ -274,6 +311,7 @@ AngaraObject Angara_WebSocket_close(__attribute__((unused)) int arg_count, Angar
     if (header->type == NATIVE_TYPE_CLIENT) {
         AngaraLwsClient* client = (AngaraLwsClient*)native_data;
         lws_close_reason(client->wsi, LWS_CLOSE_STATUS_NORMAL, nullptr, 0);
+        client->is_connected = false;
     } else {
         ServerPerSessionData* psd = (ServerPerSessionData*)native_data;
         lws_close_reason(psd->wsi, LWS_CLOSE_STATUS_NORMAL, nullptr, 0);
@@ -282,9 +320,11 @@ AngaraObject Angara_WebSocket_close(__attribute__((unused)) int arg_count, Angar
 }
 
 AngaraObject Angara_WebSocket_is_open(__attribute__((unused)) int arg_count, AngaraObject* args) {
-    void* native_data = AS_NATIVE_INSTANCE(args[0])->data; NativeObjectHeader* header = (NativeObjectHeader*)native_data;
+    void* native_data = AS_NATIVE_INSTANCE(args[0])->data;
+    const auto header = (NativeObjectHeader*)native_data;
     if (header->type == NATIVE_TYPE_CLIENT) {
-        AngaraLwsClient* client = (AngaraLwsClient*)native_data;
+        const auto client = (AngaraLwsClient*)native_data;
+        printf(client->is_connected?"Connected":"Disconnected");
         return angara_create_bool(client->is_connected);
     }
     return angara_create_bool(true);

@@ -10,32 +10,10 @@ let clients as list<WebSocket> = [];
 // clients in multiple threads in the future. It's good practice now.
 let clients_mutex = Mutex();
 
-// --- Helper function to remove a client from our list ---
-// (This reveals the need for a `list.remove(index)` function in the stdlib)
-func remove_client_from_list(client_to_remove as WebSocket) -> void {
-    let new_clients as list<WebSocket> = [];
-    let found = false;
-
-    // Angara objects are compared by reference, so this works.
-    for (c in clients) {
-        if (c != client_to_remove) {
-            new_clients.push(c);
-        } else {
-            found = true;
-        }
-    }
-
-    if (found) {
-        clients = new_clients;
-        io.println(1, "[SERVER] A client was removed from the list.");
-    }
-}
-
-
 // --- Server Callback Functions ---
 
 // Called by the `service` loop when a new client's handshake is successful.
-func on_connect(server as Server, new_client as WebSocket) -> void {
+func on_connect(server as Server, new_client as WebSocket) -> nil {
     io.println(1, "[SERVER] New client connected.");
 
     clients_mutex.lock();
@@ -48,7 +26,7 @@ func on_connect(server as Server, new_client as WebSocket) -> void {
 }
 
 // Called by the `service` loop when a message is received from any client.
-func on_message(server as Server, client as WebSocket, message as string) -> void {
+func on_message(server as Server, client as WebSocket, message as string) -> nil {
     io.println(1, "[SERVER] Received message: '" + message + "'");
     io.println(1, "         Broadcasting to all connected clients...");
 
@@ -63,11 +41,11 @@ func on_message(server as Server, client as WebSocket, message as string) -> voi
 }
 
 // Called by the `service` loop when a client connection is terminated.
-func on_close(server as Server, client as WebSocket) -> void {
+func on_close(server as Server, client as WebSocket) -> nil {
     io.println(1, "[SERVER] A client has disconnected.");
 
     clients_mutex.lock();
-    remove_client_from_list(client);
+    clients.remove(client);
     clients_mutex.unlock();
 
     let count_str = string(len(clients));

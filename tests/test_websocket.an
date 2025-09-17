@@ -16,17 +16,17 @@ let exit_mutex = Mutex();
 // --- WebSocket Callback Functions ---
 
 // This will be called by the main thread's service loop when the connection opens.
-func on_open(ws as WebSocket) -> void {
+func on_open(ws as WebSocket) -> nil {
   io.println(1, "[CLIENT] Connection established to echo server.");
 }
 
 // This will be called by the main thread's service loop for every message.
-func on_message(ws as WebSocket, message as string) -> void {
+func on_message(ws as WebSocket, message as string) -> nil {
   io.println(1, "[CLIENT] Received echo: '" + message + "'");
 }
 
 // This will be called by the main thread when the connection is finally closed.
-func on_close(ws as WebSocket) -> void {
+func on_close(ws as WebSocket) -> nil {
   io.println(1, "[CLIENT] Connection closed.");
 
   // Safely set the global flag to signal the main loop to exit.
@@ -36,7 +36,7 @@ func on_close(ws as WebSocket) -> void {
 }
 
 // This will be called if the connection fails.
-func on_error(ws as WebSocket, error_message as string) -> void {
+func on_error(ws as WebSocket, error_message as string) -> nil {
   io.println(2, "[CLIENT] Connection error: " + error_message);
 
   // Safely set the global flag to signal the main loop to exit.
@@ -57,6 +57,7 @@ func message_sender(ws as WebSocket) -> any {
   while (count < 5) {
     // Check if the connection is still open before sleeping and sending.
     if (!ws.is_open()) {
+      io.println(1, "ws is not opened! breaking...");
       break;
     }
 
@@ -82,7 +83,7 @@ func message_sender(ws as WebSocket) -> any {
 export func main() -> i64 {
   io.println(1, "--- Angara Multi-threaded WebSocket Test ---");
 
-  const WEBSOCKET_URL = "wss://ws.postman-echo.com/raw";
+  const WEBSOCKET_URL = "ws://localhost:8080";
 
   // The record of Angara closures that will handle events.
   let callbacks = {
