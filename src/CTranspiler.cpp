@@ -275,7 +275,14 @@ void CTranspiler::pass_2_generate_declarations(const std::vector<std::shared_ptr
         for (const auto& stmt : statements) {
             if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
                 indent();
-                (*m_current_out) << module_name << "_" << var_decl->name.lexeme << " = " << transpileExpr(var_decl->initializer) << ";\n";
+                (*m_current_out) << module_name << "_" << var_decl->name.lexeme << " = ";
+                if (var_decl->initializer) {
+                    // If an initializer exists, transpile it.
+                    (*m_current_out) << transpileExpr(var_decl->initializer) << ";";
+                } else {
+                    // If no initializer, the default value is `nil`.
+                    (*m_current_out) << "angara_create_nil();";
+                }
             } else if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
                 std::string var_name = "g_" + func_stmt->name.lexeme;
                 if (func_stmt->name.lexeme == "main") var_name = "g_angara_main_closure";

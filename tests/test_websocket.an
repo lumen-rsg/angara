@@ -1,82 +1,73 @@
-// =======================================================================
-// The complete, final test program for multi-threaded WebSockets.
-// =======================================================================
-
-// Import all necessary modules.
 attach WebSocket, connect from websocket;
 attach time;
 attach io;
-attach adv_string; // Required by json, good practice to be explicit
+attach adv_string;
 
-// A global flag, protected by a mutex, to signal when the program should exit.
-// This is the correct way to share state between threads.
 let should_exit = false;
 let exit_mutex = Mutex();
 
-// --- WebSocket Callback Functions ---
-
-// This will be called by the main thread's service loop when the connection opens.
-func on_open(ws as WebSocket) -> nil {
-  io.println(1, "[CLIENT] Connection established to echo server.");
-}
-
-// This will be called by the main thread's service loop for every message.
-func on_message(ws as WebSocket, message as string) -> nil {
-  io.println(1, "[CLIENT] Received echo: '" + message + "'");
-}
-
-// This will be called by the main thread when the connection is finally closed.
-func on_close(ws as WebSocket) -> nil {
-  io.println(1, "[CLIENT] Connection closed.");
-
-  // Safely set the global flag to signal the main loop to exit.
-  exit_mutex.lock();
-  should_exit = true;
-  exit_mutex.unlock();
-}
-
-// This will be called if the connection fails.
-func on_error(ws as WebSocket, error_message as string) -> nil {
-  io.println(2, "[CLIENT] Connection error: " + error_message);
-
-  // Safely set the global flag to signal the main loop to exit.
-  exit_mutex.lock();
-  should_exit = true;
-  exit_mutex.unlock();
-}
+// --- CHANGE 1: The sender thread will be a shared variable ---
+// We declare it here so both `main` and `on_open` can access it.
+let sender_thread as Thread;
 
 
-// --- Sender Thread Logic ---
+// --- Sender Thread Logic (No changes needed here) ---
 
 // This function will be executed in a separate thread.
-// It receives the WebSocket object as an argument.
+// Its logic is already correct. It will only be *started*
+// after the connection is confirmed to be open.
 func message_sender(ws as WebSocket) -> any {
   io.println(1, "[SENDER] Sender thread has started.");
   let count = 0;
-
   while (count < 5) {
-    // Check if the connection is still open before sleeping and sending.
+    // This check is still good practice, in case the connection
+    // drops while this thread is running.
     if (!ws.is_open()) {
-      io.println(1, "ws is not opened! breaking...");
+      io.println(1, "[SENDER] Connection is no longer open. Stopping.");
       break;
     }
-
     time.sleep(1.0);
-
     let message = "Ping #" + string(count + 1);
     io.println(1, "[SENDER] Sending: '" + message + "'");
     ws.send(message);
     count = count + 1;
   }
-
-  // After sending all messages, the sender's job is done.
-  // It tells the server it's closing the connection.
   if (ws.is_open()) {
     io.println(1, "[SENDER] All messages sent. Closing connection.");
     ws.close();
   }
-
   io.println(1, "[SENDER] Sender thread has finished.");
+}
+
+
+// --- WebSocket Callback Functions ---
+
+// CHANGE 2: The `on_open` callback now has a critical new responsibility.
+func on_open(ws as WebSocket) -> nil {
+  io.println(1, "[CLIENT] Connection established to echo server.");
+
+  // This is the correct moment to start the sender thread.
+  // We assign the new thread to the shared variable.
+  io.println(1, "[CLIENT] Spawning sender thread from on_open callback...");
+  sender_thread = spawn(message_sender, ws);
+}
+
+func on_message(ws as WebSocket, message as string) -> nil {
+  io.println(1, "[CLIENT] Received echo: '" + message + "'");
+}
+
+func on_close(ws as WebSocket) -> nil {
+  io.println(1, "[CLIENT] Connection closed.");
+  exit_mutex.lock();
+  should_exit = true;
+  exit_mutex.unlock();
+}
+
+func on_error(ws as WebSocket, error_message as string) -> nil {
+  io.println(2, "[CLIENT] Connection error: " + error_message);
+  exit_mutex.lock();
+  should_exit = true;
+  exit_mutex.unlock();
 }
 
 
@@ -84,8 +75,6 @@ export func main() -> i64 {
   io.println(1, "--- Angara Multi-threaded WebSocket Test ---");
 
   const WEBSOCKET_URL = "ws://localhost:8080";
-
-  // The record of Angara closures that will handle events.
   let callbacks = {
     "on_open": on_open,
     "on_message": on_message,
@@ -94,38 +83,31 @@ export func main() -> i64 {
   };
 
   try {
-    // 1. Establish the connection in the main thread.
+    // 1. Initiate the connection. This returns immediately.
     let ws = connect(WEBSOCKET_URL, callbacks);
+    io.println(1, "[MAIN] WebSocket connection initiated...");
 
-    io.println(1, "[MAIN] WebSocket object created. Spawning sender thread...");
+    // CHANGE 3: The sender thread is NO LONGER spawned here.
 
-    // 2. Spawn the sender function in a new thread and pass it the `ws` object.
-    let sender_thread = spawn(message_sender, ws);
-
-    // 3. The main thread's only job is now to run the event loop,
-    //    processing incoming messages and connection events.
+    // 2. The main thread's event loop.
     io.println(1, "[MAIN] Entering event loop...");
     while (true) {
-      // Check the shared flag to see if we should exit.
       exit_mutex.lock();
       let done = should_exit;
       exit_mutex.unlock();
+      if (done) { break; }
 
-      if (done) {
-        break;
-      }
-
-      // Process any pending network events. This is non-blocking.
       ws.service();
-      // Sleep for a very short time to prevent the loop from
-      // consuming 100% CPU. This is called "yielding".
       time.sleep(0.01);
     }
 
     io.println(1, "\n[MAIN] Event loop finished. Joining sender thread...");
 
-    // 4. Wait for the sender thread to finish its execution completely.
-    sender_thread.join();
+    // CHANGE 4: Make the join call robust.
+    // It's possible the connection failed and the thread was never spawned.
+    if (sender_thread != nil) {
+      sender_thread.join();
+    }
 
     io.println(1, "[MAIN] Test complete.");
 
@@ -133,6 +115,5 @@ export func main() -> i64 {
     io.println(2, "[MAIN] An unhandled exception occurred: " + string(e));
     return 1;
   }
-
   return 0;
 }

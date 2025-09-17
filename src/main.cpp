@@ -113,7 +113,7 @@ int main(int argc, char* argv[]) {
     std::cout << "\033[38;5;39m"  << "⠄⠄⢀⡋⣡⣴⣶⣶⡀⠄⠄⠙⢿⣿⣿⣿⣿⣿⣴⣿⣿⣿⢃⣤⣄⣀⣥⣿⣿⠄" << "   "  << RESET << PURPLE << R"(/ /_/ / / / / /_/ / /_/ / /  / /_/ / )" << std::endl;
     std::cout << "\033[38;5;69m"  << "⠄⠄⢸⣇⠻⣿⣿⣿⣧⣀⢀⣠⡌⢻⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠿⠿⣿⣿⣿⠄" << "   "  << RESET << PURPLE << R"(\__,_/_/ /_/\__, /\__,_/_/   \__,_/  )" << std::endl;
     std::cout << "\033[38;5;105m" << "⠄⢀⢸⣿⣷⣤⣤⣤⣬⣙⣛⢿⣿⣿⣿⣿⣿⣿⡿⣿⣿⡍⠄⠄⢀⣤⣄⠉⠋⣰" << "   " << RESET << PURPLE << R"(           /____/                    )" << std::endl;
-    std::cout << "\033[38;5;141m" << "⠄⣼⣖⣿⣿⣿⣿⣿⣿⣿⣿⣿⢿⣿⣿⣿⣿⣿⢇⣿⣿⡷⠶⠶⢿⣿⣿⠇⢀⣤" << "   " << RESET << PURPLE << R"(->       angc v2.3 | spec 2.1      <-)" << std::endl;
+    std::cout << "\033[38;5;141m" << "⠄⣼⣖⣿⣿⣿⣿⣿⣿⣿⣿⣿⢿⣿⣿⣿⣿⣿⢇⣿⣿⡷⠶⠶⢿⣿⣿⠇⢀⣤" << "   " << RESET << PURPLE << R"(->       angc v2.4 | spec 2.2      <-)" << std::endl;
     std::cout << RESET << std::endl;
 
     // 3. If it's not a version flag, proceed with compilation.

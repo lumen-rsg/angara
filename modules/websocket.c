@@ -2,6 +2,7 @@
 #include <libwebsockets.h>
 #include <string.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 
 static int angara_lws_callback(struct lws *wsi, enum lws_callback_reasons reason,
@@ -39,6 +40,7 @@ typedef struct AngaraLwsClient {
     AngaraObject on_message_closure;
     AngaraObject on_close_closure;
     AngaraObject on_error_closure;
+    pthread_mutex_t send_queue_mutex;
 } AngaraLwsClient;
 typedef struct ServerPerSessionData {
     NativeObjectHeader header;
@@ -88,13 +90,34 @@ static int angara_lws_callback(struct lws *wsi, enum lws_callback_reasons reason
         }
         case LWS_CALLBACK_CLIENT_WRITEABLE: {
             AngaraLwsClient *client = (AngaraLwsClient *)context_user_data;
-            if (!client->msg_queue_head) break;
-            msg_buffer* current_msg = client->msg_queue_head;
-            int bytes_sent = lws_write(wsi, ((unsigned char*)current_msg->payload) + LWS_PRE, current_msg->len, LWS_WRITE_TEXT);
-            if (bytes_sent < (int)current_msg->len) { return -1; }
-            client->msg_queue_head = current_msg->next;
-            free(current_msg->payload); free(current_msg);
-            if (client->msg_queue_head) lws_callback_on_writable(wsi);
+            msg_buffer* msg_to_send = nullptr;
+
+            // --- THE FIX: Lock the mutex before touching the queue ---
+            pthread_mutex_lock(&client->send_queue_mutex);
+            if (client->msg_queue_head) {
+                // Dequeue the message
+                msg_to_send = client->msg_queue_head;
+                client->msg_queue_head = msg_to_send->next;
+            }
+            pthread_mutex_unlock(&client->send_queue_mutex);
+            // --- End of critical section ---
+
+            if (!msg_to_send) break;
+
+            int bytes_sent = lws_write(wsi, ((unsigned char*)msg_to_send->payload) + LWS_PRE, msg_to_send->len, LWS_WRITE_TEXT);
+            if (bytes_sent < (int)msg_to_send->len) { /* handle error */ }
+
+            // Free the memory *after* sending
+            free(msg_to_send->payload);
+            free(msg_to_send);
+
+            // Check if there are more messages in the queue (thread-safe)
+            pthread_mutex_lock(&client->send_queue_mutex);
+            if (client->msg_queue_head) {
+                lws_callback_on_writable(wsi); // Ask to be called again
+            }
+            pthread_mutex_unlock(&client->send_queue_mutex);
+
             break;
         }
         case LWS_CALLBACK_RECEIVE: {
@@ -216,6 +239,13 @@ AngaraObject Angara_websocket_connect(int arg_count, AngaraObject* args) {
     }
     const auto client_data = (AngaraLwsClient*)calloc(1, sizeof(AngaraLwsClient));
     client_data->header.type = NATIVE_TYPE_CLIENT;
+
+    if (pthread_mutex_init(&client_data->send_queue_mutex, nullptr) != 0) {
+        angara_throw_error("Failed to initialize client mutex.");
+        free(client_data);
+        return angara_create_nil();
+    }
+
     client_data->self_obj = angara_create_native_instance(client_data, finalize_client);
     angara_incref(client_data->self_obj);
     client_data->on_open_closure = angara_record_get(args[1], "on_open");
@@ -287,7 +317,6 @@ AngaraObject Angara_websocket_connect(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_WebSocket_send(__attribute__((unused)) int arg_count, AngaraObject* args) {
     void* native_data = AS_NATIVE_INSTANCE(args[0])->data; AngaraObject message = args[1];
-    printf( "wsc // sending:");
     size_t msg_len = AS_STRING(message)->length;
     void* msg_payload = malloc(LWS_PRE + msg_len);
     memcpy((char*)msg_payload + LWS_PRE, AS_CSTRING(message), msg_len);
@@ -296,9 +325,26 @@ AngaraObject Angara_WebSocket_send(__attribute__((unused)) int arg_count, Angara
     NativeObjectHeader* header = (NativeObjectHeader*)native_data;
     if (header->type == NATIVE_TYPE_CLIENT) {
         AngaraLwsClient* client = (AngaraLwsClient*)native_data;
-        if (client->msg_queue_head) client->msg_queue_head->next = new_msg; else client->msg_queue_head = new_msg;
+
+        // --- Critical section ---
+        pthread_mutex_lock(&client->send_queue_mutex);
+
+        // Correctly append to the END of the linked list
+        if (!client->msg_queue_head) {
+            client->msg_queue_head = new_msg;
+        } else {
+            msg_buffer* tail = client->msg_queue_head;
+            while (tail->next) {
+                tail = tail->next;
+            }
+            tail->next = new_msg;
+        }
+
+        pthread_mutex_unlock(&client->send_queue_mutex);
+        // --- End of critical section ---
+
         lws_callback_on_writable(client->wsi);
-    } else {
+    }else {
         ServerPerSessionData* psd = (ServerPerSessionData*)native_data;
         if (psd->msg_queue_head) psd->msg_queue_head->next = new_msg; else psd->msg_queue_head = new_msg;
         lws_callback_on_writable(psd->wsi);
@@ -324,7 +370,6 @@ AngaraObject Angara_WebSocket_is_open(__attribute__((unused)) int arg_count, Ang
     const auto header = (NativeObjectHeader*)native_data;
     if (header->type == NATIVE_TYPE_CLIENT) {
         const auto client = (AngaraLwsClient*)native_data;
-        printf(client->is_connected?"Connected":"Disconnected");
         return angara_create_bool(client->is_connected);
     }
     return angara_create_bool(true);
