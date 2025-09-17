@@ -140,6 +140,8 @@ namespace angara {
         std::string sanitize_name(const std::string &name);
 
         std::string escape_c_string(const std::string &str);
+
+        std::string transpileIsExpr(const IsExpr &expr);
     };
 
 } // namespace angara

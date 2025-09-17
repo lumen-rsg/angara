@@ -320,6 +320,8 @@ AngaraObject angara_list_new_with_elements(size_t count, AngaraObject elements[]
 
 AngaraObject angara_record_remove(AngaraObject record, AngaraObject key); // <-- ADD THIS
 AngaraObject angara_record_keys(AngaraObject record);                    // <-- ADD THIS
+AngaraObject angara_is_instance_of(AngaraObject object, const char* class_name);
+AngaraObject angara_is_list_of_type(AngaraObject list, const char* element_type_name);
 
 
 #endif // ANGARA_H

@@ -9,7 +9,7 @@ namespace angara {
     class Lexer {
     public:
         // Constructor takes the source code to be scanned
-        Lexer(const std::string &source);
+        Lexer(std::string source);
 
         // The main function that scans all tokens and returns them as a vector
         std::vector<Token> scanTokens();

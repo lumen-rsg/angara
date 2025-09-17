@@ -984,3 +984,73 @@ AngaraObject angara_record_keys(AngaraObject record_obj) {
 
     return keys_list;
 }
+
+AngaraObject angara_is_instance_of(AngaraObject object, const char* type_name) {
+    bool result = false;
+
+    // First, check against primitive type names.
+    switch (object.type) {
+        case VAL_NIL:
+            result = (strcmp(type_name, "nil") == 0);
+            break;
+        case VAL_BOOL:
+            result = (strcmp(type_name, "bool") == 0);
+            break;
+        case VAL_I64:
+            result = (strcmp(type_name, "i64") == 0 || strcmp(type_name, "int") == 0);
+            break;
+        case VAL_F64:
+            result = (strcmp(type_name, "f64") == 0 || strcmp(type_name, "float") == 0);
+            break;
+        case VAL_OBJ: {
+            // If it's an object, we check its internal object type.
+            switch (OBJ_TYPE(object)) {
+                case OBJ_STRING:
+                    result = (strcmp(type_name, "string") == 0);
+                    break;
+                case OBJ_LIST:
+                    // For now, we only check the base type "list". A full implementation
+                    // would need to check the element type, which requires more runtime info.
+                    // TODO - refine
+                    result = (strcmp(type_name, "list") == 0);
+                    break;
+                case OBJ_RECORD:
+                    result = (strcmp(type_name, "record") == 0);
+                    break;
+                case OBJ_NATIVE_INSTANCE:
+                case OBJ_INSTANCE:
+                    // This is the key case for user-defined types.
+                    // We check the instance's class's name.
+                    result = (strcmp(AS_INSTANCE(object)->klass->name, type_name) == 0);
+                    break;
+                    // Add cases for Exception, Thread, Mutex etc. as needed.
+                default:
+                    result = false;
+                    break;
+            }
+            break;
+        }
+    }
+    return angara_create_bool(result);
+}
+
+// Checks if an object is a list and if its elements match a given type name.
+// Note: This is an expensive operation as it may have to check every element.
+AngaraObject angara_is_list_of_type(AngaraObject list_obj, const char* element_type_name) {
+    if (!IS_LIST(list_obj)) {
+        return angara_create_bool(false);
+    }
+    AngaraList* list = AS_LIST(list_obj);
+
+    // If the list is empty, it can be considered a list of any type.
+    if (list->count == 0) {
+        return angara_create_bool(true);
+    }
+
+    // To be correct, we should check the type of every element.
+    // However, since Angara lists are homogeneous, we only need to check the first one.
+    AngaraObject first_element = list->elements[0];
+
+    // We can call our existing `angara_is_instance_of` on the element.
+    return angara_is_instance_of(first_element, element_type_name);
+}

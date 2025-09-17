@@ -146,6 +146,11 @@ namespace angara {
         static bool isTruthy(const std::shared_ptr<Type> &type);
 
         void visit(std::shared_ptr<const BreakStmt> stmt);
+        std::map<const Symbol*, std::shared_ptr<Type>> m_narrowed_types;
+
+        std::shared_ptr<Symbol> resolve_and_narrow(const VarExpr &expr);
+
+        std::any visit(const IsExpr &expr);
     };
 
 } // namespace angara

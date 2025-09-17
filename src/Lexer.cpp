@@ -5,6 +5,7 @@
 #include "../include/Lexer.h"
 #include <iostream> // For error reporting
 #include <sstream>
+#include <utility>
 
 namespace angara {
 // Initialize the static keywords map
@@ -43,9 +44,10 @@ namespace angara {
             {"private",  TokenType::PRIVATE},
             {"public",   TokenType::PUBLIC},
             {"break", TokenType::BREAK},
+            {"is", TokenType::IS},
     };
 
-    Lexer::Lexer(const std::string &source) : m_source(source) {}
+    Lexer::Lexer(std::string source) : m_source(std::move(source)) {}
 
     std::vector<Token> Lexer::scanTokens() {
         while (!isAtEnd()) {

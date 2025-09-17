@@ -17,6 +17,25 @@ namespace angara {
         return m_module_type;
     }
 
+    std::shared_ptr<Symbol> TypeChecker::resolve_and_narrow(const VarExpr& expr) {
+        // 1. First, resolve the symbol normally from the symbol table.
+        auto symbol = m_symbols.resolve(expr.name.lexeme);
+        if (!symbol) return nullptr;
+
+        // 2. Check if this symbol has a narrowed type in our special map.
+        auto it = m_narrowed_types.find(symbol.get());
+        if (it != m_narrowed_types.end()) {
+            // It does! Create a temporary, "fake" symbol on the stack
+            // that has the same properties but with the new, narrowed type.
+            Symbol narrowed_symbol = *symbol;
+            narrowed_symbol.type = it->second;
+            return std::make_shared<Symbol>(narrowed_symbol);
+        }
+
+        // 3. No narrowing applies. Return the original symbol.
+        return symbol;
+    }
+
     TypeChecker::TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler, std::string module_name)
     : m_errorHandler(errorHandler), m_driver(driver) {
         // Integer Types
@@ -718,14 +737,31 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         return {}; // The actual return value is unused.
     }
 
+    std::any TypeChecker::visit(const IsExpr& expr) {
+        // The `is` operator itself doesn't need narrowing; it just produces a boolean.
+        // We visit the sub-expressions to ensure they are valid.
+        expr.object->accept(*this);
+        popType(); // We don't need the object's type here.
+
+        // We don't need to "visit" the RHS type, just resolve it.
+        resolveType(expr.type);
+
+        // The result of an `is` expression is always a boolean.
+        pushAndSave(&expr, m_type_bool);
+        return {};
+    }
+
     std::any TypeChecker::visit(const VarExpr& expr) {
-        auto symbol = m_symbols.resolve(expr.name.lexeme);
+        // Use our new helper that understands type narrowing.
+        auto symbol = resolve_and_narrow(expr);
+
         if (!symbol) {
             error(expr.name, "Undefined variable '" + expr.name.lexeme + "'.");
             pushAndSave(&expr, m_type_error);
         } else {
-            // Save the result of the resolution for the transpiler.
-            m_variable_resolutions[&expr] = symbol;
+            // Save the original resolution for the transpiler (it doesn't care about narrowing).
+            m_variable_resolutions[&expr] = m_symbols.resolve(expr.name.lexeme);
+            // Push the potentially narrowed type for type checking.
             pushAndSave(&expr, symbol->type);
         }
         return {};
@@ -899,20 +935,45 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     }
 
     void TypeChecker::visit(std::shared_ptr<const IfStmt> stmt) {
-        // 1. Type check the condition expression.
+        // 1. Type check the condition expression normally.
         stmt->condition->accept(*this);
         auto condition_type = popType();
 
-        // 2. Enforce the rule: the condition must be a 'bool'.
         if (!isTruthy(condition_type)) {
-            error(stmt->keyword, "If statement condition must be of type 'bool', but got '" +
+            error(stmt->keyword, "If statement condition must be a boolean or truthy value, but got '" +
                                  condition_type->toString() + "'.");
         }
 
-        // 3. Type check the 'then' branch.
-        stmt->thenBranch->accept(*this, stmt->thenBranch);
+        // --- 2. THE TYPE NARROWING MAGIC ---
+        // Check if the condition was an `is` expression on a variable.
+        if (auto is_expr = std::dynamic_pointer_cast<const IsExpr>(stmt->condition)) {
+            if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(is_expr->object)) {
+                // It is! Let's perform the narrowing for the `then` branch.
+                auto original_symbol = m_symbols.resolve(var_expr->name.lexeme);
+                auto narrowed_type = resolveType(is_expr->type);
 
-        // 4. Type check the 'else' branch, if it exists.
+                // Store the override in our map.
+                m_narrowed_types[original_symbol.get()] = narrowed_type;
+
+                // 3. Type check the 'then' branch. Inside this call, any lookup
+                //    of the variable will use our new `resolve_and_narrow` helper
+                //    and get the new, more specific type.
+                stmt->thenBranch->accept(*this, stmt->thenBranch);
+
+                // 4. CRITICAL: After the 'then' branch is done, we must remove the override.
+                //    The narrowing only applies inside that specific block.
+                m_narrowed_types.erase(original_symbol.get());
+
+                // 5. Type check the 'else' branch (if it exists) without the override.
+                if (stmt->elseBranch) {
+                    stmt->elseBranch->accept(*this, stmt->elseBranch);
+                }
+                return; // We have handled the whole statement.
+            }
+        }
+
+        // --- 3. Fallback for regular `if` statements (without type narrowing) ---
+        stmt->thenBranch->accept(*this, stmt->thenBranch);
         if (stmt->elseBranch) {
             stmt->elseBranch->accept(*this, stmt->elseBranch);
         }

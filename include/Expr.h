@@ -9,6 +9,7 @@
 #include <memory>
 #include <any>
 #include "Token.h"
+#include "ASTTypes.h"
 
 namespace angara {
 
@@ -28,6 +29,7 @@ namespace angara {
     struct TernaryExpr;
     struct ThisExpr;
     struct SuperExpr;
+    struct IsExpr;
 
 // The Visitor interface for expressions
     class ExprVisitor {
@@ -50,6 +52,7 @@ namespace angara {
         virtual std::any visit(const TernaryExpr &expr) = 0;
         virtual std::any visit(const ThisExpr &expr) = 0;
         virtual std::any visit(const SuperExpr &expr) = 0;
+        virtual std::any visit(const IsExpr &expr) = 0;
 
     };
 
@@ -236,6 +239,21 @@ namespace angara {
 
         SuperExpr(Token keyword, Token method)
                 : keyword(std::move(keyword)), method(std::move(method)) {}
+
+        std::any accept(ExprVisitor &visitor) const override {
+            return visitor.visit(*this);
+        }
+    };
+
+    struct IsExpr : Expr {
+        const std::shared_ptr<Expr> object;    // The expression on the left
+        const Token keyword;                   // The 'is' token itself
+        const std::shared_ptr<ASTType> type;   // The type on the right
+
+        IsExpr(std::shared_ptr<Expr> object, Token keyword, std::shared_ptr<ASTType> type)
+                : object(std::move(object)),
+                  keyword(std::move(keyword)),
+                  type(std::move(type)) {}
 
         std::any accept(ExprVisitor &visitor) const override {
             return visitor.visit(*this);

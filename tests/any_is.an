@@ -1,0 +1,30 @@
+attach io;
+
+class Foo {
+public:
+  func method(this) -> nil {
+    io.println(1, "Foo.method() was called!");
+  }
+}
+func main() -> i64 {
+    let f = Foo();
+    let l as list<any> = [f, "test", 15];
+
+    for (item in l) {
+      // At this point, `item` is of type `any`.
+
+      if (item is Foo) {
+        // INSIDE THIS BLOCK, the compiler now knows `item` is of type `Foo`.
+        // This call is now statically safe and will compile!
+        item.method();
+      }
+      orif (item is string) {
+        // INSIDE THIS BLOCK, the compiler now knows `item` is of type `string`.
+        io.println(1, "Found a string: " + item);
+      }
+      else {
+        // INSIDE THIS BLOCK, the compiler knows `item` is NOT a Foo and NOT a string.
+        io.println(1, "Found something else.");
+      }
+    }
+}
