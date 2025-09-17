@@ -1668,6 +1668,23 @@ for (size_t i = 0; i < spawn_args.size(); ++i) {
             error(expr.name, "Type 'list' has no property named '" + property_name + "'.");
         }
     }
+    else if (object_type->kind == TypeKind::RECORD) {
+        // <-- ADD THIS ENTIRE BLOCK
+        if (property_name == "remove") {
+            result_type = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{m_type_string},
+                m_type_bool // Returns true or false
+            );
+        } else if (property_name == "keys") {
+            auto list_of_strings = std::make_shared<ListType>(m_type_string);
+            result_type = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{},
+                list_of_strings // Returns list<string>
+            );
+        } else {
+            error(expr.name, "Type 'record' has no property named '" + property_name + "'. Use subscript `[]` to access fields.");
+        }
+    }
     else if (object_type->kind == TypeKind::THREAD) {
         if (property_name == "join") {
             result_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_any);

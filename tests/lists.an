@@ -16,7 +16,7 @@ func print_list(prefix as string, l as list<any>) -> nil {
 
 export func main() -> i64 {
     io.println(1, "--- List Removal Test ---");
-    let items as list<any> = [10, "string", 30, 40];
+    let items as list<any> = [10, "hello", 30, 40];
     print_list("Original: ", items);
 
     // Test remove_at

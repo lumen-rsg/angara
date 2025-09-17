@@ -1,0 +1,37 @@
+attach io;
+attach adv_string; // For string() conversion
+
+export func main() -> i64 {
+    io.println(1, "--- Record Manipulation Test ---");
+    let user = {
+        "name": "Alex",
+        "id": 101,
+        "role": "developer"
+    };
+
+    io.println(1, "Original record: " + string(user));
+
+    // 1. Test record.keys()
+    let keys = user.keys();
+    io.println(1, "\nKeys in record: " + string(keys));
+
+    // 2. Test record.remove()
+    io.println(1, "\nRemoving key 'role'...");
+    let success = user.remove("role");
+    io.println(1, "Was removal successful? " + string(success));
+    io.println(1, "Record after removing 'role': " + string(user));
+
+    io.println(1, "\nAttempting to remove non-existent key 'password'...");
+    let success2 = user.remove("password");
+    io.println(1, "Was removal successful? " + string(success2));
+    io.println(1, "Record after attempting to remove non-existent key: " + string(user));
+
+    // 3. Iterate over keys to print values
+    io.println(1, "\nIterating over remaining keys:");
+    for (key in user.keys()) {
+        let value = user[key]; // Dynamic access
+        io.println(1, " - " + key + ": " + string(value));
+    }
+
+    return 0;
+}

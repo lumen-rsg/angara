@@ -1133,6 +1133,10 @@ std::string CTranspiler::transpileCallExpr(const CallExpr& expr) {
             if (name == "remove_at") return "angara_list_remove_at(" + object_str + ", " + args_str + ")"; // <-- ADD THIS
             if (name == "remove") return "angara_list_remove(" + object_str + ", " + args_str + ")"; // <-- ADD THIS
         }
+        if (object_type->kind == TypeKind::RECORD) { // <-- ADD THIS BLOCK
+            if (name == "remove") return "angara_record_remove(" + object_str + ", " + args_str + ")";
+            if (name == "keys") return "angara_record_keys(" + object_str + ")";
+        }
 
         // B) Method call on a user-defined class instance (both native and Angara).
         if (object_type->kind == TypeKind::INSTANCE) {

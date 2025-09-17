@@ -317,4 +317,9 @@ AngaraObject angara_spawn_thread(AngaraObject closure, int arg_count, AngaraObje
 AngaraObject angara_list_remove_at(AngaraObject list, AngaraObject index); // <-- ADD THIS
 AngaraObject angara_list_remove(AngaraObject list, AngaraObject value);    // <-- ADD THIS
 AngaraObject angara_list_new_with_elements(size_t count, AngaraObject elements[]);
+
+AngaraObject angara_record_remove(AngaraObject record, AngaraObject key); // <-- ADD THIS
+AngaraObject angara_record_keys(AngaraObject record);                    // <-- ADD THIS
+
+
 #endif // ANGARA_H

@@ -928,3 +928,59 @@ AngaraObject angara_list_remove(AngaraObject list_obj, AngaraObject value_to_rem
 
     return angara_create_bool(false); // No item was removed.
 }
+
+AngaraObject angara_record_remove(AngaraObject record_obj, AngaraObject key_obj) {
+    if (!IS_RECORD(record_obj) || !IS_STRING(key_obj)) {
+        // This check is for safety; the type checker should prevent this.
+        return angara_create_bool(false);
+    }
+    AngaraRecord* record = AS_RECORD(record_obj);
+    const char* key_to_remove = AS_CSTRING(key_obj);
+
+    // 1. Find the index of the key.
+    int64_t found_index = -1;
+    for (size_t i = 0; i < record->count; ++i) {
+        if (strcmp(record->entries[i].key, key_to_remove) == 0) {
+            found_index = (int64_t)i;
+            break;
+        }
+    }
+
+    if (found_index == -1) {
+        return angara_create_bool(false); // Key not found.
+    }
+
+    // 2. Free the key and decref the value of the entry to be removed.
+    free(record->entries[found_index].key);
+    angara_decref(record->entries[found_index].value);
+
+    // 3. Shift all subsequent elements one position to the left.
+    if (record->count > 1 && (size_t)found_index < record->count - 1) {
+        memmove(&record->entries[found_index],
+                &record->entries[found_index + 1],
+                (record->count - found_index - 1) * sizeof(RecordEntry));
+    }
+
+    // 4. Decrease the record's count.
+    record->count--;
+
+    return angara_create_bool(true); // Success.
+}
+
+// Returns a new list containing all the keys of a record.
+AngaraObject angara_record_keys(AngaraObject record_obj) {
+    if (!IS_RECORD(record_obj)) {
+        return angara_list_new(); // Return empty list on error
+    }
+    AngaraRecord* record = AS_RECORD(record_obj);
+
+    // Create a new Angara list to store the keys.
+    AngaraObject keys_list = angara_list_new();
+
+    for (size_t i = 0; i < record->count; ++i) {
+        // Create a new Angara string for each key and push it to the list.
+        angara_list_push(keys_list, angara_create_string(record->entries[i].key));
+    }
+
+    return keys_list;
+}

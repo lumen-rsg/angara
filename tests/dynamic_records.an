@@ -1,0 +1,23 @@
+attach io;
+attach adv_string;
+
+export func main() -> i64 {
+    io.println(1, "--- Dynamic Record Modification Test ---");
+    let user = {}; // Create an empty record
+    io.println(1, "Initial empty record: " + string(user));
+
+    // To add a field, you simply assign a value to a new key.
+    user["name"] = "Alex";
+    io.println(1, "After adding 'name': " + string(user));
+
+    // This works with variable keys as well.
+    let role_key = "role";
+    user[role_key] = "developer";
+    io.println(1, "After adding 'role' with a variable key: " + string(user));
+
+    // If the key already exists, this syntax UPDATES the value.
+    user["name"] = "Alex Smith";
+    io.println(1, "After updating 'name': " + string(user));
+
+    return 0;
+}
