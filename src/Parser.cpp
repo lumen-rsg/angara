@@ -16,11 +16,11 @@ namespace angara {
         const static std::vector<TokenType> name_based_type_starters = {
                 TokenType::IDENTIFIER, TokenType::TYPE_STRING, TokenType::TYPE_INT,
                 TokenType::TYPE_FLOAT, TokenType::TYPE_BOOL, TokenType::TYPE_LIST,
-                TokenType::TYPE_MAP, TokenType::TYPE_VOID, TokenType::TYPE_I8,
+                TokenType::TYPE_MAP, TokenType::TYPE_I8,
                 TokenType::TYPE_I16, TokenType::TYPE_I32, TokenType::TYPE_I64,
                 TokenType::TYPE_U8, TokenType::TYPE_U16, TokenType::TYPE_U32,
                 TokenType::TYPE_U64, TokenType::TYPE_UINT, TokenType::TYPE_F32,
-                TokenType::TYPE_F64, TokenType::TYPE_NIL, TokenType::TYPE_ANY,
+                TokenType::TYPE_F64, TokenType::NIL, TokenType::TYPE_ANY,
                 TokenType::TYPE_THREAD
         };
 
@@ -378,7 +378,7 @@ std::shared_ptr<Stmt> Parser::declaration() {
     }
 
     bool Parser::match(const std::vector<TokenType> &types) {
-        for (TokenType type: types) {
+        for (const TokenType type: types) {
             if (check(type)) {
                 advance();
                 return true;

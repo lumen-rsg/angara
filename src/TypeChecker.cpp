@@ -34,7 +34,6 @@ namespace angara {
         // Other Primitives
         m_type_bool = std::make_shared<PrimitiveType>("bool");
         m_type_string = std::make_shared<PrimitiveType>("string");
-        m_type_void = std::make_shared<PrimitiveType>("void");
         m_type_nil = std::make_shared<NilType>();
         m_type_any = std::make_shared<AnyType>();
         m_type_error = std::make_shared<PrimitiveType>("<error>");
@@ -60,7 +59,7 @@ namespace angara {
 
         auto worker_fn_type = std::make_shared<FunctionType>(
             std::vector<std::shared_ptr<Type>>{}, // No parameters
-            m_type_void
+            m_type_nil
         );
 
         // Define the signature for `spawn` itself: function(function() -> void) -> Thread
@@ -177,7 +176,7 @@ namespace angara {
             for (const auto& p : method_stmt->params) {
                 param_types.push_back(resolveType(p.type));
             }
-            std::shared_ptr<Type> return_type = m_type_void;
+            std::shared_ptr<Type> return_type = m_type_nil;
             if (method_stmt->returnType) {
                 return_type = resolveType(method_stmt->returnType);
             }
@@ -213,7 +212,7 @@ namespace angara {
             }
         }
 
-        std::shared_ptr<Type> return_type = m_type_void;
+        std::shared_ptr<Type> return_type = m_type_nil;
         if (stmt.returnType) {
             return_type = resolveType(stmt.returnType);
         }
@@ -310,7 +309,7 @@ namespace angara {
                 for (const auto& p : method_decl->params) {
                     param_types.push_back(resolveType(p.type));
                 }
-                std::shared_ptr<Type> return_type = m_type_void;
+                std::shared_ptr<Type> return_type = m_type_nil;
                 if (method_decl->returnType) {
                     return_type = resolveType(method_decl->returnType);
                 }
@@ -555,7 +554,6 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
             if (name == "f64" || name == "float") return m_type_f64;
             if (name == "bool") return m_type_bool;
             if (name == "string") return m_type_string;
-            if (name == "void") return m_type_void;
             if (name == "nil") return m_type_nil;
             if (name == "any") return m_type_any;
             if (name == "Thread") return m_type_thread;
@@ -854,47 +852,47 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     }
 
     std::any TypeChecker::visit(const ListExpr& expr) {
-        // Case 1: The list is empty.
+        // Case 1: The list is empty. Its type is `list<any>`.
         if (expr.elements.empty()) {
-            // An empty list `[]` has no intrinsic element type. We cannot infer it
-            // without more context (e.g., `let x as list<i64> = []`).
-            // We assign it a special `list<any>` type. The logic in variable
-            // declarations and assignments is responsible for handling this special case.
             auto empty_list_type = std::make_shared<ListType>(m_type_any);
             pushAndSave(&expr, empty_list_type);
             return {};
         }
 
-        // Case 2: The list has elements. We must infer the type.
+        // Case 2: The list has elements. We must infer the common element type.
 
-        // 1. Determine the type of the *first* element. This becomes our candidate type.
+        // 1. Determine the type of the *first* element. This is our initial candidate.
         expr.elements[0]->accept(*this);
-        auto list_element_type = popType();
+        auto common_element_type = popType();
 
-        if (list_element_type->kind == TypeKind::ERROR) {
-            // If the first element has an error, the whole list is bad.
-            pushAndSave(&expr, m_type_error);
-            return {};
-        }
-
-        // 2. Iterate through the rest of the elements (if any).
+        // 2. Iterate through the rest of the elements and update the common type.
         for (size_t i = 1; i < expr.elements.size(); ++i) {
             expr.elements[i]->accept(*this);
             auto current_element_type = popType();
 
-            // Rule: All elements must be of the same type.
-            if (current_element_type->toString() != list_element_type->toString()) {
-                error(expr.bracket, "List elements must all be of the same type. This list was inferred to be of type 'list<" +
-                                    list_element_type->toString() + ">', but an element of type '" +
-                                    current_element_type->toString() + "' was found.");
-                pushAndSave(&expr, m_type_error);
-                return {};
+            // If the types don't match, the new common type becomes 'any'.
+            if (common_element_type->toString() != current_element_type->toString()) {
+                // We can add more sophisticated rules here later, e.g., if you have
+                // an i64 and an f64, the common type could be f64. For now, any
+                // mismatch defaults to 'any'.
+                common_element_type = m_type_any;
+            }
+
+            // If the common type is already 'any', we can stop checking,
+            // as 'any' is the "top type" and won't change.
+            if (common_element_type->kind == TypeKind::ANY) {
+                // We still need to process the rest of the elements to populate
+                // the expression types map, but we don't need to check their types.
+                for (size_t j = i + 1; j < expr.elements.size(); ++j) {
+                    expr.elements[j]->accept(*this);
+                    popType();
+                }
+                break; // Exit the main checking loop.
             }
         }
 
-        // 3. If we get here, all elements were the same type. The final, inferred
-        //    type of this expression is a ListType containing the element type.
-        auto final_list_type = std::make_shared<ListType>(list_element_type);
+        // 3. The final, inferred type of this expression is a ListType of the common type.
+        auto final_list_type = std::make_shared<ListType>(common_element_type);
         pushAndSave(&expr, final_list_type);
 
         return {};
@@ -1092,7 +1090,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         } else {
             // No value is returned. This is only valid for 'void' functions.
             // (Note: nil is a value, so `return nil;` would be in the block above)
-            if (expected_return_type->toString() != "void") {
+            if (expected_return_type->toString() != "nil") {
                 error(stmt->keyword, "This function must return a value of type '" +
                                      expected_return_type->toString() + "'. Use 'return nil;' if applicable.");
             }
@@ -1650,12 +1648,22 @@ for (size_t i = 0; i < spawn_args.size(); ++i) {
         }
     }
     else if (object_type->kind == TypeKind::LIST) {
+        auto list_type = std::dynamic_pointer_cast<ListType>(object_type);
         if (property_name == "push") {
-            auto list_type = std::dynamic_pointer_cast<ListType>(object_type);
             result_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{list_type->element_type},
-                m_type_void
+                m_type_nil
             );
+        } else if (property_name == "remove_at") { // <-- ADD THIS
+            result_type = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{m_type_i64},
+                list_type->element_type // Returns the element type
+            );
+        } else if (property_name == "remove") { // <-- ADD THIS
+            result_type = std::make_shared<FunctionType>(
+               std::vector<std::shared_ptr<Type>>{list_type->element_type},
+               m_type_bool // Returns true or false
+           );
         } else {
             error(expr.name, "Type 'list' has no property named '" + property_name + "'.");
         }
@@ -1669,7 +1677,7 @@ for (size_t i = 0; i < spawn_args.size(); ++i) {
     }
     else if (object_type->kind == TypeKind::MUTEX) {
         if (property_name == "lock" || property_name == "unlock") {
-            result_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_void);
+            result_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_nil);
         } else {
             error(expr.name, "Type 'Mutex' has no property named '" + property_name + "'.");
         }
@@ -1951,7 +1959,7 @@ for (size_t i = 0; i < spawn_args.size(); ++i) {
             for (const auto& p : method_decl->params) {
                 param_types.push_back(resolveType(p.type));
             }
-            std::shared_ptr<Type> return_type = m_type_void;
+            std::shared_ptr<Type> return_type = m_type_nil;
             if (method_decl->returnType) {
                 return_type = resolveType(method_decl->returnType);
             }

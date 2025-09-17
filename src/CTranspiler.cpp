@@ -65,13 +65,6 @@ namespace angara {
             return "void /* unknown type */";
         }
 
-        // For any type that isn't explicitly void, the C representation
-        // is the AngaraObject struct. The specific type information is stored
-        // inside that struct's 'type' tag.
-        if (angaraType->toString() == "void") {
-            return "void";
-        }
-
         return "AngaraObject";
     }
 
@@ -404,10 +397,10 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
     }
 
     // Handle implicit returns for functions that should return void.
-    if (func_type->return_type->toString() == "void") {
+    if (func_type->return_type->toString() == "nil") {
         if (stmt.body->empty() || !isa<ReturnStmt>(stmt.body->back())) {
              indent();
-             (*m_current_out) << "return;\n";
+             (*m_current_out) << "return angara_create_nil();\n";
         }
     }
     m_indent_level = 0;
@@ -424,7 +417,7 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
     indent();
 
     // Generate the call inside the wrapper, handling void vs. non-void returns.
-    if (func_type->return_type->toString() == "void") {
+    if (func_type->return_type->toString() == "nil") {
         (*m_current_out) << mangled_impl_name << "(";
         for (int i = 0; i < stmt.params.size(); ++i) {
             (*m_current_out) << "args[" << i << "]" << (i == stmt.params.size() - 1 ? "" : ", ");
@@ -613,9 +606,9 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
         // 4. Handle implicit returns for void methods.
         auto method_info = klass.methods.at(stmt.name.lexeme);
         auto func_type = std::dynamic_pointer_cast<FunctionType>(method_info.type);
-        if (func_type->return_type->toString() == "void") {
+        if (func_type->return_type->toString() == "nil") {
             indent();
-            (*m_current_out) << "return;\n";
+            (*m_current_out) << "return angara_create_nil();\n";
         }
 
         m_indent_level--;
@@ -1127,9 +1120,6 @@ std::string CTranspiler::transpileCallExpr(const CallExpr& expr) {
         auto object_type = m_type_checker.m_expression_types.at(get_expr->object.get());
 
         // A) Method call on a built-in primitive type. This has the highest priority.
-        if (object_type->kind == TypeKind::LIST && name == "push") {
-            return "angara_list_push(" + object_str + ", " + args_str + ")";
-        }
         if (object_type->kind == TypeKind::THREAD && name == "join") {
             return "angara_thread_join(" + object_str + ")";
         }
@@ -1137,6 +1127,11 @@ std::string CTranspiler::transpileCallExpr(const CallExpr& expr) {
             // Note: These need to be implemented in the runtime C code.
             // Assuming `angara_mutex_lock(mutex_obj)` and `angara_mutex_unlock(mutex_obj)`.
             return "angara_mutex_" + name + "(" + object_str + ")";
+        }
+        if (object_type->kind == TypeKind::LIST) {
+            if (name == "push") return "angara_list_push(" + object_str + ", " + args_str + ")";
+            if (name == "remove_at") return "angara_list_remove_at(" + object_str + ", " + args_str + ")"; // <-- ADD THIS
+            if (name == "remove") return "angara_list_remove(" + object_str + ", " + args_str + ")"; // <-- ADD THIS
         }
 
         // B) Method call on a user-defined class instance (both native and Angara).

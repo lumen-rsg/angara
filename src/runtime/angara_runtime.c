@@ -868,3 +868,63 @@ AngaraObject angara_exception_new(AngaraObject message) {
     return (AngaraObject){VAL_OBJ, {.obj = (Object*)exc}};
 }
 
+AngaraObject angara_list_remove_at(AngaraObject list_obj, AngaraObject index_obj) {
+    if (!IS_LIST(list_obj) || !IS_I64(index_obj)) {
+        angara_throw_error("remove_at(list, index) received invalid arguments.");
+        return angara_create_nil();
+    }
+    AngaraList* list = AS_LIST(list_obj);
+    int64_t index = AS_I64(index_obj);
+
+    if (index < 0 || (size_t)index >= list->count) {
+        angara_throw_error("List index out of bounds for remove_at().");
+        return angara_create_nil();
+    }
+
+    // 1. Get the value to be returned. We don't incref, as we are
+    //    transferring the list's ownership to the caller.
+    AngaraObject removed_value = list->elements[index];
+
+    // 2. Shift all subsequent elements one position to the left.
+    //    memmove is the safe choice for overlapping memory regions.
+    if (list->count > 1 && (size_t)index < list->count - 1) {
+        memmove(&list->elements[index],
+                &list->elements[index + 1],
+                (list->count - index - 1) * sizeof(AngaraObject));
+    }
+
+    // 3. Decrease the list's count.
+    list->count--;
+
+    return removed_value;
+}
+
+// Searches for and removes the first occurrence of a value in the list.
+// This requires a way to check for equality between AngaraObjects.
+AngaraObject angara_list_remove(AngaraObject list_obj, AngaraObject value_to_remove) {
+    if (!IS_LIST(list_obj)) {
+        angara_throw_error("remove(list, value) received invalid list argument.");
+        return angara_create_nil();
+    }
+    AngaraList* list = AS_LIST(list_obj);
+
+    // 1. Find the index of the value.
+    int64_t found_index = -1;
+    for (size_t i = 0; i < list->count; ++i) {
+        // We reuse the runtime's equality function.
+        if (AS_BOOL(angara_equals(list->elements[i], value_to_remove))) {
+            found_index = (int64_t)i;
+            break;
+        }
+    }
+
+    // 2. If found, call our existing remove_at logic.
+    if (found_index != -1) {
+        AngaraObject removed = angara_list_remove_at(list_obj, angara_create_i64(found_index));
+        // We are the final owner of the removed value, so we must decref it.
+        angara_decref(removed);
+        return angara_create_bool(true); // An item was removed.
+    }
+
+    return angara_create_bool(false); // No item was removed.
+}

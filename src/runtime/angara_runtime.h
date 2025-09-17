@@ -313,4 +313,8 @@ void angara_mutex_lock(AngaraObject mutex_obj);
 void angara_mutex_unlock(AngaraObject mutex_obj);
 AngaraObject angara_thread_join(AngaraObject thread_obj);
 AngaraObject angara_spawn_thread(AngaraObject closure, int arg_count, AngaraObject args[]);
+
+AngaraObject angara_list_remove_at(AngaraObject list, AngaraObject index); // <-- ADD THIS
+AngaraObject angara_list_remove(AngaraObject list, AngaraObject value);    // <-- ADD THIS
+AngaraObject angara_list_new_with_elements(size_t count, AngaraObject elements[]);
 #endif // ANGARA_H

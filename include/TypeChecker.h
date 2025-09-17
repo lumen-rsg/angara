@@ -122,7 +122,6 @@ namespace angara {
         std::shared_ptr<Type> m_type_nil;
         std::shared_ptr<Type> m_type_any;
         std::shared_ptr<Type> m_type_error;
-        std::shared_ptr<Type> m_type_void;
         std::shared_ptr<Type> m_type_thread;
         std::shared_ptr<Type> m_type_mutex;
         std::shared_ptr<Type> m_type_exception;

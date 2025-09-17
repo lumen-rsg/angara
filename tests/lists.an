@@ -1,0 +1,39 @@
+attach io;
+
+func print_list(prefix as string, l as list<any>) -> nil {
+    io.write(1, prefix);
+    io.write(1, "[");
+    let i = 0;
+    for (item in l) {
+        io.write(1, string(item));
+        if (i < len(l) - 1) {
+            io.write(1, ", ");
+        }
+        i = i + 1;
+    }
+    io.println(1, "]");
+}
+
+export func main() -> i64 {
+    io.println(1, "--- List Removal Test ---");
+    let items as list<any> = [10, "string", 30, 40];
+    print_list("Original: ", items);
+
+    // Test remove_at
+    let removed = items.remove_at(2); // Remove "hello"
+    io.println(1, "\nRemoved element at index 2: " + string(removed));
+    print_list("After remove_at(2): ", items);
+
+    // Test remove by value
+    io.println(1, "\nRemoving value 30...");
+    let success = items.remove(30);
+    io.println(1, "Was removal successful? " + string(success));
+    print_list("After remove(30): ", items);
+
+    io.println(1, "\nRemoving value 99 (not in list)...");
+    let success2 = items.remove(99);
+    io.println(1, "Was removal successful? " + string(success2));
+    print_list("After remove(99): ", items);
+
+    return 0;
+}
