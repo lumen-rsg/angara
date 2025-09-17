@@ -138,12 +138,14 @@ namespace angara {
         const std::shared_ptr<Expr> condition;
         const std::shared_ptr<Stmt> thenBranch;
         const std::shared_ptr<Stmt> elseBranch;
+        const std::shared_ptr<VarDeclStmt> declaration;
 
-        IfStmt(Token keyword, std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> thenBranch, std::shared_ptr<Stmt> elseBranch)
+        IfStmt(Token keyword, std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> thenBranch,
+               std::shared_ptr<Stmt> elseBranch, const std::shared_ptr<VarDeclStmt> declaration)
                 : keyword(std::move(keyword)),
                   condition(std::move(condition)),
                   thenBranch(std::move(thenBranch)),
-                  elseBranch(std::move(elseBranch)) {}
+                  elseBranch(std::move(elseBranch)), declaration(declaration) {}
 
         void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const IfStmt>(self));

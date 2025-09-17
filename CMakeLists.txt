@@ -11,6 +11,7 @@ pkg_check_modules(CURL REQUIRED libcurl)
 
 pkg_check_modules(LWS REQUIRED libwebsockets)
 pkg_check_modules(SSL REQUIRED openssl)   # <-- ADD openssl
+pkg_check_modules(AMQP REQUIRED librabbitmq)
 
 # --- 1. Build libangara_runtime.so ---
 # The runtime is now a SHARED library that everything else will link against.
@@ -48,6 +49,11 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
         message(STATUS "Module 'time' requires the real-time library. Linking...")
         # On many systems, clock_gettime requires linking with librt
         target_link_libraries(${MODULE_NAME} PRIVATE rt)
+
+    elseif (MODULE_NAME STREQUAL "amqp") # <-- ADD THIS BLOCK
+        message(STATUS "Module 'amqp' requires librabbitmq. Linking...")
+        target_include_directories(${MODULE_NAME} PRIVATE ${AMQP_INCLUDE_DIRS})
+        target_link_libraries(${MODULE_NAME} PRIVATE ${AMQP_LIBRARIES})
     endif()
     # --- END FIX ---
 

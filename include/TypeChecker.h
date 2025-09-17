@@ -151,6 +151,13 @@ namespace angara {
         std::shared_ptr<Symbol> resolve_and_narrow(const VarExpr &expr);
 
         std::any visit(const IsExpr &expr);
+
+        bool check_type_compatibility(const std::shared_ptr<Type> &expected, const std::shared_ptr<Type> &actual);
+
+        void check_spawn_call(const CallExpr &call, const std::vector<std::shared_ptr<Type>> &arg_types);
+
+        void check_function_call(const CallExpr &call, const std::shared_ptr<FunctionType> &func_type,
+                                 const std::vector<std::shared_ptr<Type>> &arg_types);
     };
 
 } // namespace angara

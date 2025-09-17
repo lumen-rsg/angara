@@ -30,55 +30,105 @@ namespace angara {
 
     class TypeStringParser {
     public:
-        explicit TypeStringParser(const std::string& str);
-        std::shared_ptr<Type> parse_type();
-        char peek();
-        char advance();
-        bool is_at_end();
-    private:
-        std::string m_source;
-        size_t m_current = 0;
+        // The parser is initialized with the full source string and a map of
+        // class names that have been discovered in the current module.
+        TypeStringParser(const std::string& str,
+                         std::map<std::string, std::shared_ptr<ClassType>>& known_classes)
+                : m_source(str), m_known_classes(known_classes) {}
 
-    };
+        // --- Public Parser Interface ---
 
-    TypeStringParser::TypeStringParser(const std::string& str) : m_source(str) {}
+        // This is the primary method called by the driver. It parses a single,
+        // complete type signature from the current position in the string.
+        std::shared_ptr<Type> parse_single_type() {
+            return parse_optional();
+        }
 
-    bool TypeStringParser::is_at_end() { return m_current >= m_source.length(); }
-    char TypeStringParser::peek() { return is_at_end() ? '\0' : m_source[m_current]; }
-    char TypeStringParser::advance() { return is_at_end() ? '\0' : m_source[m_current++]; }
+        // --- Public Utilities for the Driver ---
 
-    std::shared_ptr<Type> TypeStringParser::parse_type() {
-        if (is_at_end()) return std::make_shared<AnyType>();
+        bool is_at_end() {
+            return m_current >= m_source.length();
+        }
 
-        char c = advance();
-        switch (c) {
-            case 'i': return std::make_shared<PrimitiveType>("i64");
-            case 'd': return std::make_shared<PrimitiveType>("f64");
-            case 's': return std::make_shared<PrimitiveType>("string");
-            case 'b': return std::make_shared<PrimitiveType>("bool");
-            case 'a': return std::make_shared<AnyType>();
-            case 'n': return std::make_shared<NilType>();
-            case 'l': {
-                if (advance() != '<') throw std::runtime_error("Expected '<' after 'l' for list type.");
-                auto element_type = parse_type();
-                if (advance() != '>') throw std::runtime_error("Expected '>' to close list generic type.");
-                return std::make_shared<ListType>(element_type);
+        char peek() {
+            return is_at_end() ? '\0' : m_source[m_current];
+        }
+
+        void consume(char expected) {
+            if (is_at_end()) {
+                throw std::runtime_error("Unexpected end of type string. Expected '" + std::string(1, expected) + "'.");
             }
-            case '{': { // <-- NEW: Handle records
-                // A simple {} means a generic record.
-                if (peek() == '}') {
-                    advance(); // consume '}'
+            char found = m_source[m_current++];
+            if (found != expected) {
+                throw std::runtime_error("Expected '" + std::string(1, expected) + "' but found '" + std::string(1, found) + "'.");
+            }
+        }
+
+        void consume_variadic() {
+            consume('.');
+            consume('.');
+            consume('.');
+        }
+
+    private:
+        // --- Internal Parser Grammar Rules ---
+
+        // An optional type is a base type followed by an optional '?'.
+        std::shared_ptr<Type> parse_optional() {
+            auto base_type = parse_base();
+            if (!is_at_end() && peek() == '?') {
+                consume('?');
+                return std::make_shared<OptionalType>(base_type);
+            }
+            return base_type;
+        }
+
+        // A base type is a primitive, a class name, a list, or a record.
+        std::shared_ptr<Type> parse_base() {
+            if (is_at_end()) {
+                throw std::runtime_error("Unexpected end of type string.");
+            }
+
+            char c = peek();
+
+            if (isupper(c)) {
+                std::string class_name;
+                while (isalnum(peek()) || peek() == '_') {
+                    class_name += m_source[m_current++];
+                }
+                if (m_known_classes.count(class_name)) {
+                    return std::make_shared<InstanceType>(m_known_classes.at(class_name));
+                }
+                throw std::runtime_error("Unknown class name '" + class_name + "' in type string.");
+            }
+
+            m_current++; // Consume the single-character type token
+            switch (c) {
+                case 'i': return std::make_shared<PrimitiveType>("i64");
+                case 'd': return std::make_shared<PrimitiveType>("f64");
+                case 's': return std::make_shared<PrimitiveType>("string");
+                case 'b': return std::make_shared<PrimitiveType>("bool");
+                case 'a': return std::make_shared<AnyType>();
+                case 'n': return std::make_shared<NilType>();
+                case 'l': {
+                    consume('<');
+                    auto element_type = parse_optional();
+                    consume('>');
+                    return std::make_shared<ListType>(element_type);
+                }
+                case '{': {
+                    consume('}');
                     return std::make_shared<RecordType>(std::map<std::string, std::shared_ptr<Type>>{});
                 }
-
-                // This is where logic for more complex records like {s:i} would go.
-                // For now, we'll consider that an error.
-                throw std::runtime_error("Detailed record type strings like '{s:i}' are not yet supported.");
+                default:
+                    throw std::runtime_error("Invalid type character '" + std::string(1, c) + "' in type string.");
             }
-            default:
-                throw std::runtime_error("Invalid character in type string: '" + std::string(1, c) + "'");
         }
-    }
+
+        std::string m_source;
+        size_t m_current = 0;
+        std::map<std::string, std::shared_ptr<ClassType>>& m_known_classes;
+    };
 
     void CompilerDriver::log_step(const std::string& message) {
         // 1. Clear the current line (which has the progress bar on it).
@@ -466,123 +516,113 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
         auto module_type = std::make_shared<ModuleType>(module_name);
         module_type->is_native = true;
 
+        // A map to hold all native classes discovered in this module.
+        std::map<std::string, std::shared_ptr<ClassType>> native_classes;
+
+        // --- Pass 1: Discover all CLASS definitions ---
+        for (int i = 0; i < def_count; i++) {
+            const AngaraFuncDef& func_def = defs[i];
+            if (func_def.constructs) {
+                const AngaraClassDef* class_def = func_def.constructs;
+                if (native_classes.count(class_def->name)) { /* error: duplicate class */ continue; }
+
+                auto class_type = std::make_shared<ClassType>(class_def->name);
+                class_type->is_native = true;
+                native_classes[class_def->name] = class_type;
+
+                // Export the ClassType itself so it can be used in annotations.
+                module_type->exports[class_def->name] = class_type;
+            }
+        }
+
         // Iterate through all exported functions in the module.
         for (int i = 0; i < def_count; i++) {
             const AngaraFuncDef& func_def = defs[i];
             if (!func_def.name || !func_def.type_string) continue;
 
             try {
-                std::string full_sig = func_def.type_string;
-                size_t arrow_pos = full_sig.find("->");
-                if (arrow_pos == std::string::npos) {
-                    throw std::runtime_error("Signature for '" + std::string(func_def.name) + "' is missing '->'.");
-                }
+                TypeStringParser parser(func_def.type_string, native_classes);
 
-                std::string params_str = full_sig.substr(0, arrow_pos);
-                std::string return_str = full_sig.substr(arrow_pos + 2);
-
-                // Parse the parameter types from the signature string.
-                TypeStringParser param_parser(params_str);
+                // 1. Parse all parameter types.
                 std::vector<std::shared_ptr<Type>> params;
                 bool is_variadic = false;
-                while (!param_parser.is_at_end()) {
-                    params.push_back(param_parser.parse_type());
-                    if (param_parser.peek() == '.') {
-                        param_parser.advance(); param_parser.advance(); param_parser.advance();
+                while (!parser.is_at_end() && parser.peek() != '-') {
+                    params.push_back(parser.parse_single_type());
+                    if (!parser.is_at_end() && parser.peek() == '.') {
+                        parser.consume_variadic();
                         is_variadic = true;
-                        if (!param_parser.is_at_end()) {
+                        if (!parser.is_at_end()) {
                             throw std::runtime_error("Variadic '...' must be at the end of the parameter list.");
                         }
+                        break;
                     }
                 }
 
-                std::shared_ptr<Type> return_type;
+                // 2. Consume the '->' arrow.
+                parser.consume('-');
+                parser.consume('>');
 
-                // --- This is the key logic for distinguishing constructors from global functions ---
-                if (func_def.constructs != nullptr) {
-                    // This function is a constructor for a native class.
+                // 3. Parse the return type.
+                auto return_type = parser.parse_single_type();
+
+                if (!parser.is_at_end()) {
+                    throw std::runtime_error("Unexpected characters after return type in signature '" + std::string(func_def.type_string) + "'.");
+                }
+
+                // 4. If it's a constructor, populate the class methods and fields.
+                if (func_def.constructs) {
                     const AngaraClassDef* class_def = func_def.constructs;
+                    auto class_type = native_classes.at(class_def->name);
 
-                    if (return_str != class_def->name) {
-                        throw std::runtime_error("Constructor return type '" + return_str + "' in ABI does not match class name '" + std::string(class_def->name) + "'.");
-                    }
-
-                    auto class_type = std::make_shared<ClassType>(class_def->name);
-                    class_type->is_native = true;
-                    Token dummy_token;
-
-                    // Populate the class's methods.
                     if (class_def->methods) {
-                        for (int m = 0; class_def->methods[m].name != nullptr; ++m) {
+                        for (int m = 0; class_def->methods[m].name != NULL; ++m) {
                             const AngaraMethodDef& method_def = class_def->methods[m];
                             if (!method_def.name || !method_def.type_string) continue;
 
-                            std::string m_full_sig = method_def.type_string;
-                            size_t m_arrow_pos = m_full_sig.find("->");
-                            if (m_arrow_pos == std::string::npos) continue; // Skip malformed method
+                            // --- THE FIX: Create a NEW, SEPARATE parser for the method's signature ---
+                            TypeStringParser method_parser(method_def.type_string, native_classes);
 
-                            std::string m_params_str = m_full_sig.substr(0, m_arrow_pos);
-                            std::string m_return_str = m_full_sig.substr(m_arrow_pos + 2);
+                            std::vector<std::shared_ptr<Type>> method_params;
+                            while (!method_parser.is_at_end() && method_parser.peek() != '-') {
+                                method_params.push_back(method_parser.parse_single_type());
+                            }
+                            method_parser.consume('-');
+                            method_parser.consume('>');
+                            auto method_return_type = method_parser.parse_single_type();
 
-                            TypeStringParser m_param_parser(m_params_str);
-                            std::vector<std::shared_ptr<Type>> m_params;
-                            while(!m_param_parser.is_at_end()) m_params.push_back(m_param_parser.parse_type());
+                            if (!method_parser.is_at_end()) {
+                                throw std::runtime_error("Unexpected characters after return type in signature for method '" + std::string(method_def.name) + "'.");
+                            }
 
-                            TypeStringParser m_return_parser(m_return_str);
-                            auto m_return_type = m_return_parser.parse_type();
-
-                            auto method_type = std::make_shared<FunctionType>(m_params, m_return_type);
-                            class_type->methods[method_def.name] = {method_type,  AccessLevel::PUBLIC, dummy_token, false};
+                            auto method_type = std::make_shared<FunctionType>(method_params, method_return_type);
+                            class_type->methods[method_def.name] = {method_type, AccessLevel::PUBLIC, Token(), false};
                         }
                     }
 
                     // Populate the class's fields.
                     if (class_def->fields) {
-                        for (int f = 0; class_def->fields[f].name != nullptr; ++f) {
+                        for (int f = 0; class_def->fields[f].name != NULL; ++f) {
                             const AngaraFieldDef& field_def = class_def->fields[f];
                             if (!field_def.name || !field_def.type_string) continue;
 
-                            TypeStringParser field_parser(field_def.type_string);
-                            auto field_type = field_parser.parse_type();
-                            class_type->fields[field_def.name] = {field_type,  AccessLevel::PUBLIC, dummy_token, field_def.is_const};
+                            TypeStringParser field_parser(field_def.type_string, native_classes);
+                            auto field_type = field_parser.parse_single_type();
+                            if (!field_parser.is_at_end()) {
+                                throw std::runtime_error("Unexpected characters in field type string for '" + std::string(field_def.name) + "'.");
+                            }
+                            class_type->fields[field_def.name] = {field_type, AccessLevel::PUBLIC, Token(), field_def.is_const};
                         }
                     }
-
-                    // 3. Parse the constructor's parameters (the part before '->').
-                    //    We already did this to get the `params` variable.
-
-                    // 4. Create a FunctionType for the constructor's signature.
-                    //    The return type for the *signature* is always `void` for an init method.
-                    auto ctor_sig_type = std::make_shared<FunctionType>(params, std::make_shared<PrimitiveType>("void"));
-
-                    // 5. Add this signature to the class's methods map under the special name "init".
-                    class_type->methods["init"] = {ctor_sig_type,AccessLevel::PUBLIC, dummy_token,  false};
-
-                    // 6. Export the ClassType itself, making the type name available in Angara.
-                    module_type->exports[class_def->name] = class_type;
-
-
-                    // The return type of the exported *function* symbol is an INSTANCE of the class.
-                    return_type = std::make_shared<InstanceType>(class_type);
-
-                } else {
-                    // This is a regular global function, not a constructor.
-                    TypeStringParser return_parser(return_str);
-                    return_type = return_parser.parse_type();
                 }
 
-                // Create the final FunctionType for the exported symbol.
+
                 auto func_type = std::make_shared<FunctionType>(params, return_type, is_variadic);
                 module_type->exports[func_def.name] = func_type;
 
             } catch (const std::runtime_error& e) {
-                std::cerr << "\n" << BOLD << RED << "Warning:" << RESET << " FATAL error while parsing ABI for '"
+                std::cerr << "\n" << BOLD << YELLOW << "Warning:" << RESET << " Could not parse ABI definition for '"
                           << (func_def.name ? func_def.name : "unknown")
-                          << "' in module '" << path << "'.\n";
-                std::cerr << "        REASON: " << e.what() << "\n";
-                // Let's make this a hard error for now to be sure.
-                m_had_error = true;
-                return nullptr; // Stop compilation
+                          << "' in module '" << path << "': " << e.what() << "\n";
             }
         }
 

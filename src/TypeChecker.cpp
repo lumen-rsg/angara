@@ -697,6 +697,18 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                 initializer_type->toString() + "'.");
             declared_type = m_type_error;
         }
+
+        if (!types_match && declared_type->kind == TypeKind::OPTIONAL) {
+            auto optional_type = std::dynamic_pointer_cast<OptionalType>(declared_type);
+            // You can assign a T to a T?
+            if (optional_type->wrapped_type->toString() == initializer_type->toString()) {
+                types_match = true;
+            }
+            // You can assign `nil` to a T?
+            if (initializer_type->kind == TypeKind::NIL) {
+                types_match = true;
+            }
+        }
     }
 
     m_variable_types[stmt.get()] = declared_type;
@@ -935,7 +947,81 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     }
 
     void TypeChecker::visit(std::shared_ptr<const IfStmt> stmt) {
-        // 1. Type check the condition expression normally.
+        // --- Case 1: Handle `if let ...` for optional unwrapping ---
+        if (stmt->declaration) {
+            // 1a. The declaration must have an initializer. The parser should guarantee this.
+            if (!stmt->declaration->initializer) {
+                error(stmt->declaration->name, "Compiler Error: 'if let' declaration is missing an initializer.");
+                return;
+            }
+
+            // 1b. Type check the initializer expression.
+            stmt->declaration->initializer->accept(*this);
+            auto initializer_type = popType();
+
+            if (initializer_type->kind == TypeKind::ERROR) return;
+
+            // 1c. The initializer MUST be an optional type.
+            if (initializer_type->kind != TypeKind::OPTIONAL) {
+                error(stmt->declaration->name, "The value for an 'if let' statement must be an optional type (e.g., 'string?'), but got a non-optional value of type '" + initializer_type->toString() + "'.");
+            } else {
+                // It is an optional, proceed with checking the 'then' branch.
+                m_symbols.enterScope();
+
+                // Declare the new variable with the UNWRAPPED type inside the new scope.
+                auto unwrapped_type = std::dynamic_pointer_cast<OptionalType>(initializer_type)->wrapped_type;
+                // The binding is implicitly constant.
+                m_symbols.declare(stmt->declaration->name, unwrapped_type, true);
+
+                // Now, check the 'then' branch. Inside this block, the new variable
+                // is in scope and has the safe, unwrapped type.
+                stmt->thenBranch->accept(*this, stmt->thenBranch);
+
+                m_symbols.exitScope(); // The new variable goes out of scope here.
+            }
+
+            // Check the 'else' branch normally. The unwrapped variable is not in scope here.
+            if (stmt->elseBranch) {
+                stmt->elseBranch->accept(*this, stmt->elseBranch);
+            }
+            return; // We have handled the entire `if let` statement.
+        }
+
+
+        // --- Case 2: Handle `if ... is ...` for type narrowing ---
+        if (auto is_expr = std::dynamic_pointer_cast<const IsExpr>(stmt->condition)) {
+            if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(is_expr->object)) {
+                // The condition is a type check on a variable.
+
+                // 2a. Type check the condition itself to make sure it's valid.
+                stmt->condition->accept(*this);
+                popType(); // We don't need the boolean result, just the validation.
+                if (m_hadError) return;
+
+                auto original_symbol = m_symbols.resolve(var_expr->name.lexeme);
+                if (original_symbol) {
+                    auto narrowed_type = resolveType(is_expr->type);
+
+                    // 2b. Apply the narrowed type for the 'then' branch.
+                    m_narrowed_types[original_symbol.get()] = narrowed_type;
+                    stmt->thenBranch->accept(*this, stmt->thenBranch);
+                    // 2c. CRITICAL: Remove the narrowing after the 'then' branch is done.
+                    m_narrowed_types.erase(original_symbol.get());
+                } else {
+                    // This should have been caught when visiting the condition, but for safety:
+                    stmt->thenBranch->accept(*this, stmt->thenBranch);
+                }
+
+                // 2d. Check the 'else' branch normally, without the narrowing.
+                if (stmt->elseBranch) {
+                    stmt->elseBranch->accept(*this, stmt->elseBranch);
+                }
+                return; // We have handled the entire `if is` statement.
+            }
+        }
+
+
+        // --- Case 3: Handle a regular `if` statement with a boolean condition ---
         stmt->condition->accept(*this);
         auto condition_type = popType();
 
@@ -944,35 +1030,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                                  condition_type->toString() + "'.");
         }
 
-        // --- 2. THE TYPE NARROWING MAGIC ---
-        // Check if the condition was an `is` expression on a variable.
-        if (auto is_expr = std::dynamic_pointer_cast<const IsExpr>(stmt->condition)) {
-            if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(is_expr->object)) {
-                // It is! Let's perform the narrowing for the `then` branch.
-                auto original_symbol = m_symbols.resolve(var_expr->name.lexeme);
-                auto narrowed_type = resolveType(is_expr->type);
-
-                // Store the override in our map.
-                m_narrowed_types[original_symbol.get()] = narrowed_type;
-
-                // 3. Type check the 'then' branch. Inside this call, any lookup
-                //    of the variable will use our new `resolve_and_narrow` helper
-                //    and get the new, more specific type.
-                stmt->thenBranch->accept(*this, stmt->thenBranch);
-
-                // 4. CRITICAL: After the 'then' branch is done, we must remove the override.
-                //    The narrowing only applies inside that specific block.
-                m_narrowed_types.erase(original_symbol.get());
-
-                // 5. Type check the 'else' branch (if it exists) without the override.
-                if (stmt->elseBranch) {
-                    stmt->elseBranch->accept(*this, stmt->elseBranch);
-                }
-                return; // We have handled the whole statement.
-            }
-        }
-
-        // --- 3. Fallback for regular `if` statements (without type narrowing) ---
+        // Check both branches normally.
         stmt->thenBranch->accept(*this, stmt->thenBranch);
         if (stmt->elseBranch) {
             stmt->elseBranch->accept(*this, stmt->elseBranch);
@@ -1341,10 +1399,41 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             return {};
         }
 
+        // --- THE FIX: Centralized Type Compatibility Check ---
+        bool types_match = (lhs_type->toString() == rhs_type->toString());
+
+        // Rule: A T or a `nil` can be assigned to a T?
+        if (!types_match && lhs_type->kind == TypeKind::OPTIONAL) {
+            auto optional_type = std::dynamic_pointer_cast<OptionalType>(lhs_type);
+            if (optional_type->wrapped_type->toString() == rhs_type->toString() || rhs_type->kind == TypeKind::NIL) {
+                types_match = true;
+            }
+        }
+
+        // Rule: Anything can be assigned to `any`.
+        if (!types_match && lhs_type->kind == TypeKind::ANY) {
+            types_match = true;
+        }
+
+        // Rule: An `any` can be assigned to a typed variable (runtime cast assertion).
+        if (!types_match && rhs_type->kind == TypeKind::ANY) {
+            types_match = true;
+        }
+
+        // ... (other special rules for empty list, etc.) ...
+
+        if (!types_match) {
+            error(expr.op, "Type mismatch. Cannot assign a value of type '" +
+                           rhs_type->toString() + "' to a target of type '" +
+                           lhs_type->toString() + "'.");
+        }
+        // --- END FIX ---
+
         // 4. Check for type compatibility. The LHS type must match the RHS type.
         if (lhs_type->toString() != rhs_type->toString()) {
             // Special case for assigning an empty list `[]` to a typed list variable.
             if (auto list_expr = std::dynamic_pointer_cast<const ListExpr>(expr.value)) {
+
                 if (list_expr->elements.empty() && lhs_type->kind == TypeKind::LIST) {
                     // This is valid, so we skip the error.
                 } else {
@@ -1437,226 +1526,205 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         return {};
     }
 
+    bool TypeChecker::check_type_compatibility(
+            const std::shared_ptr<Type>& expected,
+            const std::shared_ptr<Type>& actual
+    ) {
+        if (expected->toString() == actual->toString()) return true;
+
+        // Rule: Anything is compatible with 'any'.
+        if (expected->kind == TypeKind::ANY || actual->kind == TypeKind::ANY) return true;
+
+        // Rule: A T or a `nil` is compatible with a T?
+        if (expected->kind == TypeKind::OPTIONAL) {
+            auto optional_type = std::dynamic_pointer_cast<OptionalType>(expected);
+            if (optional_type->wrapped_type->toString() == actual->toString() || actual->kind == TypeKind::NIL) {
+                return true;
+            }
+        }
+
+        // Rule: A generic record `{}` is compatible with a specific record `{...}`.
+        if (expected->kind == TypeKind::RECORD && actual->kind == TypeKind::RECORD) {
+            if (std::dynamic_pointer_cast<RecordType>(expected)->fields.empty()) {
+                return true;
+            }
+        }
+
+        return false; // Not compatible
+    }
+
+    // A helper to validate a standard function or method call against a signature.
+    void TypeChecker::check_function_call(
+            const CallExpr& call,
+            const std::shared_ptr<FunctionType>& func_type,
+            const std::vector<std::shared_ptr<Type>>& arg_types
+    ) {
+        size_t num_expected = func_type->param_types.size();
+        size_t num_actual = arg_types.size();
+
+        // 1. Check arity (number of arguments)
+        if (func_type->is_variadic) {
+            // For variadic functions, the user must supply at least the required parameters.
+            if (num_actual < num_expected) {
+                error(call.paren, "Incorrect number of arguments. Function expects at least " +
+                                  std::to_string(num_expected) + " argument(s), but got " +
+                                  std::to_string(num_actual) + ".");
+                // Add a note pointing to the function's definition.
+                if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(call.callee)) {
+                    if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
+                        note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
+                    }
+                }
+            }
+        } else {
+            // For regular functions, the number of arguments must match exactly.
+            if (num_actual != num_expected) {
+                error(call.paren, "Incorrect number of arguments. Function expects " +
+                                  std::to_string(num_expected) + " argument(s), but got " +
+                                  std::to_string(num_actual) + ".");
+                // Add the same helpful note.
+                if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(call.callee)) {
+                    if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
+                        note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
+                    }
+                } else if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(call.callee)) {
+                    // Handle notes for method calls, e.g., my_instance.method()
+                    // This requires more complex logic to find the method's declaration token
+                    // in the ClassType, which will be added later. TODO
+                }
+            }
+        }
+
+        // If an arity error occurred, stop checking.
+        if (m_hadError) return;
+
+        // 2. Check types of the fixed parameters (unchanged from previous logic)
+        for (size_t i = 0; i < num_expected; ++i) {
+            if (!check_type_compatibility(func_type->param_types[i], arg_types[i])) {
+                error(call.paren, "Type mismatch for argument " + std::to_string(i + 1) + ". " +
+                                  "Expected '" + func_type->param_types[i]->toString() +
+                                  "', but got '" + arg_types[i]->toString() + "'.");
+                return; // Stop after first type error
+            }
+        }
+    }
+
+// A helper for the special-case validation logic for `spawn`.
+    void TypeChecker::check_spawn_call(
+            const CallExpr& call,
+            const std::vector<std::shared_ptr<Type>>& arg_types
+    ) {
+        // Rule 1: spawn() must be called with at least one argument (the function).
+        if (arg_types.empty()) {
+            error(call.paren, "spawn() requires at least one argument, the function to execute in the new thread.");
+            return;
+        }
+
+        // Rule 2: The first argument to spawn() must be a function.
+        auto closure_type = arg_types[0];
+        if (closure_type->kind != TypeKind::FUNCTION) {
+            error(call.paren, "The first argument to spawn() must be a function, but got a value of type '" + closure_type->toString() + "'.");
+            return;
+        }
+        auto func_type = std::dynamic_pointer_cast<FunctionType>(closure_type);
+
+        // The arguments passed to spawn (after the function itself) must match the function's parameters.
+        size_t num_expected_args = func_type->param_types.size();
+        size_t num_actual_args = arg_types.size() - 1;
+
+        // Rule 3: Check arity for the spawned function.
+        if (num_actual_args != num_expected_args) {
+            error(call.paren, "Incorrect number of arguments for the spawned function. "
+                              "The function expects " + std::to_string(num_expected_args) +
+                              " argument(s), but " + std::to_string(num_actual_args) + " were provided to spawn().");
+
+            // Add a note pointing to the function being spawned, if it's a direct variable.
+            if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(call.arguments[0])) {
+                if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
+                    note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
+                }
+            }
+            return;
+        }
+
+        // Rule 4: Check the type of each argument for the spawned function.
+        for (size_t i = 0; i < num_actual_args; ++i) {
+            const auto& expected_type = func_type->param_types[i];
+            // The actual arguments start from the second element of the `spawn` call.
+            const auto& actual_type = arg_types[i + 1];
+
+            if (!check_type_compatibility(expected_type, actual_type)) {
+                error(call.paren, "Type mismatch for argument " + std::to_string(i + 1) + " of spawned function. "
+                                                                                          "Expected '" + expected_type->toString() + "', but got '" + actual_type->toString() + "'.");
+
+                // Add the same helpful note.
+                if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(call.arguments[0])) {
+                    if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
+                        note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
+                    }
+                }
+                return; // Stop after the first error.
+            }
+        }
+    }
+
     std::any TypeChecker::visit(const CallExpr& expr) {
-        // 1. Recursively visit the callee expression to determine its type.
+        // --- Phase 1: Evaluate Callee and Arguments ---
         expr.callee->accept(*this);
         auto callee_type = popType();
-
-        // 2. Recursively visit all argument expressions to determine their types.
         std::vector<std::shared_ptr<Type>> arg_types;
         for (const auto& arg_expr : expr.arguments) {
             arg_expr->accept(*this);
             arg_types.push_back(popType());
         }
+        if (m_hadError) { pushAndSave(&expr, m_type_error); return {}; }
 
-        // 3. Bail out immediately if any sub-expression had a type error.
-        if (callee_type->kind == TypeKind::ERROR) {
-            pushAndSave(&expr, m_type_error);
-            return {};
-        }
-        for (const auto& arg_type : arg_types) {
-            if (arg_type->kind == TypeKind::ERROR) {
-                pushAndSave(&expr, m_type_error);
+        // --- Phase 2: Special Case Dispatch for `spawn` ---
+        if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
+            if (var_expr->name.lexeme == "spawn") {
+                check_spawn_call(expr, arg_types);
+                // The result type of spawn is always Thread.
+                pushAndSave(&expr, m_hadError ? m_type_error : m_type_thread);
                 return {};
             }
         }
 
-        if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
-            auto symbol = m_symbols.resolve(var_expr->name.lexeme);
-            if (symbol && symbol->from_module && symbol->from_module->is_native) {
-                // This is a direct call to a native symbol. Record its usage.
-                m_used_native_symbols.insert({symbol->from_module, symbol->name, symbol->type});
-            }
-        }
+        // --- Phase 3: Main Dispatch based on Callee Type ---
+        std::shared_ptr<Type> result_type = m_type_error;
 
-        // 2. Check if the callee is the special built-in `spawn` function.
-    if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
-        if (var_expr->name.lexeme == "spawn") {
-            // --- SPECIAL VALIDATION LOGIC FOR spawn(...) ---
-            if (expr.arguments.empty()) {
-                error(expr.paren, "spawn() requires at least one argument: the function to run.");
-                pushAndSave(&expr, m_type_error); return {};
-            }
-
-            // The first argument must be a closure.
-            expr.arguments[0]->accept(*this);
-            auto closure_type = popType();
-            if (closure_type->kind != TypeKind::FUNCTION) {
-                error(expr.paren, "The first argument to spawn() must be a function, but got '" + closure_type->toString() + "'.");
-                pushAndSave(&expr, m_type_error); return {};
-            }
-            auto func_type = std::dynamic_pointer_cast<FunctionType>(closure_type);
-
-            // The rest of the arguments to spawn(...) must match the parameters of the closure.
-            std::vector<std::shared_ptr<Type>> spawn_args;
-            for (size_t i = 1; i < expr.arguments.size(); ++i) {
-                expr.arguments[i]->accept(*this);
-                spawn_args.push_back(popType());
-            }
-
-            // Now, validate the provided arguments against the closure's signature.
-if (spawn_args.size() != func_type->param_types.size()) {
-    error(expr.paren, "Incorrect number of arguments provided for the spawned function. "
-                      "The function expects " + std::to_string(func_type->param_types.size()) +
-                      " argument(s), but received " + std::to_string(spawn_args.size()) + ".");
-
-    // Add a note pointing to the function being spawned.
-    if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.arguments[0])) {
-        if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
-            note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
-        }
-    }
-
-    pushAndSave(&expr, m_type_error);
-    return {};
-}
-
-// Check the type of each argument.
-for (size_t i = 0; i < spawn_args.size(); ++i) {
-    auto expected_type = func_type->param_types[i];
-    auto actual_type = spawn_args[i];
-    bool types_match = (actual_type->toString() == expected_type->toString());
-
-    // --- Apply our standard type compatibility rules ---
-    // Rule: `any` is compatible with anything.
-    if (!types_match && (expected_type->kind == TypeKind::ANY || actual_type->kind == TypeKind::ANY)) {
-        types_match = true;
-    }
-    // Rule: A generic record `{}` is compatible with a specific record `{...}`.
-    if (!types_match && expected_type->kind == TypeKind::RECORD && actual_type->kind == TypeKind::RECORD) {
-        if (std::dynamic_pointer_cast<RecordType>(expected_type)->fields.empty()) {
-            types_match = true;
-        }
-    }
-    // Rule: A more specific type can be assigned to a more general type (`any`).
-    if (!types_match && expected_type->kind == TypeKind::ANY) {
-        types_match = true;
-    }
-
-
-    if (!types_match) {
-        // Find the specific argument expression in the AST to underline the right token.
-        // The +1 accounts for the closure argument itself.
-        const auto& error_arg_expr = expr.arguments[i + 1];
-
-        // We need a token from the expression to report the error accurately.
-        // This is a bit tricky, so we'll just use the main parenthesis for now.
-        // A more advanced implementation would get a token from the specific argument expression.
-        error(expr.paren, "Type mismatch for argument " + std::to_string(i + 1) + " of spawned function. "
-                          "Expected '" + expected_type->toString() + "', but got '" + actual_type->toString() + "'.");
-
-        // Add a note pointing to the function being spawned.
-        if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.arguments[0])) {
-            if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
-                note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
-            }
-        }
-
-        pushAndSave(&expr, m_type_error);
-        return {};
-    }
-}
-
-            // The result of a spawn call is always a Thread.
-            pushAndSave(&expr, m_type_thread);
-            return {};
-        }
-    }
-
-        std::shared_ptr<Type> result_type = m_type_error; // Default to error
-
-        // --- Case A: The callee is a FUNCTION (e.g., `println(...)` or `websocket.connect(...)`) ---
         if (callee_type->kind == TypeKind::FUNCTION) {
             auto func_type = std::dynamic_pointer_cast<FunctionType>(callee_type);
-            size_t num_fixed_params = func_type->param_types.size();
-
-            // Check arity (number of arguments)
-            if (func_type->is_variadic) {
-                if (arg_types.size() < num_fixed_params) {
-                    error(expr.paren, "Incorrect number of arguments. Function expects at least " +
-                                      std::to_string(num_fixed_params) + ", but got " + std::to_string(arg_types.size()) + ".");
-                }
-            } else {
-                if (arg_types.size() != num_fixed_params) {
-                    error(expr.paren, "Incorrect number of arguments. Function expects " +
-                                      std::to_string(num_fixed_params) + ", but got " + std::to_string(arg_types.size()) + ".");
-                }
-            }
-
-            // If arity is correct, check the type of each argument.
-            if (!m_hadError) {
-                for (size_t i = 0; i < num_fixed_params; ++i) {
-                    auto expected_type = func_type->param_types[i];
-                    auto actual_type = arg_types[i];
-                    bool types_match = (actual_type->toString() == expected_type->toString());
-
-                    // Special compatibility rules
-                    if (!types_match && (expected_type->kind == TypeKind::ANY)) types_match = true;
-                    if (!types_match && expected_type->kind == TypeKind::RECORD && actual_type->kind == TypeKind::RECORD) {
-                        if (std::dynamic_pointer_cast<RecordType>(expected_type)->fields.empty()) types_match = true;
-                    }
-
-                    if (!types_match) {
-                        error(expr.paren, "Type mismatch for argument " + std::to_string(i + 1) + ". " +
-                                          "Function expects '" + expected_type->toString() + "', but got '" +
-                                          actual_type->toString() + "'.");
-                        break; // Stop after first error
-                    }
-                }
-            }
-
-            // If all checks passed, the result of the call is the function's return type.
+            check_function_call(expr, func_type, arg_types);
             if (!m_hadError) {
                 result_type = func_type->return_type;
             }
         }
-            // --- Case B: The callee is a CLASS (e.g., `_Parser(...)` or `counter.Counter(...)`) ---
-            // Note: The CompilerDriver now ensures that native constructors are represented as a call to a ClassType.
         else if (callee_type->kind == TypeKind::CLASS) {
             auto class_type = std::dynamic_pointer_cast<ClassType>(callee_type);
             auto init_it = class_type->methods.find("init");
 
             if (init_it == class_type->methods.end()) {
+                // No 'init' method found. This class can only be constructed with zero arguments.
                 if (!arg_types.empty()) {
-                    error(expr.paren, "Class '" + class_type->name + "' has no constructor that accepts arguments.");
+                    error(expr.paren, "Class '" + class_type->name + "' does not have a constructor that accepts arguments.");
+                    // We can add a note pointing to the class definition.
+                    // This requires getting the token from the ClassType, which is an enhancement for later.
+                    // For now, the error message is very clear. TODO
                 }
             } else {
+                // An 'init' method exists, use it to validate the call.
                 auto init_sig = std::dynamic_pointer_cast<FunctionType>(init_it->second.type);
-                if (arg_types.size() != init_sig->param_types.size()) {
-                    error(expr.paren, "Incorrect number of arguments for constructor of '" + class_type->name +
-                                      "'. Expected " + std::to_string(init_sig->param_types.size()) +
-                                      ", but got " + std::to_string(arg_types.size()) + ".");
-                } else {
-                    for (size_t i = 0; i < arg_types.size(); ++i) {
-                        // (Argument type checking logic is identical to the function case above)
-                        auto expected_type = init_sig->param_types[i];
-                        auto actual_type = arg_types[i];
-                        bool types_match = (actual_type->toString() == expected_type->toString());
-                        if (!types_match && (expected_type->kind == TypeKind::ANY)) types_match = true;
-                        if (!types_match && expected_type->kind == TypeKind::RECORD && actual_type->kind == TypeKind::RECORD) {
-                            if (std::dynamic_pointer_cast<RecordType>(expected_type)->fields.empty()) types_match = true;
-                        }
-                        if (!types_match) {
-                            error(expr.paren, "Type mismatch for constructor argument " + std::to_string(i + 1) +
-                                              ". Expected '" + expected_type->toString() +
-                                              "', but got '" + actual_type->toString() + "'.");
-                            break;
-                        }
-                    }
-                }
+                check_function_call(expr, init_sig, arg_types);
             }
 
-            // If all checks passed, the result of the call is an instance of the class.
             if (!m_hadError) {
                 result_type = std::make_shared<InstanceType>(class_type);
             }
         }
-            // --- Case C: The callee is not a callable type ---
         else {
             error(expr.paren, "This expression is not callable. Can only call functions and classes.");
         }
 
-        // Finally, push the single, determined result type onto the stack.
         pushAndSave(&expr, result_type);
         return {};
     }

@@ -470,24 +470,50 @@ std::shared_ptr<Stmt> Parser::declaration() {
     }
 
     std::shared_ptr<Stmt> Parser::ifStatement() {
-        Token keyword = previous();
+        Token keyword = previous(); // The 'if' token
         consume(TokenType::LEFT_PAREN, "Expect '(' after 'if'.");
-        std::shared_ptr<Expr> condition = expression();
+
+        std::shared_ptr<Expr> condition = nullptr;
+        std::shared_ptr<VarDeclStmt> declaration = nullptr;
+
+        // --- THE FIX IS HERE ---
+        if (match({TokenType::LET})) {
+            // This is an `if let` binding, not a regular statement.
+            // We must parse it manually and NOT expect a semicolon.
+            Token name = consume(TokenType::IDENTIFIER, "Expect variable name after 'let' in 'if' condition.");
+
+            // The type annotation is optional in `if let`.
+            std::shared_ptr<ASTType> typeAnnotation = nullptr;
+            if (match({TokenType::AS})) {
+                typeAnnotation = type();
+            }
+
+            consume(TokenType::EQUAL, "Expect '=' to provide an initializer for 'if let'.");
+            std::shared_ptr<Expr> initializer = expression();
+
+            // Create the VarDeclStmt. It's implicitly a 'const' binding.
+            declaration = std::make_shared<VarDeclStmt>(name, typeAnnotation, initializer, true);
+        } else {
+            // This is a regular `if` statement with a boolean condition.
+            condition = expression();
+        }
+        // --- END FIX ---
+
         consume(TokenType::RIGHT_PAREN, "Expect ')' after if condition.");
 
+        // The rest of the logic for parsing the then/else branches is unchanged.
         consume(TokenType::LEFT_BRACE, "Expect '{' before if body.");
         std::shared_ptr<Stmt> thenBranch = std::make_shared<BlockStmt>(block());
 
         std::shared_ptr<Stmt> elseBranch = nullptr;
         if (match({TokenType::ORIF})) {
-            // "orif" is just syntactic sugar for "else if"
             elseBranch = ifStatement();
         } else if (match({TokenType::ELSE})) {
             consume(TokenType::LEFT_BRACE, "Expect '{' before else body.");
             elseBranch = std::make_shared<BlockStmt>(block());
         }
 
-        return std::make_shared<IfStmt>(std::move(keyword), std::move(condition), std::move(thenBranch), std::move(elseBranch));
+        return std::make_shared<IfStmt>(keyword, condition, thenBranch, elseBranch, declaration);
     }
 
     std::shared_ptr<Stmt> Parser::whileStatement() {

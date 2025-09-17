@@ -1,0 +1,82 @@
+attach connect from amqp;
+attach io;
+attach time;
+attach adv_string;
+
+const QUEUE_NAME = "angara_task_queue";
+
+// --- The WORKER Logic ---
+func run_worker() -> nil {
+  io.println(1, "--- Starting WORKER ---");
+  let conn = connect("amqp://guest:guest@localhost:5672/");
+  let ch = conn.channel();
+
+  // Declare a durable queue to ensure tasks are not lost if the server restarts.
+  ch.queue_declare(QUEUE_NAME, true, false, false);
+  io.println(1, "[*] Waiting for messages in queue '" + QUEUE_NAME + "'. To exit press CTRL+C");
+
+  while (true) {
+    // Wait for a message indefinitely.
+    let msg_data = ch.consume(QUEUE_NAME, 10);
+
+    if (let received_record = msg_data) {
+      let msg as {body: string, delivery_tag: i64} = received_record;
+      io.println(1, " [x] Received '" + msg["body"] + "'");
+
+      // Simulate work by sleeping for the number of dots in the message.
+      let i = 0;
+      while (i < len(msg["body"])) {
+        if (adv_string.get(msg["body"], i) == ".") {
+          time.sleep(1.0);
+        }
+        i = i + 1;
+      }
+
+      io.println(1, " [x] Done. Acknowledging message.");
+      // Acknowledge the message to remove it from the queue.
+      ch.ack(msg["delivery_tag"]);
+    }
+  }
+
+  // This part is unreachable in the while(true) loop, but shows the pattern.
+  ch.close();
+  conn.close();
+}
+
+
+// --- The PUBLISHER Logic ---
+func run_publisher(message as string) -> nil {
+  io.println(1, "--- Starting PUBLISHER ---");
+  let conn = connect("amqp://guest:guest@localhost:5672/");
+  let ch = conn.channel();
+
+  ch.queue_declare(QUEUE_NAME, true, false, false);
+
+  // Publish to the default exchange, using the queue name as the routing key.
+  ch.publish("", QUEUE_NAME, message);
+  io.println(1, " [x] Sent '" + message + "'");
+
+  ch.close();
+  conn.close();
+}
+
+
+export func main(args as list<string>) -> i64 {
+  try {
+    // Decide whether to run as a publisher or a worker based on arguments.
+    if (len(args) > 1) {
+      // If there's an argument, join them into a single message and publish.
+      let message = adv_string.substring(args[1], 0, len(args[1])); // Simple first arg
+      // A real app would join all args: `string.join(args.slice(1), " ")`
+      run_publisher(message);
+    } else {
+      // If there are no arguments, run as a worker.
+      run_worker();
+    }
+
+  } catch (e) {
+    io.println(2, "[FATAL] AMQP Error: " + string(e));
+    return 1;
+  }
+  return 0;
+}

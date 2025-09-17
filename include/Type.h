@@ -27,6 +27,7 @@ namespace angara {
         MUTEX,
         MODULE,
         EXCEPTION,
+        OPTIONAL,
         ERROR // A special type to prevent cascading error messages
     };
 
@@ -266,6 +267,16 @@ namespace angara {
     struct ExceptionType : Type {
         ExceptionType() : Type(TypeKind::EXCEPTION) {}
         std::string toString() const override { return "Exception"; }
+    };
+
+    struct OptionalType : Type {
+        const std::shared_ptr<Type> wrapped_type;
+        explicit OptionalType(std::shared_ptr<Type> wrapped_type)
+                : Type(TypeKind::OPTIONAL), wrapped_type(std::move(wrapped_type)) {}
+
+        [[nodiscard]] std::string toString() const override {
+            return wrapped_type->toString() + "?";
+        }
     };
 
 } // namespace angara
