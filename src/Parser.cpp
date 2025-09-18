@@ -338,12 +338,22 @@ std::shared_ptr<Stmt> Parser::declaration() {
         }
 
         if (match({TokenType::SUPER})) {
-            Token super_keyword = previous(); // This is the token for "super".
-            consume(TokenType::DOT, "Expect '.' after 'super'.");
-            Token method = consume(TokenType::IDENTIFIER, "Expect superclass method name.");
-            Token this_keyword = Token(TokenType::THIS, "this", super_keyword.line, super_keyword.column);
+            Token keyword = previous(); // The 'super' token
 
-            return std::make_shared<SuperExpr>(this_keyword, method);
+            // --- THE FIX: Look ahead for '.' or '(' ---
+            if (match({TokenType::DOT})) {
+                // It's a super.method() call.
+                Token method = consume(TokenType::IDENTIFIER, "Expect superclass method name after 'super.'.");
+                return std::make_shared<SuperExpr>(keyword, method);
+            }
+            else if (check(TokenType::LEFT_PAREN)) {
+                // It's a super(...) constructor call. The method is implicitly 'init'.
+                // We don't consume the parenthesis here; the `call()` function will do that.
+                return std::make_shared<SuperExpr>(keyword, std::nullopt);
+            }
+            else {
+                throw error(peek(), "Expect '.' or '(' after 'super'.");
+            }
         }
 
         if (match({TokenType::IDENTIFIER})) {

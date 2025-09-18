@@ -240,10 +240,12 @@ namespace angara {
 
     struct SuperExpr : Expr {
         const Token keyword; // The 'super' token
-        const Token method;  // The method name token
+        // The method is now optional. If it's not present, it's a constructor call.
+        const std::optional<Token> method;
 
-        SuperExpr(Token keyword, Token method)
-                : keyword(std::move(keyword)), method(std::move(method)) {}
+        SuperExpr(Token keyword, std::optional<Token> method)
+            : keyword(std::move(keyword)),
+              method(std::move(method)) {}
 
         std::any accept(ExprVisitor &visitor) const override {
             return visitor.visit(*this);

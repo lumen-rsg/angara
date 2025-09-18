@@ -993,7 +993,8 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
     }
 
     std::string CTranspiler::transpileSuperExpr(const SuperExpr& expr) {
-        return "/* super." + expr.method.lexeme + " */"; // TODO :: Keep as placeholder for now
+        // na.
+        return {};
     }
 
     std::string CTranspiler::transpileLiteral(const Literal& expr) {
@@ -1396,19 +1397,32 @@ std::string CTranspiler::transpileCallExpr(const CallExpr& expr) {
             if (name == "keys") return "angara_record_keys(" + object_str + ")";
         }
 
-        // B) Method call on a user-defined class instance (both native and Angara).
+        // A) Method call on a class instance (e.g., `p.move(...)` or `my_counter.increment()`).
         if (object_type->kind == TypeKind::INSTANCE) {
             auto instance_type = std::dynamic_pointer_cast<InstanceType>(object_type);
-            auto class_type = instance_type->class_type;
-            if (class_type->is_native) {
+
+            // --- THE FIX ---
+            // 1. Find which class in the inheritance hierarchy actually defines this method.
+            //    `name` is the method name, e.g., "move".
+            const ClassType* owner_class = findPropertyOwner(instance_type->class_type.get(), name);
+
+            // This should never happen if the TypeChecker is correct, but it's a safe guard.
+            if (!owner_class) {
+                return "/* <compiler_error_unknown_method> */";
+            }
+
+            // 2. Dispatch to the correct C code based on whether the owner class was native or not.
+            if (owner_class->is_native) {
                 // NATIVE METHOD: Transpile to a generic (argc, argv) call with `self` as the first argument.
+                // The mangled name is Angara_ClassName_MethodName, using the OWNER's name.
                 std::string final_args = object_str + (args_str.empty() ? "" : ", " + args_str);
-                return "Angara_" + class_type->name + "_" + name + "(" +
+                return "Angara_" + owner_class->name + "_" + name + "(" +
                        std::to_string(expr.arguments.size() + 1) + ", (AngaraObject[]){" + final_args + "})";
             } else {
                 // ANGARA METHOD: Transpile to a direct, strongly-typed C call.
+                // The mangled name is Angara_ClassName_MethodName, using the OWNER's name.
                 std::string final_args = object_str + (args_str.empty() ? "" : ", " + args_str);
-                return "Angara_" + class_type->name + "_" + name + "(" + final_args + ")";
+                return "Angara_" + owner_class->name + "_" + name + "(" + final_args + ")";
             }
         }
 
@@ -1475,6 +1489,31 @@ std::string CTranspiler::transpileCallExpr(const CallExpr& expr) {
         if (name == "main") closure_var = "g_angara_main_closure";
         return "angara_call(" + closure_var + ", " + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
     }
+
+        if (auto super_expr = std::dynamic_pointer_cast<const SuperExpr>(expr.callee)) {
+            // The TypeChecker guarantees `super` is only used inside a class,
+            // so `m_current_class_name` will be correctly set.
+            if (m_current_class_name.empty()) {
+                // This is a safeguard; it should be unreachable if the TypeChecker is correct.
+                return "/* <compiler_error_super_outside_class> */";
+            }
+
+            // Get the full type information for the current class from the TypeChecker's results.
+            auto current_class_symbol = m_type_checker.m_symbols.resolve(m_current_class_name);
+            auto current_class_type = std::dynamic_pointer_cast<ClassType>(current_class_symbol->type);
+            auto superclass_type = current_class_type->superclass;
+
+            if (!super_expr->method) {
+                // Case A: Constructor call `super(...)`. Transpiles to a call to the parent's `init`.
+                // The first argument is `this_obj`, which is always in scope inside a method.
+                return "Angara_" + superclass_type->name + "_init(this_obj" + (args_str.empty() ? "" : ", " + args_str) + ")";
+            } else {
+                // Case B: Regular method call `super.method(...)`.
+                const std::string& method_name = super_expr->method->lexeme;
+                // Transpiles to a direct call to the parent's C method function.
+                return "Angara_" + superclass_type->name + "_" + method_name + "(this_obj" + (args_str.empty() ? "" : ", " + args_str) + ")";
+            }
+        }
 
     // ---
     // Case 3: Fallback for dynamic calls (e.g., calling a function stored in a variable).
@@ -1564,32 +1603,33 @@ std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
 
     std::string CTranspiler::transpileGetExpr_on_instance(const GetExpr& expr, const std::string& object_str) {
         const std::string& prop_name = expr.name.lexeme;
-
-        // We need to get the unwrapped type of the object to find the ClassType.
         auto object_type = m_type_checker.m_expression_types.at(expr.object.get());
+
         if (object_type->kind == TypeKind::OPTIONAL) {
             object_type = std::dynamic_pointer_cast<OptionalType>(object_type)->wrapped_type;
         }
         auto instance_type = std::dynamic_pointer_cast<InstanceType>(object_type);
 
-        // We need to find which class in the hierarchy actually owns the property.
+        // 1. Find which class in the hierarchy actually defines this property.
         const ClassType* owner_class = findPropertyOwner(instance_type->class_type.get(), prop_name);
         if (!owner_class) {
-            // This should be caught by the TypeChecker, but we guard against it.
             return "/* <unknown_property> */";
         }
 
-        std::string c_struct_name = "Angara_" + owner_class->name;
-
-        // Build the C access path, handling parent structs for inheritance.
-        std::string access_path = "->" + sanitize_name(prop_name);
+        // 2. Build the access path by traversing the `parent` members.
+        std::string access_path = "->";
         const ClassType* current = instance_type->class_type.get();
         while (current && current->name != owner_class->name) {
-            access_path = "->parent" + access_path;
+            // Prepend `parent.` for each level of inheritance we go up.
+            access_path += "parent.";
             current = current->superclass.get();
         }
+        access_path += sanitize_name(prop_name);
 
-        return "((" + c_struct_name + "*)AS_OBJ(" + object_str + "))" + access_path;
+        // 3. The initial cast is to the struct of the INSTANCE being accessed.
+        std::string base_struct_name = "Angara_" + instance_type->class_type->name;
+
+        return "((" + base_struct_name + "*)AS_OBJ(" + object_str + "))" + access_path;
     }
 
 

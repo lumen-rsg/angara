@@ -1,0 +1,82 @@
+attach io;
+attach adv_string;
+
+// --- The Base Class ---
+class Entity {
+  public:
+    let name as string;
+    let x as i64;
+    let y as i64;
+
+  private:
+    let _internal_id as i64;
+
+  public:
+    func init(this, name as string, x as i64, y as i64) -> nil {
+      this.name = name;
+      this.x = x;
+      this.y = y;
+      this._internal_id = 100; // Private to Entity
+      io.println(1, "Entity.init called for '" + this.name + "'");
+    }
+
+    // A method that can be overridden.
+    func describe(this) -> string {
+      return "An entity named '" + this.name + "' at (" + string(this.x) + ", " + string(this.y) + ")";
+    }
+
+    // A method that will not be overridden.
+    func move(this, dx as i64, dy as i64) -> nil {
+      this.x = this.x + dx;
+      this.y = this.y + dy;
+    }
+}
+
+// --- The Subclass ---
+class Player inherits Entity {
+  public:
+    let score as i64;
+
+  public:
+    // 1. Test Constructor Chaining (`super`)
+    func init(this, name as string) -> nil {
+      // Call the parent's constructor to initialize the base fields.
+      super(name, 0, 0); // `super` call must be the first statement
+      this.score = 0;
+      io.println(1, "Player.init called for '" + this.name + "'");
+    }
+
+    // 2. Test Method Overriding and `super` calls
+    func describe(this) -> string {
+      // Call the parent's implementation first.
+      let base_description = super.describe();
+      // Then, add our own specific information.
+      return base_description + " with score " + string(this.score);
+    }
+
+    func add_score(this, points as i64) -> nil {
+        this.score = this.score + points;
+    }
+}
+
+
+export func main() -> i64 {
+  io.println(1, "--- Angara Inheritance Test ---");
+
+  io.println(1, "\nCreating Player instance...");
+  let p = Player("Alex");
+
+  io.println(1, "\n--- Testing Inherited Members ---");
+  // The 'name' field was set by the parent constructor.
+  io.println(1, "Player's name: " + p.name);
+
+  // The 'move' method was inherited directly from Entity.
+  p.move(10, -5);
+  io.println(1, "Player's position after move: (" + string(p.x) + ", " + string(p.y) + ")");
+
+  io.println(1, "\n--- Testing Overridden Method ---");
+  p.add_score(50);
+  io.println(1, "Player description: " + p.describe());
+
+  return 0;
+}

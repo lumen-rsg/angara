@@ -256,7 +256,7 @@ namespace angara {
     }
 
     std::any ASTPrinter::visit(const SuperExpr& expr) {
-        return parenthesize("super." + expr.method.lexeme, {}, &expr);
+        return parenthesize("super." + expr.method->lexeme, {}, &expr);
     }
 
 
