@@ -1,0 +1,75 @@
+// =======================================================================
+// Create a new file, e.g., `data_test.an`, to test the `data` feature.
+// =======================================================================
+
+attach io;
+attach adv_string; // For string() conversion
+
+// --- Type Definitions ---
+
+// A simple data block for a 2D vector.
+data Vec2 {
+  let x as f64;
+  let y as f64;
+}
+
+// A data block representing a player, which contains a nested Vec2.
+data Player {
+  const id as i64;
+  let name as string;
+  let position as Vec2;
+  let is_active as bool;
+}
+
+
+export func main() -> i64 {
+  io.println(1, "--- Angara 'data' Block Test ---");
+
+  // --- 1. Instantiation and Field Access ---
+  io.println(1, "\n1. Testing Instantiation and Access...");
+  let p1_pos = Vec2(10.0, 20.0);
+  let player1 = Player(101, "Alex", p1_pos, true);
+
+  io.println(1, "  Player 1's name: " + player1.name);
+  io.println(1, "  Player 1's position x: " + string(player1.position.x));
+
+  // --- 2. Field Modification ---
+  io.println(1, "\n2. Testing Field Modification...");
+  player1.position.x = 15.5;
+  io.println(1, "  Player 1's new position x: " + string(player1.position.x));
+
+  // --- 3. Value Semantics (Copying) ---
+  io.println(1, "\n3. Testing Value Semantics...");
+
+  // `player2` is a full, deep copy of `player1`.
+  let player2 = player1;
+
+  io.println(1, "  (Before change) Player 1 name: " + player1.name);
+  io.println(1, "  (Before change) Player 2 name: " + player2.name);
+
+  // Modify the copy.
+  player2.name = "Bob";
+  player2.position.y = 99.0;
+
+  io.println(1, "  (After change) Player 1 name is still: " + player1.name);
+  io.println(1, "  (After change) Player 1 y-pos is still: " + string(player1.position.y));
+  io.println(1, "  (After change) Player 2 name is now: " + player2.name);
+  io.println(1, "  (After change) Player 2 y-pos is now: " + string(player2.position.y));
+
+  // --- 4. Automatic Equality ---
+  io.println(1, "\n4. Testing Automatic Equality...");
+
+  let player3 = Player(101, "Alex", Vec2(15.5, 20.0), true);
+
+  io.println(1, "  Is player1 equal to player2? " + string(player1 == player2)); // Should be false
+  io.println(1, "  Is player1 equal to player3? " + string(player1 == player3)); // Should be true
+
+  // Change one small thing to make them unequal.
+  player3.is_active = false;
+  io.println(1, "  Is player1 equal to player3 after change? " + string(player1 == player3)); // Should be false
+
+  io.println(1, "  Is player1 not equal to player3? " + string(player1 != player3)); // Should be true
+
+  io.println(1, "\n--- Test Complete ---");
+  return 0;
+}

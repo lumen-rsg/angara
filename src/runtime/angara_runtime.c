@@ -307,6 +307,7 @@ static void free_object(Object* object) {
         case OBJ_LIST: free_list((AngaraList*)object); break;
         case OBJ_RECORD: free_record((AngaraRecord*)object); break;
         case OBJ_NATIVE_INSTANCE: free_native_instance((AngaraNativeInstance*)object); break;
+        case OBJ_DATA_INSTANCE: free(object); break;
         case OBJ_INSTANCE:
             // For now, just free the memory. We'll need to handle
             // decref-ing all fields later.
@@ -342,6 +343,12 @@ void printObject(AngaraObject obj) {
                     }
                     printf("]");
                     break;
+                }
+                case OBJ_DATA_INSTANCE: { // <-- ADD THIS
+                        // We don't know the type name at runtime yet, so just print a placeholder.
+                        // This can be improved later by storing a pointer to the DataType.
+                        printf("<data object>");
+                        break;
                 }
                 case OBJ_CLASS:
                     printf("<class %s>", AS_CLASS(obj)->name);

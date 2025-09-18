@@ -158,6 +158,10 @@ namespace angara {
 
         void check_function_call(const CallExpr &call, const std::shared_ptr<FunctionType> &func_type,
                                  const std::vector<std::shared_ptr<Type>> &arg_types);
+
+        void visit(std::shared_ptr<const DataStmt> stmt);
+
+        void defineDataHeader(const DataStmt &stmt);
     };
 
 } // namespace angara

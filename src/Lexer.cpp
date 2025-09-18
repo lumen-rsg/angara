@@ -45,6 +45,7 @@ namespace angara {
             {"public",   TokenType::PUBLIC},
             {"break", TokenType::BREAK},
             {"is", TokenType::IS},
+            {"data", TokenType::DATA},
     };
 
     Lexer::Lexer(std::string source) : m_source(std::move(source)) {}

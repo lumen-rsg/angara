@@ -30,6 +30,7 @@ namespace angara {
     struct TraitStmt;
     struct ContractStmt;
     struct BreakStmt;
+    struct DataStmt;
 
 // Statement Visitor Interface (returns void)
     class StmtVisitor {
@@ -52,6 +53,7 @@ namespace angara {
         virtual void visit(std::shared_ptr<const TraitStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const ContractStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const BreakStmt> stmt) = 0;
+        virtual void visit(std::shared_ptr<const DataStmt> stmt) = 0;
     };
     // A simple struct to pair a parameter's name with its type annotation.
     struct Parameter {
@@ -350,6 +352,21 @@ namespace angara {
 
         void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const BreakStmt>(self));
+        }
+    };
+
+    struct DataStmt : Stmt {
+        const Token name;
+        // A data block only contains a list of field declarations.
+        const std::vector<std::shared_ptr<VarDeclStmt>> fields;
+        bool is_exported = false;
+
+        DataStmt(Token name, std::vector<std::shared_ptr<VarDeclStmt>> fields)
+            : name(std::move(name)),
+              fields(std::move(fields)) {}
+
+        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+            visitor.visit(std::static_pointer_cast<const DataStmt>(self));
         }
     };
 }

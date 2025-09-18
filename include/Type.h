@@ -28,6 +28,7 @@ namespace angara {
         MODULE,
         EXCEPTION,
         OPTIONAL,
+        DATA,
         ERROR // A special type to prevent cascading error messages
     };
 
@@ -277,6 +278,21 @@ namespace angara {
         [[nodiscard]] std::string toString() const override {
             return wrapped_type->toString() + "?";
         }
+    };
+
+    struct DataType : Type {
+        const std::string name;
+        // We can reuse MemberInfo to store field type and const-ness.
+        std::map<std::string, ClassType::MemberInfo> fields;
+
+        // Data types also have an implicit constructor. We store its signature here.
+        std::shared_ptr<FunctionType> constructor_type;
+
+        explicit DataType(std::string name)
+            : Type(TypeKind::DATA), name(std::move(name)) {}
+
+        // The string representation for a data type instance is its name.
+        [[nodiscard]] std::string toString() const override { return name; }
     };
 
 } // namespace angara

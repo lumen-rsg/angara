@@ -479,10 +479,23 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
                     note(conflicting_symbol->declaration_token, "previous declaration was here.");
                 }
             }
+            else if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) { // <-- ADD THIS
+                auto data_type = std::make_shared<DataType>(data_stmt->name.lexeme);
+                if (auto conflicting = m_symbols.declare(data_stmt->name, data_type, true)) {
+                    error(data_stmt->name, "re-declaration of symbol '" + data_stmt->name.lexeme + "'.");
+                    note(conflicting->declaration_token, "previous declaration was here.");
+                }
+            }
         }
     if (m_hadError) return false;
 
     // --- PASS 2: Define all headers and signatures (Order is important!) ---
+
+    for (const auto& stmt : statements) {
+        if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
+            defineDataHeader(*data_stmt);
+        }
+    }
 
     // -- STAGE 2a: Define CONTRACT headers FIRST --
     for (const auto& stmt : statements) {
@@ -578,15 +591,15 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
             if (name == "Thread") return m_type_thread;
 
             // If it's not a primitive, it must be a user-defined type (class, trait, contract).
-            auto symbol = m_symbols.resolve(name);
-            if (symbol) {
-                // If the resolved symbol is a ClassType...
+            if (auto symbol = m_symbols.resolve(name)) {
+                // --- THE FIX ---
+                // Check if the resolved symbol is a class, data, or trait type.
                 if (symbol->type->kind == TypeKind::CLASS) {
-                    // ... then using its name as a type annotation means we want an INSTANCE of it.
+                    // When a class name is used as a type, it refers to an INSTANCE.
                     return std::make_shared<InstanceType>(std::dynamic_pointer_cast<ClassType>(symbol->type));
                 }
-                // For traits and contracts, using the name directly as a type is fine.
-                if (symbol->type->kind == TypeKind::TRAIT || symbol->type->kind == TypeKind::CONTRACT) {
+                if (symbol->type->kind == TypeKind::DATA || symbol->type->kind == TypeKind::TRAIT || symbol->type->kind == TypeKind::CONTRACT) {
+                    // Data, traits, and contracts can be used as types directly.
                     return symbol->type;
                 }
             }
@@ -864,7 +877,17 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                 // 1. The types are exactly the same.
                 // 2. One of the types is 'any' (or nil, which can be compared to anything).
                 // 3. Both types are numeric (allowing i64 == f64).
-                if (left_type->toString() == right_type->toString() ||
+                // --- NEW RULE ---
+                // Two instances of the same data type can be compared.
+                if (left_type->kind == TypeKind::DATA && right_type->kind == TypeKind::DATA) {
+                    if (left_type->toString() == right_type->toString()) {
+                        result_type = m_type_bool;
+                    } else {
+                        error(expr.op, "Cannot compare instances of two different data types: '" +
+                                       left_type->toString() + "' and '" + right_type->toString() + "'.");
+                    }
+                }
+                else if (left_type->toString() == right_type->toString() ||
                     left_type->kind == TypeKind::ANY || right_type->kind == TypeKind::ANY ||
                     left_type->kind == TypeKind::NIL || right_type->kind == TypeKind::NIL ||
                     (isNumeric(left_type) && isNumeric(right_type)))
@@ -1609,6 +1632,62 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         }
     }
 
+    void TypeChecker::visit(std::shared_ptr<const DataStmt> stmt) {
+        // All the important work (defining the type, fields, and constructor)
+        // was done in Pass 1 and Pass 2 (defineDataHeader).
+        // In this pass, there is no executable code to check.
+        // We just need to make sure we don't try to visit the field VarDeclStmts
+        // again as if they were local variables.
+    }
+
+    void TypeChecker::defineDataHeader(const DataStmt& stmt) {
+    // 1. Get the placeholder DataType we created in Pass 1.
+    auto symbol = m_symbols.resolve(stmt.name.lexeme);
+    auto data_type = std::dynamic_pointer_cast<DataType>(symbol->type);
+
+    if (stmt.is_exported) {
+        m_module_type->exports[stmt.name.lexeme] = data_type;
+    }
+
+    // 2. Populate the fields and build the constructor signature.
+    std::vector<std::shared_ptr<Type>> ctor_params;
+    Token dummy_token;
+
+    for (const auto& field_decl : stmt.fields) {
+        if (data_type->fields.count(field_decl->name.lexeme)) {
+            error(field_decl->name, "Duplicate field '" + field_decl->name.lexeme + "' in data block.");
+            continue;
+        }
+
+        std::shared_ptr<Type> field_type;
+        if (field_decl->typeAnnotation) {
+            field_type = resolveType(field_decl->typeAnnotation);
+        } else if (field_decl->initializer) {
+            // Type inference from default values is an advanced feature.
+            // For now, let's require explicit types for data blocks.
+            error(field_decl->name, "Fields in a 'data' block must have an explicit type annotation.");
+            field_type = m_type_error;
+        } else {
+            error(field_decl->name, "Fields in a 'data' block must have an explicit type annotation.");
+            field_type = m_type_error;
+        }
+
+        if (field_decl->initializer) {
+            error(field_decl->name, "Fields in a 'data' block cannot have default initializers. Initialization is done via the constructor.");
+        }
+
+        // Add to the fields map. All fields are implicitly public.
+        data_type->fields[field_decl->name.lexeme] = {field_type, AccessLevel::PUBLIC, dummy_token, field_decl->is_const};
+
+        // Add this field's type to the constructor's parameter list.
+        ctor_params.push_back(field_type);
+    }
+
+    // 3. Create and store the constructor's FunctionType.
+    // The return type is the data type itself.
+    data_type->constructor_type = std::make_shared<FunctionType>(ctor_params, data_type);
+}
+
 // A helper for the special-case validation logic for `spawn`.
     void TypeChecker::check_spawn_call(
             const CallExpr& call,
@@ -1720,6 +1799,14 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             if (!m_hadError) {
                 result_type = std::make_shared<InstanceType>(class_type);
             }
+        } else if (callee_type->kind == TypeKind::DATA) { // <-- ADD THIS BLOCK
+            auto data_type = std::dynamic_pointer_cast<DataType>(callee_type);
+            // Validate the call against the synthesized constructor signature.
+            check_function_call(expr, data_type->constructor_type, arg_types);
+            if (!m_hadError) {
+                // The result of the call is the data type itself.
+                result_type = data_type;
+            }
         }
         else {
             error(expr.paren, "This expression is not callable. Can only call functions and classes.");
@@ -1745,7 +1832,18 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
 
     // --- A single, clean if/else if chain for all property access ---
 
-    if (object_type->kind == TypeKind::INSTANCE) {
+    if (object_type->kind == TypeKind::DATA) {
+        auto data_type = std::dynamic_pointer_cast<DataType>(object_type);
+        auto field_it = data_type->fields.find(property_name);
+
+        if (field_it == data_type->fields.end()) {
+            error(expr.name, "Data block of type '" + data_type->name + "' has no field named '" + property_name + "'.");
+        } else {
+            // Success! The result type is the type of the field.
+            result_type = field_it->second.type;
+        }
+    }
+    else if (object_type->kind == TypeKind::INSTANCE) {
         auto instance_type = std::dynamic_pointer_cast<InstanceType>(object_type);
         const ClassType::MemberInfo* prop_info = instance_type->class_type->findProperty(property_name);
 

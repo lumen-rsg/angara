@@ -39,6 +39,10 @@ namespace angara {
 
         void transpileClassNew(const ClassStmt &stmt);
 
+        void transpileDataStruct(const DataStmt &stmt);
+
+        void transpileDataConstructor(const DataStmt &stmt);
+
         void transpileStruct(const ClassStmt &stmt);
 
         void pass_5_generate_main(const std::vector<std::shared_ptr<Stmt>>& statements,
@@ -101,6 +105,13 @@ namespace angara {
         std::string transpileListExpr(const ListExpr &expr);
 
         std::string transpileRecordExpr(const RecordExpr &expr);
+
+        std::string transpileDataLiteral(const CallExpr &expr);
+
+        void transpileDataEqualsImplementation(const DataStmt &stmt);
+
+        void transpileDataEqualsPrototype(const DataStmt &stmt);
+
         void transpileGlobalFunction(const FuncStmt& stmt, const std::string& module_name);
 
 
