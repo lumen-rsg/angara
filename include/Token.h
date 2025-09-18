@@ -26,7 +26,7 @@ namespace angara {
         EQUAL, EQUAL_EQUAL,
         GREATER, GREATER_EQUAL,
         LESS, LESS_EQUAL,
-        PIPE, QUESTION_QUESTION, DOT_DOT_DOT,
+        PIPE, QUESTION_QUESTION, DOT_DOT_DOT, QUESTION_DOT,
 
         // Literals
         IDENTIFIER, STRING, NUMBER_INT, NUMBER_FLOAT,
@@ -65,6 +65,7 @@ namespace angara {
 
         Token(TokenType type, std::string lexeme, int line, int column)
                 : type(type), lexeme(std::move(lexeme)), line(line), column(column) {}
+
 
         void print() const {
             std::cout << "Token(" << to_string(type)

@@ -71,6 +71,8 @@ namespace angara {
 
         const FuncStmt *findMethodAst(const ClassStmt &class_stmt, const std::string &name);
 
+        std::string transpileGetExpr_on_instance(const GetExpr &expr, const std::string &object_str);
+
         std::string transpileGetExpr(const GetExpr &expr);
 
         std::string transpileThisExpr(const ThisExpr &expr);

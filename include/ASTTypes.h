@@ -7,12 +7,16 @@
 #include "Token.h"
 #include <memory>
 #include <vector>
+
+#include "ASTTypes.h"
+
 namespace angara {
     // Forward declarations
     struct SimpleType;
     struct GenericType;
     struct FunctionTypeExpr;
     struct RecordTypeExpr;
+    struct OptionalTypeNode;
 
 
     // Visitor pattern for AST Type nodes
@@ -23,6 +27,7 @@ namespace angara {
         virtual void visit(const GenericType &type) = 0;
         virtual void visit(const FunctionTypeExpr& type) = 0;
         virtual void visit(const RecordTypeExpr& type) = 0;
+        virtual void visit(const OptionalTypeNode& type) = 0;
     };
 
     // Base class for all AST Type representations
@@ -85,6 +90,18 @@ namespace angara {
 
         RecordTypeExpr(Token keyword, std::vector<RecordFieldType> fields)
                 : keyword(std::move(keyword)), fields(std::move(fields)) {}
+
+        void accept(ASTTypeVisitor& visitor) const override {
+            visitor.visit(*this);
+        }
+    };
+
+    struct OptionalTypeNode : ASTType {
+        // The type that is being made optional, e.g., SimpleType("User")
+        const std::shared_ptr<ASTType> base_type;
+
+        explicit OptionalTypeNode(std::shared_ptr<ASTType> base)
+            : base_type(std::move(base)) {}
 
         void accept(ASTTypeVisitor& visitor) const override {
             visitor.visit(*this);

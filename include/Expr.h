@@ -153,13 +153,18 @@ namespace angara {
 
 // Represents property access, e.g., module.member
     struct GetExpr : Expr {
-        GetExpr(std::shared_ptr<Expr> object, Token name)
-                : object(std::move(object)), name(std::move(name)) {}
+        const std::shared_ptr<Expr> object; // The thing on the left
+        const Token op;                     // <-- NEW: The '.' or '?.' token
+        const Token name;                   // The property name on the right
 
-        std::any accept(ExprVisitor &visitor) const override { return visitor.visit(*this); }
+        GetExpr(std::shared_ptr<Expr> object, Token op, Token name)
+            : object(std::move(object)),
+              op(std::move(op)),
+              name(std::move(name)) {}
 
-        const std::shared_ptr<Expr> object; // The thing on the left of the dot
-        const Token name;                 // The property name on the right
+        std::any accept(ExprVisitor &visitor) const override {
+            return visitor.visit(*this);
+        }
     };
 
 // Represents a list literal expression, e.g., [1, 2, 3]

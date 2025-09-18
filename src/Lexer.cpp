@@ -300,7 +300,13 @@ namespace angara {
                 else { std::cerr << "Line " << m_line << ": Unexpected character '&'\n"; }
                 break;
             case '?':
-                addToken(match('?') ? TokenType::QUESTION_QUESTION : TokenType::QUESTION);
+                if (match('?')) {
+                    addToken(TokenType::QUESTION_QUESTION);
+                } else if (match('.')) {
+                    addToken(TokenType::QUESTION_DOT);
+                } else {
+                    addToken(TokenType::QUESTION);
+                }
                 break;
 
                 // Literals and comments

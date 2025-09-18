@@ -564,100 +564,97 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
 
     // --- AST Visitor Implementations ---
 
-    std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& ast_type) {
-        if (!ast_type) {
-            return m_type_error;
-        }
+// =======================================================================
+// REPLACE the entire resolveType function in TypeChecker.cpp with this
+// new, correct, and final version.
+// =======================================================================
 
-        // --- Case 1: A simple type name (e.g., 'i64', 'Player') ---
-        if (auto simple = std::dynamic_pointer_cast<const SimpleType>(ast_type)) {
-            const std::string& name = simple->name.lexeme;
-
-            // Check for built-in primitive types first
-            if (name == "i8") return m_type_i8;
-            if (name == "i16") return m_type_i16;
-            if (name == "i32") return m_type_i32;
-            if (name == "i64" || name == "int") return m_type_i64;
-            if (name == "u8") return m_type_u8;
-            if (name == "u16") return m_type_u16;
-            if (name == "u32") return m_type_u32;
-            if (name == "u64" || name == "uint") return m_type_u64;
-            if (name == "f32") return m_type_f32;
-            if (name == "f64" || name == "float") return m_type_f64;
-            if (name == "bool") return m_type_bool;
-            if (name == "string") return m_type_string;
-            if (name == "nil") return m_type_nil;
-            if (name == "any") return m_type_any;
-            if (name == "Thread") return m_type_thread;
-
-            // If it's not a primitive, it must be a user-defined type (class, trait, contract).
-            if (auto symbol = m_symbols.resolve(name)) {
-                // --- THE FIX ---
-                // Check if the resolved symbol is a class, data, or trait type.
-                if (symbol->type->kind == TypeKind::CLASS) {
-                    // When a class name is used as a type, it refers to an INSTANCE.
-                    return std::make_shared<InstanceType>(std::dynamic_pointer_cast<ClassType>(symbol->type));
-                }
-                if (symbol->type->kind == TypeKind::DATA || symbol->type->kind == TypeKind::TRAIT || symbol->type->kind == TypeKind::CONTRACT) {
-                    // Data, traits, and contracts can be used as types directly.
-                    return symbol->type;
-                }
-            }
-
-            // If it's not a primitive and not a declared class/trait, it's an error.
-            error(simple->name, "Unknown type name '" + name + "'.");
-            return m_type_error;
-        }
-
-        // --- Case 2: A generic type (e.g., 'list<T>', 'record<K:V>') ---
-        if (auto generic = std::dynamic_pointer_cast<const GenericType>(ast_type)) {
-            const std::string& base_name = generic->name.lexeme;
-
-            if (base_name == "list") {
-                if (generic->arguments.size() != 1) {
-                    error(generic->name, "The 'list' type requires exactly one generic argument (e.g., list<i64>).");
-                    return m_type_error;
-                }
-                auto element_type = resolveType(generic->arguments[0]);
-                if (element_type->kind == TypeKind::ERROR) return m_type_error;
-                return std::make_shared<ListType>(element_type);
-            }
-
-            error(generic->name, "Unknown generic type '" + base_name + "'.");
-            return m_type_error;
-        }
-
-        // --- Handle the FunctionTypeExpr AST node ---
-        if (auto record_type_expr = std::dynamic_pointer_cast<const RecordTypeExpr>(ast_type)) {
-            std::map<std::string, std::shared_ptr<Type>> fields;
-            for (const auto& field_def : record_type_expr->fields) {
-                const std::string& field_name = field_def.name.lexeme;
-                if (fields.count(field_name)) {
-                    error(field_def.name, "Duplicate field name '" + field_name + "' in record type definition.");
-                }
-                // Recursively resolve the type of the field
-                fields[field_name] = resolveType(field_def.type);
-            }
-            // Return our internal RecordType representation.
-            return std::make_shared<RecordType>(fields);
-        }
-
-        // --- Handle the RecordTypeExpr AST node ---
-        if (auto record_type_expr = std::dynamic_pointer_cast<const RecordTypeExpr>(ast_type)) {
-            std::map<std::string, std::shared_ptr<Type>> fields;
-            for (const auto& field_def : record_type_expr->fields) {
-                const std::string& field_name = field_def.name.lexeme;
-                if (fields.count(field_name)) {
-                    error(field_def.name, "Duplicate field name '" + field_name + "' in record type definition.");
-                    // Continue checking other fields even if one is a duplicate.
-                }
-                fields[field_name] = resolveType(field_def.type);
-            }
-            return std::make_shared<RecordType>(fields);
-        }
-
+std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& ast_type) {
+    if (!ast_type) {
         return m_type_error;
     }
+
+    // --- Case 1: The type is an Optional Type, e.g., `User?` ---
+    if (auto optional_ast_node = std::dynamic_pointer_cast<const OptionalTypeNode>(ast_type)) {
+        // Recursively resolve the type that is being wrapped.
+        auto wrapped_semantic_type = resolveType(optional_ast_node->base_type);
+        if (wrapped_semantic_type->kind == TypeKind::ERROR) {
+            return m_type_error;
+        }
+        // Return our internal semantic OptionalType.
+        return std::make_shared<OptionalType>(wrapped_semantic_type);
+    }
+
+    // --- Case 2: A simple type name, e.g., 'i64' or 'User' ---
+    if (auto simple = std::dynamic_pointer_cast<const SimpleType>(ast_type)) {
+        const std::string& name = simple->name.lexeme;
+
+        // Check for built-in primitive types first.
+        if (name == "i64" || name == "int") return m_type_i64;
+        if (name == "f64" || name == "float") return m_type_f64;
+        if (name == "bool") return m_type_bool;
+        if (name == "string") return m_type_string;
+        if (name == "nil") return m_type_nil;
+        if (name == "any") return m_type_any;
+        if (name == "Thread") return m_type_thread;
+
+        // If not a primitive, it must be a user-defined type. Look it up.
+        auto symbol = m_symbols.resolve(name);
+        if (symbol) {
+            if (symbol->type->kind == TypeKind::CLASS) {
+                return std::make_shared<InstanceType>(std::dynamic_pointer_cast<ClassType>(symbol->type));
+            }
+            if (symbol->type->kind == TypeKind::DATA || symbol->type->kind == TypeKind::TRAIT || symbol->type->kind == TypeKind::CONTRACT) {
+                return symbol->type;
+            }
+        }
+
+        error(simple->name, "Unknown type name '" + name + "'.");
+        return m_type_error;
+    }
+
+    // --- Case 3: A generic type, e.g., 'list<T>' ---
+    if (auto generic = std::dynamic_pointer_cast<const GenericType>(ast_type)) {
+        const std::string& base_name = generic->name.lexeme;
+        if (base_name == "list") {
+            if (generic->arguments.size() != 1) {
+                error(generic->name, "The 'list' type requires exactly one generic argument.");
+                return m_type_error;
+            }
+            auto element_type = resolveType(generic->arguments[0]);
+            if (element_type->kind == TypeKind::ERROR) return m_type_error;
+            return std::make_shared<ListType>(element_type);
+        }
+        error(generic->name, "Unknown generic type '" + base_name + "'.");
+        return m_type_error;
+    }
+
+    // --- Case 4: An inline record type, e.g., `{ name: string }` ---
+    if (auto record_type_expr = std::dynamic_pointer_cast<const RecordTypeExpr>(ast_type)) {
+        std::map<std::string, std::shared_ptr<Type>> fields;
+        for (const auto& field_def : record_type_expr->fields) {
+            const std::string& field_name = field_def.name.lexeme;
+            if (fields.count(field_name)) {
+                error(field_def.name, "Duplicate field name '" + field_name + "' in record type definition.");
+            }
+            fields[field_name] = resolveType(field_def.type);
+        }
+        return std::make_shared<RecordType>(fields);
+    }
+
+    // --- Case 5: A function type, e.g., `function() -> nil` ---
+    if (auto func_type_expr = std::dynamic_pointer_cast<const FunctionTypeExpr>(ast_type)) {
+        std::vector<std::shared_ptr<Type>> param_types;
+        for (const auto& p_ast_type : func_type_expr->param_types) {
+            param_types.push_back(resolveType(p_ast_type));
+        }
+        auto return_type = resolveType(func_type_expr->return_type);
+        return std::make_shared<FunctionType>(param_types, return_type);
+    }
+
+    // If the AST node type is unknown, it's a compiler bug.
+    return m_type_error;
+}
 
 void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     std::shared_ptr<Type> initializer_type = nullptr;
@@ -1212,29 +1209,28 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         auto expected_return_type = m_function_return_types.top();
 
         if (stmt->value) {
+            // A value is being returned.
             stmt->value->accept(*this);
             auto actual_return_type = popType();
 
-            // --- THE FIX: Allow returning a specific type where 'any' is expected ---
-            bool types_match = (actual_return_type->toString() == expected_return_type->toString());
-
-            // Covariance Rule: A more specific type can be used where a more general 'any' is expected.
-            if (!types_match && expected_return_type->kind == TypeKind::ANY) {
-                types_match = true;
-            }
-            // --- END FIX ---
-
-            if (!types_match) {
+            // --- THE FIX: Use our central compatibility checker ---
+            if (!check_type_compatibility(expected_return_type, actual_return_type)) {
                 error(stmt->keyword, "Type mismatch. This function is declared to return '" +
                                      expected_return_type->toString() + "', but is returning a value of type '" +
                                      actual_return_type->toString() + "'.");
             }
+
         } else {
-            // No value is returned. This is only valid for 'void' functions.
-            // (Note: nil is a value, so `return nil;` would be in the block above)
-            if (expected_return_type->toString() != "nil") {
+            // No value is being returned ('return;').
+            // This is only valid if the function is supposed to return `nil`.
+            // A `nil` return is a value, and must use `return nil;`.
+            // So, this case is actually an error unless the expected type is also nil,
+            // which check_type_compatibility would handle. Let's make this clearer.
+
+            // A `return;` is semantically equivalent to `return nil;`.
+            if (!check_type_compatibility(expected_return_type, m_type_nil)) {
                 error(stmt->keyword, "This function must return a value of type '" +
-                                     expected_return_type->toString() + "'. Use 'return nil;' if applicable.");
+                                     expected_return_type->toString() + "'. An empty 'return;' is only valid for functions that return 'nil'.");
             }
         }
     }
@@ -1747,6 +1743,160 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         }
     }
 
+    std::any TypeChecker::visit(const GetExpr& expr) {
+    // 1. First, recursively type check the object on the left of the operator.
+    expr.object->accept(*this);
+    auto object_type = popType();
+
+    // Bail out early if the object itself had a type error.
+    if (object_type->kind == TypeKind::ERROR) {
+        pushAndSave(&expr, m_type_error);
+        return {};
+    }
+
+    // 2. Determine if this is an optional chain (`?.`) or a regular access (`.`).
+    bool is_optional_chain = (expr.op.type == TokenType::QUESTION_DOT);
+    std::shared_ptr<Type> unwrapped_object_type = object_type;
+
+    // 3. Handle the optionality of the object.
+    if (object_type->kind == TypeKind::OPTIONAL) {
+        // The object is optional (e.g., `Player?`). We can proceed with either `.` or `?.`.
+        // We will work with the type it wraps (e.g., `Player`).
+        unwrapped_object_type = std::dynamic_pointer_cast<OptionalType>(object_type)->wrapped_type;
+    } else if (is_optional_chain) {
+        // This is the case `non_optional?.field`. It's redundant but safe.
+        // TODO: Add a compiler warning/note here for good style.
+    }
+
+    // A regular access (`.`) on an optional type is a compile-time error.
+    // This prevents accidental null pointer errors.
+    if (object_type->kind == TypeKind::OPTIONAL && !is_optional_chain) {
+        error(expr.op, "Cannot access property on an optional type '" + object_type->toString() + "'. Use the optional chaining operator '?.' instead.");
+        pushAndSave(&expr, m_type_error);
+        return {};
+    }
+
+    // 4. Find the property on the (now unwrapped) type.
+    const std::string& property_name = expr.name.lexeme;
+    std::shared_ptr<Type> property_type = m_type_error; // Default to error
+
+    // --- Dispatch based on the kind of the unwrapped type ---
+
+    if (unwrapped_object_type->kind == TypeKind::DATA) {
+        auto data_type = std::dynamic_pointer_cast<DataType>(unwrapped_object_type);
+        auto field_it = data_type->fields.find(property_name);
+        if (field_it == data_type->fields.end()) {
+            error(expr.name, "Data block of type '" + data_type->name + "' has no field named '" + property_name + "'.");
+        } else {
+            property_type = field_it->second.type;
+        }
+    }
+    else if (unwrapped_object_type->kind == TypeKind::INSTANCE) {
+        auto instance_type = std::dynamic_pointer_cast<InstanceType>(unwrapped_object_type);
+        const ClassType::MemberInfo* prop_info = instance_type->class_type->findProperty(property_name);
+        if (!prop_info) {
+            error(expr.name, "Instance of class '" + instance_type->toString() + "' has no property named '" + property_name + "'.");
+        } else {
+            // Check for private access
+            if (prop_info->access == AccessLevel::PRIVATE && (m_current_class == nullptr || m_current_class->name != instance_type->class_type->name)) {
+                error(expr.name, "Property '" + property_name + "' is private and cannot be accessed from this context.");
+            } else {
+                property_type = prop_info->type;
+            }
+        }
+    }
+    else if (unwrapped_object_type->kind == TypeKind::MODULE) {
+        auto module_type = std::dynamic_pointer_cast<ModuleType>(unwrapped_object_type);
+        auto member_it = module_type->exports.find(property_name);
+        if (member_it == module_type->exports.end()) {
+            error(expr.name, "Module '" + module_type->name + "' has no exported member named '" + property_name + "'.");
+        } else {
+            property_type = member_it->second;
+        }
+    }
+    else if (object_type->kind == TypeKind::MODULE) {
+        auto module_type = std::dynamic_pointer_cast<ModuleType>(object_type);
+        auto member_it = module_type->exports.find(property_name);
+        if (member_it != module_type->exports.end()) {
+            property_type = member_it->second;
+            // --- THE FIX ---
+            if (module_type->is_native) {
+                m_used_native_symbols.insert({module_type, property_name, property_type});
+            }
+        }
+    }
+    else if (object_type->kind == TypeKind::LIST) {
+        auto list_type = std::dynamic_pointer_cast<ListType>(object_type);
+        if (property_name == "push") {
+            property_type = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{list_type->element_type},
+                m_type_nil
+            );
+        } else if (property_name == "remove_at") { // <-- ADD THIS
+            property_type = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{m_type_i64},
+                list_type->element_type // Returns the element type
+            );
+        } else if (property_name == "remove") { // <-- ADD THIS
+            property_type = std::make_shared<FunctionType>(
+               std::vector<std::shared_ptr<Type>>{list_type->element_type},
+               m_type_bool // Returns true or false
+           );
+        } else {
+            error(expr.name, "Type 'list' has no property named '" + property_name + "'.");
+        }
+    }
+    else if (object_type->kind == TypeKind::RECORD) {
+        // <-- ADD THIS ENTIRE BLOCK
+        if (property_name == "remove") {
+            property_type = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{m_type_string},
+                m_type_bool // Returns true or false
+            );
+        } else if (property_name == "keys") {
+            auto list_of_strings = std::make_shared<ListType>(m_type_string);
+            property_type = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{},
+                list_of_strings // Returns list<string>
+            );
+        } else {
+            error(expr.name, "Type 'record' has no property named '" + property_name + "'. Use subscript `[]` to access fields.");
+        }
+    }
+    else if (object_type->kind == TypeKind::THREAD) {
+        if (property_name == "join") {
+            property_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_any);
+        } else {
+            error(expr.name, "Type 'Thread' has no property named '" + property_name + "'.");
+        }
+    }
+    else if (object_type->kind == TypeKind::MUTEX) {
+        if (property_name == "lock" || property_name == "unlock") {
+            property_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_nil);
+        } else {
+            error(expr.name, "Type 'Mutex' has no property named '" + property_name + "'.");
+        }
+    }
+    else {
+        error(expr.op, "Type '" + object_type->toString() + "' has no properties that can be accessed.");
+    }
+
+    // --- 5. Determine the Final Result Type ---
+    if (property_type->kind == TypeKind::ERROR) {
+        // If the property lookup failed, the result is an error.
+        pushAndSave(&expr, m_type_error);
+    } else if (is_optional_chain || object_type->kind == TypeKind::OPTIONAL) {
+        // If this was an optional chain OR if the original object was optional,
+        // the result of the access is also optional.
+        pushAndSave(&expr, std::make_shared<OptionalType>(property_type));
+    } else {
+        // Otherwise, it's a regular access on a non-optional type.
+        pushAndSave(&expr, property_type);
+    }
+
+    return {};
+}
+
     std::any TypeChecker::visit(const CallExpr& expr) {
         // --- Phase 1: Evaluate Callee and Arguments ---
         expr.callee->accept(*this);
@@ -1816,156 +1966,70 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         return {};
     }
 
-    std::any TypeChecker::visit(const GetExpr& expr) {
-    // 1. Type check the object on the left of the dot.
-    expr.object->accept(*this);
-    auto object_type = popType();
+    std::any TypeChecker::visit(const LogicalExpr& expr) {
+    // --- Case 1: Handle the Nil Coalescing Operator `??` ---
+    if (expr.op.type == TokenType::QUESTION_QUESTION) {
+        // 1a. Type check the left-hand side (the optional value).
+        expr.left->accept(*this);
+        auto lhs_type = popType();
 
+        // 1b. Type check the right-hand side (the default value).
+        expr.right->accept(*this);
+        auto rhs_type = popType();
 
-    if (object_type->kind == TypeKind::ERROR) {
+        // Bail out early on sub-expression errors.
+        if (lhs_type->kind == TypeKind::ERROR || rhs_type->kind == TypeKind::ERROR) {
+            pushAndSave(&expr, m_type_error);
+            return {};
+        }
+
+        // 1c. The LHS must be an optional type.
+        if (lhs_type->kind != TypeKind::OPTIONAL) {
+            error(expr.op, "The left-hand side of the '??' operator must be an optional type (e.g., 'string?'), but got a non-optional type '" + lhs_type->toString() + "'.");
+            pushAndSave(&expr, m_type_error);
+            return {};
+        }
+
+        auto unwrapped_lhs_type = std::dynamic_pointer_cast<OptionalType>(lhs_type)->wrapped_type;
+
+        // 1d. The RHS (default value) must be compatible with the unwrapped type.
+        if (!check_type_compatibility(unwrapped_lhs_type, rhs_type)) {
+            error(expr.op, "Type mismatch in '??' operator. The default value of type '" + rhs_type->toString() +
+                           "' is not compatible with the expected unwrapped type '" + unwrapped_lhs_type->toString() + "'.");
+            pushAndSave(&expr, m_type_error);
+            return {};
+        }
+
+        // 1e. The result of the `??` expression is the non-optional, unwrapped type.
+        pushAndSave(&expr, unwrapped_lhs_type);
+        return {};
+    }
+
+    // --- Case 2: Handle Logical AND (`&&`) and OR (`||`) ---
+    // (This logic is now the fallback case)
+    expr.left->accept(*this);
+    auto left_type = popType();
+    expr.right->accept(*this);
+    auto right_type = popType();
+
+    if (left_type->kind == TypeKind::ERROR || right_type->kind == TypeKind::ERROR) {
         pushAndSave(&expr, m_type_error);
         return {};
     }
 
-    const std::string& property_name = expr.name.lexeme;
-    std::shared_ptr<Type> result_type = m_type_error; // Default to error
-
-    // --- A single, clean if/else if chain for all property access ---
-
-    if (object_type->kind == TypeKind::DATA) {
-        auto data_type = std::dynamic_pointer_cast<DataType>(object_type);
-        auto field_it = data_type->fields.find(property_name);
-
-        if (field_it == data_type->fields.end()) {
-            error(expr.name, "Data block of type '" + data_type->name + "' has no field named '" + property_name + "'.");
-        } else {
-            // Success! The result type is the type of the field.
-            result_type = field_it->second.type;
-        }
-    }
-    else if (object_type->kind == TypeKind::INSTANCE) {
-        auto instance_type = std::dynamic_pointer_cast<InstanceType>(object_type);
-        const ClassType::MemberInfo* prop_info = instance_type->class_type->findProperty(property_name);
-
-        if (!prop_info) {
-            error(expr.name, "Instance of class '" + instance_type->toString() + "' has no property named '" + property_name + "'.");
-        } else {
-            if (prop_info->access == AccessLevel::PRIVATE && (m_current_class == nullptr || m_current_class->name != instance_type->class_type->name)) {
-                error(expr.name, "Property '" + property_name + "' is private and cannot be accessed from this context.");
-            } else {
-                result_type = prop_info->type;
-            }
-        }
-    }
-    else if (object_type->kind == TypeKind::CLASS) {
-        // THIS IS AN ERROR. You can't call a method on a class, only on an instance.
-        error(expr.name, "Cannot access property on a class type. Did you mean to use an instance of the class?");
+    // Rule: Both operands must be "truthy" (convertible to a boolean).
+    // Our isTruthy() check is very permissive, which is fine.
+    if (!isTruthy(left_type) || !isTruthy(right_type)) {
+        error(expr.op, "Operands for a logical operator ('&&', '||') must be truthy types. "
+                       "Got '" + left_type->toString() + "' and '" + right_type->toString() + "'.");
         pushAndSave(&expr, m_type_error);
         return {};
     }
-    else if (object_type->kind == TypeKind::MODULE) {
-        auto module_type = std::dynamic_pointer_cast<ModuleType>(object_type);
-        auto member_it = module_type->exports.find(property_name);
-        if (member_it != module_type->exports.end()) {
-            result_type = member_it->second;
-            // --- THE FIX ---
-            if (module_type->is_native) {
-                m_used_native_symbols.insert({module_type, property_name, result_type});
-            }
-        }
-    }
-    else if (object_type->kind == TypeKind::LIST) {
-        auto list_type = std::dynamic_pointer_cast<ListType>(object_type);
-        if (property_name == "push") {
-            result_type = std::make_shared<FunctionType>(
-                std::vector<std::shared_ptr<Type>>{list_type->element_type},
-                m_type_nil
-            );
-        } else if (property_name == "remove_at") { // <-- ADD THIS
-            result_type = std::make_shared<FunctionType>(
-                std::vector<std::shared_ptr<Type>>{m_type_i64},
-                list_type->element_type // Returns the element type
-            );
-        } else if (property_name == "remove") { // <-- ADD THIS
-            result_type = std::make_shared<FunctionType>(
-               std::vector<std::shared_ptr<Type>>{list_type->element_type},
-               m_type_bool // Returns true or false
-           );
-        } else {
-            error(expr.name, "Type 'list' has no property named '" + property_name + "'.");
-        }
-    }
-    else if (object_type->kind == TypeKind::RECORD) {
-        // <-- ADD THIS ENTIRE BLOCK
-        if (property_name == "remove") {
-            result_type = std::make_shared<FunctionType>(
-                std::vector<std::shared_ptr<Type>>{m_type_string},
-                m_type_bool // Returns true or false
-            );
-        } else if (property_name == "keys") {
-            auto list_of_strings = std::make_shared<ListType>(m_type_string);
-            result_type = std::make_shared<FunctionType>(
-                std::vector<std::shared_ptr<Type>>{},
-                list_of_strings // Returns list<string>
-            );
-        } else {
-            error(expr.name, "Type 'record' has no property named '" + property_name + "'. Use subscript `[]` to access fields.");
-        }
-    }
-    else if (object_type->kind == TypeKind::THREAD) {
-        if (property_name == "join") {
-            result_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_any);
-        } else {
-            error(expr.name, "Type 'Thread' has no property named '" + property_name + "'.");
-        }
-    }
-    else if (object_type->kind == TypeKind::MUTEX) {
-        if (property_name == "lock" || property_name == "unlock") {
-            result_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_nil);
-        } else {
-            error(expr.name, "Type 'Mutex' has no property named '" + property_name + "'.");
-        }
-    }
-    else {
-        // Update the error message to be fully comprehensive.
-        error(expr.name, "Only instances, modules, lists, threads, or mutexes have properties. Cannot access property on type '" + object_type->toString() + "'.");
-        exit(-1);
-    }
 
-    pushAndSave(&expr, result_type);
+    // The result of a logical '&&' or '||' expression is always a boolean.
+    pushAndSave(&expr, m_type_bool);
     return {};
 }
-
-    std::any TypeChecker::visit(const LogicalExpr& expr) {
-        // 1. Type check the left-hand side.
-        expr.left->accept(*this);
-        auto left_type = popType();
-
-        // 2. Type check the right-hand side.
-        expr.right->accept(*this);
-        auto right_type = popType();
-
-        std::shared_ptr<Type> result_type = m_type_error;
-
-        // 3. Prevent cascading errors.
-        if (left_type->kind == TypeKind::ERROR || right_type->kind == TypeKind::ERROR) {
-            pushAndSave(&expr, m_type_error);
-            return {};
-        }
-
-        // --- THE CORE RULE ---
-        // 4. Enforce that both operands must be of type 'bool'.
-        if (!isTruthy(left_type) || !isTruthy(right_type)) {
-            error(expr.op, "Operands for a logical operator ('&&', '||') must be a boolean or a number. "
-                           "Got '" + left_type->toString() + "' and '" + right_type->toString() + "'.");
-            pushAndSave(&expr, m_type_error);
-            return {};
-        }
-
-        // 5. If the types are correct, the result of a logical expression is always a 'bool'.
-        pushAndSave(&expr, m_type_bool);
-        return {};
-    }
 
     std::any TypeChecker::visit(const SubscriptExpr& expr) {
         // 1. Type check the object being subscripted and the index.

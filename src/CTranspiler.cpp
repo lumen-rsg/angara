@@ -1099,16 +1099,20 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
         return "(" + transpileExpr(expr.expression) + ")";
     }
 
+
     std::string CTranspiler::transpileLogical(const LogicalExpr& expr) {
-        // The Type Checker has already verified that the operands are "truthy".
-        // C's `&&` and `||` operators have the correct short-circuiting behavior.
+        // --- THE FIX: Handle Nil Coalescing Operator `??` ---
+        if (expr.op.type == TokenType::QUESTION_QUESTION) {
+            std::string lhs_str = transpileExpr(expr.left);
+            std::string rhs_str = transpileExpr(expr.right);
+            // Generates: (!IS_NIL(lhs) ? lhs : rhs)
+            return "(!IS_NIL(" + lhs_str + ") ? " + lhs_str + " : " + rhs_str + ")";
+        }
+
+        // --- Existing logic for `&&` and `||` (unchanged) ---
         std::string lhs = "angara_is_truthy(" + transpileExpr(expr.left) + ")";
         std::string rhs = "angara_is_truthy(" + transpileExpr(expr.right) + ")";
-        std::string op = expr.op.lexeme;
-
-        // The result of the C expression is a C bool (0 or 1), which we must
-        // re-box into an AngaraObject.
-        return "angara_create_bool((" + lhs + ") " + op + " (" + rhs + "))";
+        return "create_bool((" + lhs + ") " + expr.op.lexeme + " (" + rhs + "))";
     }
 
     std::string CTranspiler::transpileUpdate(const UpdateExpr& expr) {
@@ -1558,56 +1562,78 @@ std::string CTranspiler::transpileAssignExpr(const AssignExpr& expr) {
         return nullptr;
     }
 
-
-    std::string CTranspiler::transpileGetExpr(const GetExpr& expr) {
-        // 1. Transpile the object on the left of the dot.
-        std::string object_str = transpileExpr(expr.object);
+    std::string CTranspiler::transpileGetExpr_on_instance(const GetExpr& expr, const std::string& object_str) {
         const std::string& prop_name = expr.name.lexeme;
 
-        // 2. Get the pre-computed type of the object from the Type Checker.
+        // We need to get the unwrapped type of the object to find the ClassType.
         auto object_type = m_type_checker.m_expression_types.at(expr.object.get());
-
-        if (object_type->kind == TypeKind::MODULE) {
-            auto module_type = std::dynamic_pointer_cast<ModuleType>(object_type);
-            auto symbol = module_type->exports.at(expr.name.lexeme);
-            if (module_type->is_native) {
-                // Native modules don't have C variables for their functions,
-                // we handle them at the call site. Return a placeholder.
-                // This logic is complex and better handled in transpileCallExpr.
-                // For now, let's just return the base name.
-                return expr.name.lexeme;
-            } else {
-                // It's an Angara module. We are accessing its global closure variable.
-                // The mangled name is g_ModuleName_SymbolName.
-                return "g_" + module_type->name + "_" + expr.name.lexeme;
-            }
+        if (object_type->kind == TypeKind::OPTIONAL) {
+            object_type = std::dynamic_pointer_cast<OptionalType>(object_type)->wrapped_type;
         }
-        else if (object_type->kind == TypeKind::DATA) {
-            std::string c_struct_name = "Angara_" + object_type->toString();
-            std::string obj_str = transpileExpr(expr.object);
-            return "((struct " + c_struct_name + "*)AS_OBJ(" + obj_str + "))->" + sanitize_name(expr.name.lexeme);
-        }
-        // Case 2: The object is a class instance.
-        else if (object_type->kind == TypeKind::INSTANCE) {
-            auto instance_type = std::dynamic_pointer_cast<InstanceType>(object_type);
-            std::string c_struct_name = "Angara_" + instance_type->class_type->name;
+        auto instance_type = std::dynamic_pointer_cast<InstanceType>(object_type);
 
-            const ClassType* owner_class = findPropertyOwner(instance_type->class_type.get(), prop_name);
-
-            std::string access_path = "->";
-            const ClassType* current = instance_type->class_type.get();
-            while (current && owner_class && current->name != owner_class->name) {
-                access_path += "parent.";
-                current = current->superclass.get();
-            }
-            access_path += prop_name;
-
-            return "((" + c_struct_name + "*)AS_INSTANCE(" + object_str + "))" + access_path;
+        // We need to find which class in the hierarchy actually owns the property.
+        const ClassType* owner_class = findPropertyOwner(instance_type->class_type.get(), prop_name);
+        if (!owner_class) {
+            // This should be caught by the TypeChecker, but we guard against it.
+            return "/* <unknown_property> */";
         }
 
-        // Fallback for any other type (should have been caught by Type Checker)
-        return "/* unsupported get expr */";
+        std::string c_struct_name = "Angara_" + owner_class->name;
+
+        // Build the C access path, handling parent structs for inheritance.
+        std::string access_path = "->" + sanitize_name(prop_name);
+        const ClassType* current = instance_type->class_type.get();
+        while (current && current->name != owner_class->name) {
+            access_path = "->parent" + access_path;
+            current = current->superclass.get();
+        }
+
+        return "((" + c_struct_name + "*)AS_OBJ(" + object_str + "))" + access_path;
     }
+
+
+std::string CTranspiler::transpileGetExpr(const GetExpr& expr) {
+    // 1. Transpile the object on the left of the operator.
+    std::string object_str = transpileExpr(expr.object);
+    const std::string& prop_name = expr.name.lexeme;
+
+    // 2. Get the pre-computed type of the object from the Type Checker.
+    auto object_type = m_type_checker.m_expression_types.at(expr.object.get());
+
+    // 3. Determine the actual type, peeling off one layer of optionality if it exists.
+    auto unwrapped_object_type = (object_type->kind == TypeKind::OPTIONAL)
+        ? std::dynamic_pointer_cast<OptionalType>(object_type)->wrapped_type
+        : object_type;
+
+    // 4. Generate the raw C code for the property access itself.
+    std::string access_str = "/* <invalid_get_expr> */";
+
+    if (unwrapped_object_type->kind == TypeKind::DATA) {
+        std::string c_struct_name = "Angara_" + unwrapped_object_type->toString();
+        // Cast the generic obj pointer to the specific data struct pointer and access the field.
+        access_str = "((struct " + c_struct_name + "*)AS_OBJ(" + object_str + "))->" + sanitize_name(prop_name);
+    }
+    else if (unwrapped_object_type->kind == TypeKind::INSTANCE) {
+        access_str = transpileGetExpr_on_instance(expr, object_str);
+    }
+    else if (unwrapped_object_type->kind == TypeKind::MODULE) {
+        auto module_type = std::dynamic_pointer_cast<ModuleType>(unwrapped_object_type);
+        // For a module, "accessing a property" means referring to the exported global variable.
+        access_str = module_type->name + "_" + prop_name;
+    }
+
+    // 5. If the access was optional, wrap the raw access in a nil-check.
+    // An access is considered optional if the `?.` operator was used, OR if the
+    // object being accessed was an optional type to begin with.
+    if (expr.op.type == TokenType::QUESTION_DOT || object_type->kind == TypeKind::OPTIONAL) {
+        // Generates the C ternary: (IS_NIL(obj) ? create_nil() : <the_actual_access>)
+        return "(IS_NIL(" + object_str + ") ? angara_create_nil() : " + access_str + ")";
+    }
+
+    // 6. If it was a regular access, return the raw access string.
+    return access_str;
+}
 
     std::string CTranspiler::transpileThisExpr(const ThisExpr& expr) {
         // Inside a method, the first parameter is always the instance object.

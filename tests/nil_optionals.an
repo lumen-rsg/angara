@@ -1,0 +1,62 @@
+attach io;
+attach adv_string; // For string() conversion
+
+// A simple data block for the test.
+data User {
+  let name as string;
+}
+
+// A function that might return a user, or might return nil.
+func find_user_by_id(id as i64) -> User? {
+  if (id == 101) {
+    return User("Alex");
+  }
+  return nil; // User not found
+}
+
+export func main() -> i64 {
+  io.println(1, "--- Angara Optionals Test (`?.` and `??`) ---");
+
+  // --- Test Case 1: User Not Found ---
+  io.println(1, "\n1. Testing with a user that is not found (value is nil)...");
+  let user1 as User? = find_user_by_id(404);
+
+  // Test 1a: Optional Chaining on nil
+  // `user1?.name` should safely evaluate to `nil` instead of crashing.
+  let name1 = user1?.name;
+  io.println(1, "  Accessing user1?.name results in: " + string(name1));
+
+  // Test 1b: Nil Coalescing with nil
+  // The expression should fall back to the default value "Guest".
+  let display_name1 = user1?.name ?? "Guest";
+  io.println(1, "  The display name is: " + display_name1);
+
+
+  // --- Test Case 2: User Is Found ---
+  io.println(1, "\n2. Testing with a user that is found...");
+  let user2 as User? = find_user_by_id(101);
+
+  // Test 2a: Optional Chaining on a valid object
+  // `user2?.name` should successfully access the name property.
+  // The result type is `string?`.
+  let name2 = user2?.name;
+  io.println(1, "  Accessing user2?.name results in: " + string(name2));
+
+  // Test 2b: Nil Coalescing with a valid object
+  // The expression should use the unwrapped value "Alex" and not the default.
+  let display_name2 = user2?.name ?? "Guest";
+  io.println(1, "  The display name is: " + display_name2);
+
+
+  // --- Test Case 3: Redundant Optional Chaining ---
+  io.println(1, "\n3. Testing redundant `?.` on a non-optional value...");
+  let user3 = User("Bob"); // `user3` is of type `User`, not `User?`
+
+  // This is allowed, but the `?.` has no real effect.
+  // The TypeChecker could warn about this, but it's not an error.
+  let name3 = user3?.name;
+  io.println(1, "  Accessing non_optional?.name results in: " + string(name3));
+
+  io.println(1, "\n--- Test Complete ---");
+  return 0;
+}

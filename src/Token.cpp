@@ -27,7 +27,7 @@ namespace angara {
                 "EQUAL", "EQUAL_EQUAL",
                 "GREATER", "GREATER_EQUAL",
                 "LESS", "LESS_EQUAL",
-                "PIPE", "QUESTION_QUESTION", "DOT_DOT_DOT",
+                "PIPE", "QUESTION_QUESTION", "DOT_DOT_DOT", "QUESTION_DOT",
 
                 // Literals
                 "IDENTIFIER", "STRING", "NUMBER_INT", "NUMBER_FLOAT",

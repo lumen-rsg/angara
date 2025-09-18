@@ -10,75 +10,80 @@ namespace angara {
             : m_tokens(tokens), m_errorHandler(errorHandler), m_panicMode(false) {}
 
 
-    std::shared_ptr<ASTType> Parser::type() {
-        // --- Step 1: Define all possible tokens that can start a named type ---
-        // This includes user-defined types (IDENTIFIER) and all built-in type names.
-        const static std::vector<TokenType> name_based_type_starters = {
-                TokenType::IDENTIFIER, TokenType::TYPE_STRING, TokenType::TYPE_INT,
-                TokenType::TYPE_FLOAT, TokenType::TYPE_BOOL, TokenType::TYPE_LIST,
-                TokenType::TYPE_MAP, TokenType::TYPE_I8,
-                TokenType::TYPE_I16, TokenType::TYPE_I32, TokenType::TYPE_I64,
-                TokenType::TYPE_U8, TokenType::TYPE_U16, TokenType::TYPE_U32,
-                TokenType::TYPE_U64, TokenType::TYPE_UINT, TokenType::TYPE_F32,
-                TokenType::TYPE_F64, TokenType::NIL, TokenType::TYPE_ANY,
-                TokenType::TYPE_THREAD
-        };
 
-        // --- Step 2: Check for complex, token-based types first ---
-        if (match({TokenType::LEFT_BRACE})) {
-            Token keyword = previous();
-            std::vector<RecordFieldType> fields;
-            if (!check(TokenType::RIGHT_BRACE)) {
-                do {
-                    if (check(TokenType::RIGHT_BRACE)) break;
-                    Token field_name;
-                    if (match({TokenType::IDENTIFIER})) field_name = previous();
-                    else if (match({TokenType::STRING})) field_name = previous();
-                    else throw error(peek(), "Expect field name (identifier or string) in record type definition.");
-                    consume(TokenType::COLON, "Expect ':' after field name.");
-                    fields.push_back({field_name, type()});
-                } while (match({TokenType::COMMA}));
-            }
-            consume(TokenType::RIGHT_BRACE, "Expect '}' after record type fields.");
-            return std::make_shared<RecordTypeExpr>(keyword, std::move(fields));
+std::shared_ptr<ASTType> Parser::type() {
+    std::shared_ptr<ASTType> base_type;
+
+    // --- Step 1: Parse the base of the type. ---
+    // This can be a record literal, a function literal, or a name-based type.
+
+    // Check for an inline record type, e.g., `{ name: string, id: i64 }`
+    if (match({TokenType::LEFT_BRACE})) {
+        Token keyword = previous(); // The '{' token
+        std::vector<RecordFieldType> fields;
+        if (!check(TokenType::RIGHT_BRACE)) {
+            do {
+                if (check(TokenType::RIGHT_BRACE)) break; // Allows trailing comma
+                Token field_name;
+                if (match({TokenType::IDENTIFIER})) field_name = previous();
+                else if (match({TokenType::STRING})) field_name = previous();
+                else throw error(peek(), "Expect field name (identifier or string) in record type definition.");
+
+                consume(TokenType::COLON, "Expect ':' after field name.");
+                fields.push_back({field_name, type()}); // Recursive call for the field's type
+            } while (match({TokenType::COMMA}));
         }
+        consume(TokenType::RIGHT_BRACE, "Expect '}' after record type fields.");
+        base_type = std::make_shared<RecordTypeExpr>(keyword, std::move(fields));
 
-        if (match({TokenType::TYPE_FUNCTION})) {
-            Token keyword = previous();
-            consume(TokenType::LEFT_PAREN, "Expect '(' after 'function' in type annotation.");
-            std::vector<std::shared_ptr<ASTType>> params;
-            if (!check(TokenType::RIGHT_PAREN)) {
-                do {
-                    params.push_back(type());
-                } while (match({TokenType::COMMA}));
-            }
-            consume(TokenType::RIGHT_PAREN, "Expect ')' after function type parameters.");
-            consume(TokenType::MINUS_GREATER, "Expect '->' for return type.");
-            auto return_type = type();
-            return std::make_shared<FunctionTypeExpr>(keyword, std::move(params), return_type);
-        }
-
-        // --- Step 3: Check for any kind of name-based type ---
-        if (match(name_based_type_starters)) {
-            Token type_name_token = previous();
-
-            // --- Step 3a: Check if it's a generic type ---
-            if (match({TokenType::LESS})) {
-                std::vector<std::shared_ptr<ASTType>> arguments;
-                do {
-                    arguments.push_back(type());
-                } while (match({TokenType::COMMA}));
-                consume(TokenType::GREATER, "Expect '>' after generic type arguments.");
-                return std::make_shared<GenericType>(type_name_token, std::move(arguments));
-            }
-
-            // --- Step 3b: Otherwise, it was just a simple type ---
-            return std::make_shared<SimpleType>(type_name_token);
-        }
-
-        // --- Step 4: If nothing matched, it's an error ---
-        throw error(peek(), "Expect a type name (like 'i64' or 'list'), a function type, or a record type definition.");
     }
+    // Check for a function type, e.g., `function(i64, string) -> bool`
+    else if (match({TokenType::TYPE_FUNCTION})) {
+        Token keyword = previous();
+        consume(TokenType::LEFT_PAREN, "Expect '(' after 'function' in type annotation.");
+        std::vector<std::shared_ptr<ASTType>> params;
+        if (!check(TokenType::RIGHT_PAREN)) {
+            do {
+                params.push_back(type());
+            } while (match({TokenType::COMMA}));
+        }
+        consume(TokenType::RIGHT_PAREN, "Expect ')' after function type parameters.");
+        consume(TokenType::MINUS_GREATER, "Expect '->' for return type.");
+        auto return_type = type();
+        base_type = std::make_shared<FunctionTypeExpr>(keyword, std::move(params), return_type);
+
+    }
+    // Check for any kind of name-based type (e.g., `i64`, `list`, `User`)
+    else if (match({TokenType::IDENTIFIER, TokenType::NIL})) { // Also allow `nil` keyword as a type
+        Token type_name_token = previous();
+
+        // After finding a name, check if it's a generic type like `list<string>`
+        if (match({TokenType::LESS})) {
+            std::vector<std::shared_ptr<ASTType>> arguments;
+            do {
+                arguments.push_back(type()); // Recursive call for generic arguments
+            } while (match({TokenType::COMMA}));
+            consume(TokenType::GREATER, "Expect '>' after generic type arguments.");
+            base_type = std::make_shared<GenericType>(type_name_token, std::move(arguments));
+        } else {
+            // If not generic, it was just a simple type name.
+            base_type = std::make_shared<SimpleType>(type_name_token);
+        }
+    }
+    // If none of the above matched, it's a syntax error.
+    else {
+        throw error(peek(), "Expect a type name (like 'i64' or 'User'), a function type, or a record type definition.");
+    }
+
+    // --- Step 2: After successfully parsing a base type, check for an optional suffix. ---
+    if (match({TokenType::QUESTION})) {
+        // If we see a '?', wrap the entire type we just parsed in an OptionalType node.
+        return std::make_shared<OptionalTypeNode>(base_type);
+    }
+
+    // If there was no '?', just return the base type we parsed.
+    return base_type;
+}
 
 
     std::vector<std::shared_ptr<Stmt>> Parser::parseStmts() {
@@ -272,48 +277,53 @@ std::shared_ptr<Stmt> Parser::declaration() {
     }
 
     std::shared_ptr<Expr> Parser::call() {
-        // First, parse the primary expression (e.g., the variable name 'sys').
-        std::shared_ptr<Expr> expr = primary();
+    // 1. Parse the primary expression (e.g., the variable, literal, or grouped expr).
+    std::shared_ptr<Expr> expr = primary();
 
-        // Now, loop as long as we find a '(', '.', '++', or '--'.
-        // This allows for chaining like: getModule().member++.
-        while (true) {
-            if (match({TokenType::LEFT_PAREN})) {
-                // --- It's a Function Call ---
-                std::vector<std::shared_ptr<Expr>> arguments;
-                if (!check(TokenType::RIGHT_PAREN)) {
-                    do {
-                        if (arguments.size() >= 255) {
-                            error(peek(), "Can't have more than 255 arguments.");
-                        }
-                        arguments.push_back(expression());
-                    } while (match({TokenType::COMMA}));
-                }
-                Token paren = consume(TokenType::RIGHT_PAREN, "Expect ')' after arguments.");
-                // The 'expr' from the previous step becomes the "callee" of the new CallExpr.
-                expr = std::make_shared<CallExpr>(std::move(expr), std::move(paren), std::move(arguments));
-
-            } else if (match({TokenType::LEFT_BRACKET})) {
-                Token bracket = previous();
-                std::shared_ptr<Expr> index = expression();
-                consume(TokenType::RIGHT_BRACKET, "Expect ']' after subscript index.");
-                expr = std::make_shared<SubscriptExpr>(std::move(expr), std::move(bracket), std::move(index));
-            } else if (match({TokenType::PLUS_PLUS, TokenType::MINUS_MINUS})) {
-                // --- It's a Postfix Update ---
-                Token op = previous();
-                expr = std::make_shared<UpdateExpr>(std::move(expr), std::move(op), false /* isPrefix */);
-
-            } else if (match({TokenType::DOT})) {
-                Token name = consume(TokenType::IDENTIFIER, "Expect property name after '.'.");
-                expr = std::make_shared<GetExpr>(std::move(expr), std::move(name));
-            } else {
-                // If we don't find any of the above, we're done.
-                break;
+    // 2. Loop to handle chained calls like `a.b()?.c`.
+    while (true) {
+        if (match({TokenType::LEFT_PAREN})) {
+            // --- Handle Function Call: `(...)` ---
+            std::vector<std::shared_ptr<Expr>> arguments;
+            if (!check(TokenType::RIGHT_PAREN)) {
+                do {
+                    if (arguments.size() >= 255) {
+                        error(peek(), "Cannot have more than 255 arguments.");
+                    }
+                    arguments.push_back(expression());
+                } while (match({TokenType::COMMA}));
             }
-        }
+            Token paren = consume(TokenType::RIGHT_PAREN, "Expect ')' after arguments.");
+            expr = std::make_shared<CallExpr>(std::move(expr), std::move(paren), std::move(arguments));
 
-        return expr;
+        } else if (match({TokenType::LEFT_BRACKET})) {
+            // --- Handle Subscript: `[...]` ---
+            Token bracket = previous();
+            std::shared_ptr<Expr> index = expression();
+            consume(TokenType::RIGHT_BRACKET, "Expect ']' after subscript index.");
+            expr = std::make_shared<SubscriptExpr>(std::move(expr), std::move(bracket), std::move(index));
+
+        } else if (match({TokenType::PLUS_PLUS, TokenType::MINUS_MINUS})) {
+            // --- Handle Postfix Update: `++` or `--` ---
+            Token op = previous();
+            expr = std::make_shared<UpdateExpr>(std::move(expr), std::move(op), false /* isPrefix */);
+
+        } else if (match({TokenType::DOT, TokenType::QUESTION_DOT})) {
+            // --- THE FIX: Handle Property Access: `.` or `?.` ---
+            Token op = previous(); // This is the '.' or '?.' token.
+            Token name = consume(TokenType::IDENTIFIER, "Expect property name after '.' or '?.'.");
+
+            // Pass all three parts to the updated GetExpr constructor.
+            expr = std::make_shared<GetExpr>(std::move(expr), op, std::move(name));
+
+        } else {
+            // No more chained operators found, so exit the loop.
+            break;
+        }
     }
+
+    return expr;
+}
 
 // primary → NUMBER | STRING | "true" | "false" | IDENTIFIER | "(" expression ")"
     std::shared_ptr<Expr> Parser::primary() {
@@ -800,24 +810,29 @@ std::shared_ptr<Stmt> Parser::declaration() {
         return std::make_shared<TryStmt>(std::move(tryBlock), std::move(catchName), std::move(catchBlock));
     }
 
+
     std::shared_ptr<Expr> Parser::ternary() {
-        std::shared_ptr<Expr> expr = nil_coalescing(); // Its condition can be a '??' expression
+        // The condition can now be a nil-coalescing expression.
+        std::shared_ptr<Expr> expr = nil_coalescing();
 
         if (match({TokenType::QUESTION})) {
-            std::shared_ptr<Expr> thenBranch = expression(); // The middle can be any expression
+            std::shared_ptr<Expr> thenBranch = expression();
             consume(TokenType::COLON, "Expect ':' for ternary operator.");
-            std::shared_ptr<Expr> elseBranch = ternary(); // The end is another ternary (right-associative)
+            std::shared_ptr<Expr> elseBranch = ternary(); // Right-associative
             expr = std::make_shared<TernaryExpr>(std::move(expr), std::move(thenBranch), std::move(elseBranch));
         }
         return expr;
     }
 
     std::shared_ptr<Expr> Parser::nil_coalescing() {
-        std::shared_ptr<Expr> expr = logic_or(); // Its left-hand side can be a logical OR
+        std::shared_ptr<Expr> expr = logic_or(); // Its left-hand side is higher precedence
 
         while (match({TokenType::QUESTION_QUESTION})) {
             Token op = previous();
-            std::shared_ptr<Expr> right = logic_or(); // Right-hand side is higher precedence
+            // The right-hand side is also higher precedence.
+            std::shared_ptr<Expr> right = logic_or();
+            // We will reuse the LogicalExpr AST node for `??`. The TypeChecker will
+            // give it its special meaning.
             expr = std::make_shared<LogicalExpr>(std::move(expr), std::move(op), std::move(right));
         }
         return expr;
@@ -1019,5 +1034,7 @@ std::shared_ptr<Stmt> Parser::contractDeclaration() {
         consume(TokenType::RIGHT_BRACE, "Expect '}' after data block body.");
         return std::make_shared<DataStmt>(std::move(name), std::move(fields));
     }
+
+
 }
 
