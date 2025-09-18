@@ -161,14 +161,18 @@ AngaraObject Angara_Channel_publish(int arg_count, AngaraObject* args) {
     const char* routing_key = AS_CSTRING(args[2]);
     const char* body = AS_CSTRING(args[3]);
 
+    amqp_bytes_t body_bytes = amqp_cstring_bytes(body);
+
     amqp_basic_publish(conn_data->conn, ch_data->id,
-                       amqp_cstring_bytes(exchange), amqp_cstring_bytes(routing_key),
-                       0, 0, NULL, amqp_cstring_bytes(body));
+                                    amqp_cstring_bytes(exchange), amqp_cstring_bytes(routing_key),
+                                    0, 0, NULL, body_bytes);
+
     return angara_create_nil();
 }
 
 // *** NEW METHOD: `ch.consume(queue as string, [timeout_ms as i64]) -> record|nil` ***
 AngaraObject Angara_Channel_consume(int arg_count, AngaraObject* args) {
+
     if (arg_count < 2 || arg_count > 3 || !IS_STRING(args[1])) {
         angara_throw_error("consume(queue, [timeout_ms]) invalid arguments.");
         return angara_create_nil();
@@ -198,29 +202,30 @@ AngaraObject Angara_Channel_consume(int arg_count, AngaraObject* args) {
     amqp_rpc_reply_t res = amqp_consume_message(conn_data->conn, &envelope, timeout, 0);
 
     if (res.reply_type != AMQP_RESPONSE_NORMAL) {
-        amqp_destroy_envelope(&envelope);
         if (res.library_error == AMQP_STATUS_TIMEOUT) {
-            return angara_create_nil(); // Timeout is not an error, just return nil.
+            return angara_create_nil();
         }
         check_amqp_reply(res, "Consuming message");
-        return angara_create_nil(); // Should not be reached
+        return angara_create_nil();
     }
 
-    // Copy the message body into a new Angara string.
-    AngaraObject body_str = angara_create_string_no_copy(
-            (char*)envelope.message.body.bytes, envelope.message.body.len);
+    // Create a new Angara string by COPYING the data.
+    AngaraObject body_str = angara_create_string_with_len(
+        (const char*)envelope.message.body.bytes,
+        envelope.message.body.len
+    );
+
     AngaraObject delivery_tag = angara_create_i64(envelope.delivery_tag);
 
-    // Create the result record { body: "...", delivery_tag: 123 }
-    AngaraObject result = angara_record_new_with_fields(2, (AngaraObject[]){
-            angara_create_string("body"), body_str,
-            angara_create_string("delivery_tag"), delivery_tag,
-    });
+    // Create the result record.
+    AngaraObject result = angara_record_new();
+    angara_record_set(result, "body", body_str);
+    angara_record_set(result, "delivery_tag", delivery_tag);
 
     angara_decref(body_str);
     angara_decref(delivery_tag);
 
-    amqp_destroy_envelope(&envelope); // VERY IMPORTANT: Free the library's memory.
+    amqp_destroy_envelope(&envelope);
     return result;
 }
 

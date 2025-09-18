@@ -1054,3 +1054,11 @@ AngaraObject angara_is_list_of_type(AngaraObject list_obj, const char* element_t
     // We can call our existing `angara_is_instance_of` on the element.
     return angara_is_instance_of(first_element, element_type_name);
 }
+
+AngaraObject angara_create_string_with_len(const char* chars, size_t length) {
+    char* heap_chars = (char*)malloc(length + 1);
+    if (!heap_chars) { return angara_create_nil(); }
+    memcpy(heap_chars, chars, length);
+    heap_chars[length] = '\0';
+    return angara_create_string_no_copy(heap_chars, length);
+}

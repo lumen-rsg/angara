@@ -322,6 +322,7 @@ AngaraObject angara_record_remove(AngaraObject record, AngaraObject key); // <--
 AngaraObject angara_record_keys(AngaraObject record);                    // <-- ADD THIS
 AngaraObject angara_is_instance_of(AngaraObject object, const char* class_name);
 AngaraObject angara_is_list_of_type(AngaraObject list, const char* element_type_name);
+AngaraObject angara_create_string_with_len(const char* chars, size_t length);
 
 
 #endif // ANGARA_H
