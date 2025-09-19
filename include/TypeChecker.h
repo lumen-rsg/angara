@@ -44,6 +44,7 @@ namespace angara {
         std::map<const VarExpr*, std::shared_ptr<Symbol>> m_variable_resolutions;
         std::map<const AttachStmt*, std::shared_ptr<ModuleType>> m_module_resolutions;
         std::set<UsedNativeSymbol> m_used_native_symbols;
+        std::shared_ptr<Type> resolveType(const std::shared_ptr<ASTType>& ast_type);
     private:
         // --- Visitor Methods ---
         // Statements (return void)
@@ -90,10 +91,13 @@ namespace angara {
 
         // --- Helper Methods ---
         // A helper to get the canonical Type from an ASTType node
-        std::shared_ptr<Type> resolveType(const std::shared_ptr<ASTType>& ast_type);
 
         static bool isNumeric(const std::shared_ptr<Type>& type);
         std::shared_ptr<Type> popType();
+
+        void defineEnumHeader(const EnumStmt &stmt);
+
+        void visit(std::shared_ptr<const EnumStmt> stmt);
 
         // Error reporting
         void error(const Token& token, const std::string& message);

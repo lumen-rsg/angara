@@ -485,11 +485,23 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
                     error(data_stmt->name, "re-declaration of symbol '" + data_stmt->name.lexeme + "'.");
                     note(conflicting->declaration_token, "previous declaration was here.");
                 }
+            } else if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) { // <-- ADD THIS
+                auto enum_type = std::make_shared<EnumType>(enum_stmt->name.lexeme);
+                if (auto conflicting = m_symbols.declare(enum_stmt->name, enum_type, true)) {
+                    error(enum_stmt->name, "re-declaration of symbol '" + enum_stmt->name.lexeme + "'.");
+                    note(conflicting->declaration_token, "previous declaration was here.");
+                }
             }
         }
     if (m_hadError) return false;
 
     // --- PASS 2: Define all headers and signatures (Order is important!) ---
+
+        for (const auto& stmt : statements) {
+            if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
+                defineEnumHeader(*enum_stmt);
+            }
+        }
 
     for (const auto& stmt : statements) {
         if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
@@ -562,12 +574,46 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         return type;
     }
 
-    // --- AST Visitor Implementations ---
+    void TypeChecker::defineEnumHeader(const EnumStmt& stmt) {
+        // 1. Get the placeholder EnumType we created in Pass 1.
+        auto symbol = m_symbols.resolve(stmt.name.lexeme);
+        auto enum_type = std::dynamic_pointer_cast<EnumType>(symbol->type);
 
-// =======================================================================
-// REPLACE the entire resolveType function in TypeChecker.cpp with this
-// new, correct, and final version.
-// =======================================================================
+        if (stmt.is_exported) {
+            m_module_type->exports[stmt.name.lexeme] = enum_type;
+        }
+
+        // 2. Iterate through the AST variants and create semantic EnumVariantTypes.
+        for (const auto& variant_node : stmt.variants) {
+            const std::string& variant_name = variant_node->name.lexeme;
+
+            if (enum_type->variants.count(variant_name)) {
+                error(variant_node->name, "Duplicate variant name '" + variant_name + "' in enum '" + enum_type->name + "'.");
+                continue;
+            }
+
+            // Resolve the types of the variant's parameters.
+            std::vector<std::shared_ptr<Type>> param_types;
+            for (const auto& param_node : variant_node->params) {
+                param_types.push_back(resolveType(param_node.type));
+            }
+
+            // Create the semantic type for this specific variant.
+            auto variant_constructor_type = std::make_shared<FunctionType>(
+                param_types,
+                enum_type // The return type is the EnumType itself
+            );
+            // --- END FIX ---
+
+            // Store it in the parent enum's map.
+            enum_type->variants[variant_name] = variant_constructor_type;
+        }
+    }
+
+    void TypeChecker::visit(std::shared_ptr<const EnumStmt> stmt) {
+        // All semantic validation was done in `defineEnumHeader`.
+        // There is no executable code to check in an enum definition itself.
+    }
 
 std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& ast_type) {
     if (!ast_type) {
@@ -1805,6 +1851,17 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             }
         }
     }
+    else if (unwrapped_object_type->kind == TypeKind::ENUM) {
+        auto enum_type = std::dynamic_pointer_cast<EnumType>(unwrapped_object_type);
+        auto variant_it = enum_type->variants.find(property_name);
+
+        if (variant_it == enum_type->variants.end()) {
+            error(expr.name, "Enum '" + enum_type->name + "' has no variant named '" + property_name + "'.");
+        } else {
+            // The result of accessing a variant is its constructor's FunctionType.
+            property_type = variant_it->second;
+        }
+    }
     else if (unwrapped_object_type->kind == TypeKind::MODULE) {
         auto module_type = std::dynamic_pointer_cast<ModuleType>(unwrapped_object_type);
         auto member_it = module_type->exports.find(property_name);
@@ -1814,8 +1871,8 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             property_type = member_it->second;
         }
     }
-    else if (object_type->kind == TypeKind::MODULE) {
-        auto module_type = std::dynamic_pointer_cast<ModuleType>(object_type);
+    else if (unwrapped_object_type->kind == TypeKind::MODULE) {
+        auto module_type = std::dynamic_pointer_cast<ModuleType>(unwrapped_object_type);
         auto member_it = module_type->exports.find(property_name);
         if (member_it != module_type->exports.end()) {
             property_type = member_it->second;
@@ -1825,8 +1882,8 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             }
         }
     }
-    else if (object_type->kind == TypeKind::LIST) {
-        auto list_type = std::dynamic_pointer_cast<ListType>(object_type);
+    else if (unwrapped_object_type->kind == TypeKind::LIST) {
+        auto list_type = std::dynamic_pointer_cast<ListType>(unwrapped_object_type);
         if (property_name == "push") {
             property_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{list_type->element_type},
@@ -1846,7 +1903,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             error(expr.name, "Type 'list' has no property named '" + property_name + "'.");
         }
     }
-    else if (object_type->kind == TypeKind::RECORD) {
+    else if (unwrapped_object_type->kind == TypeKind::RECORD) {
         // <-- ADD THIS ENTIRE BLOCK
         if (property_name == "remove") {
             property_type = std::make_shared<FunctionType>(
@@ -1863,14 +1920,14 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             error(expr.name, "Type 'record' has no property named '" + property_name + "'. Use subscript `[]` to access fields.");
         }
     }
-    else if (object_type->kind == TypeKind::THREAD) {
+    else if (unwrapped_object_type->kind == TypeKind::THREAD) {
         if (property_name == "join") {
             property_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_any);
         } else {
             error(expr.name, "Type 'Thread' has no property named '" + property_name + "'.");
         }
     }
-    else if (object_type->kind == TypeKind::MUTEX) {
+    else if (unwrapped_object_type->kind == TypeKind::MUTEX) {
         if (property_name == "lock" || property_name == "unlock") {
             property_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_nil);
         } else {

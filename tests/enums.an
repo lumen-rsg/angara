@@ -1,0 +1,75 @@
+// =======================================================================
+// Create a new file, e.g., `enum_test.an`, to test the `enum` feature.
+// =======================================================================
+
+attach io;
+attach adv_string;
+
+// --- Enum Definitions ---
+
+// A simple enum with no associated data.
+enum Color {
+  Red,
+  Green,
+  Blue
+}
+
+// A more complex enum with different kinds of associated data.
+enum WebEvent {
+  PageLoad,              // No data
+  KeyPress(string),      // A single value
+  Click({x: i64, y: i64}) // A data block
+}
+
+
+// --- Helper Function ---
+// This function demonstrates that enums can be used as type annotations
+// and passed as arguments.
+func process_event(event as WebEvent) -> nil {
+  // We can't inspect the event with `match` yet, so for now, we just
+  // confirm we received it. A `toString()` implementation would be nice here.
+  io.println(1, "Processing a WebEvent...");
+}
+
+export func main() -> i64 {
+  io.println(1, "--- Angara Enum Test ---");
+
+  // --- 1. Using Simple Enum Variants ---
+  io.println(1, "\n1. Testing simple enum variants...");
+  let favorite_color = Color.Green;
+  // We can't print the value meaningfully yet, but we can assign it.
+  io.println(1, "  Successfully assigned Color.Green to a variable.");
+
+  // Type checker should catch this if uncommented:
+  // let wrong_color = Color.Yellow; // ERROR: Enum 'Color' has no variant 'Yellow'.
+
+
+  // --- 2. Using Enum Variants as Constructors ---
+  io.println(1, "\n2. Testing variants with associated data...");
+
+  // Create an instance of each WebEvent variant.
+  let event1 = WebEvent.PageLoad;
+  let event2 = WebEvent.KeyPress("h");
+  let click_pos = {x: 100, y: 250};
+  let event3 = WebEvent.Click(click_pos);
+
+  io.println(1, "  Successfully created instances of all WebEvent variants.");
+
+  // Type checker should catch this if uncommented:
+  // let bad_event = WebEvent.KeyPress(123); // ERROR: Expected 'string', got 'i64'.
+
+
+  // --- 3. Storing and Passing Enum Instances ---
+  io.println(1, "\n3. Testing storing and passing enums...");
+
+  // Enums can be stored in a list of a common type.
+  // The type checker correctly infers the list type as `list<WebEvent>`.
+  let event_log = [event1, event2, event3];
+  io.println(1, "  Successfully created a list of WebEvent instances.");
+
+  // We can pass them to a function.
+  process_event(event_log[1]); // Pass the KeyPress event
+
+  io.println(1, "\n--- Test Complete ---");
+  return 0;
+}

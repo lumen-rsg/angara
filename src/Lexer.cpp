@@ -40,12 +40,13 @@ namespace angara {
             {"export",   TokenType::EXPORT},
             {"as",       TokenType::AS},
             {"contract", TokenType::CONTRACT},
-            {"signs", TokenType::SIGNS},
+            {"signs",    TokenType::SIGNS},
             {"private",  TokenType::PRIVATE},
             {"public",   TokenType::PUBLIC},
-            {"break", TokenType::BREAK},
-            {"is", TokenType::IS},
-            {"data", TokenType::DATA},
+            {"break",    TokenType::BREAK},
+            {"is",       TokenType::IS},
+            {"data",     TokenType::DATA},
+            {"enum",     TokenType::ENUM},
     };
 
     Lexer::Lexer(std::string source) : m_source(std::move(source)) {}

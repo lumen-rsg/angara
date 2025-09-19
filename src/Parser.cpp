@@ -136,6 +136,10 @@ std::shared_ptr<Stmt> Parser::declaration() {
             auto data_decl = std::static_pointer_cast<DataStmt>(dataDeclaration());
             data_decl->is_exported = is_exported;
             return data_decl;
+        } else if (match({TokenType::ENUM})) { // <-- ADD THIS BLOCK
+            auto enum_decl = std::static_pointer_cast<EnumStmt>(enumDeclaration());
+            enum_decl->is_exported = is_exported;
+            return enum_decl;
         } else {
             // If we saw 'export' but not a valid declaration that can follow it, it's an error.
             if (is_exported) {
@@ -1043,6 +1047,36 @@ std::shared_ptr<Stmt> Parser::contractDeclaration() {
 
         consume(TokenType::RIGHT_BRACE, "Expect '}' after data block body.");
         return std::make_shared<DataStmt>(std::move(name), std::move(fields));
+    }
+
+    std::shared_ptr<Stmt> Parser::enumDeclaration() {
+        Token name = consume(TokenType::IDENTIFIER, "Expect enum name.");
+        consume(TokenType::LEFT_BRACE, "Expect '{' before enum body.");
+
+        std::vector<std::shared_ptr<EnumVariant>> variants;
+
+        // The first variant does not need a leading comma.
+        if (!check(TokenType::RIGHT_BRACE)) {
+            do {
+                Token variant_name = consume(TokenType::IDENTIFIER, "Expect enum variant name.");
+
+                std::vector<EnumVariantParam> params;
+                // Check for associated data types in parentheses.
+                if (match({TokenType::LEFT_PAREN})) {
+                    if (!check(TokenType::RIGHT_PAREN)) {
+                        do {
+                            // Each parameter is just a type.
+                            params.push_back({type()});
+                        } while (match({TokenType::COMMA}));
+                    }
+                    consume(TokenType::RIGHT_PAREN, "Expect ')' after enum variant parameters.");
+                }
+                variants.push_back(std::make_shared<EnumVariant>(variant_name, std::move(params)));
+            } while (match({TokenType::COMMA}));
+        }
+
+        consume(TokenType::RIGHT_BRACE, "Expect '}' after enum body.");
+        return std::make_shared<EnumStmt>(std::move(name), std::move(variants));
     }
 
 

@@ -29,11 +29,15 @@ namespace angara {
         EXCEPTION,
         OPTIONAL,
         DATA,
+        ENUM,          // Represents the enum type itself (e.g., `WebEvent`)
         ERROR // A special type to prevent cascading error messages
     };
 
 
     struct Type;
+    struct EnumType;
+    struct EnumVariantType;
+    struct ClassType; // Needed for DataType and others
 
     // --- BASE TYPE CLASS ---
     struct Type {
@@ -296,5 +300,23 @@ namespace angara {
     };
 
 
+    // --- NEW: ENUM-RELATED TYPES ---
+
+    // Represents a specific variant of an enum, e.g., `WebEvent.KeyPress`.
+    // It can be treated as a value (if it has no parameters) or as a
+    // constructor function (if it has parameters).
+
+    // Represents the enum type itself, e.g., `WebEvent`.
+    // It acts as a namespace for its variants.
+    struct EnumType : Type {
+        const std::string name;
+        // The map now stores the CONSTRUCTOR SIGNATURE for each variant.
+        std::map<std::string, std::shared_ptr<FunctionType>> variants;
+
+        explicit EnumType(std::string name)
+            : Type(TypeKind::ENUM), name(std::move(name)) {}
+
+        [[nodiscard]] std::string toString() const override { return name; }
+    };
 
 } // namespace angara

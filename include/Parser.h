@@ -89,5 +89,7 @@ namespace angara {
         std::shared_ptr<Stmt> breakStatement();
 
         std::shared_ptr<Stmt> dataDeclaration();
+
+        std::shared_ptr<Stmt> enumDeclaration();
     };
 }

@@ -310,7 +310,7 @@ static void free_object(Object* object) {
         case OBJ_DATA_INSTANCE: free(object); break;
         case OBJ_INSTANCE:
             // For now, just free the memory. We'll need to handle
-            // decref-ing all fields later.
+            // decref-ing all fields later. TODO
             free(object);
             break;
         case OBJ_CLASS:
@@ -321,6 +321,11 @@ static void free_object(Object* object) {
             break;
         case OBJ_MUTEX: free_mutex((AngaraMutex*)object); break; // <-- ADD THIS
         case OBJ_EXCEPTION: free_exception((AngaraException*)object); break;
+            // An enum instance might hold AngaraObjects in its payload. We MUST decref them.
+            // This is a complex task. For now, we will assume a simple free, but this
+            // will cause memory leaks if a variant holds a string, list, etc.
+            // TODO: Implement a GC-aware free for enums.
+        case OBJ_ENUM_INSTANCE: free(object); break;
         default: break;
     }
 }
@@ -346,7 +351,7 @@ void printObject(AngaraObject obj) {
                 }
                 case OBJ_DATA_INSTANCE: { // <-- ADD THIS
                         // We don't know the type name at runtime yet, so just print a placeholder.
-                        // This can be improved later by storing a pointer to the DataType.
+                        // This can be improved later by storing a pointer to the DataType. // TODO
                         printf("<data object>");
                         break;
                 }
@@ -375,12 +380,19 @@ void printObject(AngaraObject obj) {
                     printf("Exception: %s", AS_CSTRING(exc->message));
                     break;
             }
+            case OBJ_ENUM_INSTANCE: {
+                    // We don't have enough runtime info to print the variant name yet.
+                    // TODO
+                    printf("<enum instance>");
+                    break;
+            }
                 case OBJ_NATIVE_INSTANCE:
                     printf("<native instance at %p>", AS_NATIVE_INSTANCE(obj)->data);
                     break;
 
                 default: printf("<object>"); break;
             }
+
             break;
     }
 }

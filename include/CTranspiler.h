@@ -24,6 +24,11 @@ namespace angara {
         TranspileResult generate(const std::vector<std::shared_ptr<Stmt>>& statements,
                                  const std::shared_ptr<ModuleType>& module_type,
                                  std::vector<std::string>& all_module_names);
+
+        void transpileEnumStructs(const EnumStmt &stmt);
+
+        void transpileEnumConstructors(const EnumStmt &stmt, bool generate_prototype_only);
+
     private:
         // --- Main Pass Methods ---
         void pass_1_generate_structs(const std::vector<std::shared_ptr<Stmt>>& statements);

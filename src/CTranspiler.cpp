@@ -687,6 +687,23 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
             }
         }
 
+        // --- NEW PASS 0c: Generate ENUM struct definitions ---
+        (*m_current_out) << "\n// --- Enum Definitions ---\n";
+        for (const auto& stmt : statements) {
+            if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
+                transpileEnumStructs(*enum_stmt);
+            }
+        }
+
+        // --- NEW PASS 0d: Generate ENUM constructor prototypes ---
+        (*m_current_out) << "\n// --- Enum Constructor Prototypes ---\n";
+        for (const auto& stmt : statements) {
+            if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
+                // This helper will generate prototypes for each variant.
+                transpileEnumConstructors(*enum_stmt, true /* generate_prototype_only */);
+            }
+        }
+
         pass_1_generate_structs(statements);
         pass_2_generate_declarations(statements, module_name);
 
@@ -717,6 +734,13 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
         }
         // --- END FIX ---
 
+        (*m_current_out) << "\n// --- Enum Constructor Implementations ---\n";
+        for (const auto& stmt : statements) {
+            if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
+                transpileEnumConstructors(*enum_stmt, false /* generate_prototype_only */);
+            }
+        }
+
         pass_3_generate_globals_and_implementations(statements, module_name);
 
         // Pass 5: Generate the C main() function if this is the main module.
@@ -737,6 +761,99 @@ void CTranspiler::transpileGlobalFunction(const FuncStmt& stmt, const std::strin
         if (m_hadError) return {};
         return {m_header_out.str(), final_source};
     }
+
+    void CTranspiler::transpileEnumStructs(const EnumStmt& stmt) {
+        std::string enum_name = stmt.name.lexeme;
+        std::string c_base_name = "Angara_" + enum_name;
+        auto enum_type = std::dynamic_pointer_cast<EnumType>(m_type_checker.m_symbols.resolve(enum_name)->type);
+
+        // 1. Generate the tag enum
+        (*m_current_out) << "typedef enum {\n";
+        m_indent_level++;
+        for (const auto& variant_pair : enum_type->variants) {
+            indent();
+            (*m_current_out) << c_base_name << "_Tag_" << variant_pair.first << ",\n";
+        }
+        m_indent_level--;
+        (*m_current_out) << "} " << c_base_name << "_Tag;\n\n";
+
+        // 2. Generate the payload union. Only include variants that have data.
+        (*m_current_out) << "typedef union {\n";
+        m_indent_level++;
+        for (const auto& variant_pair : enum_type->variants) {
+            if (!variant_pair.second->param_types.empty()) {
+                // This simplified version assumes a variant has at most one parameter.
+                // A full implementation would use a nested struct for multi-param variants.
+                auto param_type = variant_pair.second->param_types[0];
+                indent();
+                (*m_current_out) << getCType(param_type) << " " << sanitize_name(variant_pair.first) << ";\n";
+            }
+        }
+        m_indent_level--;
+        (*m_current_out) << "} " << c_base_name << "_Payload;\n\n";
+
+        // 3. Generate the main struct for an enum instance
+        (*m_current_out) << "typedef struct " << c_base_name << " {\n";
+        m_indent_level++;
+        indent(); (*m_current_out) << "Object obj;\n";
+        indent(); (*m_current_out) << c_base_name << "_Tag tag;\n";
+        indent(); (*m_current_out) << c_base_name << "_Payload payload;\n";
+        m_indent_level--;
+        (*m_current_out) << "} " << c_base_name << ";\n\n";
+    }
+
+void CTranspiler::transpileEnumConstructors(const EnumStmt& stmt, bool generate_prototype_only) {
+    auto enum_type = std::dynamic_pointer_cast<EnumType>(m_type_checker.m_symbols.resolve(stmt.name.lexeme)->type);
+    std::string enum_name = enum_type->name;
+    std::string c_struct_name = "Angara_" + enum_name;
+
+    for (const auto& variant_pair : enum_type->variants) {
+        const auto& variant_name = variant_pair.first;
+        const auto& variant_sig = variant_pair.second;
+        std::string c_func_name = "Angara_" + enum_name + "_" + variant_name;
+
+        // --- Generate Signature ---
+        // A constructor always returns a generic AngaraObject.
+        (*m_current_out) << "AngaraObject " << c_func_name << "(";
+        for (size_t i = 0; i < variant_sig->param_types.size(); ++i) {
+            (*m_current_out) << getCType(variant_sig->param_types[i]) << " arg" << i;
+            if (i < variant_sig->param_types.size() - 1) (*m_current_out) << ", ";
+        }
+        (*m_current_out) << ")";
+
+        if (generate_prototype_only) {
+            (*m_current_out) << ";\n";
+            continue;
+        }
+
+        // --- Generate Body ---
+        (*m_current_out) << " {\n";
+        m_indent_level++;
+
+        indent();
+        (*m_current_out) << c_struct_name << "* data = (" << c_struct_name << "*)malloc(sizeof(" << c_struct_name << "));\n";
+        indent();
+        (*m_current_out) << "if (data == NULL) { angara_throw_error(\"Out of memory creating enum instance.\"); }\n";
+
+        indent();
+        (*m_current_out) << "data->obj.type = OBJ_ENUM_INSTANCE; data->obj.ref_count = 1;\n";
+        indent();
+        (*m_current_out) << "data->tag = " << c_struct_name << "_Tag_" << variant_name << ";\n";
+
+        // Assign the payload, if one exists.
+        if (!variant_sig->param_types.empty()) {
+            indent();
+            // This simplified version assumes a single parameter.
+            (*m_current_out) << "data->payload." << sanitize_name(variant_name) << " = arg0;\n";
+            // A full implementation would need to handle incref-ing if the payload is an AngaraObject.
+        }
+
+        indent();
+        (*m_current_out) << "return (AngaraObject){ VAL_OBJ, { .obj = (Object*)data } };\n";
+        m_indent_level--;
+        (*m_current_out) << "}\n\n";
+    }
+}
 
 
     void CTranspiler::pass_1_generate_structs(const std::vector<std::shared_ptr<Stmt>>& statements) {
@@ -1397,6 +1514,7 @@ std::string CTranspiler::transpileCallExpr(const CallExpr& expr) {
             if (name == "keys") return "angara_record_keys(" + object_str + ")";
         }
 
+
         // A) Method call on a class instance (e.g., `p.move(...)` or `my_counter.increment()`).
         if (object_type->kind == TypeKind::INSTANCE) {
             auto instance_type = std::dynamic_pointer_cast<InstanceType>(object_type);
@@ -1437,6 +1555,17 @@ std::string CTranspiler::transpileCallExpr(const CallExpr& expr) {
                 // ANGARA symbol from another module: Call its global closure.
                 std::string closure_var = "g_" + name;
                 return "angara_call(" + closure_var + ", " + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
+            }
+        }
+
+        if (callee_type->kind == TypeKind::FUNCTION) {
+            auto func_type = std::dynamic_pointer_cast<FunctionType>(callee_type);
+            if (func_type->return_type->kind == TypeKind::ENUM) {
+                // This is an enum variant constructor call.
+                // The `transpileGetExpr` on the callee (`WebEvent.KeyPress`) has already
+                // produced the correct C function name (e.g., `Angara_WebEvent_KeyPress`).
+                std::string c_constructor_name = transpileExpr(expr.callee);
+                return c_constructor_name + "(" + args_str + ")";
             }
         }
     }
@@ -1661,7 +1790,11 @@ std::string CTranspiler::transpileGetExpr(const GetExpr& expr) {
         auto module_type = std::dynamic_pointer_cast<ModuleType>(unwrapped_object_type);
         // For a module, "accessing a property" means referring to the exported global variable.
         access_str = module_type->name + "_" + prop_name;
-    }
+    } if (object_type->kind == TypeKind::ENUM) {
+            // Accessing `WebEvent.KeyPress` doesn't generate a value, it resolves to the
+            // constructor function. We just return its name. The CallExpr transpiler will use it.
+            return "Angara_" + object_type->toString() + "_" + expr.name.lexeme;
+        }
 
     // 5. If the access was optional, wrap the raw access in a nil-check.
     // An access is considered optional if the `?.` operator was used, OR if the

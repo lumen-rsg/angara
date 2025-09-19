@@ -31,6 +31,7 @@ namespace angara {
     struct ContractStmt;
     struct BreakStmt;
     struct DataStmt;
+    struct EnumStmt;
 
 // Statement Visitor Interface (returns void)
     class StmtVisitor {
@@ -54,6 +55,7 @@ namespace angara {
         virtual void visit(std::shared_ptr<const ContractStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const BreakStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const DataStmt> stmt) = 0;
+        virtual void visit(std::shared_ptr<const EnumStmt> stmt) = 0;
     };
     // A simple struct to pair a parameter's name with its type annotation.
     struct Parameter {
@@ -367,6 +369,44 @@ namespace angara {
 
         void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const DataStmt>(self));
+        }
+    };
+
+    // --- Helper Structs for EnumStmt ---
+
+    // Represents a single, unnamed type parameter in an enum variant.
+    // For example, the `string` in `KeyPress(string)`.
+    struct EnumVariantParam {
+        std::shared_ptr<ASTType> type;
+    };
+
+    // Represents a single variant (or case) within an enum.
+    // For example, `KeyPress(string)` or just `North`.
+    struct EnumVariant {
+        const Token name;
+        // The list of types the variant holds. Empty if it has no associated data.
+        const std::vector<EnumVariantParam> params;
+
+        EnumVariant(Token name, std::vector<EnumVariantParam> params)
+            : name(std::move(name)),
+              params(std::move(params)) {}
+    };
+
+
+    // --- The EnumStmt AST Node ---
+
+    // Represents a complete "enum Name { Variant1, Variant2(...) }" statement.
+    struct EnumStmt : Stmt {
+        const Token name;
+        const std::vector<std::shared_ptr<EnumVariant>> variants;
+        bool is_exported = false;
+
+        EnumStmt(Token name, std::vector<std::shared_ptr<EnumVariant>> variants)
+            : name(std::move(name)),
+              variants(std::move(variants)) {}
+
+        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+            visitor.visit(std::static_pointer_cast<const EnumStmt>(self));
         }
     };
 }
