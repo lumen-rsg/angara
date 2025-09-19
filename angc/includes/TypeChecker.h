@@ -13,6 +13,7 @@
 #include <stack>
 
 #include "CompilerDriver.h"
+#include "StringUtils.h"
 
 namespace angara {
 
@@ -106,6 +107,7 @@ namespace angara {
         void note(const Token &token, const std::string &message);
 
         bool m_is_in_trait = false;
+        void find_and_report_suggestion(const Token& bad_token, const std::vector<std::string>& candidates);
 
 
 

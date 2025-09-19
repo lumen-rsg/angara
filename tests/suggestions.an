@@ -1,0 +1,7 @@
+func main() -> i64 {
+
+    let print as string = "print";
+
+    let test as string = prnt;
+
+}
