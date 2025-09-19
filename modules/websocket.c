@@ -92,7 +92,7 @@ static int angara_lws_callback(struct lws *wsi, enum lws_callback_reasons reason
             AngaraLwsClient *client = (AngaraLwsClient *)context_user_data;
             msg_buffer* msg_to_send = nullptr;
 
-            // --- THE FIX: Lock the mutex before touching the queue ---
+            // Lock the mutex before touching the queue ---
             pthread_mutex_lock(&client->send_queue_mutex);
             if (client->msg_queue_head) {
                 // Dequeue the message
@@ -265,7 +265,6 @@ AngaraObject Angara_websocket_connect(int arg_count, AngaraObject* args) {
         finalize_client(client_data);
         return angara_create_nil();
     }
-    // --- FIX STARTS HERE ---
     char* url_copy = strdup(AS_CSTRING(args[0]));
     const char *protocol, *host, *parsed_path;
     int port;
@@ -310,7 +309,7 @@ AngaraObject Angara_websocket_connect(int arg_count, AngaraObject* args) {
     }
 
     free(url_copy);
-    // --- FIX ENDS HERE ---
+
 
     return client_data->self_obj;
 }
@@ -426,7 +425,6 @@ static const AngaraMethodDef WEBSOCKET_METHODS[] = {
 };
 
 static const AngaraMethodDef SERVER_METHODS[] = {
-        // **FIX**: Point to the correct, existing server service function
         {"service", (AngaraMethodFn)Angara_Server_service, "->n"},
         {nullptr, nullptr, nullptr}
 };

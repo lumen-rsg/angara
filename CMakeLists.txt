@@ -10,15 +10,15 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(CURL REQUIRED libcurl)
 
 pkg_check_modules(LWS REQUIRED libwebsockets)
-pkg_check_modules(SSL REQUIRED openssl)   # <-- ADD openssl
+pkg_check_modules(SSL REQUIRED openssl)
 pkg_check_modules(AMQP REQUIRED librabbitmq)
 
 # --- 1. Build libangara_runtime.so ---
 # The runtime is now a SHARED library that everything else will link against.
-add_library(angara_runtime SHARED src/runtime/angara_runtime.c)
-target_include_directories(angara_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+add_library(angara_runtime SHARED runtime/angara_runtime.c)
+target_include_directories(angara_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/angc/includes)
 set_target_properties(angara_runtime PROPERTIES
-        PUBLIC_HEADER src/runtime/angara_runtime.h # Expose the header
+        PUBLIC_HEADER runtime/angara_runtime.h # Expose the header
         INSTALL_NAME_DIR "@rpath"
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
@@ -33,7 +33,7 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
     # Modules link against the CORE RUNTIME LIBRARY
     target_link_libraries(${MODULE_NAME} PRIVATE angara_runtime)
 
-    # --- THE FIX: Conditional Linking ---
+    # --- Conditional Linking ---
     # If this specific module needs an external library, link it here.
     if (MODULE_NAME STREQUAL "http")
         message(STATUS "Module 'http' requires libcurl. Linking...")
@@ -43,21 +43,19 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
 
     elseif (MODULE_NAME STREQUAL "websocket")
         message(STATUS "Module 'websocket' requires libwebsocket and openssl. Linking...")
-        # --- THE FIX ---
         target_link_libraries(${MODULE_NAME} PRIVATE ${LWS_LIBRARIES} ${SSL_LIBRARIES})
     elseif (MODULE_NAME STREQUAL "time") # <-- ADD THIS BLOCK
         message(STATUS "Module 'time' requires the real-time library. Linking...")
         # On many systems, clock_gettime requires linking with librt
         target_link_libraries(${MODULE_NAME} PRIVATE rt)
 
-    elseif (MODULE_NAME STREQUAL "amqp") # <-- ADD THIS BLOCK
+    elseif (MODULE_NAME STREQUAL "amqp")
         message(STATUS "Module 'amqp' requires librabbitmq. Linking...")
         target_include_directories(${MODULE_NAME} PRIVATE ${AMQP_INCLUDE_DIRS})
         target_link_libraries(${MODULE_NAME} PRIVATE ${AMQP_LIBRARIES})
     endif()
-    # --- END FIX ---
 
-    target_include_directories(${MODULE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_include_directories(${MODULE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/angc/includes)
     set_target_properties(${MODULE_NAME} PROPERTIES
             INSTALL_NAME_DIR "@rpath"
             LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
@@ -67,20 +65,13 @@ endforeach()
 
 
 # --- 3. Build the angc executable ---
+file(GLOB_RECURSE ANGC_SOURCES "${CMAKE_SOURCE_DIR}/angc/*.cpp")
+
 add_executable(angc
-        src/ErrorHandler.cpp
-        src/Lexer.cpp
-        src/main.cpp
-        src/Parser.cpp
-        src/Token.cpp
-        src/TypeChecker.cpp
-        src/SymbolTable.cpp
-        src/CTranspiler.cpp
-        src/ASTPrinter.cpp
-        src/CompilerDriver.cpp
+        ${ANGC_SOURCES}
 )
 # The compiler itself does not need to link against the runtime.
-target_include_directories(angc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(angc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/angc/includes)
 target_link_libraries(angc PRIVATE angara_runtime)
 
 

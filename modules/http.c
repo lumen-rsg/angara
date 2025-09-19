@@ -24,7 +24,6 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
     size_t real_size = size * nmemb;
     MemoryBuffer *mem = (MemoryBuffer *)userp;
 
-    // --- THE FIX ---
     // Ensure there is enough space for the new data AND a null terminator.
     while (mem->len + real_size + 1 > mem->cap) {
         // If cap is 0, start with a reasonable size.

@@ -18,7 +18,7 @@ static inline CounterData* get_data(AngaraObject self) {
 }
 
 // --- Constructor ---
-// THE FIX: The C function name must exactly match the mangled name.
+// The C function name must exactly match the mangled name.
 // Transpiler generates: Angara_ModuleName_ClassName
 AngaraObject Angara_counter_Counter(int arg_count, AngaraObject* args) {
     if (arg_count != 1 || !IS_I64(args[0])) {
@@ -31,7 +31,7 @@ AngaraObject Angara_counter_Counter(int arg_count, AngaraObject* args) {
 }
 
 // --- Methods ---
-// THE FIX: The C function name must exactly match the mangled name.
+// The C function name must exactly match the mangled name.
 // Transpiler generates: Angara_ClassName_MethodName
 AngaraObject Angara_Counter_increment(int arg_count, AngaraObject* args) {
     AngaraObject self = args[0];
