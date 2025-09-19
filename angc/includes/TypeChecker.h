@@ -30,7 +30,7 @@ namespace angara {
 
     class TypeChecker : public ExprVisitor, public StmtVisitor {
     public:
-        TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler, std::string module_name);
+        TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler, const std::string& module_name);
 
         // The main entry point. Returns true if type checking generators.
         bool check(const std::vector<std::shared_ptr<Stmt>>& statements);
@@ -66,7 +66,7 @@ namespace angara {
         std::any visit(const ThisExpr &expr) override;
         std::any visit(const SuperExpr &expr) override;
 
-        void visit(std::shared_ptr<const ContractStmt> stmt);
+        void visit(std::shared_ptr<const ContractStmt> stmt) override;
 
         void defineContractHeader(const ContractStmt &stmt);
 
@@ -97,7 +97,7 @@ namespace angara {
 
         void defineEnumHeader(const EnumStmt &stmt);
 
-        void visit(std::shared_ptr<const EnumStmt> stmt);
+        void visit(std::shared_ptr<const EnumStmt> stmt) override;
 
         // Error reporting
         void error(const Token& token, const std::string& message);
@@ -145,16 +145,16 @@ namespace angara {
 
         static bool isFloat(const std::shared_ptr<Type> &type);
 
-        void pushAndSave(const Expr *expr, std::shared_ptr<Type> type);
+        void pushAndSave(const Expr *expr, const std::shared_ptr<Type>& type);
 
         static bool isTruthy(const std::shared_ptr<Type> &type);
 
-        void visit(std::shared_ptr<const BreakStmt> stmt);
+        void visit(std::shared_ptr<const BreakStmt> stmt) override;
         std::map<const Symbol*, std::shared_ptr<Type>> m_narrowed_types;
 
         std::shared_ptr<Symbol> resolve_and_narrow(const VarExpr &expr);
 
-        std::any visit(const IsExpr &expr);
+        std::any visit(const IsExpr &expr) override;
 
         bool check_type_compatibility(const std::shared_ptr<Type> &expected, const std::shared_ptr<Type> &actual);
 
@@ -163,7 +163,7 @@ namespace angara {
         void check_function_call(const CallExpr &call, const std::shared_ptr<FunctionType> &func_type,
                                  const std::vector<std::shared_ptr<Type>> &arg_types);
 
-        void visit(std::shared_ptr<const DataStmt> stmt);
+        void visit(std::shared_ptr<const DataStmt> stmt) override;
 
         void defineDataHeader(const DataStmt &stmt);
     };

@@ -23,6 +23,8 @@ set_target_properties(angara_runtime PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
 
+set(CMAKE_CXX_FLAGS "-Wno-trigraphs")
+
 
 # --- 2. Build Native Modules (like libfs.so) ---
 file(GLOB_RECURSE NATIVE_MODULE_SOURCES "${CMAKE_SOURCE_DIR}/modules/*.c")

@@ -23,8 +23,7 @@ namespace angara {
         if (!symbol) return nullptr;
 
         // 2. Check if this symbol has a narrowed type in our special map.
-        auto it = m_narrowed_types.find(symbol.get());
-        if (it != m_narrowed_types.end()) {
+        if (const auto it = m_narrowed_types.find(symbol.get()); it != m_narrowed_types.end()) {
             // It does! Create a temporary, "fake" symbol on the stack
             // that has the same properties but with the new, narrowed type.
             Symbol narrowed_symbol = *symbol;
@@ -36,7 +35,7 @@ namespace angara {
         return symbol;
     }
 
-    TypeChecker::TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler, std::string module_name)
+    TypeChecker::TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler, const std::string& module_name)
     : m_errorHandler(errorHandler), m_driver(driver) {
         // Integer Types
         m_type_i8 = std::make_shared<PrimitiveType>("i8");
@@ -63,14 +62,14 @@ namespace angara {
 
 
         // func len(any) -> i64;
-        auto len_type = std::make_shared<FunctionType>(
+        const auto len_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{m_type_any},
                 m_type_i64
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "len", 0, 0), len_type, true);
 
         // func typeof(any) -> string;
-        auto typeof_type = std::make_shared<FunctionType>(
+        const auto typeof_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{m_type_any},
                 m_type_string
         );
@@ -82,7 +81,7 @@ namespace angara {
         );
 
         // Define the signature for `spawn` itself: function(function() -> void) -> Thread
-        auto spawn_type = std::make_shared<FunctionType>(
+        const auto spawn_type = std::make_shared<FunctionType>(
             std::vector<std::shared_ptr<Type>>{std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{}, std::make_shared<AnyType>(), true // A generic function
             )},
@@ -133,7 +132,7 @@ namespace angara {
 
     }
 
-    void TypeChecker::pushAndSave(const Expr* expr, std::shared_ptr<Type> type) {
+    void TypeChecker::pushAndSave(const Expr* expr, const std::shared_ptr<Type>& type) {
         m_type_stack.push(type);
         m_expression_types[expr] = type;
     }
@@ -372,7 +371,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         std::map<std::string, std::shared_ptr<Type>> fields;
         for (const auto& field_def : record_type_expr->fields) {
             const std::string& field_name = field_def.name.lexeme;
-            if (fields.count(field_name)) {
+            if (fields.contains(field_name)) {
                 error(field_def.name, "Duplicate field name '" + field_name + "' in record type definition.");
             }
             fields[field_name] = resolveType(field_def.type);

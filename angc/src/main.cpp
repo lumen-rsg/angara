@@ -2,25 +2,24 @@
 #include <random>
 #include <string>
 #include <thread>
-#include <random>
 
 #include "CompilerDriver.h"
 
 // --- Standard Color Constants ---
-const char* const RESET = "\033[0m";
-const char* const BOLD = "\033[1m";
-const char* const RED = "\033[31m";
-const char* const GREEN = "\033[32m";
-const char* const YELLOW = "\033[33m";
-const char* const BLUE = "\033[34m";
-const char* const PURPLE = "\033[35m";
-const char* const CYAN = "\033[36m";
+const auto RESET = "\033[0m";
+const auto BOLD = "\033[1m";
+const auto RED = "\033[31m";
+const auto GREEN = "\033[32m";
+const auto YELLOW = "\033[33m";
+const auto BLUE = "\033[34m";
+const auto PURPLE = "\033[35m";
+const auto CYAN = "\033[36m";
 
 const std::string ANGC_VERSION = "2.0-staging";
 const std::string ANGARA_SPEC = "v2-static";
 const std::string BACKEND_VERSION = "2.3-staging";
 
-void print_and_remove(std::string data) {
+void print_and_remove(const std::string& data) {
     std::random_device dev;
     std::mt19937 rng(dev());
     std::uniform_int_distribution<std::mt19937::result_type> dist6(40,100);
@@ -81,15 +80,15 @@ void print_easter() {
 }
 
 
-int main(int argc, char* argv[]) {
+int main(const int argc, char* argv[]) {
     // 1. Handle command-line arguments.
     if (argc != 2) {
         std::cerr << RED << BOLD << "Error: " << RESET << "Incorrect usage." << std::endl;
-        std::cerr << "Usage: angara_compiler <source_file.an | -v | --version>" << std::endl;
+        std::cerr << "Usage: angc <source_file.an | -v | --version>" << std::endl;
         return 1;
     }
 
-    std::string arg = argv[1];
+    const std::string arg = argv[1];
 
     // 2. Check for the version flag.
     if (arg == "-v" || arg == "--version") {
@@ -117,11 +116,9 @@ int main(int argc, char* argv[]) {
     std::cout << RESET << std::endl;
 
     // 3. If it's not a version flag, proceed with compilation.
-    angara::CompilerDriver driver;
-    bool success = driver.compile(arg);
 
     // 4. Return the appropriate final exit code.
-    if (success) {
+    if (angara::CompilerDriver driver; driver.compile(arg)) {
         std::cout << "\n" << BOLD << GREEN << "Build successful." << RESET << std::endl;
         return 0;
     } else {

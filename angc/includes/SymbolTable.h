@@ -38,14 +38,14 @@ namespace angara {
         // Returns the symbol if found, otherwise nullptr.
         [[nodiscard]] std::shared_ptr<Symbol> resolve(const std::string& name) const;
 
-        [[nodiscard]] std::shared_ptr<Symbol> declare(
+        std::shared_ptr<Symbol> declare(
             const Token &token,
             std::shared_ptr<Type> type,
             bool is_const,
             std::shared_ptr<ModuleType> from_module = nullptr
         );
-        const std::map<std::string, std::shared_ptr<Symbol>>& getGlobalScope() const;
-        int getScopeDepth() const;
+        [[nodiscard]] const std::map<std::string, std::shared_ptr<Symbol>>& getGlobalScope() const;
+        [[nodiscard]] int getScopeDepth() const;
 
 
     private:
