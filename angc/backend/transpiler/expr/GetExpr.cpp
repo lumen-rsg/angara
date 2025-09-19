@@ -32,11 +32,31 @@ namespace angara{
             auto module_type = std::dynamic_pointer_cast<ModuleType>(unwrapped_object_type);
             // For a module, "accessing a property" means referring to the exported global variable.
             access_str = module_type->name + "_" + prop_name;
-        } if (object_type->kind == TypeKind::ENUM) {
-                // Accessing `WebEvent.KeyPress` doesn't generate a value, it resolves to the
-                // constructor function. We just return its name. The CallExpr transpiler will use it.
-                return "Angara_" + object_type->toString() + "_" + expr.name.lexeme;
+        } if (unwrapped_object_type->kind == TypeKind::ENUM) {
+            // This is an access to an enum variant, like `Color.Green`.
+            // We need to check if it's a nullary variant being used as a value,
+            // or a constructor that is about to be called.
+
+            // 1. Get the type of the ENTIRE GetExpr node itself (e.g., the type of `Color.Green`).
+            auto get_expr_type = m_type_checker.m_expression_types.at(&expr);
+
+            // 2. The TypeChecker resolves all variant accesses to a FunctionType.
+            if (get_expr_type->kind == TypeKind::FUNCTION) {
+                auto func_type = std::dynamic_pointer_cast<FunctionType>(get_expr_type);
+
+                // 3. Check if it's a function with ZERO parameters.
+                if (func_type->param_types.empty()) {
+                    // This is a nullary variant being used as a value. We must transpile it
+                    // to an immediate function call. e.g., `Angara_Color_Green()`
+                    return "Angara_" + unwrapped_object_type->toString() + "_" + prop_name + "()";
+                }
             }
+
+            // If it's a function with parameters, it MUST be the callee of a CallExpr.
+            // The CallExpr transpiler will add the parentheses. Just return the function name.
+            // e.g., `Angara_WebEvent_KeyPress`
+            return "Angara_" + unwrapped_object_type->toString() + "_" + prop_name;
+        }
 
         // 5. If the access was optional, wrap the raw access in a nil-check.
         // An access is considered optional if the `?.` operator was used, OR if the

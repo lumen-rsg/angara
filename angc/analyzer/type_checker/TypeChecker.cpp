@@ -341,7 +341,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
             if (symbol->type->kind == TypeKind::CLASS) {
                 return std::make_shared<InstanceType>(std::dynamic_pointer_cast<ClassType>(symbol->type));
             }
-            if (symbol->type->kind == TypeKind::DATA || symbol->type->kind == TypeKind::TRAIT || symbol->type->kind == TypeKind::CONTRACT) {
+            if (symbol->type->kind == TypeKind::DATA || symbol->type->kind == TypeKind::TRAIT || symbol->type->kind == TypeKind::CONTRACT || symbol->type->kind == TypeKind::ENUM) {
                 return symbol->type;
             }
         }
