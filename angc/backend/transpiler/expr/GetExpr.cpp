@@ -32,30 +32,28 @@ namespace angara{
             auto module_type = std::dynamic_pointer_cast<ModuleType>(unwrapped_object_type);
             // For a module, "accessing a property" means referring to the exported global variable.
             access_str = module_type->name + "_" + prop_name;
-        } if (unwrapped_object_type->kind == TypeKind::ENUM) {
-            // This is an access to an enum variant, like `Color.Green`.
-            // We need to check if it's a nullary variant being used as a value,
-            // or a constructor that is about to be called.
+        } else if (unwrapped_object_type->kind == TypeKind::ENUM) {
+            auto enum_type = std::dynamic_pointer_cast<EnumType>(unwrapped_object_type);
 
-            // 1. Get the type of the ENTIRE GetExpr node itself (e.g., the type of `Color.Green`).
-            auto get_expr_type = m_type_checker.m_expression_types.at(&expr);
+            // Look up the *constructor signature* for the variant from the EnumType definition.
+            // This is the source of truth.
+            auto variant_it = enum_type->variants.find(prop_name);
 
-            // 2. The TypeChecker resolves all variant accesses to a FunctionType.
-            if (get_expr_type->kind == TypeKind::FUNCTION) {
-                auto func_type = std::dynamic_pointer_cast<FunctionType>(get_expr_type);
+            // This should always succeed if the Type Checker did its job.
+            if (variant_it != enum_type->variants.end()) {
+                auto variant_constructor_type = variant_it->second;
 
-                // 3. Check if it's a function with ZERO parameters.
-                if (func_type->param_types.empty()) {
-                    // This is a nullary variant being used as a value. We must transpile it
-                    // to an immediate function call. e.g., `Angara_Color_Green()`
-                    return "Angara_" + unwrapped_object_type->toString() + "_" + prop_name + "()";
+                // If the constructor function takes no parameters, it's a nullary variant.
+                // When used as a value, we must transpile it to an immediate C function call.
+                if (variant_constructor_type->param_types.empty()) {
+                    return "Angara_" + enum_type->name + "_" + prop_name + "()";
                 }
             }
 
-            // If it's a function with parameters, it MUST be the callee of a CallExpr.
-            // The CallExpr transpiler will add the parentheses. Just return the function name.
-            // e.g., `Angara_WebEvent_KeyPress`
-            return "Angara_" + unwrapped_object_type->toString() + "_" + prop_name;
+            // If the variant is not nullary (it takes parameters), then it must be
+            // part of a CallExpr. Just return the C function name, and the
+            // CallExpr transpiler will add the parentheses and arguments.
+            return "Angara_" + enum_type->name + "_" + prop_name;
         }
 
         // 5. If the access was optional, wrap the raw access in a nil-check.

@@ -73,8 +73,19 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         if (variant_it == enum_type->variants.end()) {
             error(expr.name, "Enum '" + enum_type->name + "' has no variant named '" + property_name + "'.");
         } else {
-            // The result of accessing a variant is its constructor's FunctionType.
-            property_type = variant_it->second;
+            // --- CORRECTED LOGIC ---
+            auto variant_constructor_type = std::dynamic_pointer_cast<FunctionType>(variant_it->second);
+
+            // If a variant takes no arguments (is nullary), accessing it directly
+            // (e.g., `WebEvent.PageLoad`) immediately produces an instance of the enum.
+            if (variant_constructor_type->param_types.empty()) {
+                property_type = variant_constructor_type->return_type; // This is the EnumType itself
+            } else {
+                // If it takes arguments, accessing it returns the constructor function,
+                // which must then be called.
+                property_type = variant_constructor_type;
+            }
+            // --- END CORRECTION ---
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::MODULE) {

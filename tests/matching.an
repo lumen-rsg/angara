@@ -1,0 +1,64 @@
+// Import the standard I/O module for printing.
+attach io;
+
+// Define a multi-variant enum to serve as the subject of our test.
+// It includes a simple variant, a variant with a single value,
+// and a variant with a record.
+enum WebEvent {
+  PageLoad,
+  KeyPress(string),
+  Click({x: i64, y: i64})
+}
+
+// The main entry point of our test program.
+export func main() -> i64 {
+  io.println(1, "--- Angara Match Expression Test ---");
+
+  // 1. Create a list of different enum instances.
+  //    This will allow us to test the match expression against each variant.
+  let events as list<WebEvent> = [
+    WebEvent.KeyPress("H"),
+    WebEvent.Click({x: 1024, y: 768}),
+    WebEvent.PageLoad
+  ];
+
+  // 2. Loop through the events and use `match` to process each one.
+  io.println(1, "\n-> Testing match with destructuring and type consistency...");
+  for (event in events) {
+    // The `match` expression evaluates the `event` and assigns the
+    // resulting string to the `description` variable.
+    let description as string = match (event) {
+      case WebEvent.PageLoad: { "PageLoad: A simple event with no data." },
+
+      // This case destructures the `KeyPress` variant, binding its
+      // string payload to a new constant `key`.
+      case WebEvent.KeyPress(key): { "KeyPress: The user pressed the key '" + key + "'." },
+
+      // This case destructures the `Click` variant, binding its
+      // record payload to a new constant `pos`. We can then access pos.x and pos.y.
+      case WebEvent.Click(pos): {
+        "Click: The user clicked at (" + string(pos["x"]) + ", " + string(pos["y"]) + ")."
+      },
+
+      case _: { "unknown event. skipping..." }
+    };
+
+    // Print the result of the match expression.
+    io.println(1, "  - Matched: " + description);
+  }
+
+  // 3. Test the wildcard (default) case.
+  io.println(1, "\n-> Testing match with a wildcard case...");
+  let first_event as WebEvent = events[0]; // This is a KeyPress event
+
+  let short_description as string = match (first_event) {
+    case WebEvent.PageLoad: { "It was a page load." },
+    // A wildcard '_' case catches any variant not explicitly handled above.
+    case _: { "It was some other event." }
+  };
+  io.println(1, "  - Result: " + short_description);
+
+
+  io.println(1, "\n--- Test Complete ---");
+  return 0;
+}

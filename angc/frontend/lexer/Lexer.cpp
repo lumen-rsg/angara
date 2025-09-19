@@ -47,6 +47,8 @@ namespace angara {
             {"is",       TokenType::IS},
             {"data",     TokenType::DATA},
             {"enum",     TokenType::ENUM},
+            {"match",    TokenType::MATCH},
+            {"case",      TokenType::CASE}
     };
 
     Lexer::Lexer(std::string source) : m_source(std::move(source)) {}

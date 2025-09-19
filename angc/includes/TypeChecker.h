@@ -65,6 +65,7 @@ namespace angara {
         std::any visit(const TernaryExpr &expr) override;
         std::any visit(const ThisExpr &expr) override;
         std::any visit(const SuperExpr &expr) override;
+        std::any visit(const MatchExpr& expr) override;
 
         void visit(std::shared_ptr<const ContractStmt> stmt) override;
 

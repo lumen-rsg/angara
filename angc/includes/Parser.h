@@ -32,6 +32,7 @@ namespace angara {
         std::shared_ptr<Stmt> parseCStyleLoop(const Token& keyword);
         std::shared_ptr<Stmt> parseForInLoop(const Token& keyword);
         std::shared_ptr<Stmt> whileStatement();
+        std::shared_ptr<Expr> matchExpression();
 
         bool isForInLoop();
         std::shared_ptr<Stmt> function(const std::string &kind); // Helper for functions/methods
@@ -91,5 +92,7 @@ namespace angara {
         std::shared_ptr<Stmt> dataDeclaration();
 
         std::shared_ptr<Stmt> enumDeclaration();
+
+        std::shared_ptr<Expr> parseMatchPattern();
     };
 }

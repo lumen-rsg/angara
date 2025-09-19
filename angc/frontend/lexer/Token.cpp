@@ -38,7 +38,7 @@ namespace angara {
                 "FUNC", "RETURN", "TRUE", "FALSE", "TRY", "CATCH",
                 "ATTACH", "NIL", "THROW", "FROM",
                 "CLASS", "THIS", "INHERITS", "SUPER", "TRAIT", "USES", "STATIC",
-                "PRIVATE", "PUBLIC", "EXPORT", "CONTRACT", "SIGNS", "BREAK", "IS", "DATA", "ENUM",
+                "PRIVATE", "PUBLIC", "EXPORT", "CONTRACT", "SIGNS", "BREAK", "IS", "DATA", "ENUM", "MATCH", "CASE",
 
                 // Type Keywords
                 "TYPE_STRING", "TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL",
