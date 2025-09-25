@@ -22,15 +22,17 @@ void write_json(const json& j) {
     std::cout << "Content-Length: " << content.length() << "\r\n\r\n" << content << std::flush;
 }
 
+
 json diagnostic_to_json(const angara::Diagnostic& d) {
     return json{
-        {"range", {
-            {"start", {{"line", d.range.start_line}, {"character", d.range.start_char}}},
-            {"end", {{"line", d.range.end_line}, {"character", d.range.end_char}}}
-        }},
-        {"severity", static_cast<int>(d.severity)},
-        {"source", "angc"},
-        {"message", d.message}
+            {"range", {
+                // Use the correct nested members
+                {"start", {{"line", d.range.start.line}, {"character", d.range.start.character}}},
+                {"end", {{"line", d.range.end.line}, {"character", d.range.end.character}}}
+            }},
+            {"severity", static_cast<int>(d.severity)},
+            {"source", "angc"},
+            {"message", d.message}
     };
 }
 
@@ -193,10 +195,27 @@ int main() {
 
         } else if (method == "textDocument/hover") {
             const std::string uri = params["textDocument"]["uri"];
-            LOG("Handling 'hover' request for URI: " + uri);
-            json result = {{"contents", {{"kind", "markdown"}, {"value", "**Angara**: Hover feature works!"}}}};
+            const angara::Position hover_pos = {
+                params["position"]["line"],
+                params["position"]["character"]
+            };
+            LOG("Handling 'hover' request for URI: " + uri + " at line " + std::to_string(hover_pos.line));
+
+            // Call our new state method
+            auto hover_info = state.get_hover_info(uri, hover_pos);
+
+            json result = json(nullptr); // Default to null if no info found
+            if (hover_info) {
+                result = {
+                    {"contents", {
+                            {"kind", "markdown"},
+                            {"value", *hover_info}
+                    }}
+                };
+            }
+
             json response = {{"id", id}, {"jsonrpc", "2.0"}, {"result", result}};
-            LOG("Sending response: " + response.dump(-1));
+            LOG("Sending hover response: " + response.dump(-1));
             write_json(response);
 
         } else if (id) {
