@@ -1,4 +1,4 @@
-#include "../src/runtime/angara_runtime.h" // Your provided ABI header
+#include "../runtime/angara_runtime.h" // Your provided ABI header
 #include <rabbitmq-c/amqp.h>
 #include <rabbitmq-c/tcp_socket.h>
 #include <stdlib.h>

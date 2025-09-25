@@ -8,6 +8,11 @@
 #include <string.h>
 #include <math.h>
 
+#define ANSI_COLOR_BOLD_RED   "\033[1;31m"
+#define ANSI_COLOR_YELLOW     "\033[0;33m"
+#define ANSI_COLOR_CYAN       "\033[0;36m"
+#define ANSI_COLOR_RESET      "\033[0m"
+
 // --- Internal Forward Declarations ---
 static void free_object(Object* object);
 void printObject(AngaraObject obj);
@@ -435,20 +440,30 @@ void angara_debug_print(const char* message) {
 
 // 2. Enhance the angara_throw function
 void angara_throw(AngaraObject exception) {
-    // --- NEW DEBUGGING LOGIC ---
-    fprintf(stderr, "[FATAL] Unhandled Angara Exception thrown.\n");
-    if (IS_OBJ(exception) && OBJ_TYPE(exception) == OBJ_EXCEPTION) {
-        fprintf(stderr, "        Message: %s\n", AS_CSTRING(AS_EXCEPTION(exception)->message));
-    } else {
-        fprintf(stderr, "        (Exception object was not a standard Exception type)\n");
-    }
-    // --- END NEW LOGIC ---
+    // This function is called for ALL throws. It only terminates if there's
+    // no active `try` block to jump to.
 
     if (g_exception_chain_head == NULL) {
-        // The original "Unhandled exception" message can now be more specific.
-        fprintf(stderr, "        No active `try` blocks. Terminating.\n");
+        // --- This is the UNHANDLED exception path ---
+
+        fprintf(stderr, "\n" ANSI_COLOR_BOLD_RED "[FATAL] Unhandled Angara Exception" ANSI_COLOR_RESET "\n");
+
+        if (IS_OBJ(exception) && OBJ_TYPE(exception) == OBJ_EXCEPTION) {
+            // The exception is a proper, standard Exception object.
+            fprintf(stderr, ANSI_COLOR_YELLOW "  -> Message: " ANSI_COLOR_RESET "%s\n", AS_CSTRING(AS_EXCEPTION(exception)->message));
+        } else if (IS_OBJ(exception) && OBJ_TYPE(exception) == OBJ_STRING) {
+            // It was a raw string, likely from an old angara_throw_error call.
+            fprintf(stderr, ANSI_COLOR_YELLOW "  -> Message: " ANSI_COLOR_RESET "%s\n", AS_CSTRING(exception));
+        } else {
+            // It's some other non-standard object.
+            fprintf(stderr, ANSI_COLOR_YELLOW "  -> Thrown object was not a standard Exception or String type." ANSI_COLOR_RESET "\n");
+        }
+
+        fprintf(stderr, ANSI_COLOR_CYAN "  -> No active `try` blocks were found on the call stack. Terminating program." ANSI_COLOR_RESET "\n\n");
         exit(1);
     }
+
+    // If there IS a try block, we perform the longjmp to it.
     g_current_exception = exception;
     angara_incref(g_current_exception);
     ExceptionFrame* frame = g_exception_chain_head;
@@ -477,8 +492,8 @@ typedef struct {
 // The generic C function that a new pthread will execute.
 // It's a simple wrapper that calls our Angara function.
 void* thread_starter_routine(void* arg) {
-    const auto start_data = (ThreadStartData*)arg;
-    const auto thread_obj = (AngaraThread*)start_data->args[0].as.obj;
+    const ThreadStartData* start_data = (ThreadStartData*)arg;
+    AngaraThread* thread_obj = (AngaraThread*)start_data->args[0].as.obj;
 
     const AngaraObject result = angara_call(start_data->closure, start_data->arg_count - 1, start_data->args + 1);
     thread_obj->return_value = result;
@@ -671,8 +686,18 @@ AngaraObject angara_typeof(AngaraObject value) {
 }
 
 void angara_throw_error(const char* message) {
-    // Create an Angara string from the error message and throw it.
-    angara_throw(angara_string_from_c(message));
+    // 1. First, create an AngaraString for the message.
+    AngaraObject message_obj = angara_string_from_c(message);
+
+    // 2. Then, create a proper AngaraException that WRAPS the message.
+    AngaraObject exception_obj = angara_exception_new(message_obj);
+
+    // 3. The message object was consumed by angara_exception_new (its ref_count was
+    //    incremented), so we can now decref our local reference to it.
+    angara_decref(message_obj);
+
+    // 4. Finally, throw the correctly-typed exception object.
+    angara_throw(exception_obj);
 }
 
 // And a more efficient string creator for the ABI.

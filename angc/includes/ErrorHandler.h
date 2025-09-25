@@ -9,10 +9,12 @@
 namespace angara {
     class ErrorHandler {
     public:
-        ErrorHandler(const std::string &source);
+        virtual ~ErrorHandler() = default;
 
-        void report(const Token &token, const std::string &message);
-        void note(const Token &token, const std::string &message);
+        explicit ErrorHandler(const std::string &source);
+
+        virtual void report(const Token &token, const std::string &message);
+        virtual void note(const Token &token, const std::string &message);
 
         bool hadError() const;
 

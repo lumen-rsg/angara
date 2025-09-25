@@ -1,0 +1,1 @@
+Content-Length: 104{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"processId":1234,"rootUri":null,"capabilities":{}}}Content-Length: 115{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///tmp/test.an","languageId":"angara","version":1,"text":"let x as i64 = \"hello\";"}}}

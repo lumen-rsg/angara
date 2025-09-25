@@ -15,9 +15,9 @@ const auto BLUE = "\033[34m";
 const auto PURPLE = "\033[35m";
 const auto CYAN = "\033[36m";
 
-const std::string ANGC_VERSION = "2.0-staging";
-const std::string ANGARA_SPEC = "v2-static";
-const std::string BACKEND_VERSION = "2.3-staging";
+const std::string ANGC_VERSION = "2.2-staging";
+const std::string ANGARA_SPEC = "v2.4-static";
+const std::string BACKEND_VERSION = "2.7-staging";
 
 void print_and_remove(const std::string& data) {
     std::random_device dev;
@@ -106,14 +106,6 @@ int main(const int argc, char* argv[]) {
         print_easter();
         return 0; // Exit successfully.
     }
-
-    std::cout << "\033[38;5;27m"  << "⠄⠄⠄⢰⣧⣼⣯⠄⣸⣠⣶⣶⣦⣾⠄⠄⠄⠄⡀⠄⢀⣿⣿⠄⠄⠄⢸⡇⠄⠄" << "   "  << RESET << PURPLE << R"(  ____ _____  ____ _____ __________ _)" << std::endl;
-    std::cout << "\033[38;5;33m"  << "⠄⠄⠄⣾⣿⠿⠿⠶⠿⢿⣿⣿⣿⣿⣦⣤⣄⢀⡅⢠⣾⣛⡉⠄⠄⠄⠸⢀⣿⠄" << "   "  << RESET << PURPLE << R"( / __ `/ __ \/ __ `/ __ `/ ___/ __ `/)" << std::endl;
-    std::cout << "\033[38;5;39m"  << "⠄⠄⢀⡋⣡⣴⣶⣶⡀⠄⠄⠙⢿⣿⣿⣿⣿⣿⣴⣿⣿⣿⢃⣤⣄⣀⣥⣿⣿⠄" << "   "  << RESET << PURPLE << R"(/ /_/ / / / / /_/ / /_/ / /  / /_/ / )" << std::endl;
-    std::cout << "\033[38;5;69m"  << "⠄⠄⢸⣇⠻⣿⣿⣿⣧⣀⢀⣠⡌⢻⣿⣿⣿⣿⣿⣿⣿⣿⣿⠿⠿⠿⣿⣿⣿⠄" << "   "  << RESET << PURPLE << R"(\__,_/_/ /_/\__, /\__,_/_/   \__,_/  )" << std::endl;
-    std::cout << "\033[38;5;105m" << "⠄⢀⢸⣿⣷⣤⣤⣤⣬⣙⣛⢿⣿⣿⣿⣿⣿⣿⡿⣿⣿⡍⠄⠄⢀⣤⣄⠉⠋⣰" << "   " << RESET << PURPLE << R"(           /____/                    )" << std::endl;
-    std::cout << "\033[38;5;141m" << "⠄⣼⣖⣿⣿⣿⣿⣿⣿⣿⣿⣿⢿⣿⣿⣿⣿⣿⢇⣿⣿⡷⠶⠶⢿⣿⣿⠇⢀⣤" << "   " << RESET << PURPLE << R"(->       angc v2.4 | spec 2.2      <-)" << std::endl;
-    std::cout << RESET << std::endl;
 
     // 3. If it's not a version flag, proceed with compilation.
 

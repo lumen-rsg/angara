@@ -49,8 +49,7 @@ namespace angara {
         };
 
         // Safety check to prevent crashing if the enum and array get out of sync
-        int index = static_cast<int>(type);
-        if (index >= 0 && index < (sizeof(names) / sizeof(names[0]))) {
+        if (const int index = static_cast<int>(type); index >= 0 && index < std::size(names)) {
             return names[index];
         }
 

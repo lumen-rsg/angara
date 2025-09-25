@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h> // For isdigit, isspace
-#include "../src/runtime/angara_runtime.h"
+#include "../runtime/angara_runtime.h"
 
 // --- Function Implementations ---
 

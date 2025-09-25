@@ -5,7 +5,7 @@
 #include <errno.h>    // Required for `errno`
 #include <unistd.h>   // Required for link, symlink, rmdir
 #include <sys/stat.h> // Required for mkdir
-#include "../src/runtime/angara_runtime.h"
+#include "../runtime/angara_runtime.h"
 
 // --- Helper for formatting error messages ---
 // This prevents us from needing a large static buffer.

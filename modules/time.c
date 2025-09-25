@@ -2,7 +2,7 @@
 // Created by cv2 on 9/14/25.
 //
 
-#include "../src/runtime/angara_runtime.h"
+#include "../runtime/angara_runtime.h"
 #include <time.h>
 #include <stdlib.h>
 #include <stdio.h>

@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../src/runtime/angara_runtime.h"
+#include "../runtime/angara_runtime.h"
 
 // --- Function Implementations ---
 

@@ -1,60 +1,87 @@
 cmake_minimum_required(VERSION 3.16)
-project(angara CXX C) # Project is now 'angara'
+project(angara CXX C)
 set(CMAKE_CXX_STANDARD 23)
 
-# --- NEW: Tell CMake to use pkg-config ---
+# --- Dependency Configuration ---
+include(FetchContent)
+
+# For macOS, dynamically find the Homebrew root to help CMake and pkg-config.
+if(APPLE)
+    message(STATUS "macOS detected. Configuring paths for Homebrew.")
+    execute_process(COMMAND brew --prefix OUTPUT_VARIABLE HOMEBREW_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(HOMEBREW_PREFIX)
+        message(STATUS "Found Homebrew prefix: ${HOMEBREW_PREFIX}")
+        list(APPEND CMAKE_PREFIX_PATH ${HOMEBREW_PREFIX})
+        set(ENV{PKG_CONFIG_PATH} "${HOMEBREW_PREFIX}/lib/pkgconfig")
+    else()
+        message(WARNING "Could not determine Homebrew prefix. Build may fail.")
+    endif()
+endif()
+
+# Find system libraries using pkg-config. This is now macOS-aware.
 find_package(PkgConfig REQUIRED)
-
-# --- Find libraries using pkg-config ---
-# This will find libcurl and set variables like CURL_INCLUDE_DIRS and CURL_LIBRARIES
 pkg_check_modules(CURL REQUIRED libcurl)
-
 pkg_check_modules(LWS REQUIRED libwebsockets)
 pkg_check_modules(SSL REQUIRED openssl)
-pkg_check_modules(AMQP REQUIRED librabbitmq)
 
-# --- 1. Build libangara_runtime.so ---
-# The runtime is now a SHARED library that everything else will link against.
+# Vendor rabbitmq-c to ensure a consistent, portable build for the amqp module.
+FetchContent_Declare(
+        rabbitmq-c
+        GIT_REPOSITORY https://github.com/alanxz/rabbitmq-c.git
+        GIT_TAG        v0.14.0
+)
+FetchContent_MakeAvailable(rabbitmq-c)
+
+
+# --- Core Library Targets ---
+
+# Build the Angara runtime as a shared library.
 add_library(angara_runtime SHARED runtime/angara_runtime.c)
 target_include_directories(angara_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/angc/includes)
 set_target_properties(angara_runtime PROPERTIES
-        PUBLIC_HEADER runtime/angara_runtime.h # Expose the header
+        PUBLIC_HEADER runtime/angara_runtime.h
         INSTALL_NAME_DIR "@rpath"
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
 )
-
 set(CMAKE_CXX_FLAGS "-Wno-trigraphs")
 
 
-# --- 2. Build Native Modules (like libfs.so) ---
+# --- Native Module Targets ---
 file(GLOB_RECURSE NATIVE_MODULE_SOURCES "${CMAKE_SOURCE_DIR}/modules/*.c")
 foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
     get_filename_component(MODULE_NAME ${MODULE_SOURCE} NAME_WE)
     add_library(${MODULE_NAME} SHARED ${MODULE_SOURCE})
 
-    # Modules link against the CORE RUNTIME LIBRARY
     target_link_libraries(${MODULE_NAME} PRIVATE angara_runtime)
 
-    # --- Conditional Linking ---
-    # If this specific module needs an external library, link it here.
+    # Link specific external dependencies for each module.
     if (MODULE_NAME STREQUAL "http")
-        message(STATUS "Module 'http' requires libcurl. Linking...")
-        # Use the variables found by pkg-config
         target_include_directories(${MODULE_NAME} PRIVATE ${CURL_INCLUDE_DIRS})
         target_link_libraries(${MODULE_NAME} PRIVATE ${CURL_LIBRARIES})
 
     elseif (MODULE_NAME STREQUAL "websocket")
-        message(STATUS "Module 'websocket' requires libwebsocket and openssl. Linking...")
-        target_link_libraries(${MODULE_NAME} PRIVATE ${LWS_LIBRARIES} ${SSL_LIBRARIES})
-    elseif (MODULE_NAME STREQUAL "time") # <-- ADD THIS BLOCK
-        message(STATUS "Module 'time' requires the real-time library. Linking...")
-        # On many systems, clock_gettime requires linking with librt
-        target_link_libraries(${MODULE_NAME} PRIVATE rt)
+        target_include_directories(${MODULE_NAME} PRIVATE ${LWS_INCLUDE_DIRS} ${SSL_INCLUDE_DIRS})
+        if(APPLE)
+            set(SSL_FULL_PATH_LIBS "")
+            foreach(SSL_LIB_NAME ${SSL_LIBRARIES})
+                list(APPEND SSL_FULL_PATH_LIBS "${SSL_LIBRARY_DIRS}/lib${SSL_LIB_NAME}.dylib")
+            endforeach()
+            target_link_libraries(${MODULE_NAME} PRIVATE "${LWS_LIBRARY_DIRS}/lib${LWS_LIBRARIES}.dylib" ${SSL_FULL_PATH_LIBS})
+        else()
+            target_link_libraries(${MODULE_NAME} PRIVATE ${LWS_LIBRARIES} ${SSL_LIBRARIES})
+        endif()
+
+    elseif (MODULE_NAME STREQUAL "time")
+        if(NOT APPLE)
+            target_link_libraries(${MODULE_NAME} PRIVATE rt)
+        endif()
 
     elseif (MODULE_NAME STREQUAL "amqp")
-        message(STATUS "Module 'amqp' requires librabbitmq. Linking...")
-        target_include_directories(${MODULE_NAME} PRIVATE ${AMQP_INCLUDE_DIRS})
-        target_link_libraries(${MODULE_NAME} PRIVATE ${AMQP_LIBRARIES})
+        target_include_directories(${MODULE_NAME} PRIVATE
+                ${rabbitmq-c_SOURCE_DIR}/librabbitmq
+                ${rabbitmq-c_BINARY_DIR}
+        )
+        target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq-static)
     endif()
 
     target_include_directories(${MODULE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/angc/includes)
@@ -66,32 +93,34 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
 endforeach()
 
 
-# --- 3. Build the angc executable ---
-file(GLOB_RECURSE ANGC_SOURCES "${CMAKE_SOURCE_DIR}/angc/*.cpp")
+# --- Main Executable Targets ---
 
-add_executable(angc
-        ${ANGC_SOURCES}
-)
-# The compiler itself does not need to link against the runtime.
+# Build the angc compiler.
+file(GLOB_RECURSE ANGC_SOURCES "${CMAKE_SOURCE_DIR}/angc/*.cpp")
+add_executable(angc ${ANGC_SOURCES})
 target_include_directories(angc PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/angc/includes)
 target_link_libraries(angc PRIVATE angara_runtime)
 
+# Build the angara-ls language server.
+file(GLOB_RECURSE ALS_SOURCES "${CMAKE_SOURCE_DIR}/angara-ls/*.cpp")
+file(GLOB_RECURSE ANGC_FRONTEND
+        "${CMAKE_SOURCE_DIR}/angc/analyzer/*.cpp"
+        "${CMAKE_SOURCE_DIR}/angc/frontend/*.cpp"
+        "${CMAKE_SOURCE_DIR}/angc/shared/*.cpp"
+        "${CMAKE_SOURCE_DIR}/angc/backend/*.cpp"
+)
+add_executable(angara_ls ${ALS_SOURCES} ${ANGC_FRONTEND})
+target_include_directories(angara_ls PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/angara-ls/includes)
+target_include_directories(angara_ls PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/angc/includes)
+target_include_directories(angara_ls PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/angara-ls/vendor)
 
-# --- 4. A new target to run tests ---
-# This will build and run the transpiled code.
+
+# --- Testing Target ---
 add_custom_target(run_test
-        # First, build the compiler and all libraries
-        DEPENDS angc fs # Add other modules here
-
-        # Then, run the compilation process
+        DEPENDS angc fs
         COMMAND ${CMAKE_BINARY_DIR}/angc ${CMAKE_SOURCE_DIR}/native_test.an
-
-        # Then, compile the generated C code, linking against our runtime library
         COMMAND gcc -o native_test_executable native_test.c -L${CMAKE_BINARY_DIR}/lib -langara_runtime -lfs -I. -pthread -lm
-
-        # Finally, run the executable
         COMMAND ./native_test_executable
-
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Running Angara end-to-end test"
 )

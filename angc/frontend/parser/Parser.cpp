@@ -54,7 +54,14 @@ std::shared_ptr<ASTType> Parser::type() {
 
     }
     // Check for any kind of name-based type (e.g., `i64`, `list`, `User`)
-    else if (match({TokenType::IDENTIFIER, TokenType::NIL})) { // Also allow `nil` keyword as a type
+    else if (match({
+    // Keep the existing tokens
+    TokenType::IDENTIFIER, TokenType::NIL,
+
+    // Add all keywords that can represent a type
+    TokenType::TYPE_LIST, TokenType::TYPE_MAP, TokenType::TYPE_STRING,
+    TokenType::TYPE_INT, TokenType::TYPE_FLOAT, TokenType::TYPE_BOOL
+})) {
         Token type_name_token = previous();
 
         // After finding a name, check if it's a generic type like `list<string>`

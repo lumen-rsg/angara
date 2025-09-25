@@ -1,4 +1,4 @@
-#include "../src/runtime/angara_runtime.h"
+#include "../runtime/angara_runtime.h"
 #include <libwebsockets.h>
 #include <string.h>
 #include <stdlib.h>
@@ -61,7 +61,7 @@ static int angara_lws_callback(struct lws *wsi, enum lws_callback_reasons reason
             AngaraLwsServer *server = (AngaraLwsServer *)context_user_data;
             psd->header.type = NATIVE_TYPE_SERVER_CONNECTION;
             psd->wsi = wsi;
-            psd->client_obj = angara_create_native_instance(psd, nullptr);
+            psd->client_obj = angara_create_native_instance(psd, NULL);
             angara_incref(psd->client_obj);
             if (!IS_NIL(server->on_connect_closure)) {
                 angara_call(server->on_connect_closure, 2, (AngaraObject[]){server->self_obj, psd->client_obj});
@@ -90,7 +90,7 @@ static int angara_lws_callback(struct lws *wsi, enum lws_callback_reasons reason
         }
         case LWS_CALLBACK_CLIENT_WRITEABLE: {
             AngaraLwsClient *client = (AngaraLwsClient *)context_user_data;
-            msg_buffer* msg_to_send = nullptr;
+            msg_buffer* msg_to_send = NULL;
 
             // Lock the mutex before touching the queue ---
             pthread_mutex_lock(&client->send_queue_mutex);
@@ -187,7 +187,7 @@ static int angara_lws_callback(struct lws *wsi, enum lws_callback_reasons reason
 // --- Angara ABI Functions ---
 
 AngaraObject Angara_websocket_createServer(int arg_count, AngaraObject* args) {
-    lws_set_log_level(0, nullptr);
+    lws_set_log_level(0, NULL);
     if (arg_count < 2 || !IS_I64(args[0]) || !IS_RECORD(args[1])) {
         angara_throw_error("createServer(port, callbacks, [options]) expects an integer, a record, and an optional options record.");
         return angara_create_nil();
@@ -210,7 +210,7 @@ AngaraObject Angara_websocket_createServer(int arg_count, AngaraObject* args) {
     info.user = server_data;
     info.protocols = (struct lws_protocols[]){
             {"http", angara_lws_callback, sizeof(ServerPerSessionData), 4096},
-            {nullptr, nullptr, 0, 0}
+            {NULL, NULL, 0, 0}
     };
     if (arg_count == 3 && IS_RECORD(args[2])) {
         AngaraObject options = args[2];
@@ -232,15 +232,15 @@ AngaraObject Angara_websocket_createServer(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_websocket_connect(int arg_count, AngaraObject* args) {
-    lws_set_log_level(0, nullptr);
+    lws_set_log_level(0, NULL);
     if (arg_count != 2 || !IS_STRING(args[0]) || !IS_RECORD(args[1])) {
         angara_throw_error("connect(url, callbacks) expects a string and a record.");
         return angara_create_nil();
     }
-    const auto client_data = (AngaraLwsClient*)calloc(1, sizeof(AngaraLwsClient));
+    AngaraLwsClient* client_data = (AngaraLwsClient*)calloc(1, sizeof(AngaraLwsClient));
     client_data->header.type = NATIVE_TYPE_CLIENT;
 
-    if (pthread_mutex_init(&client_data->send_queue_mutex, nullptr) != 0) {
+    if (pthread_mutex_init(&client_data->send_queue_mutex, NULL) != 0) {
         angara_throw_error("Failed to initialize client mutex.");
         free(client_data);
         return angara_create_nil();
@@ -254,10 +254,10 @@ AngaraObject Angara_websocket_connect(int arg_count, AngaraObject* args) {
     client_data->on_error_closure = angara_record_get(args[1], "on_error");
     angara_incref(client_data->on_open_closure); angara_incref(client_data->on_message_closure);
     angara_incref(client_data->on_close_closure); angara_incref(client_data->on_error_closure);
-    struct lws_context_creation_info info = {nullptr};
+    struct lws_context_creation_info info = {NULL};
     info.port = CONTEXT_PORT_NO_LISTEN;
     info.user = client_data;
-    info.protocols = (struct lws_protocols[]){ {"http", angara_lws_callback, 0, 4096}, {nullptr, nullptr, 0, 0} };
+    info.protocols = (struct lws_protocols[]){ {"http", angara_lws_callback, 0, 4096}, {NULL, NULL, 0, 0} };
     info.options = LWS_SERVER_OPTION_DO_SSL_GLOBAL_INIT;
     client_data->context = lws_create_context(&info);
     if (!client_data->context) {
@@ -320,7 +320,7 @@ AngaraObject Angara_WebSocket_send(__attribute__((unused)) int arg_count, Angara
     void* msg_payload = malloc(LWS_PRE + msg_len);
     memcpy((char*)msg_payload + LWS_PRE, AS_CSTRING(message), msg_len);
     msg_buffer* new_msg = (msg_buffer*)malloc(sizeof(msg_buffer));
-    new_msg->payload = msg_payload; new_msg->len = msg_len; new_msg->next = nullptr;
+    new_msg->payload = msg_payload; new_msg->len = msg_len; new_msg->next = NULL;
     NativeObjectHeader* header = (NativeObjectHeader*)native_data;
     if (header->type == NATIVE_TYPE_CLIENT) {
         AngaraLwsClient* client = (AngaraLwsClient*)native_data;
@@ -355,20 +355,20 @@ AngaraObject Angara_WebSocket_close(__attribute__((unused)) int arg_count, Angar
     void* native_data = AS_NATIVE_INSTANCE(args[0])->data; NativeObjectHeader* header = (NativeObjectHeader*)native_data;
     if (header->type == NATIVE_TYPE_CLIENT) {
         AngaraLwsClient* client = (AngaraLwsClient*)native_data;
-        lws_close_reason(client->wsi, LWS_CLOSE_STATUS_NORMAL, nullptr, 0);
+        lws_close_reason(client->wsi, LWS_CLOSE_STATUS_NORMAL, NULL, 0);
         client->is_connected = false;
     } else {
         ServerPerSessionData* psd = (ServerPerSessionData*)native_data;
-        lws_close_reason(psd->wsi, LWS_CLOSE_STATUS_NORMAL, nullptr, 0);
+        lws_close_reason(psd->wsi, LWS_CLOSE_STATUS_NORMAL, NULL, 0);
     }
     return angara_create_nil();
 }
 
 AngaraObject Angara_WebSocket_is_open(__attribute__((unused)) int arg_count, AngaraObject* args) {
     void* native_data = AS_NATIVE_INSTANCE(args[0])->data;
-    const auto header = (NativeObjectHeader*)native_data;
+    NativeObjectHeader* header = (NativeObjectHeader*)native_data;
     if (header->type == NATIVE_TYPE_CLIENT) {
-        const auto client = (AngaraLwsClient*)native_data;
+        AngaraLwsClient* client = (AngaraLwsClient*)native_data;
         return angara_create_bool(client->is_connected);
     }
     return angara_create_bool(true);
@@ -421,21 +421,21 @@ static const AngaraMethodDef WEBSOCKET_METHODS[] = {
         {"close",   (AngaraMethodFn)Angara_WebSocket_close,    "->n"},
         {"service", (AngaraMethodFn)Angara_WebSocket_service,  "->n"},
         {"is_open", (AngaraMethodFn)Angara_WebSocket_is_open,  "->b"},
-        {nullptr, nullptr, nullptr}
+        {NULL, NULL, NULL}
 };
 
 static const AngaraMethodDef SERVER_METHODS[] = {
         {"service", (AngaraMethodFn)Angara_Server_service, "->n"},
-        {nullptr, nullptr, nullptr}
+        {NULL, NULL, NULL}
 };
 
-static const AngaraClassDef WEBSOCKET_CLASS_DEF = { "WebSocket", nullptr, WEBSOCKET_METHODS };
-static const AngaraClassDef SERVER_CLASS_DEF = { "Server", nullptr, SERVER_METHODS };
+static const AngaraClassDef WEBSOCKET_CLASS_DEF = { "WebSocket", NULL, WEBSOCKET_METHODS };
+static const AngaraClassDef SERVER_CLASS_DEF = { "Server", NULL, SERVER_METHODS };
 
 static const AngaraFuncDef WEBSOCKET_EXPORTS[] = {
         {"connect",      Angara_websocket_connect,      "s{}->WebSocket", &WEBSOCKET_CLASS_DEF},
         {"createServer", Angara_websocket_createServer, "i{}->Server",   &SERVER_CLASS_DEF},
-        {nullptr, nullptr, nullptr, nullptr}
+        {NULL, NULL, NULL, NULL}
 };
 
 ANGARA_MODULE_INIT(websocket) {

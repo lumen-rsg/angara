@@ -1,0 +1,116 @@
+// A simple, universal error structure to be used by all services.
+export data ServiceError {
+  const code as i64;      // e.g., 400, 403, 500
+  const message as string; // e.g., "VIOLATION", "Invalid API Key"
+}
+
+// Request and Params are unchanged and well-designed.
+export data TextGenRequest {
+  const character as string;
+  const user as string?;
+  const text as string;
+  const system as string?;
+  const params as LLMParams;
+}
+
+export data LLMParams {
+  const apiKey as string?;
+  const model as string?;
+  const temperature as f64?;
+  const top_p as f64?;
+  const top_k as f64?;
+  const max_tokens as i64?;
+}
+
+// The specific data block for a SUCCESSFUL text generation.
+export data TextGenSuccess {
+  const reply as string;
+  const params as LLMParams;
+}
+
+// The complete response is a dedicated enum for this service,
+// handling both success (with its data) and failure.
+export enum TextGenResult {
+  Success(TextGenSuccess),
+  Error(ServiceError)
+}
+
+
+export data CensorRequest {
+  const text as string;
+}
+
+// The logical outcome of the censorship check.
+export enum CensorVerdict {
+  OK,
+  VIOLATION
+}
+
+// The full result of the service call.
+export enum CensorshipResult {
+    Success(CensorVerdict), // Contains the logical verdict on success.
+    Error(ServiceError)     // For technical failures (e.g., service is down).
+}
+
+
+export data AnimPlannerRequest {
+  const char as string;
+  const context as string;
+  const params as LLMParams;
+}
+
+// The specific data for each command type.
+export data EmotionCommand {
+  const char as string;
+  const emotion as string;
+  const intensity as f64;
+}
+
+export data AnimationCommand {
+  const char as string;
+  const name as string;
+}
+
+// A concrete, type-safe enum that can be EITHER an emotion OR an animation.
+// This is the core of the refinement.
+export enum AnimCommand {
+  SetEmotion(EmotionCommand),
+  PlayAnimation(AnimationCommand)
+}
+
+// The successful response is now a concrete, type-safe list.
+export data AnimPlannerSuccess {
+  const timeline as list<AnimCommand>;
+}
+
+// The final result uses our concrete, service-specific enum pattern.
+export enum AnimPlannerResult {
+  Success(AnimPlannerSuccess),
+  Error(ServiceError)
+}
+
+export data TimelineRequest {
+  const user_persona as string;
+  const char_persona as string;
+  const user_input as string;
+  const textgen_system_prompt as string?;
+  const llm_params as LLMParams;
+}
+
+// We reuse the concrete AnimCommand enum.
+export data TimelineEntry {
+  const time as f64;
+  const command as AnimCommand;
+}
+
+export data TimelineSuccess {
+  const llm_reply as string;
+  const timeline as list<TimelineEntry>;
+}
+
+// A specific enum to model the three distinct outcomes of this service call.
+export enum TimelineResult {
+    Success(TimelineSuccess),
+    Violation,          // A simple variant for a known logical error
+    Error(ServiceError) // For all other technical failures
+}

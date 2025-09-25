@@ -7,7 +7,7 @@
 #include <string.h>
 #include <curl/curl.h>
 #include <ctype.h> // For isspace
-#include "../src/runtime/angara_runtime.h"
+#include "../runtime/angara_runtime.h"
 
 // --- libcurl callback helpers ---
 

@@ -1,0 +1,6 @@
+attach io;
+
+func main() -> i64 {
+    io.println(1, "Hello, macOS!");
+    return 0;
+}

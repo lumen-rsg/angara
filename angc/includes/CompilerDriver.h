@@ -29,14 +29,16 @@ namespace angara {
 
     class CompilerDriver {
     public:
+        virtual ~CompilerDriver() = default;
+
         CompilerDriver();
         bool compile(const std::string& root_file_path);
         std::shared_ptr<ModuleType> resolveModule(const std::string& path_or_id, const Token& import_token);
         static std::string get_base_name(const std::string& path);
 
 
-    private:
-        std::string read_file(const std::string& path);
+    protected:
+        virtual std::string read_file(const std::string& path);
 
         void log_step(const std::string& message);
         void print_progress(const std::string& current_file);
