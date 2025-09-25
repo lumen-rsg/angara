@@ -1,15 +1,15 @@
-attach connect from amqp;
+attach connect, Connection, Channel from amqp;
 attach io;
 attach time;
 attach adv_string;
 
-const QUEUE_NAME = "angara_task_queue";
+const QUEUE_NAME as string = "angara_task_queue";
 
 // --- The WORKER Logic ---
 func run_worker() -> nil {
   io.println(1, "--- Starting WORKER ---");
-  let conn = connect("amqp://guest:guest@localhost:5672/");
-  let ch = conn.channel();
+  let conn as Connection = connect("amqp://guest:guest@localhost:5672/");
+  let ch as Channel = conn.channel();
 
   // Declare a durable queue to ensure tasks are not lost if the server restarts.
   ch.queue_declare(QUEUE_NAME, true, false, false);
@@ -17,14 +17,14 @@ func run_worker() -> nil {
 
   while (true) {
     // Wait for a message indefinitely.
-    let msg_data = ch.consume(QUEUE_NAME, 10);  // returns optional
+    let msg_data as record? = ch.consume(QUEUE_NAME, 10);  // returns optional
 
     if (let received_record = msg_data) {
       let msg as {body: string, delivery_tag: i64} = received_record;
       io.println(1, msg["body"]);
 
       // Simulate work by sleeping for the number of dots in the message.
-      let i = 0;
+      let i as i64 = 0;
       while (i < len(msg["body"])) {
         if (adv_string.get(msg["body"], i) == ".") {
           time.sleep(1.0);
@@ -47,8 +47,8 @@ func run_worker() -> nil {
 // --- The PUBLISHER Logic ---
 func run_publisher(message as string) -> nil {
   io.println(1, "--- Starting PUBLISHER ---");
-  let conn = connect("amqp://guest:guest@localhost:5672/");
-  let ch = conn.channel();
+  let conn as Connection = connect("amqp://guest:guest@localhost:5672/");
+  let ch as Channel = conn.channel();
 
   ch.queue_declare(QUEUE_NAME, true, false, false);
 
@@ -66,7 +66,7 @@ export func main(args as list<string>) -> i64 {
     // Decide whether to run as a publisher or a worker based on arguments.
     if (len(args) > 1) {
       // If there's an argument, join them into a single message and publish.
-      let message = adv_string.substring(args[1], 0, len(args[1])); // Simple first arg
+      let message as string = adv_string.substring(args[1], 0, len(args[1])); // Simple first arg
       // A real app would join all args: `string.join(args.slice(1), " ")`
       run_publisher(message);
     } else {

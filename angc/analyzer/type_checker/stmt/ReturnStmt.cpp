@@ -9,12 +9,13 @@ namespace angara {
                 const std::shared_ptr<Type>& expected,
                 const std::shared_ptr<Type>& actual
         ) {
+        // Rule 1: Exact type match is always compatible.
         if (expected->toString() == actual->toString()) return true;
 
-        // Rule: Anything is compatible with 'any'.
+        // Rule 2: Anything is compatible with 'any'.
         if (expected->kind == TypeKind::ANY || actual->kind == TypeKind::ANY) return true;
 
-        // Rule: A T or a `nil` is compatible with a T?
+        // Rule 3: A T or a `nil` is compatible with a T?
         if (expected->kind == TypeKind::OPTIONAL) {
             auto optional_type = std::dynamic_pointer_cast<OptionalType>(expected);
             if (optional_type->wrapped_type->toString() == actual->toString() || actual->kind == TypeKind::NIL) {
@@ -22,12 +23,17 @@ namespace angara {
             }
         }
 
-        // Rule: A generic record `{}` is compatible with a specific record `{...}`.
+        // --- NEW, CORRECTED RULE FOR RECORD ASSIGNMENT ---
+        // Rule 4: A value of a generic `record` type can be assigned to a
+        // variable with a specific record type annotation. This is a type assertion.
         if (expected->kind == TypeKind::RECORD && actual->kind == TypeKind::RECORD) {
-            if (std::dynamic_pointer_cast<RecordType>(expected)->fields.empty()) {
-                return true;
+            auto actual_record = std::dynamic_pointer_cast<RecordType>(actual);
+            // Check if the ACTUAL value's type is the generic, empty record.
+            if (actual_record->fields.empty()) {
+                return true; // Allow assigning `{}` to `{a: i64}`.
             }
         }
+        // --- END OF NEW RULE ---
 
         return false; // Not compatible
     }

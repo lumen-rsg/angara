@@ -60,7 +60,7 @@ std::shared_ptr<ASTType> Parser::type() {
 
     // Add all keywords that can represent a type
     TokenType::TYPE_LIST, TokenType::TYPE_MAP, TokenType::TYPE_STRING,
-    TokenType::TYPE_INT, TokenType::TYPE_FLOAT, TokenType::TYPE_BOOL
+    TokenType::TYPE_INT, TokenType::TYPE_FLOAT, TokenType::TYPE_BOOL, TokenType::TYPE_RECORD
 })) {
         Token type_name_token = previous();
 

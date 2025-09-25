@@ -335,6 +335,12 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         if (name == "any") return m_type_any;
         if (name == "Thread") return m_type_thread;
 
+        // Handle the generic `record` keyword as a special built-in type.
+        if (name == "record") {
+            // It resolves to a RecordType with no predefined fields.
+            return std::make_shared<RecordType>(std::map<std::string, std::shared_ptr<Type>>{});
+        }
+
         // If not a primitive, it must be a user-defined type. Look it up.
         auto symbol = m_symbols.resolve(name);
         if (symbol) {
@@ -348,6 +354,18 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         }
 
         error(simple->name, "Unknown type name '" + name + "'.");
+        std::vector<std::string> candidates;
+        for (const auto& scope : m_symbols.getScopes()) {
+            for (const auto& [sym_name, sym] : scope) {
+                if (sym->type->kind == TypeKind::CLASS || sym->type->kind == TypeKind::ENUM ||
+                    sym->type->kind == TypeKind::DATA || sym->type->kind == TypeKind::TRAIT ||
+                    sym->type->kind == TypeKind::CONTRACT)
+                {
+                    candidates.push_back(sym_name);
+                }
+            }
+        }
+        find_and_report_suggestion(simple->name, candidates);
         return m_type_error;
     }
 
@@ -396,6 +414,27 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
 
     bool TypeChecker::isNumeric(const std::shared_ptr<Type>& type) {
         return isInteger(type) || isFloat(type);
+    }
+
+    void TypeChecker::find_and_report_suggestion(const Token& bad_token, const std::vector<std::string>& candidates) {
+        const std::string& misspelled = bad_token.lexeme;
+        std::string best_guess;
+
+        // A reasonable threshold. Don't suggest "banana" for "cat".
+        // A good starting point is 1/3 of the word's length, with a max of 3.
+        size_t min_distance = std::min((size_t)3, (misspelled.length() / 3) + 1);
+
+        for (const auto& candidate : candidates) {
+            size_t dist = levenshtein_distance(misspelled, candidate);
+            if (dist < min_distance) {
+                min_distance = dist;
+                best_guess = candidate;
+            }
+        }
+
+        if (!best_guess.empty()) {
+            note(bad_token, "did you mean '" + best_guess + "'?");
+        }
     }
 
 } // namespace angara
