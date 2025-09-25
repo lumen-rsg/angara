@@ -57,6 +57,12 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         const ClassType::MemberInfo* prop_info = instance_type->class_type->findProperty(property_name);
         if (!prop_info) {
             error(expr.name, "Instance of class '" + instance_type->toString() + "' has no property named '" + property_name + "'.");
+
+            std::vector<std::string> candidates;
+            // This is a simplification; a full implementation would walk the superclass chain. // TODO
+            for(const auto& [name, member] : instance_type->class_type->fields) candidates.push_back(name);
+            for(const auto& [name, member] : instance_type->class_type->methods) candidates.push_back(name);
+            find_and_report_suggestion(expr.name, candidates);
         } else {
             // Check for private access
             if (prop_info->access == AccessLevel::PRIVATE && (m_current_class == nullptr || m_current_class->name != instance_type->class_type->name)) {
@@ -73,8 +79,17 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         if (variant_it == enum_type->variants.end()) {
             error(expr.name, "Enum '" + enum_type->name + "' has no variant named '" + property_name + "'.");
         } else {
-            // The result of accessing a variant is its constructor's FunctionType.
-            property_type = variant_it->second;
+            auto variant_constructor_type = std::dynamic_pointer_cast<FunctionType>(variant_it->second);
+
+            // If a variant takes no arguments (is nullary), accessing it directly
+            // (e.g., `WebEvent.PageLoad`) immediately produces an instance of the enum.
+            if (variant_constructor_type->param_types.empty()) {
+                property_type = variant_constructor_type->return_type; // This is the EnumType itself
+            } else {
+                // If it takes arguments, accessing it returns the constructor function,
+                // which must then be called.
+                property_type = variant_constructor_type;
+            }
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::MODULE) {
@@ -82,6 +97,11 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         auto member_it = module_type->exports.find(property_name);
         if (member_it == module_type->exports.end()) {
             error(expr.name, "Module '" + module_type->name + "' has no exported member named '" + property_name + "'.");
+
+            std::vector<std::string> candidates;
+            for(const auto& [name, type] : module_type->exports) candidates.push_back(name);
+            find_and_report_suggestion(expr.name, candidates);
+
         } else {
             property_type = member_it->second;
         }

@@ -11,6 +11,18 @@ namespace angara {
 
         if (!symbol) {
             error(expr.name, "Undefined variable '" + expr.name.lexeme + "'.");
+
+            // --- ADD SUGGESTION LOGIC ---
+            std::vector<std::string> candidates;
+            // Walk up the scope chain to gather all visible symbols.
+            for (const auto& scope : m_symbols.getScopes()) { // <-- You will need to add a getScopes() method to SymbolTable
+                for (const auto& [name, sym] : scope) {
+                    candidates.push_back(name);
+                }
+            }
+            find_and_report_suggestion(expr.name, candidates);
+            // --- END SUGGESTION LOGIC ---
+
             pushAndSave(&expr, m_type_error);
         } else {
             // Save the original resolution for the transpiler (it doesn't care about narrowing).

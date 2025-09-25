@@ -32,11 +32,29 @@ namespace angara{
             auto module_type = std::dynamic_pointer_cast<ModuleType>(unwrapped_object_type);
             // For a module, "accessing a property" means referring to the exported global variable.
             access_str = module_type->name + "_" + prop_name;
-        } if (object_type->kind == TypeKind::ENUM) {
-                // Accessing `WebEvent.KeyPress` doesn't generate a value, it resolves to the
-                // constructor function. We just return its name. The CallExpr transpiler will use it.
-                return "Angara_" + object_type->toString() + "_" + expr.name.lexeme;
+        } else if (unwrapped_object_type->kind == TypeKind::ENUM) {
+            auto enum_type = std::dynamic_pointer_cast<EnumType>(unwrapped_object_type);
+
+            // Look up the *constructor signature* for the variant from the EnumType definition.
+            // This is the source of truth.
+            auto variant_it = enum_type->variants.find(prop_name);
+
+            // This should always succeed if the Type Checker did its job.
+            if (variant_it != enum_type->variants.end()) {
+                auto variant_constructor_type = variant_it->second;
+
+                // If the constructor function takes no parameters, it's a nullary variant.
+                // When used as a value, we must transpile it to an immediate C function call.
+                if (variant_constructor_type->param_types.empty()) {
+                    return "Angara_" + enum_type->name + "_" + prop_name + "()";
+                }
             }
+
+            // If the variant is not nullary (it takes parameters), then it must be
+            // part of a CallExpr. Just return the C function name, and the
+            // CallExpr transpiler will add the parentheses and arguments.
+            return "Angara_" + enum_type->name + "_" + prop_name;
+        }
 
         // 5. If the access was optional, wrap the raw access in a nil-check.
         // An access is considered optional if the `?.` operator was used, OR if the

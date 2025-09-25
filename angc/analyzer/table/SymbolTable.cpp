@@ -77,4 +77,6 @@ namespace angara {
         return m_scopes.size() - 1;
     }
 
+    const std::vector<std::map<std::string, std::shared_ptr<Symbol>>>& SymbolTable::getScopes() const { return m_scopes; }
+
 } // namespace angara

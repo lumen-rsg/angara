@@ -13,6 +13,7 @@
 #include <stack>
 
 #include "CompilerDriver.h"
+#include "StringUtils.h"
 
 namespace angara {
 
@@ -65,6 +66,7 @@ namespace angara {
         std::any visit(const TernaryExpr &expr) override;
         std::any visit(const ThisExpr &expr) override;
         std::any visit(const SuperExpr &expr) override;
+        std::any visit(const MatchExpr& expr) override;
 
         void visit(std::shared_ptr<const ContractStmt> stmt) override;
 
@@ -105,6 +107,7 @@ namespace angara {
         void note(const Token &token, const std::string &message);
 
         bool m_is_in_trait = false;
+        void find_and_report_suggestion(const Token& bad_token, const std::vector<std::string>& candidates);
 
 
 

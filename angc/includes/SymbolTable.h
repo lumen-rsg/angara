@@ -46,6 +46,7 @@ namespace angara {
         );
         [[nodiscard]] const std::map<std::string, std::shared_ptr<Symbol>>& getGlobalScope() const;
         [[nodiscard]] int getScopeDepth() const;
+        [[nodiscard]] const std::vector<std::map<std::string, std::shared_ptr<Symbol>>>& getScopes() const;
 
 
     private:

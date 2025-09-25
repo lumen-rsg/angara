@@ -41,6 +41,8 @@ namespace angara{
                 return transpileSubscriptExpr(*subscript);
             } else if (auto is_expr = std::dynamic_pointer_cast<const IsExpr>(expr)) {
                 return transpileIsExpr(*is_expr);
+            } else if (auto match_expr = std::dynamic_pointer_cast<const MatchExpr>(expr)) {
+                return transpileMatchExpr(*match_expr); // <-- ADD THIS
             }
             return "/* unknown expr */";
         }

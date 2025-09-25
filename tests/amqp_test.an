@@ -17,11 +17,11 @@ func run_worker() -> nil {
 
   while (true) {
     // Wait for a message indefinitely.
-    let msg_data = ch.consume(QUEUE_NAME, 10);
+    let msg_data = ch.consume(QUEUE_NAME, 10);  // returns optional
 
     if (let received_record = msg_data) {
       let msg as {body: string, delivery_tag: i64} = received_record;
-      io.println(1, " [x] Received '" + msg["body"] + "'");
+      io.println(1, msg["body"]);
 
       // Simulate work by sleeping for the number of dots in the message.
       let i = 0;

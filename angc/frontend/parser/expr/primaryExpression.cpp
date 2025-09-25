@@ -87,6 +87,10 @@ namespace angara {
             return std::make_shared<Grouping>(std::move(expr));
         }
 
+        if (match({TokenType::MATCH})) {
+            return matchExpression();
+        }
+
         // If none of the above matched, it's an error.
         throw error(peek(), "Expect expression.");
     }

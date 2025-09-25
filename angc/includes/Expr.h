@@ -30,8 +30,9 @@ namespace angara {
     struct ThisExpr;
     struct SuperExpr;
     struct IsExpr;
+    struct MatchExpr;
 
-// The Visitor interface for expressions
+    // The Visitor interface for expressions
     class ExprVisitor {
     public:
         virtual ~ExprVisitor() = default;
@@ -53,6 +54,7 @@ namespace angara {
         virtual std::any visit(const ThisExpr &expr) = 0;
         virtual std::any visit(const SuperExpr &expr) = 0;
         virtual std::any visit(const IsExpr &expr) = 0;
+        virtual std::any visit(const MatchExpr& expr) = 0;
 
     };
 
@@ -263,6 +265,29 @@ namespace angara {
                   type(std::move(type)) {}
 
         std::any accept(ExprVisitor &visitor) const override {
+            return visitor.visit(*this);
+        }
+    };
+
+    // A single case within a match expression, e.g., `case Pattern: body`
+    struct MatchCase {
+        const std::shared_ptr<Expr> pattern; // e.g., `Color.Green` or `WebEvent.KeyPress`
+        const std::optional<Token> variable; // e.g., the `key` in `KeyPress(key)`
+        const std::shared_ptr<Expr> body;
+    };
+
+// The entire match expression, e.g., `match (x) { ... }`
+    struct MatchExpr : Expr {
+        const Token keyword;
+        const std::shared_ptr<Expr> condition;
+        const std::vector<MatchCase> cases;
+
+        MatchExpr(Token keyword, std::shared_ptr<Expr> condition, std::vector<MatchCase> cases)
+                : keyword(std::move(keyword)),
+                  condition(std::move(condition)),
+                  cases(std::move(cases)) {}
+
+        std::any accept(ExprVisitor& visitor) const override {
             return visitor.visit(*this);
         }
     };
