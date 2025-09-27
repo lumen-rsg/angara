@@ -21,6 +21,24 @@ namespace angara {
             m_module_type->exports[stmt.name.lexeme] = data_type;
         }
 
+        if (stmt.is_foreign) {
+            // For a foreign struct, we just populate its fields.
+            // We DO NOT create an Angara constructor for it.
+            Token dummy_token;
+            data_type->is_foreign = true;
+            for (const auto& field_decl : stmt.fields) {
+                if (data_type->fields.count(field_decl->name.lexeme)) {
+                    error(field_decl->name, "Duplicate field '" + field_decl->name.lexeme + "' in foreign data block.");
+                    continue;
+                }
+                auto field_type = resolveType(field_decl->typeAnnotation);
+                // All fields in a C struct are implicitly public and mutable from C's perspective.
+                data_type->fields[field_decl->name.lexeme] = {field_type, AccessLevel::PUBLIC, dummy_token, false};
+            }
+            // Crucially, we DO NOT set `data_type->constructor_type`.
+            return;
+        }
+
         // 2. Populate the fields and build the constructor signature.
         std::vector<std::shared_ptr<Type>> ctor_params;
         Token dummy_token;

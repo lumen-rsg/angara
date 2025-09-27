@@ -85,6 +85,9 @@ namespace angara {
                     (*m_current_out) << "angara_create_nil();";
                 }
             } else if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
+                if (func_stmt->is_foreign) {
+                    continue;
+                }
                 std::string var_name = "g_" + func_stmt->name.lexeme;
                 if (func_stmt->name.lexeme == "main") var_name = "g_angara_main_closure";
                 std::string mangled_name = "angara_f_" + module_name + "_" + func_stmt->name.lexeme;
@@ -103,7 +106,9 @@ namespace angara {
         (*m_current_out) << "// --- Function Implementations ---\n";
         for (const auto& stmt : statements) {
             if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
-                transpileGlobalFunction(*func_stmt, module_name);
+                if (!func_stmt->is_foreign) {
+                    transpileGlobalFunction(*func_stmt, module_name);
+                }
             } else if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
                 m_current_class_name = class_stmt->name.lexeme;
                 auto class_type = std::dynamic_pointer_cast<ClassType>(m_type_checker.m_symbols.resolve(class_stmt->name.lexeme)->type);

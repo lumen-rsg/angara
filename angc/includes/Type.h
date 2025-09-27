@@ -29,7 +29,8 @@ namespace angara {
         EXCEPTION,
         OPTIONAL,
         DATA,
-        ENUM,          // Represents the enum type itself (e.g., `WebEvent`)
+        ENUM,
+        C_PTR,
         ERROR // A special type to prevent cascading error messages
     };
 
@@ -92,6 +93,7 @@ namespace angara {
         const std::shared_ptr<Type> return_type;
 
         const bool is_variadic;
+        bool is_foreign = false;
 
         // Update constructor to accept the flag, defaulting to false.
         FunctionType(std::vector<std::shared_ptr<Type>> params, std::shared_ptr<Type> ret, bool is_variadic = false)
@@ -291,6 +293,7 @@ namespace angara {
 
         // Data types also have an implicit constructor. We store its signature here.
         std::shared_ptr<FunctionType> constructor_type;
+        bool is_foreign = false;
 
         explicit DataType(std::string name)
             : Type(TypeKind::DATA), name(std::move(name)) {}
@@ -299,12 +302,6 @@ namespace angara {
         [[nodiscard]] std::string toString() const override { return name; }
     };
 
-
-    // --- NEW: ENUM-RELATED TYPES ---
-
-    // Represents a specific variant of an enum, e.g., `WebEvent.KeyPress`.
-    // It can be treated as a value (if it has no parameters) or as a
-    // constructor function (if it has parameters).
 
     // Represents the enum type itself, e.g., `WebEvent`.
     // It acts as a namespace for its variants.
@@ -317,6 +314,11 @@ namespace angara {
             : Type(TypeKind::ENUM), name(std::move(name)) {}
 
         [[nodiscard]] std::string toString() const override { return name; }
+    };
+
+    struct CPtrType : Type {
+        CPtrType() : Type(TypeKind::C_PTR) {}
+        std::string toString() const override { return "c_ptr"; }
     };
 
 } // namespace angara

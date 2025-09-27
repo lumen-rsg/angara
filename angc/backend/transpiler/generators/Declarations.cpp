@@ -17,6 +17,11 @@ namespace angara {
         (*m_current_out) << "\n// --- Function & Closure Forward Declarations ---\n";
         for (const auto& stmt : statements) {
             if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
+
+                if (func_stmt->is_foreign) {
+                    continue; // Skip foreign functions entirely in this pass.
+                }
+
                 if (func_stmt->is_exported || func_stmt->name.lexeme == "main") {
                     std::string var_name = "g_" + func_stmt->name.lexeme;
                     if (func_stmt->name.lexeme == "main") var_name = "g_angara_main_closure";

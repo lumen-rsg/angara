@@ -10,6 +10,7 @@ namespace angara {
         expr.value->accept(*this);
         auto rhs_type = popType();
 
+
         if (auto subscript_target = std::dynamic_pointer_cast<const SubscriptExpr>(expr.target)) {
             // We need to get the types of the collection and index before proceeding.
             subscript_target->object->accept(*this);
@@ -85,6 +86,16 @@ namespace angara {
         }
 
         // TODO ... (other special rules for empty list, etc.) ...
+
+        // NEW RULE: Allow implicit narrowing for integer assignments.
+        // e.g., allow `let x as i32; x = 0;` where 0 is an i64.
+        if (!types_match && isInteger(lhs_type) && rhs_type->toString() == "i64") {
+            // This is a potential narrowing conversion. For now, we allow it.
+            // A more advanced compiler could issue a warning if the RHS is not a constant,
+            // as it could lead to data loss at runtime. But allowing it makes the
+            // language far more ergonomic.
+            types_match = true;
+        }
 
         if (!types_match) {
             error(expr.op, "Type mismatch. Cannot assign a value of type '" +

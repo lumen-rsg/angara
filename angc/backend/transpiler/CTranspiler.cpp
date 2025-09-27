@@ -31,6 +31,20 @@ namespace angara {
         m_header_out << "\n";
         (*m_current_out) << "\n";
 
+        m_header_out << "// --- Foreign Header Includes ---\n";
+        std::set<std::string> included_headers;
+        for (const auto& stmt : statements) {
+            // Now we look for our new, specific statement type.
+            if (auto header_stmt = std::dynamic_pointer_cast<const ForeignHeaderStmt>(stmt)) {
+                const std::string& header_name = header_stmt->header.lexeme;
+                if (included_headers.find(header_name) == included_headers.end()) {
+                    m_header_out << "#include <" << header_name << ">\n";
+                    included_headers.insert(header_name);
+                }
+            }
+        }
+        m_header_out << "\n";
+
         // --- HEADER FILE GENERATION ---
         m_current_out = &m_header_out; // Set context for Pass 1 & 2
         m_indent_level = 0;
@@ -45,7 +59,7 @@ namespace angara {
         (*m_current_out) << "// --- Data Struct Definitions ---\n";
         for (const auto& stmt : statements) {
             if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
-                transpileDataStruct(*data_stmt);
+                if (!data_stmt->is_foreign) transpileDataStruct(*data_stmt);
             }
         }
 
@@ -53,7 +67,7 @@ namespace angara {
         (*m_current_out) << "\n// --- Data Equals Function Prototypes ---\n";
         for (const auto& stmt : statements) {
             if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
-                transpileDataEqualsPrototype(*data_stmt); // We'll add this helper
+                if (!data_stmt->is_foreign) transpileDataEqualsPrototype(*data_stmt);
             }
         }
 
@@ -90,7 +104,7 @@ namespace angara {
         (*m_current_out) << "// --- Data Constructor Implementations ---\n";
         for (const auto& stmt : statements) {
             if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
-                transpileDataConstructor(*data_stmt);
+                if (!data_stmt->is_foreign) transpileDataConstructor(*data_stmt);
             }
         }
 
@@ -98,7 +112,7 @@ namespace angara {
         (*m_current_out) << "\n// --- Data Equals Function Implementations ---\n";
         for (const auto& stmt : statements) {
             if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
-                transpileDataEqualsImplementation(*data_stmt);
+                if (!data_stmt->is_foreign) transpileDataEqualsImplementation(*data_stmt);
             }
         }
 

@@ -59,6 +59,7 @@ namespace angara {
         m_type_mutex = std::make_shared<MutexType>();
         m_module_type = std::make_shared<ModuleType>(module_name);
         m_type_exception = std::make_shared<ExceptionType>();
+        m_type_c_ptr = std::make_shared<CPtrType>();
 
 
         // func len(any) -> i64;
@@ -328,12 +329,21 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
 
         // Check for built-in primitive types first.
         if (name == "i64" || name == "int") return m_type_i64;
+        if (name == "i32") return m_type_i32;
+        if (name == "i16") return m_type_i16;
+        if (name == "i8") return m_type_i8;
+        if (name == "u64") return m_type_u64;
+        if (name == "u32") return m_type_u32;
+        if (name == "u16") return m_type_u16;
+        if (name == "u8") return m_type_u8;
         if (name == "f64" || name == "float") return m_type_f64;
+        if (name == "f32") return m_type_f32;
         if (name == "bool") return m_type_bool;
         if (name == "string") return m_type_string;
         if (name == "nil") return m_type_nil;
         if (name == "any") return m_type_any;
         if (name == "Thread") return m_type_thread;
+        if (name == "c_ptr") return m_type_c_ptr;
 
         // Handle the generic `record` keyword as a special built-in type.
         if (name == "record") {

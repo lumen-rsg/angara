@@ -1,0 +1,66 @@
+foreign "stdlib.h";      // For malloc() and free()
+foreign "sys/utsname.h"; // For uname() and the utsname struct
+
+foreign data utsname {
+  const sysname as string;
+  const nodename as string;
+  const release as string;
+  const version as string;
+  const machine as string;
+}
+
+foreign func malloc(size as u64) -> c_ptr;
+foreign func uname(buffer as c_ptr) -> i32;
+foreign func free(ptr as c_ptr) -> nil;
+
+attach io;
+attach adv_string;
+
+export func main() -> i64 {
+  let buf as c_ptr = malloc(sizeof<utsname>());
+
+  if (buf == nil) {
+    io.println(2, "Fatal: Failed to allocate memory for utsname buffer.");
+    return 1;
+  }
+
+  let result as i32 = uname(buf);
+
+  if (result < 0) {
+    io.println(2, "Fatal: The uname() system call failed.");
+    free(buf);
+    return 1;
+  }
+
+  let sys_info as list<string> = [
+    retype<utsname>(buf).sysname,
+    retype<utsname>(buf).nodename,
+    retype<utsname>(buf).release,
+    retype<utsname>(buf).version,
+    retype<utsname>(buf).machine
+  ];
+
+  free(buf);
+
+  let labels as list<string> = ["OS Name:", "Node Name:", "Release:", "Version:", "Machine:"];
+  let max_label_len as i64 = 0;
+
+  let i as i64 = 0;
+  while (i < len(labels)) {
+    if (len(labels[i]) > max_label_len) {
+      max_label_len = len(labels[i]);
+    }
+    i = i + 1;
+  }
+
+  io.println(1, "--- System Information (Angara FFI) ---");
+  i = 0;
+  while (i < len(labels)) {
+    let padded_label as string = adv_string.pad_end(labels[i], max_label_len + 2, " ");
+    io.println(1, "  " + padded_label + sys_info[i]);
+    i = i + 1;
+  }
+  io.println(1, "---------------------------------------");
+
+  return 0;
+}

@@ -30,6 +30,24 @@ namespace angara {
 
         auto function_type = std::make_shared<FunctionType>(param_types, return_type);
 
+        if (stmt.is_foreign) {
+            function_type->is_foreign = true;
+        }
+
+        // For a foreign function, we simply declare it. It has no Angara-level closure.
+        // The transpiler will use this symbol table entry to generate a direct C call.
+        if (stmt.is_foreign) {
+            if (auto conflicting = m_symbols.declare(stmt.name, function_type, true)) {
+                error(stmt.name, "re-declaration of symbol '" + stmt.name.lexeme + "'.");
+                note(conflicting->declaration_token, "previous declaration was here.");
+            }
+            // A foreign function cannot be exported; it's an import.
+            if (stmt.is_exported) {
+                error(stmt.name, "A 'foreign' function is an import and cannot be exported.");
+            }
+            return; // Skip the rest of the logic for closures/exports
+        }
+
         if (auto conflicting_symbol = m_symbols.declare(stmt.name, function_type, true)) {
             error(stmt.name, "re-declaration of symbol '" + stmt.name.lexeme + "'.");
             note(conflicting_symbol->declaration_token, "previous declaration was here.");
@@ -49,7 +67,7 @@ namespace angara {
         // The signature was already processed in Pass 1.
 
         // A function with no body (a trait method) has no implementation to check.
-        if (!stmt->body) {
+        if (!stmt->body || stmt->is_foreign) {
             return;
         }
 

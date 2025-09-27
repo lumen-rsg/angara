@@ -46,6 +46,8 @@ namespace angara {
         std::map<const AttachStmt*, std::shared_ptr<ModuleType>> m_module_resolutions;
         std::set<UsedNativeSymbol> m_used_native_symbols;
         std::shared_ptr<Type> resolveType(const std::shared_ptr<ASTType>& ast_type);
+        std::map<const SizeofExpr*, std::shared_ptr<Type>> m_sizeof_resolutions;
+
     private:
         // --- Visitor Methods ---
         // Statements (return void)
@@ -67,13 +69,12 @@ namespace angara {
         std::any visit(const ThisExpr &expr) override;
         std::any visit(const SuperExpr &expr) override;
         std::any visit(const MatchExpr& expr) override;
+        std::any visit(const SizeofExpr& expr) override;
+        std::any visit(const RetypeExpr& expr) override;
 
         void visit(std::shared_ptr<const ContractStmt> stmt) override;
-
         void defineContractHeader(const ContractStmt &stmt);
-
         void resolveAttach(const AttachStmt &stmt);
-
         void visit(std::shared_ptr<const VarDeclStmt> stmt) override;
         void visit(std::shared_ptr<const IfStmt> stmt) override;
         void visit(std::shared_ptr<const EmptyStmt> stmt) override;
@@ -89,6 +90,8 @@ namespace angara {
         void visit(std::shared_ptr<const TraitStmt> stmt) override;
         void visit(std::shared_ptr<const ExpressionStmt> stmt) override;
         void visit(std::shared_ptr<const BlockStmt> stmt) override;
+        void visit(std::shared_ptr<const ForeignHeaderStmt> stmt) override;
+
 
 
         // --- Helper Methods ---
@@ -132,10 +135,12 @@ namespace angara {
         std::shared_ptr<Type> m_type_thread;
         std::shared_ptr<Type> m_type_mutex;
         std::shared_ptr<Type> m_type_exception;
+        std::shared_ptr<Type> m_type_c_ptr;
         CompilerDriver& m_driver;
         std::shared_ptr<ModuleType> m_module_type;
         std::stack<std::shared_ptr<Type>> m_function_return_types;
         std::shared_ptr<ClassType> m_current_class = nullptr;
+
 
 
         void defineClassHeader(const ClassStmt &stmt);

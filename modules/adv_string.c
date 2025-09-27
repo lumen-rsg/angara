@@ -81,6 +81,53 @@ AngaraObject Angara_adv_string_is_whitespace(int arg_count, AngaraObject* args) 
     return angara_create_bool(isspace(str->chars[0]));
 }
 
+// --- C Implementation of pad_end ---
+// Angara signature: func pad_end(base as string, length as i64, pad_char as string) -> string
+AngaraObject Angara_adv_string_pad_end(int arg_count, AngaraObject* args) {
+    // 1. Validate arguments (arity and types).
+    if (arg_count != 3) {
+        angara_throw_error("pad_end() requires exactly 3 arguments: (string, i64, string).");
+        return angara_create_nil(); // Unreachable, but good practice
+    }
+    if (!IS_STRING(args[0]) || !IS_I64(args[1]) || !IS_STRING(args[2])) {
+        angara_throw_error("Invalid argument types for pad_end(string, i64, string).");
+        return angara_create_nil();
+    }
+
+    // 2. Unbox the Angara arguments into C types.
+    const char* base_str = AS_CSTRING(args[0]);
+    size_t base_len = AS_STRING(args[0])->length;
+    int64_t target_len = AS_I64(args[1]);
+    const char* pad_str = AS_CSTRING(args[2]);
+
+    // 3. Perform the logic.
+    if ((int64_t)base_len >= target_len) {
+        // The string is already long enough. Return a copy of the original.
+        angara_incref(args[0]);
+        return args[0];
+    }
+
+    // The padding character should be the first character of the padding string.
+    char pad_char = (AS_STRING(args[2])->length > 0) ? pad_str[0] : ' ';
+    size_t pad_count = target_len - base_len;
+
+    // 4. Allocate memory for the new, padded string.
+    char* result_buf = (char*)malloc(target_len + 1);
+    if (!result_buf) {
+        angara_throw_error("Out of memory in pad_end().");
+        return angara_create_nil();
+    }
+
+    // 5. Build the new string.
+    memcpy(result_buf, base_str, base_len);
+    memset(result_buf + base_len, pad_char, pad_count);
+    result_buf[target_len] = '\0';
+
+    // 6. Box the C string back into an AngaraObject and return it.
+    //    The new AngaraString takes ownership of the malloc'd buffer.
+    return angara_create_string_no_copy(result_buf, target_len);
+}
+
 
 // --- Module Definition ---
 
@@ -90,6 +137,7 @@ static const AngaraFuncDef STRING_EXPORTS[] = {
         {"substring",     Angara_adv_string_substring,     "sii->s", NULL},
         {"is_digit",      Angara_adv_string_is_digit,      "s->b",   NULL},
         {"is_whitespace", Angara_adv_string_is_whitespace, "s->b",   NULL},
+        {"pad_end",         Angara_adv_string_pad_end,     "sis->s", NULL},
         {NULL, NULL, NULL, NULL}
 };
 

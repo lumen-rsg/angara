@@ -130,6 +130,19 @@ namespace angara {
         auto data_type = std::dynamic_pointer_cast<DataType>(m_type_checker.m_symbols.resolve(stmt.name.lexeme)->type);
         std::string c_struct_name = "Angara_" + data_type->name;
 
+        if (stmt.is_foreign) {
+            // A foreign data block in Angara is just a wrapper around a pointer.
+            // The real struct is defined in the included C header.
+            (*m_current_out) << "typedef struct " << c_struct_name << " {\n";
+            m_indent_level++;
+            indent(); (*m_current_out) << "Object obj;\n";
+            // The payload is a single, opaque pointer to the real C struct.
+            indent(); (*m_current_out) << "struct " << stmt.name.lexeme << "* ptr;\n";
+            m_indent_level--;
+            (*m_current_out) << "} " << c_struct_name << ";\n\n";
+            return;
+        }
+
         // Use a typedef for a clean name in C.
         (*m_current_out) << "typedef struct " << c_struct_name << " " << c_struct_name << ";\n";
         (*m_current_out) << "struct " << c_struct_name << " {\n";

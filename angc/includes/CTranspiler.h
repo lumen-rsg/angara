@@ -121,6 +121,8 @@ namespace angara {
         void transpileDataEqualsPrototype(const DataStmt &stmt);
 
         void transpileGlobalFunction(const FuncStmt& stmt, const std::string& module_name);
+        std::string transpileSizeofExpr(const SizeofExpr& expr);
+        std::string transpileRetypeExpr(const RetypeExpr& expr);
 
 
         // --- Utility Methods ---
@@ -161,15 +163,12 @@ namespace angara {
         // An empty string means we are in the global scope.
         std::string m_current_class_name;
         std::string m_current_module_name;
-
         void transpileBreakStmt(const BreakStmt &stmt);
-
         std::string sanitize_name(const std::string &name);
-        
-
         std::string escape_c_string(const std::string &str);
-
         std::string transpileIsExpr(const IsExpr &expr);
+        std::string getRawCType(const std::shared_ptr<Type>& angaraType);
+        std::string getCTypeNameForSizeof(const std::shared_ptr<Type>& angaraType);
     };
 
 } // namespace angara

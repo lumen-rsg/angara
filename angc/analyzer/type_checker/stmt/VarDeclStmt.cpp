@@ -13,14 +13,31 @@ namespace angara {
 
             // Prevent cascading errors.
             if (declared_type->kind != TypeKind::ERROR && initializer_type->kind != TypeKind::ERROR) {
-                if (!check_type_compatibility(declared_type, initializer_type)) {
+                bool types_match = check_type_compatibility(declared_type, initializer_type);
+
+                // --- THIS IS THE NEW, CRITICAL FIX ---
+                // Allow implicit narrowing for integer literals.
+                // e.g., allow `let x as i32 = 0;` where 0 is inferred as i64.
+                if (!types_match && isInteger(declared_type) && initializer_type->toString() == "i64") {
+                    if (std::dynamic_pointer_cast<const Literal>(stmt->initializer)) {
+                        // The initializer is a literal, so this is a safe conversion.
+                        // A more advanced compiler would check if the literal's value
+                        // actually fits in the target type, but for now, trusting
+                        // the programmer is a huge ergonomic improvement.
+                        types_match = true;
+                    }
+                }
+                // --- END OF FIX ---
+
+                if (!types_match) {
                     error(stmt->name, "Type mismatch. Cannot initialize variable of type '" +
-                                      declared_type->toString() + "' with a value of type '" +
-                                      initializer_type->toString() + "'.");
-                    declared_type = m_type_error; // Mark as error to prevent further issues
+                        declared_type->toString() + "' with a value of type '" +
+                        initializer_type->toString() + "'.");
+                    declared_type = m_type_error;
                 }
             }
         }
+
 
         // 3. Store the (now definitive) type for this variable.
         m_variable_types[stmt.get()] = declared_type;

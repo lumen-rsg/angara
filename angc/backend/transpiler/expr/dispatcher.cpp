@@ -43,6 +43,10 @@ namespace angara{
                 return transpileIsExpr(*is_expr);
             } else if (auto match_expr = std::dynamic_pointer_cast<const MatchExpr>(expr)) {
                 return transpileMatchExpr(*match_expr); // <-- ADD THIS
+            } else if (auto sizeof_expr = std::dynamic_pointer_cast<const SizeofExpr>(expr)) {
+                return transpileSizeofExpr(*sizeof_expr);
+            } else if (auto retype_expr = std::dynamic_pointer_cast<const RetypeExpr>(expr)) {
+                return transpileRetypeExpr(*retype_expr);
             }
             return "/* unknown expr */";
         }

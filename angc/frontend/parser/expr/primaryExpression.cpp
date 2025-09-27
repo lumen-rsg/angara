@@ -11,6 +11,27 @@ namespace angara {
             return std::make_shared<Literal>(previous());
         }
 
+        if (match({TokenType::RETYPE})) {
+            Token keyword = previous();
+            consume(TokenType::LESS, "Expect '<' after 'retype'.");
+            auto target_type = type();
+            consume(TokenType::GREATER, "Expect '>' after retype target type.");
+            consume(TokenType::LEFT_PAREN, "Expect '(' after 'retype<T>'.");
+            auto expr = expression(); // The c_ptr to be retyped
+            consume(TokenType::RIGHT_PAREN, "Expect ')' to close 'retype<T>(...)'.");
+            return std::make_shared<RetypeExpr>(keyword, target_type, expr);
+        }
+
+        if (match({TokenType::SIZEOF})) { // Assuming you add SIZEOF to the lexer
+            Token keyword = previous();
+            consume(TokenType::LESS, "Expect '<' after 'sizeof'.");
+            auto type_arg = type(); // Reuse our existing type parser
+            consume(TokenType::GREATER, "Expect '>' after type argument.");
+            consume(TokenType::LEFT_PAREN, "Expect '()' after 'sizeof<T>'.");
+            consume(TokenType::RIGHT_PAREN, "Expect ')' to close 'sizeof<T>()'.");
+            return std::make_shared<SizeofExpr>(keyword, type_arg);
+        }
+
 
         if (match({TokenType::THIS})) {
             return std::make_shared<ThisExpr>(previous());

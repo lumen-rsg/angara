@@ -324,5 +324,39 @@ AngaraObject angara_is_instance_of(AngaraObject object, const char* class_name);
 AngaraObject angara_is_list_of_type(AngaraObject list, const char* element_type_name);
 AngaraObject angara_create_string_with_len(const char* chars, size_t length);
 
+// --- FFI Boxing/Unboxing Helpers ---
+
+// Unboxes an AngaraObject to its corresponding raw C type.
+// These are implemented as macros for type safety and efficiency.
+#define angara_as_c_i64(obj)   (AS_I64(obj))
+#define angara_as_c_i64(obj)   (AS_I64(obj))
+#define angara_as_c_i32(obj)   ((int32_t)AS_I64(obj))
+#define angara_as_c_i16(obj)   ((int16_t)AS_I64(obj))
+#define angara_as_c_i8(obj)    ((int8_t)AS_I64(obj))
+#define angara_as_c_c_ptr(obj)  ((void*)AS_I64(obj))
+
+#define angara_as_c_u64(obj)   ((uint64_t)AS_I64(obj))
+#define angara_as_c_u32(obj)   ((uint32_t)AS_I64(obj))
+#define angara_as_c_u16(obj)   ((uint16_t)AS_I64(obj))
+#define angara_as_c_u8(obj)    ((uint8_t)AS_I64(obj))
+
+#define angara_as_c_f64(obj)   (AS_F64(obj))
+#define angara_as_c_f32(obj)   ((float)AS_F64(obj))
+
+#define angara_as_c_bool(obj)  (AS_BOOL(obj))
+
+// Boxes a raw C type into a new AngaraObject.
+// These must be functions declared here and implemented in the .c file.
+AngaraObject angara_from_c_i32(int32_t value);
+AngaraObject angara_from_c_u32(uint32_t value);
+AngaraObject angara_from_c_i64(int64_t value);
+AngaraObject angara_from_c_f64(double value);
+AngaraObject angara_from_c_bool(bool value);
+AngaraObject angara_from_c_string(const char* value);
+AngaraObject angara_from_c_c_ptr(void* value);
+AngaraObject angara_from_c_u64(uint64_t value);
+
+AngaraObject angara_retype_c_ptr(AngaraObject c_ptr_obj, size_t wrapper_size);
+
 
 #endif // ANGARA_H

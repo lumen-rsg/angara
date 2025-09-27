@@ -11,6 +11,11 @@ namespace angara {
                 transpileStruct(*class_stmt);
                 (*m_current_out) << "extern AngaraClass g_" << class_stmt->name.lexeme << "_class;\n";
             }
+            // --- THIS IS THE FIX ---
+            // Also look for DataStmt and Foreign DataStmt and generate their structs.
+            else if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
+                transpileDataStruct(*data_stmt);
+            }
         }
     }
 

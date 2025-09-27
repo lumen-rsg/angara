@@ -85,4 +85,68 @@ namespace angara {
         return nullptr;
     }
 
+#include "CTranspiler.h"
+
+    // ... other helpers in this file ...
+
+    std::string CTranspiler::getRawCType(const std::shared_ptr<Type>& angaraType) {
+        if (!angaraType) {
+            // This case should ideally not be hit if the type checker is correct,
+            // but "void" is a safe fallback.
+            return "void";
+        }
+
+        // Handle special (non-primitive) types first.
+        if (angaraType->kind == TypeKind::NIL) {
+            return "void";
+        }
+        if (angaraType->kind == TypeKind::C_PTR) {
+            return "void*";
+        }
+
+        // Use the string representation for a simple mapping of primitive types.
+        const std::string& typeName = angaraType->toString();
+
+        // C String
+        if (typeName == "string") return "const char*";
+
+        // Signed Integers (from <stdint.h>)
+        if (typeName == "i64") return "int64_t";
+        if (typeName == "i32") return "int32_t";
+        if (typeName == "i16") return "int16_t";
+        if (typeName == "i8")  return "int8_t";
+
+        // Unsigned Integers (from <stdint.h>)
+        if (typeName == "u64") return "uint64_t";
+        if (typeName == "u32") return "uint32_t";
+        if (typeName == "u16") return "uint16_t";
+        if (typeName == "u8")  return "uint8_t";
+
+        // Floating-Point Types
+        if (typeName == "f64") return "double";
+        if (typeName == "f32") return "float";
+
+        // Boolean Type (from <stdbool.h>, which angara_runtime.h includes)
+        if (typeName == "bool") return "bool";
+
+        // Default case: If the type is not a primitive that can be directly
+        // mapped to C, it must be passed as an opaque AngaraObject handle.
+        // This would apply to lists, records, class instances, etc.
+        return "AngaraObject";
+    }
+
+    std::string CTranspiler::getCTypeNameForSizeof(const std::shared_ptr<Type>& angaraType) {
+        if (auto data_type = std::dynamic_pointer_cast<DataType>(angaraType)) {
+            if (data_type->is_foreign) {
+                // For `sizeof<utsname>`, we need `struct utsname`.
+                return "struct " + data_type->name;
+            } else {
+                // For `sizeof<MyData>`, we need `struct Angara_MyData`.
+                return "struct Angara_" + data_type->name;
+            }
+        }
+        // For primitives, fall back to the FFI type mapping.
+        return getRawCType(angaraType);
+    }
+
 }

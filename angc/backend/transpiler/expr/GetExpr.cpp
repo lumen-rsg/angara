@@ -21,9 +21,35 @@ namespace angara{
         std::string access_str = "/* <invalid_get_expr> */";
 
         if (unwrapped_object_type->kind == TypeKind::DATA) {
+            auto data_type = std::dynamic_pointer_cast<DataType>(unwrapped_object_type);
+
+            // --- NEW, SIMPLIFIED LOGIC ---
+            // Check the flag directly on the semantic Type object. No AST search needed.
+            if (data_type->is_foreign) {
+                auto field_info_it = data_type->fields.find(prop_name);
+                if (field_info_it != data_type->fields.end()) {
+                    auto field_type = field_info_it->second.type;
+                    std::string c_struct_name = "Angara_" + data_type->name;
+
+                    // The access path: (wrapper_struct*)->ptr->field_name
+                    std::string raw_access = "((struct " + c_struct_name + "*)AS_OBJ(" + object_str + "))->ptr->" + prop_name;
+
+                    // Box the raw C value back into an AngaraObject.
+                    std::string boxing_func = "angara_from_c_" + field_type->toString();
+
+                    // Handle optional chaining
+                    if (expr.op.type == TokenType::QUESTION_DOT || object_type->kind == TypeKind::OPTIONAL) {
+                        return "(IS_NIL(" + object_str + ") ? angara_create_nil() : " + boxing_func + "(" + raw_access + "))";
+                    }
+                    return boxing_func + "(" + raw_access + ")";
+                }
+            }
+            // --- END OF NEW LOGIC ---
+
+            // If it's not a foreign data type, it must be a regular one.
+            // Fall through to the original logic for regular Angara 'data' field access.
             std::string c_struct_name = "Angara_" + unwrapped_object_type->toString();
-            // Cast the generic obj pointer to the specific data struct pointer and access the field.
-            access_str = "((struct " + c_struct_name + "*)AS_OBJ(" + object_str + "))->" + sanitize_name(prop_name);
+            return "((struct " + c_struct_name + "*)AS_OBJ(" + object_str + "))->" + sanitize_name(prop_name);
         }
         else if (unwrapped_object_type->kind == TypeKind::INSTANCE) {
             access_str = transpileGetExpr_on_instance(expr, object_str);

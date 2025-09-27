@@ -19,6 +19,40 @@ namespace angara {
                 return func_decl;
             }
 
+            if (match({TokenType::FOREIGN})) {
+                // --- REVISED, CORRECTED LOGIC ---
+
+                // Case 1: `foreign "header.h";`
+                if (peek().type == TokenType::STRING) {
+                    Token header_token = advance();
+                    consume(TokenType::SEMICOLON, "Expect ';' after a foreign header declaration.");
+                    return std::make_shared<ForeignHeaderStmt>(header_token);
+                }
+
+                // Case 2: `foreign func ...`
+                if (match({TokenType::FUNC})) {
+                    auto func_decl = std::static_pointer_cast<FuncStmt>(function("function"));
+                    if (func_decl->body) {
+                        throw error(func_decl->name, "A foreign function declaration cannot have a body.");
+                    }
+                    func_decl->is_foreign = true;
+                    return func_decl;
+                }
+
+                // Case 3: `foreign data ...`
+                if (match({TokenType::DATA})) {
+                    auto data_decl = std::static_pointer_cast<DataStmt>(dataDeclaration());
+                    data_decl->is_foreign = true;
+                    if (data_decl->is_exported) {
+                        throw error(data_decl->name, "A 'foreign data' declaration is an import and cannot be exported.");
+                    }
+                    return data_decl;
+                }
+
+                // If none of the above, it's an error.
+                throw error(peek(), "Expect 'func', 'data', or a header string after 'foreign'.");
+            }
+
             std::shared_ptr<Stmt> decl_stmt = nullptr;
             if (match({TokenType::CONTRACT})) {
                 decl_stmt = contractDeclaration();

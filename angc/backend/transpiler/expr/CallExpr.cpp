@@ -124,6 +124,36 @@ namespace angara {
                 return "angara_spawn_thread(" + closure_str + ", " + std::to_string(rest_arg_strs.size()) + ", (AngaraObject[]){" + rest_args_str + "})";
             }
 
+            if (symbol && symbol->type->kind == TypeKind::FUNCTION) {
+                auto func_type = std::dynamic_pointer_cast<FunctionType>(symbol->type);
+                if (func_type->is_foreign) {
+                    std::stringstream call_ss;
+
+                    // 1. Box the return value from the raw C type.
+                    if (func_type->return_type->kind != TypeKind::NIL) {
+                        // e.g., angara_from_c_i32(...)
+                        call_ss << "angara_from_c_" << func_type->return_type->toString() << "(";
+                    }
+
+                    // 2. Generate the direct C function call.
+                    call_ss << name << "(";
+                    for (size_t i = 0; i < arg_strs.size(); ++i) {
+                        // 3. Unbox the AngaraObject arguments to their raw C types.
+                        // e.g., angara_as_c_string(...)
+                        call_ss << "angara_as_c_" << func_type->param_types[i]->toString() << "(" << arg_strs[i] << ")";
+                        if (i < arg_strs.size() - 1) {
+                            call_ss << ", ";
+                        }
+                    }
+                    call_ss << ")";
+
+                    if (func_type->return_type->kind != TypeKind::NIL) {
+                        call_ss << ")"; // Close the boxing function call
+                    }
+                    return call_ss.str();
+                }
+            }
+
             if (callee_type->kind == TypeKind::DATA) {
                 auto data_type = std::dynamic_pointer_cast<DataType>(callee_type);
                 return "Angara_data_new_" + data_type->name + "(" + args_str + ")";
@@ -138,6 +168,8 @@ namespace angara {
             std::string closure_var = "g_" + name;
             if (name == "main") closure_var = "g_angara_main_closure";
             return "angara_call(" + closure_var + ", " + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
+
+
         }
 
             if (auto super_expr = std::dynamic_pointer_cast<const SuperExpr>(expr.callee)) {

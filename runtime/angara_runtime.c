@@ -1106,3 +1106,41 @@ AngaraObject angara_create_string_with_len(const char* chars, size_t length) {
     heap_chars[length] = '\0';
     return angara_create_string_no_copy(heap_chars, length);
 }
+
+AngaraObject angara_from_c_i32(int32_t value) { return angara_create_i64((int64_t)value); }
+AngaraObject angara_from_c_u32(uint32_t value) { return angara_create_i64((int64_t)value); } // Note: Potential signedness issues, but i64 is safest container TODO
+AngaraObject angara_from_c_i64(int64_t value) { return angara_create_i64(value); }
+AngaraObject angara_from_c_f64(double value) { return angara_create_f64(value); }
+AngaraObject angara_from_c_bool(bool value) { return angara_create_bool(value); }
+AngaraObject angara_from_c_string(const char* value) { return angara_string_from_c(value); }
+AngaraObject angara_from_c_c_ptr(void* value) { return angara_create_i64((int64_t)value); }
+AngaraObject angara_from_c_u64(uint64_t value) { return angara_create_i64((int64_t)value); }
+
+AngaraObject angara_retype_c_ptr(AngaraObject c_ptr_obj, size_t wrapper_size) {
+    if (c_ptr_obj.type != VAL_I64 && c_ptr_obj.type != VAL_NIL) {
+        // A safety check, though the type checker should prevent this.
+        // A c_ptr is stored in the i64 slot.
+        return angara_create_nil();
+    }
+
+    // 1. Allocate memory for our Angara wrapper struct (e.g., Angara_utsname).
+    Object* wrapper_obj = (Object*)malloc(wrapper_size);
+    if (!wrapper_obj) {
+        angara_throw_error("Out of memory during retype operation.");
+        return angara_create_nil();
+    }
+
+    // 2. Initialize the generic Angara object header.
+    wrapper_obj->type = OBJ_DATA_INSTANCE; // We can reuse this type tag.
+    wrapper_obj->ref_count = 1;
+
+    // 3. This is the crucial step: Store the raw C pointer from the source
+    //    object into the `ptr` field of the new wrapper. We assume the `ptr`
+    //    field is the first field after the `Object obj` header.
+    //    This is a bit of a hack but avoids needing a unique function for every type.
+    void** ptr_field = (void**)((char*)wrapper_obj + sizeof(Object));
+    *ptr_field = (void*)AS_I64(c_ptr_obj);
+
+    // 4. Box the new wrapper struct into an AngaraObject and return it.
+    return (AngaraObject){VAL_OBJ, {.obj = wrapper_obj}};
+}

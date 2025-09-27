@@ -32,6 +32,7 @@ namespace angara {
     struct BreakStmt;
     struct DataStmt;
     struct EnumStmt;
+    struct ForeignHeaderStmt;
 
 // Statement Visitor Interface (returns void)
     class StmtVisitor {
@@ -56,6 +57,7 @@ namespace angara {
         virtual void visit(std::shared_ptr<const BreakStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const DataStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const EnumStmt> stmt) = 0;
+        virtual void visit(std::shared_ptr<const ForeignHeaderStmt> stmt) = 0;
     };
     // A simple struct to pair a parameter's name with its type annotation.
     struct Parameter {
@@ -227,15 +229,19 @@ namespace angara {
         bool is_static = false;
         bool is_exported = false;
 
+        bool is_foreign = false;
+        // Stores the header name, e.g., "unistd.h"
+        std::vector<Token> foreign_headers;
+
         // TODO ignore `throws` for now and add it when exceptions are fully implemented.
 
         FuncStmt(Token name, bool has_this, std::vector<Parameter> params,
-                 std::shared_ptr<ASTType> returnType, std::optional<std::vector<std::shared_ptr<Stmt>>> body)
-                : name(std::move(name)),
-                  params(std::move(params)),
-                  returnType(std::move(returnType)),
-                  has_this(has_this),
-                  body(std::move(body)) {}
+         std::shared_ptr<ASTType> returnType, std::optional<std::vector<std::shared_ptr<Stmt>>> body)
+        : name(std::move(name)),
+          params(std::move(params)),
+          returnType(std::move(returnType)),
+          has_this(has_this),
+          body(std::move(body)) {}
 
         void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const FuncStmt>(self));
@@ -362,6 +368,7 @@ namespace angara {
         // A data block only contains a list of field declarations.
         const std::vector<std::shared_ptr<VarDeclStmt>> fields;
         bool is_exported = false;
+        bool is_foreign = false;
 
         DataStmt(Token name, std::vector<std::shared_ptr<VarDeclStmt>> fields)
             : name(std::move(name)),
@@ -407,6 +414,16 @@ namespace angara {
 
         void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const EnumStmt>(self));
+        }
+    };
+
+    struct ForeignHeaderStmt : Stmt {
+        const Token header; // The string literal token
+
+        ForeignHeaderStmt(Token header) : header(std::move(header)) {}
+
+        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+            visitor.visit(std::static_pointer_cast<const ForeignHeaderStmt>(self));
         }
     };
 }
