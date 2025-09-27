@@ -5,8 +5,7 @@
 
 A modern, statically-typed systems programming language designed for clarity, safety, and pragmatic interoperability with C.
 [![Continuous Build and Release](https://github.com/lumen-rsg/angara/actions/workflows/main.yml/badge.svg)](https://github.com/lumen-rsg/angara/actions/workflows/main.yml)
-<img src="https://img.shields.io/badge/docs-Language%20Guide-blue.svg" alt="Language Guide">
-<img src="https://img.shields.io/badge/license-MIT-lightgrey.svg" alt="License">
+[![Docs](https://img.shields.io/badge/docs-Language%20Guide-blue.svg)](https://github.com/lumen-rsg/angara/wiki)
 
 ---
 
@@ -90,7 +89,7 @@ After the build completes, the `angc` compiler and `angara-ls` language server e
 
 # This will create an executable named 'hello'. Run it:
 ./hello
-# Output: Hello, Ulumina!
+# Output: Hello, world!
 ```
 
 ## Dive Deeper
