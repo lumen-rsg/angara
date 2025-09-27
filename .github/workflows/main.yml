@@ -1,0 +1,82 @@
+# .github/workflows/ci_release.yml
+
+name: Continuous Build and Release
+
+# This workflow triggers on every push to the 'main' branch.
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-and-release:
+    # Use the latest stable Ubuntu runner provided by GitHub.
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Check out the repository's source code.
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Install all required build dependencies for Angara.
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config git \
+                                  libcurl4-openssl-dev libwebsockets-dev \
+                                  libssl-dev # libwebsockets needs this
+
+      # Step 3: Configure the project using CMake.
+      # We create a build directory as is standard practice.
+      - name: Configure CMake
+        run: cmake -B build -S .
+
+      # Step 4: Build all targets.
+      # This compiles angc, angara-ls, angara_runtime, and all native modules.
+      - name: Build Project
+        run: cmake --build build
+
+      # Step 5: Prepare artifacts for release.
+      # We create a dedicated directory and copy all the distributable files into it.
+      - name: Stage Artifacts
+        run: |
+          mkdir -p release_artifacts/lib
+          # Copy the main executables
+          cp build/angc release_artifacts/
+          cp build/angara-ls release_artifacts/
+          # Copy the core runtime library
+          cp build/lib/libangara_runtime.so release_artifacts/lib/
+          # Copy all the native module libraries
+          cp build/lib/*.so release_artifacts/lib/
+
+      # Step 6: Archive the staged artifacts into a single .tar.gz file.
+      - name: Archive Release
+        run: |
+          tar -czvf angara-linux-amd64.tar.gz -C release_artifacts .
+      
+      # Step 7: Create a new GitHub Release.
+      # The release will be tagged with the date and the short commit hash (e.g., v2025.09.28-a1b2c3d).
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v$(date +'%Y.%m.%d')-${{ github.sha }}
+          release_name: Angara Nightly Build ${{ github.sha }}
+          body: |
+            Automated build of Angara from commit ${{ github.sha }}.
+            This is an unstable development build.
+          draft: false
+          prerelease: true
+
+      # Step 8: Upload the archived build to the release we just created.
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./angara-linux-amd64.tar.gz
+          asset_name: angara-linux-amd64.tar.gz
+          asset_content_type: application/gzip
