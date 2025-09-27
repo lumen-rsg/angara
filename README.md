@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/lumen-rsg/angara/actions">
-    <img src="https://github.com/lumen-rsg/angara/workflows/CI/badge.svg" alt="CI Status">
+    <img src="https://github.com/lumen-rsg/angara/workflows/CI/badge.svg](https://github.com/lumen-rsg/angara/actions/workflows/main.yml/badge.svg" alt="CI Status">
   </a>
   <a href="https://github.com/lumen-rsg/angara/wiki">
     <img src="https://img.shields.io/badge/docs-Language%20Guide-blue.svg" alt="Language Guide">
