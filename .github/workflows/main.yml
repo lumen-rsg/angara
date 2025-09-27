@@ -47,11 +47,13 @@ jobs:
           mkdir -p release_artifacts/lib
           # Copy the main executables
           cp build/angc release_artifacts/
-          cp build/angara-ls release_artifacts/
+          cp build/angara_ls release_artifacts/
           # Copy the core runtime library
           cp build/lib/libangara_runtime.so release_artifacts/lib/
           # Copy all the native module libraries
           cp build/lib/*.so release_artifacts/lib/
+          mkdir -p release_artifacts/runtime
+          cp runtime/angara_runtime.* release_artifacts/runtime/
 
       # Step 6: Archive the staged artifacts into a single .tar.gz file.
       - name: Archive Release
