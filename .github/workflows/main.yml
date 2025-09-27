@@ -62,16 +62,22 @@ jobs:
       - name: Archive Release
         run: |
           tar -czvf angara-linux-amd64.tar.gz -C release_artifacts .
-      
+
       # Step 7: Create a new GitHub Release.
       # The release will be tagged with the date and the short commit hash (e.g., v2025.09.28-a1b2c3d).
+      - name: Generate Release Tag
+        id: generate_tag
+        run: echo "TAG_NAME=v$(date +'%Y.%m.%d')-${{ github.sha }}" >> $GITHUB_ENV
+
+      # Step 8: Create a new GitHub Release using the generated tag.
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: v$(date +'%Y.%m.%d')-${{ github.sha }}
+          # Use the output from the previous step as the tag name.
+          tag_name: ${{ env.TAG_NAME }}
           release_name: Angara Nightly Build ${{ github.sha }}
           body: |
             Automated build of Angara from commit ${{ github.sha }}.
@@ -79,7 +85,7 @@ jobs:
           draft: false
           prerelease: true
 
-      # Step 8: Upload the archived build to the release we just created.
+      # Step 9: Upload the archived build to the release.
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         env:
