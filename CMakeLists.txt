@@ -134,14 +134,3 @@ add_executable(angara_ls ${ALS_SOURCES} ${ANGC_FRONTEND})
 target_include_directories(angara_ls PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/angara-ls/includes)
 target_include_directories(angara_ls PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/angc/includes)
 target_include_directories(angara_ls PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/angara-ls/vendor)
-
-
-# --- Testing Target ---
-add_custom_target(run_test
-        DEPENDS angc fs
-        COMMAND ${CMAKE_BINARY_DIR}/angc ${CMAKE_SOURCE_DIR}/native_test.an
-        COMMAND gcc -o native_test_executable native_test.c -L${CMAKE_BINARY_DIR}/lib -langara_runtime -lfs -I. -pthread -lm
-        COMMAND ./native_test_executable
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Running Angara end-to-end test"
-)

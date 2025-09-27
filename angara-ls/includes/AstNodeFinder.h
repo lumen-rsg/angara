@@ -37,6 +37,8 @@ private:
     void visit(std::shared_ptr<const BreakStmt> stmt) override;
     void visit(std::shared_ptr<const DataStmt> stmt) override;
     void visit(std::shared_ptr<const EnumStmt> stmt) override;
+    void visit(std::shared_ptr<const ForeignHeaderStmt> stmt) override;
+
 
     // Expressions
     std::any visit(const Binary& expr) override;
@@ -57,6 +59,8 @@ private:
     std::any visit(const SuperExpr& expr) override;
     std::any visit(const IsExpr& expr) override;
     std::any visit(const MatchExpr& expr) override;
+    std::any visit(const SizeofExpr& expr) override;
+    std::any visit(const RetypeExpr& expr) override;
 
     // --- Helper Methods ---
     // Checks if the current target position is within a given range.

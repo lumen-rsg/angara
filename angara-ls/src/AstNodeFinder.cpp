@@ -196,4 +196,25 @@ std::any AstNodeFinder::visit(const MatchExpr& expr) {
     return {};
 }
 
+    void AstNodeFinder::visit(std::shared_ptr<const ForeignHeaderStmt> stmt) {
+        // This statement is just a pragma, it has no expressions to hover over.
+        // So, we do nothing.
+    }
+
+
+    std::any AstNodeFinder::visit(const SizeofExpr& expr) {
+        // The range of a sizeof is its keyword. It's a good candidate for a hover.
+        update_best_match(std::make_shared<SizeofExpr>(expr), range_from_token(expr.keyword));
+        // We don't need to visit the inner type_arg, as it's not an expression.
+        return {};
+    }
+
+    std::any AstNodeFinder::visit(const RetypeExpr& expr) {
+        // The range of a retype is its keyword.
+        update_best_match(std::make_shared<RetypeExpr>(expr), range_from_token(expr.keyword));
+        // We must recursively visit the inner expression to find more specific nodes.
+        expr.expression->accept(*this);
+        return {};
+    }
+
 } // namespace angara
