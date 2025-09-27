@@ -2,6 +2,15 @@ cmake_minimum_required(VERSION 3.16)
 project(angara CXX C)
 set(CMAKE_CXX_STANDARD 23)
 
+find_program(CLANG_EXECUTABLE clang)
+find_program(CLANG_PLUS_PLUS_EXECUTABLE clang++)
+
+if(CLANG_EXECUTABLE AND CLANG_PLUS_PLUS_EXECUTABLE)
+    message(STATUS "Clang found, setting it as the default C/C++ compiler.")
+    set(CMAKE_C_COMPILER "clang")
+    set(CMAKE_CXX_COMPILER "clang++")
+endif()
+
 # --- Dependency Configuration ---
 include(FetchContent)
 

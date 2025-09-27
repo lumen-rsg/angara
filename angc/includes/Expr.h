@@ -10,6 +10,7 @@
 #include <any>
 #include "Token.h"
 #include "ASTTypes.h"
+#include <optional>
 
 namespace angara {
 
