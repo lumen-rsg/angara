@@ -25,8 +25,7 @@ pkg_check_modules(LWS REQUIRED libwebsockets)
 pkg_check_modules(SSL REQUIRED openssl)
 
 if(NOT(APPLE))
-
-    pkg_check_modules(lrq REQUIRED librabbitmq)
+    pkg_check_modules(AMQP REQUIRED librabbitmq)
 endif ()
 
 if(APPLE)
@@ -91,6 +90,7 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
             )
             target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq-static)
         else()
+            target_include_directories(${MODULE_NAME} PRIVATE ${AMQP_INCLUDE_DIRS})
             target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq)
         endif ()
     endif()
