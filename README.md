@@ -1,24 +1,12 @@
 # Angara
 
-<p align="center">
-  <img src="angara.jpg" alt="Angara Language Logo" width="150">
-</p>
 
-<p align="center">
-  A modern, statically-typed systems programming language designed for clarity, safety, and pragmatic interoperability with C.
-</p>
+![angara](https://github.com/user-attachments/assets/7fd6448a-abdf-42ea-87f0-e9de3cc22390)
 
-<p align="center">
-  <a href="https://github.com/lumen-rsg/angara/actions">
-    <img src="https://github.com/lumen-rsg/angara/workflows/CI/badge.svg](https://github.com/lumen-rsg/angara/actions/workflows/main.yml/badge.svg" alt="CI Status">
-  </a>
-  <a href="https://github.com/lumen-rsg/angara/wiki">
-    <img src="https://img.shields.io/badge/docs-Language%20Guide-blue.svg" alt="Language Guide">
-  </a>
-  <a href="https://github.com/your-repo/angara/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-lightgrey.svg" alt="License">
-  </a>
-</p>
+A modern, statically-typed systems programming language designed for clarity, safety, and pragmatic interoperability with C.
+[![Continuous Build and Release](https://github.com/lumen-rsg/angara/actions/workflows/main.yml/badge.svg)](https://github.com/lumen-rsg/angara/actions/workflows/main.yml)
+<img src="https://img.shields.io/badge/docs-Language%20Guide-blue.svg" alt="Language Guide">
+<img src="https://img.shields.io/badge/license-MIT-lightgrey.svg" alt="License">
 
 ---
 
