@@ -24,13 +24,20 @@ pkg_check_modules(CURL REQUIRED libcurl)
 pkg_check_modules(LWS REQUIRED libwebsockets)
 pkg_check_modules(SSL REQUIRED openssl)
 
-# Vendor rabbitmq-c to ensure a consistent, portable build for the amqp module.
-FetchContent_Declare(
-        rabbitmq-c
-        GIT_REPOSITORY https://github.com/alanxz/rabbitmq-c.git
-        GIT_TAG        v0.14.0
-)
-FetchContent_MakeAvailable(rabbitmq-c)
+if(NOT(APPLE))
+
+    pkg_check_modules(lrq REQUIRED librabbitmq)
+endif ()
+
+if(APPLE)
+    # Vendor rabbitmq-c to ensure a consistent, portable build for the amqp module.
+    FetchContent_Declare(
+            rabbitmq-c
+            GIT_REPOSITORY https://github.com/alanxz/rabbitmq-c.git
+            GIT_TAG        v0.14.0
+    )
+    FetchContent_MakeAvailable(rabbitmq-c)
+endif ()
 
 
 # --- Core Library Targets ---
@@ -77,11 +84,15 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
         endif()
 
     elseif (MODULE_NAME STREQUAL "amqp")
-        target_include_directories(${MODULE_NAME} PRIVATE
-                ${rabbitmq-c_SOURCE_DIR}/librabbitmq
-                ${rabbitmq-c_BINARY_DIR}
-        )
-        target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq-static)
+        if(APPLE)
+            target_include_directories(${MODULE_NAME} PRIVATE
+                    ${rabbitmq-c_SOURCE_DIR}/librabbitmq
+                    ${rabbitmq-c_BINARY_DIR}
+            )
+            target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq-static)
+        else()
+            target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq)
+        endif ()
     endif()
 
     target_include_directories(${MODULE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/angc/includes)
