@@ -6,7 +6,7 @@ name: Continuous Build and Release
 on:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   build-and-release:
