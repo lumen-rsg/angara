@@ -83,16 +83,17 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
         endif()
 
     elseif (MODULE_NAME STREQUAL "amqp")
-        if(APPLE)
-            target_include_directories(${MODULE_NAME} PRIVATE
-                    ${rabbitmq-c_SOURCE_DIR}/librabbitmq
-                    ${rabbitmq-c_BINARY_DIR}
-            )
-            target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq-static)
-        else()
-            target_include_directories(${MODULE_NAME} PRIVATE ${AMQP_INCLUDE_DIRS})
-            target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq)
-        endif ()
+        #if(APPLE)
+        #    target_include_directories(${MODULE_NAME} PRIVATE
+        #            ${rabbitmq-c_SOURCE_DIR}/librabbitmq
+        #            ${rabbitmq-c_BINARY_DIR}
+        #    )
+        #    target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq-static)
+        #else()
+        #    target_include_directories(${MODULE_NAME} PRIVATE ${AMQP_INCLUDE_DIRS})
+        #    target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq)
+        #endif ()
+        message("AMQP build on GitHub actions is disabled. To build AMQP Angara module, uncomment the above lines. -cv2")
     endif()
 
     target_include_directories(${MODULE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/angc/includes)
