@@ -289,16 +289,24 @@ namespace angara {
     };
 
     struct TryStmt : Stmt {
-        TryStmt(std::shared_ptr<Stmt> tryBlock, Token catchName, std::shared_ptr<Stmt> catchBlock)
-                : tryBlock(std::move(tryBlock)), catchName(std::move(catchName)), catchBlock(std::move(catchBlock)) {}
-
-        void accept(StmtVisitor &visitor, std::shared_ptr<const Stmt> self) override {
-            visitor.visit(std::static_pointer_cast<const TryStmt>(self));
-        }
-
         const std::shared_ptr<Stmt> tryBlock;
         const Token catchName; // The 'e' in catch(e)
+
+        // --- NEW FIELD ---
+        const std::shared_ptr<ASTType> catchType; // The optional `as <type>`
+
         const std::shared_ptr<Stmt> catchBlock;
+
+        // --- UPDATE CONSTRUCTOR ---
+        TryStmt(std::shared_ptr<Stmt> tryBlock, Token catchName, std::shared_ptr<ASTType> catchType, std::shared_ptr<Stmt> catchBlock)
+                : tryBlock(std::move(tryBlock)),
+                  catchName(std::move(catchName)),
+                  catchType(std::move(catchType)), // Store the new type
+                  catchBlock(std::move(catchBlock)) {}
+
+        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+            visitor.visit(std::static_pointer_cast<const TryStmt>(self));
+        }
     };
 
     // Represents a "class Name signs C1, C2 inherits S uses T1, T2 { ... }" statement

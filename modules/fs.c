@@ -5,6 +5,7 @@
 #include <errno.h>    // Required for `errno`
 #include <unistd.h>   // Required for link, symlink, rmdir
 #include <sys/stat.h> // Required for mkdir
+#include <fcntl.h>
 #include "../runtime/angara_runtime.h"
 
 // --- Helper for formatting error messages ---
@@ -232,6 +233,84 @@ AngaraObject Angara_fs_is_symlink(int arg_count, AngaraObject* args) {
     return angara_create_bool(S_ISLNK(st.st_mode));
 }
 
+// --- Helper for the `install` command ---
+// A simple C implementation to copy file contents.
+static int copy_file_contents(const char* source, const char* dest) {
+    int src_fd = open(source, O_RDONLY);
+    if (src_fd < 0) return -1;
+
+    int dest_fd = open(dest, O_WRONLY | O_CREAT | O_TRUNC, 0644); // Default permissions
+    if (dest_fd < 0) {
+        close(src_fd);
+        return -1;
+    }
+
+    char buffer[4096];
+    ssize_t bytes_read;
+    while ((bytes_read = read(src_fd, buffer, sizeof(buffer))) > 0) {
+        if (write(dest_fd, buffer, bytes_read) != bytes_read) {
+            close(src_fd);
+            close(dest_fd);
+            return -1; // Write error
+        }
+    }
+
+    close(src_fd);
+    close(dest_fd);
+    return 0; // Success
+}
+
+
+// --- New Native Function: fs.chmod ---
+// Angara signature: func chmod(path as string, mode as i64) -> nil
+AngaraObject Angara_fs_chmod(int arg_count, AngaraObject args[]) {
+    if (arg_count != 2 || !IS_STRING(args[0]) || !IS_I64(args[1])) {
+        angara_throw_error("chmod() requires 2 arguments: (string, i64).");
+        return angara_create_nil();
+    }
+
+    const char* path = AS_CSTRING(args[0]);
+    mode_t mode = (mode_t)AS_I64(args[1]);
+
+    if (chmod(path, mode) != 0) {
+        char err_buf[256];
+        snprintf(err_buf, sizeof(err_buf), "chmod failed for '%s': %s", path, strerror(errno));
+        angara_throw_error(err_buf);
+    }
+
+    return angara_create_nil();
+}
+
+// --- New Native Function: fs.install ---
+// Angara signature: func install(source as string, dest as string, mode as i64) -> nil
+AngaraObject Angara_fs_install(int arg_count, AngaraObject args[]) {
+    if (arg_count != 3 || !IS_STRING(args[0]) || !IS_STRING(args[1]) || !IS_I64(args[2])) {
+        angara_throw_error("install() requires 3 arguments: (string, string, i64).");
+        return angara_create_nil();
+    }
+
+    const char* source = AS_CSTRING(args[0]);
+    const char* dest = AS_CSTRING(args[1]);
+    mode_t mode = (mode_t)AS_I64(args[2]);
+
+    // 1. Copy the file contents.
+    if (copy_file_contents(source, dest) != 0) {
+        char err_buf[256];
+        snprintf(err_buf, sizeof(err_buf), "install: failed to copy '%s' to '%s': %s", source, dest, strerror(errno));
+        angara_throw_error(err_buf);
+        return angara_create_nil();
+    }
+
+    // 2. Set the permissions on the new destination file.
+    if (chmod(dest, mode) != 0) {
+        char err_buf[256];
+        snprintf(err_buf, sizeof(err_buf), "install: failed to set mode on '%s': %s", dest, strerror(errno));
+        angara_throw_error(err_buf);
+    }
+
+    return angara_create_nil();
+}
+
 static const AngaraFuncDef FS_EXPORTS[] = {
         {"read_file",       Angara_fs_read_file,       "s->s",    NULL},
         {"write_file",      Angara_fs_write_file,      "ss->n",   NULL},
@@ -245,6 +324,8 @@ static const AngaraFuncDef FS_EXPORTS[] = {
         {"is_file",         Angara_fs_is_file,         "s->b",    NULL},
         {"is_dir",          Angara_fs_is_dir,          "s->b",    NULL},
         {"is_symlink",      Angara_fs_is_symlink,      "s->b",    NULL},
+        {"chmod",           Angara_fs_chmod,           "si->n",   NULL},
+        {"install",         Angara_fs_install,         "ssi->n",  NULL},
         {NULL, NULL, NULL, NULL}
 };
 

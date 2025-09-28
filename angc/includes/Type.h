@@ -272,8 +272,16 @@ namespace angara {
     };
 
     struct ExceptionType : Type {
-        ExceptionType() : Type(TypeKind::EXCEPTION) {}
-        std::string toString() const override { return "Exception"; }
+        std::map<std::string, ClassType::MemberInfo> fields;
+
+        ExceptionType() : Type(TypeKind::EXCEPTION) {
+            // Pre-populate the fields map.
+            // The message is a public, constant string.
+            auto string_type = std::make_shared<PrimitiveType>("string");
+            fields["message"] = {string_type, AccessLevel::PUBLIC, Token(), true};
+        }
+
+        [[nodiscard]] std::string toString() const override { return "Exception"; }
     };
 
     struct OptionalType : Type {

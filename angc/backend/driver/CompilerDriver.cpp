@@ -551,9 +551,14 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
                     if (!parser.is_at_end() && parser.peek() == '.') {
                         parser.consume_variadic();
                         is_variadic = true;
-                        if (!parser.is_at_end()) {
-                            throw std::runtime_error("Variadic '...' must be at the end of the parameter list.");
+
+                        // --- THIS IS THE FIX ---
+                        // A variadic marker must be the last thing in the parameter list.
+                        // This means the very next character MUST be the '->' arrow.
+                        if (parser.peek() != '-') {
+                            throw std::runtime_error("Variadic '...' must be the final item in the parameter list before '->'.");
                         }
+                        // The `break` is also essential, as it stops the loop from trying to parse more parameters.
                         break;
                     }
                 }

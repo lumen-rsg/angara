@@ -1,0 +1,82 @@
+// Import the json and io modules.
+attach json;
+attach io;
+
+// A sample JSON string representing a configuration file.
+// It includes a string, a number (float), a boolean, null, and an array.
+const CONFIG_JSON as string = """
+{
+  "appName": "Ulumina Core",
+  "version": 0.1,
+  "enabled": true,
+  "logLevel": null,
+  "features": [
+    "FFI",
+    "Enums",
+    "Pattern Matching"
+  ]
+}
+""";
+
+const INVALID_JSON as string = """
+{
+  "appName": "Broken JSON",
+  "version": 0.2,
+  "features": ["Incomplete" // Missing comma and closing bracket
+}
+""";
+
+export func main() -> i64 {
+  io.println(1, "--- Angara JSON Module Test ---");
+
+  // --- Test Case 1: Successful Parse and Data Access ---
+  io.println(1, "\n-> Testing successful JSON parsing...");
+  try {
+    // The `parse` function returns `any`. We know it's a record, so we assert the type.
+    let config as record = json.parse(CONFIG_JSON);
+
+    io.println(1, "  JSON parsed successfully.");
+
+    // Access fields from the generic record.
+    // The programmer is responsible for asserting the correct type for each field.
+    let app_name as string = config["appName"];
+    let version as f64 = config["version"];
+    let is_enabled as bool = config["enabled"];
+    let features as list<any> = config["features"];
+
+    io.println(1, "  App Name: " + app_name);
+    io.println(1, "  Version: " + string(version));
+    io.println(1, "  Enabled: " + string(is_enabled));
+
+    // Iterate through the list of `any` and use `is` for safe type checking.
+    io.println(1, "  Features:");
+    for (feature in features) {
+      if (feature is string) {
+        io.println(1, "    - " + feature);
+      }
+    }
+
+  } catch (e as Exception) {
+    // This block should not be reached in the first test case.
+    io.println(2, "  [UNEXPECTED ERROR] Failed to parse valid JSON: " + e.message);
+    return 1;
+  }
+
+  // --- Test Case 2: Handling a Parse Error ---
+  io.println(1, "\n-> Testing JSON parse error handling...");
+  try {
+    let broken_config as string = json.parse(INVALID_JSON);
+
+    // This line should not be reached.
+    io.println(2, "  [ERROR] The program failed to throw an exception for invalid JSON!");
+    return 1;
+
+  } catch (e as Exception) {
+    // This block SHOULD be reached.
+    io.println(1, "  Successfully caught expected error.");
+    io.println(1, "  Error message: " + e.message);
+  }
+
+  io.println(1, "\n--- Test Complete ---");
+  return 0;
+}

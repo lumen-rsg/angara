@@ -167,6 +167,15 @@ std::any TypeChecker::visit(const GetExpr& expr) {
             error(expr.name, "Type 'Mutex' has no property named '" + property_name + "'.");
         }
     }
+    else if (unwrapped_object_type->kind == TypeKind::EXCEPTION) {
+        auto exception_type = std::dynamic_pointer_cast<ExceptionType>(unwrapped_object_type);
+        auto field_it = exception_type->fields.find(property_name);
+        if (field_it == exception_type->fields.end()) {
+            error(expr.name, "Type 'Exception' has no property named '" + property_name + "'.");
+        } else {
+            property_type = field_it->second.type; // Should resolve to `string`
+        }
+    }
     else {
         error(expr.op, "Type '" + object_type->toString() + "' has no properties that can be accessed.");
     }

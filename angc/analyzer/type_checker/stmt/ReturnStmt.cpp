@@ -27,10 +27,18 @@ namespace angara {
         // Rule 4: A value of a generic `record` type can be assigned to a
         // variable with a specific record type annotation. This is a type assertion.
         if (expected->kind == TypeKind::RECORD && actual->kind == TypeKind::RECORD) {
+            auto expected_record = std::dynamic_pointer_cast<RecordType>(expected);
             auto actual_record = std::dynamic_pointer_cast<RecordType>(actual);
-            // Check if the ACTUAL value's type is the generic, empty record.
+
+            // Case A (Upcasting): Any specific record can be assigned to the generic `record` type.
+            // This solves the bug you found.
+            if (expected_record->fields.empty()) {
+                return true; // Allow assigning `{id: string}` to `{}`.
+            }
+
+            // Case B (Downcasting/Assertion): The generic `record` can be assigned to a specific record type.
             if (actual_record->fields.empty()) {
-                return true; // Allow assigning `{}` to `{a: i64}`.
+                return true; // Allow assigning `{}` to `{id: string}`.
             }
         }
         // --- END OF NEW RULE ---

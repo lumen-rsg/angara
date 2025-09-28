@@ -124,9 +124,10 @@ namespace angara {
         m_symbols.declare(Token(TokenType::IDENTIFIER, "bool", 0, 0), bool_conv_type, true);
 
         auto exception_constructor_type = std::make_shared<FunctionType>(
-            std::vector<std::shared_ptr<Type>>{m_type_string},
-            m_type_exception
+                std::vector<std::shared_ptr<Type>>{m_type_string},
+                m_type_exception
         );
+        // Declare the symbol "Exception" in the global scope.
         m_symbols.declare(Token(TokenType::IDENTIFIER, "Exception", 0, 0), exception_constructor_type, true);
 
         m_module_type = std::make_shared<ModuleType>(module_name);
@@ -344,6 +345,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         if (name == "any") return m_type_any;
         if (name == "Thread") return m_type_thread;
         if (name == "c_ptr") return m_type_c_ptr;
+        if (name == "Exception") return m_type_exception;
 
         // Handle the generic `record` keyword as a special built-in type.
         if (name == "record") {

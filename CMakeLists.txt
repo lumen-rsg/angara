@@ -103,6 +103,26 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
         #    target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq)
         #endif ()
         message("AMQP build on GitHub actions is disabled. To build AMQP Angara module, uncomment the above lines. -cv2")
+
+    elseif (MODULE_NAME STREQUAL "json")
+        message(STATUS "Configuring 'json' module with nlohmann/json C++ bridge.")
+
+        # --- NEW C++ BRIDGE LOGIC ---
+        # 1. Create a new library target for our C++ bridge code.
+        add_library(json_bridge STATIC modules/json_bridge.cpp)
+
+        # 2. Tell CMake this target uses C++ and needs the nlohmann/json header.
+        #    Assuming nlohmann/json.hpp is in a `vendor` directory.
+        target_include_directories(json_bridge PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/angara-ls/vendor
+        )
+
+        set_target_properties(json_bridge PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+        # 3. The main `json` module now links against our bridge.
+        #    The main module is C, the bridge is C++, but CMake handles the linking seamlessly.
+        target_link_libraries(${MODULE_NAME} PRIVATE json_bridge)
+        # --- END NEW ---
     endif()
 
     target_include_directories(${MODULE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/angc/includes)

@@ -81,6 +81,14 @@ namespace angara{
             // CallExpr transpiler will add the parentheses and arguments.
             return "Angara_" + enum_type->name + "_" + prop_name;
         }
+        else if (unwrapped_object_type->kind == TypeKind::EXCEPTION) {
+            if (prop_name == "message") {
+                // The C struct is AngaraException, and its field is `message`.
+                access_str = "((AngaraException*)AS_OBJ(" + object_str + "))->message";
+            } else {
+                access_str = "/* <invalid_exception_field> */";
+            }
+        }
 
         // 5. If the access was optional, wrap the raw access in a nil-check.
         // An access is considered optional if the `?.` operator was used, OR if the

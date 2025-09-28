@@ -39,22 +39,29 @@ namespace angara {
             if (index_type->toString() != "string") {
                 error(expr.bracket, "Record key must be a string, but got '" + index_type->toString() + "'.");
             } else {
-                // --- REVISED LOGIC ---
-                if (auto key_literal = std::dynamic_pointer_cast<const Literal>(expr.index)) {
-                    // STATIC ACCESS: Key is a literal, so we check it at compile time.
-                    const std::string& key_name = key_literal->token.lexeme;
-                    auto field_it = record_type->fields.find(key_name);
-                    if (field_it == record_type->fields.end()) {
-                        error(key_literal->token, "Record of type '" + record_type->toString() + "' has no statically-known field named '" + key_name + "'.");
-                        result_type = m_type_error;
-                    } else {
-                        result_type = field_it->second; // Success!
-                    }
-                } else {
-                    // DYNAMIC ACCESS: Key is a variable. The compiler cannot check the key's value.
-                    // The result of a dynamic access is always 'any' because we don't know which field will be accessed.
+                // --- THIS IS THE FIX ---
+                // If the record type is the generic, empty one, then all
+                // key access is dynamic and results in a value of type `any`.
+                if (record_type->fields.empty()) {
                     result_type = m_type_any;
+                } else {
+                    // Otherwise, it's a specifically-typed record. Apply the
+                    // original logic for static checking.
+                    if (auto key_literal = std::dynamic_pointer_cast<const Literal>(expr.index)) {
+                        const std::string& key_name = key_literal->token.lexeme;
+                        auto field_it = record_type->fields.find(key_name);
+                        if (field_it == record_type->fields.end()) {
+                            error(key_literal->token, "Record of type '" + record_type->toString() + "' has no statically-known field named '" + key_name + "'.");
+                            result_type = m_type_error;
+                        } else {
+                            result_type = field_it->second; // Success!
+                        }
+                    } else {
+                        // Dynamic access on a specific record type also results in `any`.
+                        result_type = m_type_any;
+                    }
                 }
+                // --- END OF FIX ---
             }
         }
             // --- Case 3: Accessing a string character ---
