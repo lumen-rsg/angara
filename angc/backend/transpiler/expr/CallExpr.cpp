@@ -105,6 +105,7 @@ namespace angara {
                 return mangled_name + "(" + std::to_string(expr.arguments.size()) + ", (AngaraObject[]){" + args_str + "})";
             }
 
+
             // A) Check for BUILT-IN global functions first.
             if (name == "len") return "angara_len(" + args_str + ")";
             if (name == "typeof") return "angara_typeof(" + args_str + ")";

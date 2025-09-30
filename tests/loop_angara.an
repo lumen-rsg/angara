@@ -1,0 +1,25 @@
+attach io;
+attach time;
+
+export func main() -> i64 {
+  const ITERATIONS as i64 = 2000000000; // 2 billion
+  let total as i64 = 0;
+  let i as i64 = 0;
+
+  let stopwatch = time.Stopwatch();
+
+  // --- The Core Work: A tight loop ---
+  while (i < ITERATIONS) {
+    total = total + 1;
+    i = i + 1;
+  }
+
+  let time_taken = stopwatch.elapsed();
+
+  io.println(1, "Angara Loop Benchmark");
+  io.println(1, "---------------------------");
+  io.println(1, "Total: " + string(total) + " (to prevent optimization)");
+  io.println(1, "Time taken: " + string(time_taken) + " seconds");
+
+  return 0;
+}

@@ -15,6 +15,7 @@
 #include <dlfcn.h> // For dlopen, dlsym
 #include <filesystem>
 #include <thread>
+#include <utility>
 
 #include "../../runtime/angara_runtime.h"
 
@@ -32,9 +33,9 @@ namespace angara {
     public:
         // The parser is initialized with the full source string and a map of
         // class names that have been discovered in the current module.
-        TypeStringParser(const std::string& str,
+        TypeStringParser(std::string  str,
                          std::map<std::string, std::shared_ptr<ClassType>>& known_classes)
-                : m_source(str), m_known_classes(known_classes) {}
+                : m_source(std::move(str)), m_known_classes(known_classes) {}
 
         // --- Public Parser Interface ---
 
@@ -151,13 +152,13 @@ namespace angara {
         // Store the message so other functions can reprint it.
         m_last_progress_message = current_file;
 
-        int bar_width = 20;
-        float progress = (m_total_modules > 0) ? (float)m_modules_compiled / m_total_modules : 0;
+        constexpr int bar_width = 20;
+        float progress = (m_total_modules > 0) ? static_cast<float>(m_modules_compiled) / m_total_modules : 0;
         // Don't let the bar go to 100% until the very end.
         if (m_modules_compiled == m_total_modules && current_file != "Done!") {
             progress = 0.99;
         }
-        int pos = bar_width * progress;
+        const int pos = bar_width * progress;
 
         std::stringstream ss;
         ss << BOLD << GREEN << "[" << RESET;
@@ -270,7 +271,7 @@ bool CompilerDriver::compile(const std::string& root_file_path) {
     // Add final flags
     command_ss << " -pthread -lm";
         command_ss << " -Wl,-rpath," << m_native_module_path;
-        command_ss << " -O2";
+        command_ss << " -O3";
     std::string command = command_ss.str();
 
         // --- NEW LOGIC: Redirect output and conditionally print ---
@@ -317,7 +318,7 @@ bool CompilerDriver::compile(const std::string& root_file_path) {
 
     // Calculate total lines
     int total_lines = 0;
-    for (const auto& [file, count] : m_line_counts) {
+    for (const auto &count: m_line_counts | std::views::values) {
         total_lines += count;
     }
 

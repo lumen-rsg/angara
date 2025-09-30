@@ -2,51 +2,55 @@
 namespace angara {
 
     void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
-        // The parser now guarantees stmt->typeAnnotation is not null.
-        // 1. Resolve the explicitly declared type.
-        auto declared_type = resolveType(stmt->typeAnnotation);
+    std::shared_ptr<Type> declared_type = nullptr;
 
-        // 2. If an initializer exists, check that its type is compatible.
-        if (stmt->initializer) {
-            stmt->initializer->accept(*this);
-            auto initializer_type = popType();
+    // 1. First, check if there's an initializer. This is now the primary source of type info.
+    if (stmt->initializer) {
+        stmt->initializer->accept(*this);
+        auto initializer_type = popType();
 
-            // Prevent cascading errors.
+        if (stmt->typeAnnotation) {
+            // --- CASE A: Both annotation and initializer are present ---
+            declared_type = resolveType(stmt->typeAnnotation);
             if (declared_type->kind != TypeKind::ERROR && initializer_type->kind != TypeKind::ERROR) {
+                // Check for compatibility (using our existing robust logic)
                 bool types_match = check_type_compatibility(declared_type, initializer_type);
-
-                // --- THIS IS THE NEW, CRITICAL FIX ---
-                // Allow implicit narrowing for integer literals.
-                // e.g., allow `let x as i32 = 0;` where 0 is inferred as i64.
                 if (!types_match && isInteger(declared_type) && initializer_type->toString() == "i64") {
                     if (std::dynamic_pointer_cast<const Literal>(stmt->initializer)) {
-                        // The initializer is a literal, so this is a safe conversion.
-                        // A more advanced compiler would check if the literal's value
-                        // actually fits in the target type, but for now, trusting
-                        // the programmer is a huge ergonomic improvement.
                         types_match = true;
                     }
                 }
-                // --- END OF FIX ---
-
                 if (!types_match) {
-                    error(stmt->name, "Type mismatch. Cannot initialize variable of type '" +
-                        declared_type->toString() + "' with a value of type '" +
+                    error(stmt->name, "Type mismatch. Variable is annotated as '" +
+                        declared_type->toString() + "' but is initialized with a value of type '" +
                         initializer_type->toString() + "'.");
                     declared_type = m_type_error;
                 }
             }
+        } else {
+            // --- CASE B: Type Inference is used ---
+            // The declared type is the type of the initializer.
+            declared_type = initializer_type;
+
+            // --- THIS IS THE NEW FEATURE ---
+            // Issue an informational note about the inferred type.
+            if (declared_type->kind != TypeKind::ERROR && declared_type->kind != TypeKind::NIL) {
+                note(stmt->name, "Type for '" + stmt->name.lexeme + "' was inferred as '" + declared_type->toString() + "'. Consider adding an explicit annotation for clarity: `as " + declared_type->toString() + "`");
+            }
+            // --- END NEW FEATURE ---
         }
+    } else {
+        // --- CASE C: Only a type annotation is present ---
+        // The parser guarantees this case.
+        declared_type = resolveType(stmt->typeAnnotation);
+    }
 
-
-        // 3. Store the (now definitive) type for this variable.
-        m_variable_types[stmt.get()] = declared_type;
-
-        // 4. Declare the symbol in the current scope.
-        if (auto conflicting_symbol = m_symbols.declare(stmt->name, declared_type, stmt->is_const)) {
-            error(stmt->name, "re-declaration of variable '" + stmt->name.lexeme + "'.");
-            note(conflicting_symbol->declaration_token, "previous declaration was here.");
-        }
+    // 2. The rest of the function is unchanged.
+    m_variable_types[stmt.get()] = declared_type;
+    if (auto conflicting_symbol = m_symbols.declare(stmt->name, declared_type, stmt->is_const)) {
+        error(stmt->name, "re-declaration of variable '" + stmt->name.lexeme + "'.");
+        note(conflicting_symbol->declaration_token, "previous declaration was here.");
+    }
 
         // 5. Handle exporting the symbol (logic is unchanged).
         if (stmt->is_exported) {

@@ -1,0 +1,35 @@
+// We need the `time` module for sleeping (to verify concurrency if needed)
+// and the `io` module for printing.
+attach time;
+attach io;
+
+// A pure Angara implementation of recursive Fibonacci.
+// Using i64 to match the C version's uint64_t.
+func fib(n as i64) -> i64 {
+  if (n <= 1) {
+    return n;
+  }
+  return fib(n - 1) + fib(n - 2);
+}
+
+export func main() -> i64 {
+  // Use the same input as the C benchmark for a fair comparison.
+  const N as i64 = 40;
+
+  // --- Time Measurement ---
+  // We use the Stopwatch class from the `time` module.
+  let stopwatch = time.Stopwatch();
+
+  // --- The Core Work ---
+  let result as i64 = fib(N);
+
+  // --- End Time Measurement ---
+  let time_taken as f64 = stopwatch.elapsed();
+
+  io.println(1, "Angara Benchmark");
+  io.println(1, "---------------------------");
+  io.println(1, "Fibonacci(" + string(N) + ") = " + string(result));
+  io.println(1, "Time taken: " + string(time_taken) + " seconds");
+
+  return 0;
+}
