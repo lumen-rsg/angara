@@ -54,7 +54,8 @@ namespace angara {
             {"retype", TokenType::RETYPE},
     };
 
-    Lexer::Lexer(std::string source) : m_source(std::move(source)) {}
+    Lexer::Lexer(std::string source, ErrorHandler& errorHandler)
+            : m_source(std::move(source)), m_errorHandler(errorHandler) {}
 
     std::vector<Token> Lexer::scanTokens() {
         while (!isAtEnd()) {
@@ -119,47 +120,106 @@ namespace angara {
     }
 
     void Lexer::string() {
-        std::stringstream value; // Use a stringstream to build the final value
+        std::stringstream value; // Use a stringstream to build the final string byte by byte.
 
         while (peek() != '"' && !isAtEnd()) {
+            if (peek() == '\n') {
+                // Unescaped newlines are not allowed in single-line strings.
+                m_errorHandler.report(Token(TokenType::STRING, m_source.substr(m_start, m_current - m_start), m_line, m_column), "Unterminated string literal.");
+                return;
+            }
+
             char c = advance();
 
-            if (c == '\\') { // --- HANDLE ESCAPE SEQUENCE ---
+            if (c == '\\') { // --- Handle an Escape Sequence ---
                 if (isAtEnd()) {
-                    std::cerr << "Line " << m_line << ": Unterminated escape sequence.\n";
+                    m_errorHandler.report(Token(TokenType::STRING, "", m_line, m_column), "Unterminated string literal; ends with '\\'.");
                     return;
                 }
+
                 char escaped = advance();
                 switch (escaped) {
+                    // Simple, single-character escapes
                     case '"':  value << '"'; break;
                     case '\\': value << '\\'; break;
                     case 'n':  value << '\n'; break;
                     case 'r':  value << '\r'; break;
                     case 't':  value << '\t'; break;
-                        // You can add more escapes like \b, \f, etc. here
+                    case 'b':  value << '\b'; break;
+                    case 'f':  value << '\f'; break;
+                    case 'v':  value << '\v'; break;
+                    case 'a':  value << '\a'; break;
+
+                        // Octal escapes (e.g., \177)
+                    case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': {
+                        std::string octal_str;
+                        octal_str += escaped;
+                        // Read up to two more octal digits
+                        for (int i = 0; i < 2; ++i) {
+                            if (peek() >= '0' && peek() <= '7') {
+                                octal_str += advance();
+                            } else {
+                                break;
+                            }
+                        }
+                        char octal_char = (char)strtol(octal_str.c_str(), nullptr, 8);
+                        value << octal_char;
+                        break;
+                    }
+
+                        // Hexadecimal escapes (e.g., \x1b)
+                    case 'x': {
+                        std::string hex_str;
+                        // Read up to two hex digits
+                        for (int i = 0; i < 2; ++i) {
+                            if (isxdigit(peek())) {
+                                hex_str += advance();
+                            } else {
+                                break;
+                            }
+                        }
+                        if (hex_str.empty()) {
+                            m_errorHandler.report(Token(TokenType::STRING, "", m_line, m_column), "Incomplete hex escape sequence '\\x'.");
+                        } else {
+                            char hex_char = (char)strtol(hex_str.c_str(), nullptr, 16);
+                            value << hex_char;
+                        }
+                        break;
+                    }
+
+                        // Note: For Unicode escapes \u and \U, the output depends on the
+                        // string's encoding. Since we've defined Angara strings as UTF-8,
+                        // we would need a helper to convert the codepoint to a UTF-8 byte sequence.
+                        // This is a more advanced topic. For now, we will report them as unsupported.
+                    case 'u':
+                    case 'U': {
+                        m_errorHandler.report(Token(TokenType::STRING, "", m_line, m_column),
+                                              "Unicode escape sequences ('\\u', '\\U') are not yet supported.");
+                        // Consume the hex digits to avoid cascading errors
+                        int limit = (escaped == 'u' ? 4 : 8);
+                        for (int i = 0; i < limit; ++i) { if (isxdigit(peek())) advance(); }
+                        break;
+                    }
+
                     default:
-                        // For now, if we see an unknown escape, we'll just treat it literally
-                        // e.g., "\c" will become "c". A stricter lexer could error here.
+                        // Treat any other escape sequence as invalid, but just use the character itself.
+                        m_errorHandler.report(Token(TokenType::STRING, "", m_line, m_column), "Unknown escape sequence '\\" + std::string(1, escaped) + "'.");
                         value << escaped;
                         break;
                 }
-            } else if (c == '\n') {
-                std::cerr << "Line " << m_line << ": Unterminated string (found unescaped newline).\n";
-                return;
-            }
-            else { // --- REGULAR CHARACTER ---
+            } else {
+                // A regular, non-escaped character.
                 value << c;
             }
         }
 
         if (isAtEnd()) {
-            std::cerr << "Line " << m_line << ": Unterminated string.\n";
+            m_errorHandler.report(Token(TokenType::STRING, m_source.substr(m_start, m_current - m_start), m_line, m_column), "Unterminated string literal.");
             return;
         }
 
         advance(); // Consume the closing ".
 
-        // The stringstream now holds the correctly unescaped string content.
         addToken(TokenType::STRING, value.str());
     }
 

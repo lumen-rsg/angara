@@ -5,10 +5,10 @@ attach adv_string; // Used by our list_remove helper
 
 // --- Global State ---
 // This list will store a handle to every connected client.
-let clients as list<WebSocket> = [];
+let clients as list<WebSocket>;
 // A mutex is crucial to prevent race conditions if we were to service
 // clients in multiple threads in the future. It's good practice now.
-let clients_mutex = Mutex();
+let clients_mutex as Mutex = Mutex();
 
 // --- Server Callback Functions ---
 
@@ -20,7 +20,7 @@ func on_connect(server as Server, new_client as WebSocket) -> nil {
     clients.push(new_client);
     clients_mutex.unlock();
 
-    let count_str = string(len(clients));
+    let count_str as string = string(len(clients));
     io.println(1, "         Total clients: " + count_str);
     new_client.send("Welcome to the Angara Echo Server!");
 }
@@ -48,20 +48,20 @@ func on_close(server as Server, client as WebSocket) -> nil {
     clients.remove(client);
     clients_mutex.unlock();
 
-    let count_str = string(len(clients));
+    let count_str as string = string(len(clients));
     io.println(1, "         Total clients: " + count_str);
 }
 
 
 export func main() -> i64 {
-    let callbacks = {
+    let callbacks as record = {
         "on_connect": on_connect,
         "on_message": on_message,
         "on_close": on_close
     };
 
     try {
-        let server = createServer(8080, callbacks);
+        let server as Server = createServer(8080, callbacks);
         io.println(1, "--- Angara WebSocket Echo Server ---");
         io.println(1, "Listening on ws://0.0.0.0:8080");
 

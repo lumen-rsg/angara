@@ -64,62 +64,20 @@ namespace angara {
             return {};
         }
 
-        // --- Centralized Type Compatibility Check ---
-        bool types_match = (lhs_type->toString() == rhs_type->toString());
-
-        // Rule: A T or a `nil` can be assigned to a T?
-        if (!types_match && lhs_type->kind == TypeKind::OPTIONAL) {
-            auto optional_type = std::dynamic_pointer_cast<OptionalType>(lhs_type);
-            if (optional_type->wrapped_type->toString() == rhs_type->toString() || rhs_type->kind == TypeKind::NIL) {
-                types_match = true;
-            }
-        }
-
-        // Rule: Anything can be assigned to `any`.
-        if (!types_match && lhs_type->kind == TypeKind::ANY) {
-            types_match = true;
-        }
-
-        // Rule: An `any` can be assigned to a typed variable (runtime cast assertion).
-        if (!types_match && rhs_type->kind == TypeKind::ANY) {
-            types_match = true;
-        }
-
-        // TODO ... (other special rules for empty list, etc.) ...
-
-        // NEW RULE: Allow implicit narrowing for integer assignments.
-        // e.g., allow `let x as i32; x = 0;` where 0 is an i64.
-        if (!types_match && isInteger(lhs_type) && rhs_type->toString() == "i64") {
-            // This is a potential narrowing conversion. For now, we allow it.
-            // A more advanced compiler could issue a warning if the RHS is not a constant,
-            // as it could lead to data loss at runtime. But allowing it makes the
-            // language far more ergonomic.
-            types_match = true;
-        }
-
-        if (!types_match) {
-            error(expr.op, "Type mismatch. Cannot assign a value of type '" +
-                           rhs_type->toString() + "' to a target of type '" +
-                           lhs_type->toString() + "'.");
-        }
-
-        // 4. Check for type compatibility. The LHS type must match the RHS type.
-        if (lhs_type->toString() != rhs_type->toString()) {
-            // Special case for assigning an empty list `[]` to a typed list variable.
-            if (auto list_expr = std::dynamic_pointer_cast<const ListExpr>(expr.value)) {
-
-                if (list_expr->elements.empty() && lhs_type->kind == TypeKind::LIST) {
-                    // This is valid, so we skip the error.
-                } else {
-                    error(expr.op, "Type mismatch. Cannot assign a value of type '" +
-                                   rhs_type->toString() + "' to a target of type '" +
-                                   lhs_type->toString() + "'.");
+        if (!check_type_compatibility(lhs_type, rhs_type)) {
+            // We can add a special check here for integer literals if we want to be
+            // even more robust, but the main logic is now centralized.
+            bool types_match = false;
+            if (isInteger(lhs_type) && rhs_type->toString() == "i64") {
+                if (std::dynamic_pointer_cast<const Literal>(expr.value)) {
+                    types_match = true;
                 }
-            } else {
+            }
+
+            if (!types_match) {
                 error(expr.op, "Type mismatch. Cannot assign a value of type '" +
                                rhs_type->toString() + "' to a target of type '" +
                                lhs_type->toString() + "'.");
-
             }
         }
 

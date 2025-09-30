@@ -3,13 +3,14 @@
 #include <string>
 #include <vector>
 #include <map>
-#include "Token.h" // Adjust path to find Token.h
+#include "Token.h"
+#include "ErrorHandler.h"
 namespace angara {
 
     class Lexer {
     public:
         // Constructor takes the source code to be scanned
-        Lexer(std::string source);
+        Lexer(std::string source, ErrorHandler& errorHandler);
 
         // The main function that scans all tokens and returns them as a vector
         std::vector<Token> scanTokens();
@@ -27,6 +28,7 @@ namespace angara {
         void identifier();
         void addToken(TokenType type);
         void addToken(TokenType type, const std::string &literal);
+        ErrorHandler& m_errorHandler;
 
         const std::string m_source;
         std::vector<Token> m_tokens;

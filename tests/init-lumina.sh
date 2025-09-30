@@ -16,8 +16,8 @@ sudo cp /bin/echo /var/lib/lumina/runtimes/org.freedesktop.Platform/22.08/files/
 sudo chmod 755 /var/lib/lumina/runtimes/org.freedesktop.Platform/22.08/files/bin/echo
 
 # Create the library directories inside the runtime
-sudo mkdir -p "/var/lib/lumina/runtimes/org.freedesktop.Platform/22.08/files$(dirname ${LINKER_PATH})"
-sudo mkdir -p "/var/lib/lumina/runtimes/org.freedesktop.Platform/22.08/files$(dirname ${LIBC_PATH})"
+sudo mkdir -p "/var/lib/lumina/runtimes/org.freedesktop.Platform/22.08/files$(dirname "${LINKER_PATH}")"
+sudo mkdir -p "/var/lib/lumina/runtimes/org.freedesktop.Platform/22.08/files$(dirname "${LIBC_PATH}")"
 
 # Copy and set permissions for the dynamic linker and libc
 sudo cp "${LINKER_PATH}" "/var/lib/lumina/runtimes/org.freedesktop.Platform/22.08/files${LINKER_PATH}"

@@ -1,0 +1,117 @@
+// This program provides a complete test suite for the native `tar` module.
+attach tar;
+attach fs;
+attach io;
+attach path; // For path joining
+
+// A helper function to print the state of a directory for verification.
+func verify_directory(dir_path as string, expected_files as list<string>, absent_files as list<string>) -> bool {
+  let all_ok as bool = true;
+  for (file in expected_files) {
+    let full_path as string = path.join(dir_path, file);
+    if (!fs.exists(full_path)) {
+      io.println(2, "  [FAIL] Expected file does not exist: " + full_path);
+      all_ok = false;
+    }
+  }
+  for (file in absent_files) {
+    let full_path as string = path.join(dir_path, file);
+    if (fs.exists(full_path)) {
+      io.println(2, "  [FAIL] Unexpected file exists: " + full_path);
+      all_ok = false;
+    }
+  }
+  if (all_ok) {
+    io.println(1, "  [PASS] Directory contents are correct.");
+  }
+  return all_ok;
+}
+
+export func main() -> i64 {
+  io.println(1, "--- Angara `tar` Module Test Suite ---");
+
+  // --- Setup: Create dummy files and directories ---
+  const ARCHIVE_NAME as string = "ulumina_package.tar.gz";
+  const SRC_DIR as string = "source_files";
+  const UNPACK_DIR_1 as string = "unpacked_v1";
+  const UNPACK_DIR_2 as string = "unpacked_v2";
+
+  try {
+    fs.create_dir(SRC_DIR);
+    fs.create_dir(UNPACK_DIR_1);
+    fs.create_dir(UNPACK_DIR_2);
+
+    fs.write_file(path.join(SRC_DIR, "readme.txt"), "This is the readme.");
+    fs.write_file(path.join(SRC_DIR, "ulumina"), "core binary data");
+    fs.write_file(path.join(SRC_DIR, "temp.log"), "temporary log file");
+
+  } catch (e as Exception) {
+    io.println(2, "Setup failed: " + e.message);
+    return 1;
+  }
+
+  // --- Test 1: Pack ---
+  io.println(1, "\n1. Testing `tar.pack`...");
+  try {
+    let initial_files as list<string> = [
+      path.join(SRC_DIR, "readme.txt"),
+      path.join(SRC_DIR, "ulumina")
+    ];
+    tar.pack(ARCHIVE_NAME, initial_files);
+    io.println(1, "  `tar.pack` executed successfully.");
+  } catch (e as Exception) {
+    io.println(2, "  `tar.pack` failed: " + e.message);
+    return 1;
+  }
+
+  // --- Verification 1: Unpack and Verify ---
+  io.println(1, "\n2. Verifying initial archive contents...");
+  try {
+    tar.unpack(ARCHIVE_NAME, UNPACK_DIR_1);
+    verify_directory(path.join(UNPACK_DIR_1, SRC_DIR), ["readme.txt", "ulumina"], []);
+  } catch (e as Exception) {
+    io.println(2, "  Verification failed during unpack: " + e.message);
+    return 1;
+  }
+
+  // --- Test 2: Add ---
+  io.println(1, "\n3. Testing `tar.add`...");
+  try {
+    let files_to_add as list<string> = [path.join(SRC_DIR, "temp.log")];
+    tar.add(ARCHIVE_NAME, files_to_add);
+    io.println(1, "  `tar.add` executed successfully.");
+  } catch (e as Exception) {
+    io.println(2, "  `tar.add` failed: " + e.message);
+    return 1;
+  }
+
+  // --- Test 3: Remove ---
+  io.println(1, "\n4. Testing `tar.remove`...");
+  try {
+    // Let's remove the readme, but keep the log and the binary.
+    let files_to_remove as list<string> = [path.join(SRC_DIR, "readme.txt")];
+    tar.remove(ARCHIVE_NAME, files_to_remove);
+    io.println(1, "  `tar.remove` executed successfully.");
+  } catch (e as Exception) {
+    io.println(2, "  `tar.remove` failed: " + e.message);
+    return 1;
+  }
+
+  // --- Final Verification ---
+  io.println(1, "\n5. Verifying final archive contents...");
+  try {
+    tar.unpack(ARCHIVE_NAME, UNPACK_DIR_2);
+    // The final state should have the binary and the log, but not the readme.
+    if (verify_directory(UNPACK_DIR_2, ["ulumina", "temp.log"], ["readme.txt"])) {
+      io.println(1, "\n--- All `tar` module tests passed! ---");
+    } else {
+      io.println(2, "\n--- `tar` module tests FAILED. ---");
+      return 1;
+    }
+  } catch (e as Exception) {
+    io.println(2, "  Final verification failed during unpack: " + e.message);
+    return 1;
+  }
+
+  return 0;
+}

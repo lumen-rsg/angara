@@ -179,10 +179,30 @@ namespace angara {
 
         // 2. Check types of the fixed parameters
         for (size_t i = 0; i < num_expected; ++i) {
-            if (!check_type_compatibility(func_type->param_types[i], arg_types[i])) {
+            const auto& expected_type = func_type->param_types[i];
+            const auto& actual_type = arg_types[i];
+
+            // --- THIS IS THE FIX ---
+            // Get the original AST node for the argument.
+            const auto& arg_expr = call.arguments[i];
+
+            // Check for the special case: is the argument an empty list literal `[]`?
+            if (auto list_lit = std::dynamic_pointer_cast<const ListExpr>(arg_expr)) {
+                if (list_lit->elements.empty()) {
+                    // It is an empty list. Is the expected type ANY kind of list?
+                    if (expected_type->kind == TypeKind::LIST) {
+                        // Yes. Consider this a match and continue to the next argument.
+                        continue;
+                    }
+                }
+            }
+            // --- END OF FIX ---
+
+            // If it's not the special case, perform the standard compatibility check.
+            if (!check_type_compatibility(expected_type, actual_type)) {
                 error(call.paren, "Type mismatch for argument " + std::to_string(i + 1) + ". " +
-                                  "Expected '" + func_type->param_types[i]->toString() +
-                                  "', but got '" + arg_types[i]->toString() + "'.");
+                                  "Expected '" + expected_type->toString() +
+                                  "', but got '" + actual_type->toString() + "'.");
                 return; // Stop after first type error
             }
         }

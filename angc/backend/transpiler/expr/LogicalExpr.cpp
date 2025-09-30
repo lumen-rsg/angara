@@ -16,7 +16,7 @@ namespace angara {
         // --- logic for `&&` and `||` ---
         std::string lhs = "angara_is_truthy(" + transpileExpr(expr.left) + ")";
         std::string rhs = "angara_is_truthy(" + transpileExpr(expr.right) + ")";
-        return "create_bool((" + lhs + ") " + expr.op.lexeme + " (" + rhs + "))";
+        return "angara_create_bool((" + lhs + ") " + expr.op.lexeme + " (" + rhs + "))";
     }
 
 }

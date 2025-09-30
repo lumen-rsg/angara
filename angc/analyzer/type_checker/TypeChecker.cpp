@@ -346,6 +346,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         if (name == "Thread") return m_type_thread;
         if (name == "c_ptr") return m_type_c_ptr;
         if (name == "Exception") return m_type_exception;
+        if (name == "Mutex") return m_type_mutex;
 
         // Handle the generic `record` keyword as a special built-in type.
         if (name == "record") {

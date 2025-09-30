@@ -1,0 +1,7 @@
+export func test() -> i64 {
+    return 0;
+}
+
+func main() -> i64 {
+    tst();
+}

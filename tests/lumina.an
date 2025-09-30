@@ -3,79 +3,86 @@ attach container;
 attach fs;
 attach io;
 attach path;
-
-// We assume a JSON parsing module exists.
 attach json;
 
+// --- ANSI Color Constants ---
+const C_RESET as string = "\x1b[0m";
+const C_RED as string = "\x1b[31m";
+const C_GREEN as string = "\x1b[32m";
+const C_YELLOW as string = "\x1b[33m";
+const C_BLUE_BOLD as string = "\x1b[1;34m"; // Bold Blue for the "Lumina" prefix
+
 // --- Constants for our package manager ---
-const LUMINA_BASE_PATH = "/var/lib/lumina";
-const RUNTIMES_PATH = path.join(LUMINA_BASE_PATH, "runtimes");
-const APPS_PATH = path.join(LUMINA_BASE_PATH, "apps");
+const LUMINA_BASE_PATH as string = "/var/lib/lumina";
+const RUNTIMES_PATH as string = path.join(LUMINA_BASE_PATH, "runtimes");
+const APPS_PATH as string = path.join(LUMINA_BASE_PATH, "apps");
 
-// The main entry point now directly receives command-line arguments.
+// A helper to print error messages in a standard, colored format.
+func print_error(message as string, details as string) -> nil {
+  io.println(2, C_RED + "Error: " + message + C_RESET);
+  if (details != "") {
+    io.println(2, "  Details: " + details);
+  }
+}
+
 export func main(args as list<string>) -> i64 {
+  // We expect a command like: ./lumina run <app-id>
+  if (len(args) != 3 || args[1] != "run") {
+    io.println(2, "Usage: lumina run <application-id>");
+    return 1;
+  }
+
+  const app_id as string = args[2];
+  io.println(1, C_BLUE_BOLD + "Lumina:" + C_RESET + " Attempting to run application: " + app_id);
+
+  const manifest_path as string = path.join(APPS_PATH, app_id, "metadata.json");
+  if (!fs.exists(manifest_path)) {
+    print_error("Application '" + app_id + "' not found.", "Manifest missing at: " + manifest_path);
+    return 1;
+  }
+
+  let manifest_content as string = fs.read_file(manifest_path);
+  let manifest_data as record;
+
   try {
-    // We expect a command like: ./lumina run <app-id>
-    // args[0] is "./lumina", args[1] is "run", args[2] is the app-id.
-    if (len(args) != 3 || args[1] != "run") {
-      io.println(2, "Usage: lumina run <application-id>");
+    manifest_data = json.parse(manifest_content);
+  } catch (e as Exception) {
+    print_error("Failed to parse manifest file.", e.message);
+    return 1;
+  }
+
+  try {
+    const runtime_id as string = manifest_data["runtime"];
+    const command_list as list<any> = manifest_data["command"];
+
+    const runtime_files_path as string = path.join(RUNTIMES_PATH, runtime_id, "files");
+    const app_files_path as string = path.join(APPS_PATH, app_id, "files");
+
+    if (!fs.exists(runtime_files_path) || !fs.is_dir(runtime_files_path)) {
+      print_error("required runtime '" + runtime_id + "' not found.", "Path does not exist: " + runtime_files_path);
       return 1;
     }
 
-    const app_id = args[2];
-    io.println(1, "Lumina: Attempting to run application: " + app_id);
+    let container_manifest as record = {
+      id: app_id,
+      runtime_path: runtime_files_path,
+      app_path: app_files_path,
+      command: command_list
+    };
 
-    // 1. Locate and Parse the Application Manifest
-    const manifest_path = path.join(APPS_PATH, app_id, "metadata.json");
-    if (!fs.exists(manifest_path)) {
-      io.println(2, "Error: Application '" + app_id + "' not found. Manifest missing at: " + manifest_path);
-      return 1;
-    }
+    io.println(1, C_BLUE_BOLD + "lumina:" + C_RESET + " Handing off to native container runtime...");
+    let exit_code as i64 = container.run(container_manifest);
 
-    let manifest_content = fs.read_file(manifest_path);
-    let manifest_opt = json.parse(manifest_content);
-
-    if (let manifest_data = manifest_opt) {
-      // 2. Determine Paths from Manifest Data
-      const runtime_id = manifest_data["runtime"];
-      const runtime_base_path = path.join(RUNTIMES_PATH, runtime_id);
-      const runtime_files_path = path.join(runtime_base_path, "files");
-
-      const app_base_path = path.join(APPS_PATH, app_id);
-      const app_files_path = path.join(app_base_path, "files");
-
-      if (!fs.exists(runtime_files_path) || !fs.is_dir(runtime_files_path)) {
-        io.println(2, "Error: Required runtime '" + runtime_id + "' not found or is not a directory.");
-        return 1;
-      }
-
-      // 3. Prepare the record for the native container module
-      let container_manifest as record = {
-        id: app_id,
-        runtime_path: runtime_files_path,
-        app_path: app_files_path,
-        command: manifest_data["command"]
-      };
-
-      // 4. Execute the container
-      io.println(1, "Lumina: Handing off to native container runtime...");
-      let exit_code as i64 = container.run(container_manifest);
-
-      if (exit_code == 0) {
-        io.println(1, "Lumina: Application finished successfully.");
-        return 0;
-      } else {
-        io.println(2, "Lumina: Application exited with an error (code: " + string(exit_code) + ").");
-        return 1;
-      }
-
+    if (exit_code == 0) {
+      io.println(1, C_BLUE_BOLD + "lumina:" + C_RESET + " Application finished " + C_GREEN + "successfully." + C_RESET);
+      return 0;
     } else {
-      io.println(2, "Error: Failed to parse manifest file at: " + manifest_path);
+      print_error("application exited with a non-zero status.", "Exit code: " + string(exit_code));
       return 1;
     }
-  } catch (e) {
-    // A general-purpose error handler for any unexpected exceptions.
-    io.println(2, "An unexpected error occurred: " + string(e));
+
+  } catch (e as Exception) {
+    print_error("manifest file '" + manifest_path + "' is invalid or missing required fields.", e.message);
     return 1;
   }
 }

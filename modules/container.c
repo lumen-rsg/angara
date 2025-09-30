@@ -12,13 +12,15 @@
 
 #define BUNDLE_BASE_PATH "/run/containers"
 #define PATH_BUFFER_SIZE 1024
+#define MAX_UMOUNT_RETRIES 10
+#define UMOUNT_RETRY_DELAY_US 100000 // 100 milliseconds
 
 // --- Forward Declarations of Helper Functions ---
 
 static int recursive_mkdir(const char* path, mode_t mode);
 static bool generate_runc_config(const char* config_path, const char* rootfs_path, AngaraObject command_list_obj);
 static int execute_runc(const char* bundle_path, const char* container_id);
-static void cleanup_container(const char* bundle_path);
+static void cleanup_container(const char* bundle_path, const char* merged_path);
 
 // --- The Main Native Function Exposed to Angara ---
 AngaraObject Angara_container_run(int arg_count, AngaraObject args[]) {
@@ -87,7 +89,7 @@ AngaraObject Angara_container_run(int arg_count, AngaraObject args[]) {
             perror("WARNING: Failed to unmount overlayfs. Manual cleanup may be required");
         }
     }
-    cleanup_container(bundle_path);
+    cleanup_container(bundle_path, merged_path);
 
     return angara_create_i64(exit_code);
 }
@@ -175,23 +177,38 @@ static bool generate_runc_config(const char* config_path, const char* rootfs_pat
     return true;
 }
 
-static void cleanup_container(const char* bundle_path) {
+static void cleanup_container(const char* bundle_path, const char* merged_path) {
+    // --- Robust Unmount with Retry Loop ---
+    bool unmounted_successfully = false;
+    for (int i = 0; i < MAX_UMOUNT_RETRIES; i++) {
+        if (umount(merged_path) == 0) {
+            unmounted_successfully = true;
+            break; // Success!
+        }
+
+        // If the error is NOT EBUSY, it's a real problem. Stop trying.
+        if (errno != EBUSY) {
+            perror("Fatal error during umount");
+            break;
+        }
+
+        // If it was EBUSY, wait a bit and try again.
+        usleep(UMOUNT_RETRY_DELAY_US);
+    }
+
+    if (!unmounted_successfully) {
+        fprintf(stderr, "WARNING: Failed to unmount overlayfs after %d retries. Manual cleanup may be required.\n", MAX_UMOUNT_RETRIES);
+    }
+
+    // --- Clean up directories ---
     char path_buffer[PATH_BUFFER_SIZE];
-
-    snprintf(path_buffer, sizeof(path_buffer), "%s/merged", bundle_path);
-    rmdir(path_buffer);
-
-    snprintf(path_buffer, sizeof(path_buffer), "%s/upper", bundle_path);
-    rmdir(path_buffer);
-
-    snprintf(path_buffer, sizeof(path_buffer), "%s/work", bundle_path);
-    rmdir(path_buffer);
-
-    snprintf(path_buffer, sizeof(path_buffer), "%s/config.json", bundle_path);
-    unlink(path_buffer);
-
+    snprintf(path_buffer, sizeof(path_buffer), "%s/merged", bundle_path); rmdir(path_buffer);
+    snprintf(path_buffer, sizeof(path_buffer), "%s/upper", bundle_path); rmdir(path_buffer);
+    snprintf(path_buffer, sizeof(path_buffer), "%s/work", bundle_path); rmdir(path_buffer);
+    snprintf(path_buffer, sizeof(path_buffer), "%s/config.json", bundle_path); unlink(path_buffer);
     rmdir(bundle_path);
 }
+
 
 static int recursive_mkdir(const char* path, mode_t mode) {
     char* path_copy = strdup(path);

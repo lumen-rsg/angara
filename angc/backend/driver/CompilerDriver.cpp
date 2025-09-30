@@ -446,7 +446,7 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
             m_line_counts[found_path] = line_count;
 
             ErrorHandler errorHandler(source);
-            Lexer lexer(source);
+            Lexer lexer(source, errorHandler);
             auto tokens = lexer.scanTokens();
             Parser parser(tokens, errorHandler);
             auto statements = parser.parseStmts();
