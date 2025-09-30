@@ -245,7 +245,7 @@ bool CompilerDriver::compile(const std::string& root_file_path) {
     std::string runtime_c_path = std::filesystem::path(m_runtime_path) / "angara_runtime.c";
 
     std::stringstream command_ss;
-    command_ss << "gcc -o " << base_name;
+    command_ss << "clang -o " << base_name;
 
     // Add our generated source files
     for (const auto& c_file : m_compiled_c_files) {
@@ -270,6 +270,7 @@ bool CompilerDriver::compile(const std::string& root_file_path) {
     // Add final flags
     command_ss << " -pthread -lm";
         command_ss << " -Wl,-rpath," << m_native_module_path;
+        command_ss << " -O2";
     std::string command = command_ss.str();
 
         // --- NEW LOGIC: Redirect output and conditionally print ---
@@ -393,8 +394,7 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
                 }
 
                 // Add other native extensions if needed (.dylib, .dll)
-                std::filesystem::path dylib_path = std::filesystem::path(dir) / ("lib" + path_or_id + ".dylib");
-                if (std::filesystem::exists(dylib_path)) {
+                if (std::filesystem::path dylib_path = std::filesystem::path(dir) / ("lib" + path_or_id + ".dylib"); std::filesystem::exists(dylib_path)) {
                     found_path = std::filesystem::absolute(dylib_path).string();
                     break;
                 }
@@ -409,7 +409,7 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
 
         // 2. Use the canonical, absolute path as the cache key.
         const std::string& cache_key = found_path;
-        if (m_module_cache.count(cache_key)) {
+        if (m_module_cache.contains(cache_key)) {
             return m_module_cache[cache_key];
         }
 
@@ -580,7 +580,7 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
                     auto class_type = native_classes.at(class_def->name);
 
                     if (class_def->methods) {
-                        for (int m = 0; class_def->methods[m].name != NULL; ++m) {
+                        for (int m = 0; class_def->methods[m].name != nullptr; ++m) {
                             const AngaraMethodDef& method_def = class_def->methods[m];
                             if (!method_def.name || !method_def.type_string) continue;
 
@@ -606,7 +606,7 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
 
                     // Populate the class's fields.
                     if (class_def->fields) {
-                        for (int f = 0; class_def->fields[f].name != NULL; ++f) {
+                        for (int f = 0; class_def->fields[f].name != nullptr; ++f) {
                             const AngaraFieldDef& field_def = class_def->fields[f];
                             if (!field_def.name || !field_def.type_string) continue;
 
