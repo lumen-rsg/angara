@@ -161,7 +161,17 @@ namespace angara {
 
             // B) Check if it's an ANGARA CLASS CONSTRUCTOR.
             if (callee_type->kind == TypeKind::CLASS) {
-                return "Angara_" + name + "_new(" + args_str + ")";
+                // --- THIS IS THE FIX ---
+                auto class_type = std::dynamic_pointer_cast<ClassType>(callee_type);
+                // Only generate a `_new` call for classes defined in Angara.
+                // Native classes are constructed via their exported factory functions.
+                if (!class_type->is_native) {
+                    return "Angara_" + name + "_new(" + args_str + ")";
+                }
+                // If it IS a native class, we should have found its factory function
+                // earlier. Reaching here is likely a logic error, so we can
+                // produce a comment to make debugging easier.
+                return "/* <compiler_error_direct_native_class_instantiation> */";
             }
 
             // C) If not a built-in or constructor, it's an ANGARA GLOBAL FUNCTION. Call via closure.

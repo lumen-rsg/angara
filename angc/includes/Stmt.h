@@ -33,6 +33,7 @@ namespace angara {
     struct DataStmt;
     struct EnumStmt;
     struct ForeignHeaderStmt;
+    struct UnsafeBlockStmt;
 
 // Statement Visitor Interface (returns void)
     class StmtVisitor {
@@ -58,6 +59,7 @@ namespace angara {
         virtual void visit(std::shared_ptr<const DataStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const EnumStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const ForeignHeaderStmt> stmt) = 0;
+        virtual void visit(std::shared_ptr<const UnsafeBlockStmt> stmt) = 0;
     };
     // A simple struct to pair a parameter's name with its type annotation.
     struct Parameter {
@@ -114,6 +116,7 @@ namespace angara {
         bool is_static = false;
         const bool is_const;
         bool is_exported = false;
+        bool is_unsafe = false;
 
         VarDeclStmt(Token name, std::shared_ptr<ASTType> type, std::shared_ptr<Expr> initializer, bool is_const)
                 : name(std::move(name)),
@@ -432,6 +435,18 @@ namespace angara {
 
         void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const ForeignHeaderStmt>(self));
+        }
+    };
+
+    struct UnsafeBlockStmt : Stmt {
+        const Token keyword; // The '@' token
+        const std::shared_ptr<BlockStmt> block;
+
+        UnsafeBlockStmt(Token keyword, std::shared_ptr<BlockStmt> block)
+            : keyword(std::move(keyword)), block(std::move(block)) {}
+
+        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+            visitor.visit(std::static_pointer_cast<const UnsafeBlockStmt>(self));
         }
     };
 }

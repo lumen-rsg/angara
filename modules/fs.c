@@ -311,6 +311,42 @@ AngaraObject Angara_fs_install(int arg_count, AngaraObject args[]) {
     return angara_create_nil();
 }
 
+AngaraObject Angara_fs_append_file(int arg_count, AngaraObject args[]) {
+    if (arg_count != 2 || !IS_STRING(args[0]) || !IS_STRING(args[1])) {
+        angara_throw_error("fs.append_file() requires 2 arguments: (string, string).");
+        return angara_create_nil();
+    }
+
+    const char* path = AS_CSTRING(args[0]);
+    const char* content = AS_CSTRING(args[1]);
+    size_t content_len = AS_STRING(args[1])->length;
+
+    // 1. Open the file in append mode ("a").
+    //    If the file doesn't exist, it will be created.
+    FILE* file = fopen(path, "a");
+    if (file == NULL) {
+        char err_buf[256];
+        snprintf(err_buf, sizeof(err_buf), "Failed to open file '%s' for appending: %s", path, strerror(errno));
+        angara_throw_error(err_buf);
+        return angara_create_nil();
+    }
+
+    // 2. Write the content to the end of the file.
+    size_t written = fwrite(content, sizeof(char), content_len, file);
+
+    // 3. Close the file.
+    fclose(file);
+
+    // 4. Check for write errors.
+    if (written != content_len) {
+        char err_buf[256];
+        snprintf(err_buf, sizeof(err_buf), "Error writing to file '%s': Incomplete write.", path);
+        angara_throw_error(err_buf);
+    }
+
+    return angara_create_nil();
+}
+
 static const AngaraFuncDef FS_EXPORTS[] = {
         {"read_file",       Angara_fs_read_file,       "s->s",    NULL},
         {"write_file",      Angara_fs_write_file,      "ss->n",   NULL},
@@ -326,6 +362,7 @@ static const AngaraFuncDef FS_EXPORTS[] = {
         {"is_symlink",      Angara_fs_is_symlink,      "s->b",    NULL},
         {"chmod",           Angara_fs_chmod,           "si->n",   NULL},
         {"install",         Angara_fs_install,         "ssi->n",  NULL},
+        {"append_file",     Angara_fs_append_file,     "ss->n",   NULL},
         {NULL, NULL, NULL, NULL}
 };
 

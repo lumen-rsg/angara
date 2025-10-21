@@ -1,0 +1,95 @@
+// This program tests the enhanced native `http` module.
+// It performs a GET request to a JSON API and a POST request to httpbin.org.
+
+attach http;
+attach json;
+attach io;
+
+export func main() -> i64 {
+  io.println(1, "--- Angara `http` Module Test Suite ---");
+
+  // --- Test 1: Simple GET Request ---
+  io.println(1, "\n-> 1. Performing GET request to ipify API...");
+  try {
+    // We only need to provide the URL for a simple GET request.
+    let get_options as record = {
+      url: "https://api.ipify.org?format=json"
+    };
+
+    let response = http.request(get_options);
+
+    io.println(1, "  Response Status: " + string(response["status"]));
+
+    if (response["status"] == 200) {
+      // The body is a JSON string, so we parse it.
+      let _data as record = json.parse(response["body"]);
+      let ip as string = _data["ip"];
+      io.println(1, "  Success! Public IP address is: " + ip);
+    } else {
+      io.println(2, "  GET request failed. Response body:");
+      io.println(2, "  " + string(response["body"]));
+      return 1;
+    }
+
+  } catch (e as Exception) {
+    io.println(2, "  [FATAL] An exception occurred during GET request: " + e.message);
+    return 1;
+  }
+
+  // --- Test 2: POST Request with Headers and Body ---
+  io.println(1, "\n-> 2. Performing POST request to httpbin.org...");
+  try {
+    // Create a payload to send.
+    let post_payload as record = {
+      source: "Angara HTTP Module",
+      testId: 12345,
+      isTest: true
+    };
+    let post_body = json.stringify(post_payload);
+
+    // Define the full set of options for the POST request.
+    let post_options as record = {
+      method: "POST",
+      url: "https://httpbin.org/post",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Powered-By": "Angara"
+      },
+      body: post_body
+    };
+
+    let response = http.request(post_options);
+    io.println(1, "  Response Status: " + string(response["status"]));
+
+    if (response["status"] == 200) {
+      // httpbin.org echoes the request details in its response.
+      // We can parse its response to verify our request was sent correctly.
+      let _data = json.parse(response["body"]);
+
+      // We expect a 'json' field in the response containing our original payload.
+      @unsafe{
+          let echo_payload = _data["json"];
+          let echo_source as string = echo_payload["source"];
+
+          io.println(1, "  Success! httpbin.org echoed our source: '" + echo_source + "'");
+
+          // Let's also check if it received our custom header.
+          let headers_echo = _data["headers"];
+          let powered_by as string = headers_echo["X-Powered-By"];
+          io.println(1, "  httpbin.org received our custom header: '" + powered_by + "'");
+      }
+
+    } else {
+      io.println(2, "  POST request failed. Response body:");
+      io.println(2, "  " + string(response["body"]));
+      return 1;
+    }
+
+  } catch (e as Exception) {
+    io.println(2, "  [FATAL] An exception occurred during POST request: " + e.message);
+    return 1;
+  }
+
+  io.println(1, "\n--- All `http` module tests passed! ---");
+  return 0;
+}

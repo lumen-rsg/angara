@@ -47,10 +47,21 @@ const char* json_bridge_object_get_key_at(JsonHandle handle, size_t index);
 // Returns a handle to the value at a given index in a JSON object.
 JsonHandle json_bridge_object_get_value_at(JsonHandle handle, size_t index);
 
-// Functions for iterating over objects and arrays.
-// These are more complex and would be a great next step, but for now
-// we can provide a simplified API. A full implementation would return
-// iterators or arrays of keys/values.
+
+const char* json_bridge_stringify(JsonHandle handle);
+void json_bridge_free_string(char* str);
+
+// --- NEW: Value Creation ---
+JsonHandle json_bridge_new_null();
+JsonHandle json_bridge_new_bool(int value);
+JsonHandle json_bridge_new_number(double value);
+JsonHandle json_bridge_new_string(const char* value);
+JsonHandle json_bridge_new_object();
+JsonHandle json_bridge_new_array();
+
+// --- NEW: Collection Modification ---
+void json_bridge_object_add(JsonHandle object, const char* key, JsonHandle value);
+void json_bridge_array_add(JsonHandle array, JsonHandle value);
 
 #ifdef __cplusplus
 }

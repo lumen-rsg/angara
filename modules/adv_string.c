@@ -128,6 +128,80 @@ AngaraObject Angara_adv_string_pad_end(int arg_count, AngaraObject* args) {
     return angara_create_string_no_copy(result_buf, target_len);
 }
 
+AngaraObject Angara_adv_string_to_uppercase(int arg_count, AngaraObject args[]) {
+    if (arg_count != 1 || !IS_STRING(args[0])) {
+        angara_throw_error("adv_string.to_uppercase() requires one string argument.");
+        return angara_create_nil();
+    }
+
+    const char* source_str = AS_CSTRING(args[0]);
+    size_t len = AS_STRING(args[0])->length;
+
+    // 1. Allocate a new buffer for the uppercase string.
+    char* new_str = (char*)malloc(len + 1);
+    if (!new_str) {
+        angara_throw_error("Out of memory in to_uppercase().");
+        return angara_create_nil();
+    }
+
+    // 2. Iterate through the source and convert each character.
+    for (size_t i = 0; i < len; ++i) {
+        new_str[i] = toupper((unsigned char)source_str[i]);
+    }
+    new_str[len] = '\0'; // Null-terminate the new string.
+
+    // 3. Box the new C string into an AngaraObject, giving it ownership of the buffer.
+    return angara_create_string_no_copy(new_str, len);
+}
+
+
+// Angara signature: func to_lowercase(s as string) -> string
+AngaraObject Angara_adv_string_to_lowercase(int arg_count, AngaraObject args[]) {
+    if (arg_count != 1 || !IS_STRING(args[0])) { angara_throw_error("to_lowercase() requires one string argument."); return angara_create_nil(); }
+    const char* source_str = AS_CSTRING(args[0]);
+    size_t len = AS_STRING(args[0])->length;
+    char* new_str = (char*)malloc(len + 1);
+    if (!new_str) { angara_throw_error("Out of memory in to_lowercase()."); return angara_create_nil(); }
+    for (size_t i = 0; i < len; ++i) { new_str[i] = tolower((unsigned char)source_str[i]); }
+    new_str[len] = '\0';
+    return angara_create_string_no_copy(new_str, len);
+}
+
+// Angara signature: func trim(s as string) -> string
+AngaraObject Angara_adv_string_trim(int arg_count, AngaraObject args[]) {
+    if (arg_count != 1 || !IS_STRING(args[0])) { angara_throw_error("trim() requires one string argument."); return angara_create_nil(); }
+    const char* start = AS_CSTRING(args[0]);
+    size_t len = AS_STRING(args[0])->length;
+    const char* end = start + len - 1;
+
+    // Find the first non-whitespace character.
+    while (isspace((unsigned char)*start) && start < end) { start++; }
+    // Find the last non-whitespace character.
+    while (isspace((unsigned char)*end) && end > start) { end--; }
+
+    size_t new_len = (end - start) + 1;
+
+    // Use angara_create_string_with_len which copies the substring.
+    return angara_create_string_with_len(start, new_len);
+}
+
+AngaraObject Angara_adv_string_contains(int arg_count, AngaraObject args[]) {
+    if (arg_count != 2 || !IS_STRING(args[0]) || !IS_STRING(args[1])) {
+        angara_throw_error("adv_string.contains() requires two string arguments: (haystack, needle).");
+        return angara_create_nil();
+    }
+
+    const char* haystack = AS_CSTRING(args[0]);
+    const char* needle = AS_CSTRING(args[1]);
+
+    // 1. Use the standard C `strstr` function to search for the substring.
+    const char* result = strstr(haystack, needle);
+
+    // 2. If strstr returns a non-NULL pointer, the substring was found.
+    //    Return a boxed Angara boolean.
+    return angara_create_bool(result != NULL);
+}
+
 
 // --- Module Definition ---
 
@@ -138,6 +212,10 @@ static const AngaraFuncDef STRING_EXPORTS[] = {
         {"is_digit",      Angara_adv_string_is_digit,      "s->b",   NULL},
         {"is_whitespace", Angara_adv_string_is_whitespace, "s->b",   NULL},
         {"pad_end",         Angara_adv_string_pad_end,     "sis->s", NULL},
+        {"to_uppercase",  Angara_adv_string_to_uppercase,  "s->s",   NULL},
+        {"to_lowercase",  Angara_adv_string_to_lowercase,  "s->s",   NULL},
+        {"trim",          Angara_adv_string_trim,          "s->s",   NULL},
+        {"contains",      Angara_adv_string_contains,      "ss->b",  NULL},
         {NULL, NULL, NULL, NULL}
 };
 

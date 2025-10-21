@@ -12,6 +12,7 @@ namespace angara {
 
         // Transpile the body of the loop.
         transpileStmt(stmt.body);
+
     }
 
 }

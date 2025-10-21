@@ -2,10 +2,11 @@
 // Created by cv2 on 9/29/25.
 //
 
-#include <nlohmann/json.hpp>
+#include <json.hpp>
 #include <string>
 #include <vector>
 #include <iostream>
+#include <sstream>
 
 // This is a C++ file, but it exposes a C-compatible interface.
 extern "C" {
@@ -142,4 +143,34 @@ JsonHandle json_bridge_object_get_value_at(JsonHandle h, size_t index) {
         return const_cast<json*>(&(*it));
     }
     return nullptr;
+}
+
+const char* json_bridge_stringify(JsonHandle h) {
+    if (!h) return strdup("null");
+    std::string s = static_cast<json*>(h)->dump();
+    return strdup(s.c_str());
+}
+
+// --- NEW: Value Creation Implementation ---
+JsonHandle json_bridge_new_null()   { return new json(); }
+JsonHandle json_bridge_new_bool(int v)   { return new json(v != 0); }
+JsonHandle json_bridge_new_number(double v) { return new json(v); }
+JsonHandle json_bridge_new_string(const char* v) { return new json(v); }
+JsonHandle json_bridge_new_object() { return new json(json::object()); }
+JsonHandle json_bridge_new_array()  { return new json(json::array()); }
+
+// --- NEW: Collection Modification Implementation ---
+void json_bridge_object_add(JsonHandle h, const char* key, JsonHandle vh) {
+    json* obj = static_cast<json*>(h);
+    json* val = static_cast<json*>(vh);
+    if (obj && key && val) {
+        (*obj)[key] = *val;
+    }
+}
+void json_bridge_array_add(JsonHandle h, JsonHandle vh) {
+    json* arr = static_cast<json*>(h);
+    json* val = static_cast<json*>(vh);
+    if (arr && val) {
+        arr->push_back(*val);
+    }
 }

@@ -103,17 +103,102 @@ AngaraObject Angara_json_parse(int arg_count, AngaraObject args[]) {
     return result;
 }
 
+static JsonHandle convert_angara_to_json_handle(AngaraObject obj);
+
+static JsonHandle convert_angara_record(AngaraObject record_obj) {
+    JsonHandle h = json_bridge_new_object();
+    AngaraRecord* record = AS_RECORD(record_obj);
+    for (size_t i = 0; i < record->count; ++i) {
+        const char* key = record->entries[i].key;
+        AngaraObject val_obj = record->entries[i].value;
+
+        JsonHandle val_h = convert_angara_to_json_handle(val_obj);
+        json_bridge_object_add(h, key, val_h);
+
+        // The object_add function copies the value, so we must free the
+        // temporary handle we created for the value.
+        json_bridge_free(val_h);
+    }
+    return h;
+}
+
+static JsonHandle convert_angara_list(AngaraObject list_obj) {
+    JsonHandle h = json_bridge_new_array();
+    AngaraList* list = AS_LIST(list_obj);
+    for (size_t i = 0; i < list->count; ++i) {
+        JsonHandle val_h = convert_angara_to_json_handle(list->elements[i]);
+        json_bridge_array_add(h, val_h);
+
+        // The array_add function copies the value, so we must free the temporary handle.
+        json_bridge_free(val_h);
+    }
+    return h;
+}
+
+static JsonHandle convert_angara_to_json_handle(AngaraObject obj) {
+    switch (obj.type) {
+        case VAL_NIL:
+            return json_bridge_new_null();
+        case VAL_BOOL:
+            return json_bridge_new_bool(AS_BOOL(obj));
+        case VAL_I64:
+            // JSON spec technically doesn't have integers, just numbers.
+            // We convert to double for compatibility.
+            return json_bridge_new_number((double)AS_I64(obj));
+        case VAL_F64:
+            return json_bridge_new_number(AS_F64(obj));
+        case VAL_OBJ:
+            switch (OBJ_TYPE(obj)) {
+                case OBJ_STRING:
+                    return json_bridge_new_string(AS_CSTRING(obj));
+                case OBJ_LIST:
+                    return convert_angara_list(obj);
+                case OBJ_RECORD:
+                    return convert_angara_record(obj);
+                default:
+                    // Cannot serialize other object types (functions, instances, etc.)
+                    // We'll represent them as null in the JSON.
+                    return json_bridge_new_null();
+            }
+        default:
+            return json_bridge_new_null();
+    }
+}
+
+// --- Angara-Exported Function: json.stringify ---
+AngaraObject Angara_json_stringify(int arg_count, AngaraObject args[]) {
+    if (arg_count != 1) {
+        angara_throw_error("json.stringify() requires one argument.");
+        return angara_create_nil();
+    }
+
+    // 1. Recursively convert the Angara object to a C++ JSON handle.
+    JsonHandle handle = convert_angara_to_json_handle(args[0]);
+    if (handle == NULL) {
+        // This should not happen with the new logic, but as a safeguard:
+        return angara_create_string("null");
+    }
+
+    // 2. Call the bridge to serialize the handle to a C string.
+    const char* c_str = json_bridge_stringify(handle);
+
+    // 3. Convert the C string to an Angara string.
+    AngaraObject angara_str = angara_create_string(c_str);
+
+    // 4. Free the memory allocated by the bridge.
+    json_bridge_free_string((char*)c_str);
+    json_bridge_free(handle);
+
+    return angara_str;
+}
+
 
 
 // --- ABI Definition Table ---
 static const AngaraFuncDef JSON_EXPORTS[] = {
-        {
-                "parse",
-                Angara_json_parse,
-                "s->a", // Takes a string, returns `any`
-                           NULL
-        },
-        {NULL, NULL, NULL, NULL}
+    {"parse",     Angara_json_parse,     "s->a", NULL},
+    {"stringify", Angara_json_stringify, "a->s", NULL}, // <-- ADD THIS
+    {NULL, NULL, NULL, NULL}
 };
 
 // --- Module Entry Point ---

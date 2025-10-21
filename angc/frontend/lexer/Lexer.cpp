@@ -150,6 +150,7 @@ namespace angara {
                     case 'v':  value << '\v'; break;
                     case 'a':  value << '\a'; break;
 
+
                         // Octal escapes (e.g., \177)
                     case '0': case '1': case '2': case '3': case '4': case '5': case '6': case '7': {
                         std::string octal_str;
@@ -332,6 +333,9 @@ namespace angara {
                 break;
             case ']':
                 addToken(TokenType::RIGHT_BRACKET);
+                break;
+            case '@':
+                addToken(TokenType::AT_SIGN);
                 break;
 
                 // One or two character tokens

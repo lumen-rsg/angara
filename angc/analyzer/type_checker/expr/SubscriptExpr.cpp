@@ -33,6 +33,22 @@ namespace angara {
                 result_type = list_type->element_type;
             }
         }
+
+        else if (collection_type->kind == TypeKind::ANY) {
+            // Check if we are in an @unsafe context.
+            if (!m_is_in_unsafe_context) {
+                error(expr.bracket, "Object of type 'any' is not subscriptable. To perform this dynamic operation, you must mark the statement with an '@unsafe' annotation.");
+                result_type = m_type_error;
+            } else {
+                if (index_type->toString() != "string" && !isInteger(index_type)) {
+                    error(expr.bracket, "Unsafe subscript on 'any' requires an index of type string or integer, but got '" + index_type->toString() + "'.");
+                    result_type = m_type_error;
+                } else {
+                    // In an unsafe context, allow the operation and infer the result as `any`.
+                    result_type = m_type_any;
+                }
+            }
+        }
             // --- Case 2: Accessing a record field ---
         else if (collection_type->kind == TypeKind::RECORD) {
             auto record_type = std::dynamic_pointer_cast<RecordType>(collection_type);

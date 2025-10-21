@@ -21,22 +21,35 @@ namespace angara {
             if (initializer_type->kind == TypeKind::ERROR) return;
 
             // 1c. The initializer MUST be an optional type.
-            if (initializer_type->kind != TypeKind::OPTIONAL) {
-                error(stmt->declaration->name, "The value for an 'if let' statement must be an optional type (e.g., 'string?'), but got a non-optional value of type '" + initializer_type->toString() + "'.");
+            if (initializer_type->kind != TypeKind::OPTIONAL && initializer_type->kind != TypeKind::ANY) {
+                error(stmt->declaration->name, "The value for an 'if let' statement must be an optional type (e.g., 'string?') or 'any', but got a non-optional value of type '" + initializer_type->toString() + "'.");
             } else {
-                // It is an optional, proceed with checking the 'then' branch.
+                // It is a valid type for `if let`. Proceed.
                 m_symbols.enterScope();
 
-                // Declare the new variable with the UNWRAPPED type inside the new scope.
-                auto unwrapped_type = std::dynamic_pointer_cast<OptionalType>(initializer_type)->wrapped_type;
-                // The binding is implicitly constant.
+                // Determine the type of the new, unwrapped variable.
+                std::shared_ptr<Type> unwrapped_type;
+                if (stmt->declaration->typeAnnotation) {
+                    // Case A: `if (let v as string = my_any)`
+                    // The user is providing an explicit type assertion. Use that.
+                    unwrapped_type = resolveType(stmt->declaration->typeAnnotation);
+                } else if (initializer_type->kind == TypeKind::OPTIONAL) {
+                    // Case B: `if (let v = my_optional)`
+                    // Infer the type from the wrapped type of the optional.
+                    unwrapped_type = std::dynamic_pointer_cast<OptionalType>(initializer_type)->wrapped_type;
+                } else {
+                    // Case C: `if (let v = my_any)`
+                    // There is no type annotation, so the unwrapped type is still `any`.
+                    unwrapped_type = m_type_any;
+                }
+
+                // Declare the new variable with the unwrapped type inside the new scope.
                 m_symbols.declare(stmt->declaration->name, unwrapped_type, true);
 
-                // Now, check the 'then' branch. Inside this block, the new variable
-                // is in scope and has the safe, unwrapped type.
+                // Now, check the 'then' branch.
                 stmt->thenBranch->accept(*this, stmt->thenBranch);
 
-                m_symbols.exitScope(); // The new variable goes out of scope here.
+                m_symbols.exitScope();
             }
 
             // Check the 'else' branch normally. The unwrapped variable is not in scope here.

@@ -7,8 +7,8 @@ find_program(CLANG_PLUS_PLUS_EXECUTABLE clang++)
 
 if(CLANG_EXECUTABLE AND CLANG_PLUS_PLUS_EXECUTABLE)
     message(STATUS "Clang found, setting it as the default C/C++ compiler.")
-    set(CMAKE_C_COMPILER "clang")
-    set(CMAKE_CXX_COMPILER "clang++")
+    #set(CMAKE_C_COMPILER "clang")
+    #set(CMAKE_CXX_COMPILER "clang++")
 endif()
 
 # --- Dependency Configuration ---
@@ -32,7 +32,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(CURL REQUIRED libcurl)
 pkg_check_modules(LWS REQUIRED libwebsockets)
 pkg_check_modules(SSL REQUIRED openssl)
-pkg_check_modules(ARCHIVE REQUIRED libarchive)
+#pkg_check_modules(ARCHIVE REQUIRED libarchive)
 
 if(NOT(APPLE))
     pkg_check_modules(AMQP REQUIRED librabbitmq)
@@ -93,16 +93,16 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
         endif()
 
     elseif (MODULE_NAME STREQUAL "amqp")
-        #if(APPLE)
-        #    target_include_directories(${MODULE_NAME} PRIVATE
-        #            ${rabbitmq-c_SOURCE_DIR}/librabbitmq
-        #            ${rabbitmq-c_BINARY_DIR}
-        #    )
-        #    target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq-static)
-        #else()
-        #    target_include_directories(${MODULE_NAME} PRIVATE ${AMQP_INCLUDE_DIRS})
-        #    target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq)
-        #endif ()
+        if(APPLE)
+            target_include_directories(${MODULE_NAME} PRIVATE
+                    ${rabbitmq-c_SOURCE_DIR}/librabbitmq
+                    ${rabbitmq-c_BINARY_DIR}
+            )
+            target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq-static)
+        else()
+            target_include_directories(${MODULE_NAME} PRIVATE ${AMQP_INCLUDE_DIRS})
+            target_link_libraries(${MODULE_NAME} PRIVATE rabbitmq)
+        endif ()
         message("AMQP build on GitHub actions is disabled. To build AMQP Angara module, uncomment the above lines. -cv2")
 
     elseif (MODULE_NAME STREQUAL "json")
@@ -126,15 +126,15 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
         # --- END NEW ---
     endif()
 
-    if (MODULE_NAME STREQUAL "tar")
-        message(STATUS "Linking 'tar' module against system libarchive.")
-        target_include_directories(${MODULE_NAME} PRIVATE ${ARCHIVE_INCLUDE_DIRS})
-        if(APPLE)
-            target_link_libraries(${MODULE_NAME} PRIVATE "${ARCHIVE_LIBRARY_DIRS}/lib${ARCHIVE_LIBRARIES}.dylib")
-        else()
-            target_link_libraries(${MODULE_NAME} PRIVATE ${ARCHIVE_LIBRARIES})
-        endif()
-    endif()
+    #if (MODULE_NAME STREQUAL "tar")
+    #    message(STATUS "Linking 'tar' module against system libarchive.")
+    #    target_include_directories(${MODULE_NAME} PRIVATE ${ARCHIVE_INCLUDE_DIRS})
+    #    if(APPLE)
+    #        target_link_libraries(${MODULE_NAME} PRIVATE "${ARCHIVE_LIBRARY_DIRS}/lib${ARCHIVE_LIBRARIES}.dylib")
+    #    else()
+    #        target_link_libraries(${MODULE_NAME} PRIVATE ${ARCHIVE_LIBRARIES})
+    #    endif()
+    #endif()
 
     target_include_directories(${MODULE_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/angc/includes)
     set_target_properties(${MODULE_NAME} PROPERTIES

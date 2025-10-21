@@ -28,6 +28,7 @@ namespace angara {
         void transpileEnumStructs(const EnumStmt &stmt);
 
         void transpileEnumConstructors(const EnumStmt &stmt, bool generate_prototype_only);
+        void transpileUnsafeBlockStmt(const UnsafeBlockStmt& stmt);
 
     private:
         // --- Main Pass Methods ---

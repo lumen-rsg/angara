@@ -111,6 +111,21 @@ std::shared_ptr<ASTType> Parser::type() {
         if (match({TokenType::SEMICOLON})) return std::make_shared<EmptyStmt>();
         if (match({TokenType::TRY})) return tryStatement();
         if (match({TokenType::BREAK})) return breakStatement();
+        // --- NEW: Check for an annotation block ---
+        if (match({TokenType::AT_SIGN})) {
+            Token at_token = previous();
+            Token annotation = consume(TokenType::IDENTIFIER, "Expect annotation name after '@'.");
+            if (annotation.lexeme != "unsafe") {
+                throw error(annotation, "Unknown annotation '@" + annotation.lexeme + "'. Did you mean '@unsafe'?");
+            }
+
+            consume(TokenType::LEFT_BRACE, "Expect '{' to begin an '@unsafe' block.");
+            // We can reuse our existing `block()` parser, which returns a `vector<Stmt>`.
+            // We then wrap this in a BlockStmt.
+            auto block_node = std::make_shared<BlockStmt>(block());
+            return std::make_shared<UnsafeBlockStmt>(at_token, block_node);
+        }
+        // --- END NEW ---
 
         return expressionStatement();
     }

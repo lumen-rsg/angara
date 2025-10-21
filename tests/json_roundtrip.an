@@ -1,0 +1,83 @@
+// This program performs a round-trip test of the `json` module.
+// 1. Creates a complex Angara record.
+// 2. Serializes it to a JSON string using `json.stringify`.
+// 3. Parses the JSON string back into an Angara record using `json.parse`.
+// 4. Verifies that the final record is identical to the original.
+
+attach json;
+attach io;
+
+// A helper function to assert that two values are equal.
+// It will throw an exception if the check fails.
+func assert_equal(expected as any, actual as any, description as string) -> nil {
+  if (string(expected) != string(actual)) {
+    let err_msg = "Assertion Failed [" + description + "]: Expected '" + string(expected) + "', but got '" + string(actual) + "'.";
+    throw Exception(err_msg);
+  }
+}
+
+func main() -> i64 {
+  io.println(1, "--- Angara `json` Module Round-Trip Test ---");
+
+  // 1. Create the original, complex Angara record.
+  let original_data as record = {
+    appName: "Ulumina Control System",
+    version: 1.2, // Will be serialized as a float
+    isEnabled: true,
+    lastCheck: nil,
+    permissions: [
+      "READ_LOGS",
+      "WRITE_CONFIG",
+      "REBOOT_SYSTEM"
+    ],
+    owner: {
+      name: "Root Administrator",
+      id: 9001
+    }
+  };
+
+  io.println(1, "\n-> Step 1: Original Angara data created.");
+
+  try {
+    // 2. Serialize the Angara record to a JSON string.
+    let json_string as string = json.stringify(original_data);
+    io.println(1, "\n-> Step 2: Serialized to JSON string:");
+    io.println(1, "   " + json_string);
+
+    // 3. Parse the JSON string back into a new Angara record (`any` -> `record`).
+    let parsed_data as record = json.parse(json_string);
+    io.println(1, "\n-> Step 3: Parsed JSON string back into an Angara record.");
+
+    // 4. Verify the contents of the new record, field by field.
+    io.println(1, "\n-> Step 4: Verifying contents of the new record...");
+
+    // Test top-level fields
+    assert_equal(original_data["appName"], parsed_data["appName"], "appName");
+    assert_equal(original_data["version"], parsed_data["version"], "version");
+    assert_equal(original_data["isEnabled"], parsed_data["isEnabled"], "isEnabled");
+    assert_equal(original_data["lastCheck"], parsed_data["lastCheck"], "lastCheck");
+
+    // Test nested object
+    let original_owner as record = original_data["owner"];
+    let parsed_owner as record = parsed_data["owner"];
+    assert_equal(original_owner["name"], parsed_owner["name"], "owner.name");
+    assert_equal(original_owner["id"], parsed_owner["id"], "owner.id");
+
+    // Test array
+    let original_perms as list<any> = original_data["permissions"];
+    let parsed_perms as list<any> = parsed_data["permissions"];
+    assert_equal(len(original_perms), len(parsed_perms), "permissions length");
+    assert_equal(original_perms[0], parsed_perms[0], "permissions[0]");
+    assert_equal(original_perms[1], parsed_perms[1], "permissions[1]");
+    assert_equal(original_perms[2], parsed_perms[2], "permissions[2]");
+
+    io.println(1, "\n--- All assertions passed! JSON round-trip successful. ---");
+
+  } catch (e as Exception) {
+    io.println(2, "\n--- TEST FAILED ---");
+    io.println(2, "An exception occurred during the test: " + e.message);
+    return 1;
+  }
+
+  return 0;
+}

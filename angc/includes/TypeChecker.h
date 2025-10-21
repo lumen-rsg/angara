@@ -35,6 +35,7 @@ namespace angara {
 
         // The main entry point. Returns true if type checking generators.
         bool check(const std::vector<std::shared_ptr<Stmt>>& statements);
+        void visit(std::shared_ptr<const UnsafeBlockStmt> stmt) override;
 
         std::map<const Expr*, std::shared_ptr<Type>> m_expression_types;
 
@@ -47,6 +48,7 @@ namespace angara {
         std::set<UsedNativeSymbol> m_used_native_symbols;
         std::shared_ptr<Type> resolveType(const std::shared_ptr<ASTType>& ast_type);
         std::map<const SizeofExpr*, std::shared_ptr<Type>> m_sizeof_resolutions;
+        bool m_is_in_unsafe_context = false;
 
     private:
         // --- Visitor Methods ---
@@ -164,6 +166,8 @@ namespace angara {
 
         std::any visit(const IsExpr &expr) override;
 
+        bool check_structural_match(const std::shared_ptr<DataType>& data_type,
+                                    const std::shared_ptr<RecordType>& record_type);
         bool check_type_compatibility(const std::shared_ptr<Type> &expected, const std::shared_ptr<Type> &actual);
 
         void check_spawn_call(const CallExpr &call, const std::vector<std::shared_ptr<Type>> &arg_types);

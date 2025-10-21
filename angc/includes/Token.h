@@ -10,7 +10,7 @@ namespace angara {
         LEFT_PAREN, RIGHT_PAREN, LEFT_BRACE, RIGHT_BRACE,
         LEFT_BRACKET, RIGHT_BRACKET,
         COMMA, DOT, MINUS, PLUS, SLASH, STAR, PERCENT,
-        COLON, SEMICOLON, QUESTION,
+        COLON, SEMICOLON, QUESTION, AT_SIGN,
 
         // Two-character operators
         PLUS_PLUS, MINUS_MINUS,

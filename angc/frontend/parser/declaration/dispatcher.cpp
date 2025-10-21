@@ -8,6 +8,7 @@ namespace angara {
         // declaration → "export"? (class_decl | trait_decl | func_decl | var_decl) | statement
     std::shared_ptr<Stmt> Parser::declaration() {
         try {
+
             // Look for an optional 'export' keyword first.
             bool is_exported = match({TokenType::EXPORT});
 
