@@ -1,0 +1,77 @@
+attach io;
+attach assert;
+
+data User {
+    let id as i64;
+    let name as string;
+}
+
+func test_primitives() {
+    io.println(1, "Testing primitives...");
+
+    assert.eq(1 + 1, 2, "Math matches");
+    assert.ne(10, 20, "Inequality matches");
+    assert.that(true, "Boolean logic");
+
+    // Test type mismatch handling in eq
+    assert.ne(1, "1", "Integer 1 should not equal String '1'");
+}
+
+func test_records() {
+    io.println(1, "Testing records...");
+
+    let r1 = { "a": 10, "b": 20 };
+    let r2 = { "a": 10, "b": 20 };
+    let r3 = { "a": 99, "b": 20 };
+
+    // Structural equality provided by runtime
+    assert.eq(r1, r2, "Identical records should be equal");
+    assert.ne(r1, r3, "Different records should not be equal");
+}
+
+func test_data_structs() {
+    io.println(1, "Testing data structs...");
+
+    let u1 = User(1, "Alice");
+    let u2 = User(1, "Alice");
+    let u3 = User(2, "Bob");
+
+    // Generated _equals checks deep equality
+    assert.eq(u1, u2, "Identical Data structs should be equal");
+    assert.ne(u1, u3, "Different Data structs should not be equal");
+}
+
+func test_failures() {
+    io.println(1, "Testing expected failure output (this section prints to stderr intentionally)...");
+
+    // Note: We catch these to demonstrate the error message formatting
+    try {
+        assert.eq(5, 10, "Five is ten?");
+    } catch (e as Exception) {
+        io.println(2, "[Caught Expected Error] " + e.message);
+    }
+
+    try {
+        assert.eq({ "val": 1 }, { "val": 2 }, "Record mismatch");
+    } catch (e as Exception) {
+        io.println(2, "[Caught Expected Error] " + e.message);
+    }
+}
+
+export func main() -> i64 {
+    try {
+        io.println(1, "=== Angara Assertion Test Suite ===");
+
+        test_primitives();
+        test_records();
+        test_data_structs();
+        test_failures();
+
+        io.println(1, "\n=== SUCCESS ===");
+        return 0;
+    } catch (e as Exception) {
+        io.println(2, "\n!!! UNCAUGHT FAILURE !!!");
+        io.println(2, e.message);
+        return 1;
+    }
+}

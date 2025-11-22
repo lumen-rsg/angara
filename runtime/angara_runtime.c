@@ -27,6 +27,40 @@ AngaraObject angara_create_bool(bool value) { return (AngaraObject){VAL_BOOL, {.
 AngaraObject angara_create_i64(int64_t value) { return (AngaraObject){VAL_I64, {.i64 = value}}; }
 AngaraObject angara_create_f64(double value) { return (AngaraObject){VAL_F64, {.f64 = value}}; }
 
+// --- Internal StringBuilder Helper ---
+// Used for efficient string concatenation during angara_to_string
+typedef struct {
+    char* buffer;
+    size_t length;
+    size_t capacity;
+} StringBuilder;
+
+static void sb_init(StringBuilder* sb) {
+    sb->capacity = 64;
+    sb->length = 0;
+    sb->buffer = (char*)malloc(sb->capacity);
+    sb->buffer[0] = '\0';
+}
+
+static void sb_append(StringBuilder* sb, const char* str) {
+    size_t len = strlen(str);
+    if (sb->length + len + 1 >= sb->capacity) {
+        while (sb->length + len + 1 >= sb->capacity) {
+            sb->capacity *= 2;
+        }
+        sb->buffer = (char*)realloc(sb->buffer, sb->capacity);
+    }
+    memcpy(sb->buffer + sb->length, str, len);
+    sb->length += len;
+    sb->buffer[sb->length] = '\0';
+}
+
+// Converts the builder to an AngaraString, transferring ownership of the buffer.
+static AngaraObject sb_to_string_obj(StringBuilder* sb) {
+    // Use the no-copy constructor to take ownership of the malloc'd buffer
+    return angara_create_string_no_copy(sb->buffer, sb->length);
+}
+
 // --- Memory Management ---
 void angara_incref(AngaraObject value) {
     if (IS_OBJ(value)) AS_OBJ(value)->ref_count++;
@@ -678,6 +712,10 @@ AngaraObject angara_typeof(AngaraObject value) {
                 case OBJ_THREAD:   return angara_string_from_c("Thread");
                 case OBJ_MUTEX:    return angara_string_from_c("Mutex");
                 case OBJ_EXCEPTION:return angara_string_from_c("Exception");
+                case OBJ_DATA_INSTANCE: {
+                        AngaraDataInstanceHeader* h = (AngaraDataInstanceHeader*)AS_OBJ(value);
+                        return angara_string_from_c(h->info->name);
+                }
                 default:           return angara_string_from_c("unknown object");
             }
         default:
@@ -730,25 +768,101 @@ AngaraObject angara_create_string(const char* chars) {
 }
 
 AngaraObject angara_equals(AngaraObject a, AngaraObject b) {
+    // 1. Generic Type Mismatch Check
     if (a.type != b.type) {
-        // Special case: allow comparing any number to any other number
+        // Allow comparing int vs float (numeric equivalence)
         if ((IS_I64(a) || IS_F64(a)) && (IS_I64(b) || IS_F64(b))) {
             return angara_create_bool(AS_F64(a) == AS_F64(b));
         }
-        return angara_create_bool(false); // Different types are not equal
+        return angara_create_bool(false);
     }
 
+    // 2. Value Type Checks
     switch (a.type) {
-        case VAL_NIL: return angara_create_bool(true);
+        case VAL_NIL:  return angara_create_bool(true);
         case VAL_BOOL: return angara_create_bool(AS_BOOL(a) == AS_BOOL(b));
-        case VAL_I64: return angara_create_bool(AS_I64(a) == AS_I64(b));
-        case VAL_F64: return angara_create_bool(AS_F64(a) == AS_F64(b));
-        case VAL_OBJ:
-            if (OBJ_TYPE(a) == OBJ_STRING) {
-                return angara_create_bool(strcmp(AS_CSTRING(a), AS_CSTRING(b)) == 0);
+        case VAL_I64:  return angara_create_bool(AS_I64(a) == AS_I64(b));
+        case VAL_F64:  return angara_create_bool(AS_F64(a) == AS_F64(b));
+
+        case VAL_OBJ: {
+            // Optimization: If they point to the exact same object in memory, they are equal.
+            if (AS_OBJ(a) == AS_OBJ(b)) return angara_create_bool(true);
+
+            // If object types differ (e.g. List vs String), they aren't equal.
+            if (OBJ_TYPE(a) != OBJ_TYPE(b)) return angara_create_bool(false);
+
+            switch (OBJ_TYPE(a)) {
+                case OBJ_STRING:
+                    return angara_create_bool(strcmp(AS_CSTRING(a), AS_CSTRING(b)) == 0);
+
+                case OBJ_LIST: {
+                    AngaraList* l1 = AS_LIST(a);
+                    AngaraList* l2 = AS_LIST(b);
+
+                    // Size check
+                    if (l1->count != l2->count) return angara_create_bool(false);
+
+                    // Element-wise check (Recursive)
+                    for (size_t i = 0; i < l1->count; i++) {
+                        if (!AS_BOOL(angara_equals(l1->elements[i], l2->elements[i]))) {
+                            return angara_create_bool(false);
+                        }
+                    }
+                    return angara_create_bool(true);
+                }
+
+                case OBJ_RECORD: {
+                    AngaraRecord* r1 = AS_RECORD(a);
+                    AngaraRecord* r2 = AS_RECORD(b);
+
+                    // Size check
+                    if (r1->count != r2->count) return angara_create_bool(false);
+
+                    // Key-Value check (O(N^2) for now, since keys are unsorted)
+                    for (size_t i = 0; i < r1->count; i++) {
+                        char* key = r1->entries[i].key;
+                        AngaraObject val1 = r1->entries[i].value;
+
+                        // Find corresponding key in r2
+                        bool found = false;
+                        for (size_t j = 0; j < r2->count; j++) {
+                            if (strcmp(r2->entries[j].key, key) == 0) {
+                                // Key found, check value equality recursively
+                                if (!AS_BOOL(angara_equals(val1, r2->entries[j].value))) {
+                                    return angara_create_bool(false);
+                                }
+                                found = true;
+                                break;
+                            }
+                        }
+                        // Key from r1 was missing in r2
+                        if (!found) return angara_create_bool(false);
+                    }
+                    return angara_create_bool(true);
+                }
+
+                case OBJ_DATA_INSTANCE: {
+                            AngaraDataInstanceHeader* d1 = (AngaraDataInstanceHeader*)AS_OBJ(a);
+                            AngaraDataInstanceHeader* d2 = (AngaraDataInstanceHeader*)AS_OBJ(b);
+
+                            // 1. Check if they are the same type (compare VTable pointers)
+                            if (d1->info != d2->info) return angara_create_bool(false);
+
+                            // 2. Use the specific equality function stored in the VTable
+                            if (d1->info->equals_fn) {
+                                // Call it (the function casts void* to specific struct*)
+                                return angara_create_bool(d1->info->equals_fn(d1, d2));
+                            }
+
+                            // Fallback to pointer equality
+                            return angara_create_bool(d1 == d2);
+                }
+
+                // Fallback for other objects (Classes, Threads, etc.) -> Pointer Equality
+                default:
+                    return angara_create_bool(AS_OBJ(a) == AS_OBJ(b));
             }
-            // For other objects, compare pointers for now.
-            return angara_create_bool(AS_OBJ(a) == AS_OBJ(b));
+        }
     }
     return angara_create_bool(false);
 }
@@ -785,15 +899,73 @@ AngaraObject angara_to_string(AngaraObject value) {
                 angara_incref(exc->message);
                 return exc->message;
             }
-            // --- END NEW ---
-            // For other object types, return a placeholder representation.
-            // We can expand this later.
+            if (OBJ_TYPE(value) == OBJ_LIST) {
+            AngaraList* list = AS_LIST(value);
+            if (list->count == 0) return angara_string_from_c("[]");
+
+            StringBuilder sb;
+            sb_init(&sb);
+            sb_append(&sb, "[");
+
+            for (size_t i = 0; i < list->count; i++) {
+                // Recursive call to stringify element
+                AngaraObject elem_str = angara_to_string(list->elements[i]);
+                sb_append(&sb, AS_CSTRING(elem_str));
+
+                // CRITICAL: Decref the temporary string object immediately
+                angara_decref(elem_str);
+
+                if (i < list->count - 1) {
+                    sb_append(&sb, ", ");
+                }
+            }
+            sb_append(&sb, "]");
+            return sb_to_string_obj(&sb);
+        }
+
+        if (OBJ_TYPE(value) == OBJ_RECORD){
+            AngaraRecord* record = AS_RECORD(value);
+            if (record->count == 0) return angara_string_from_c("{}");
+
+            StringBuilder sb;
+            sb_init(&sb);
+            sb_append(&sb, "{");
+
+            for (size_t i = 0; i < record->count; i++) {
+                // 1. Append Key (wrapped in quotes for JSON-like style)
+                sb_append(&sb, "\"");
+                sb_append(&sb, record->entries[i].key);
+                sb_append(&sb, "\": ");
+
+                // 2. Append Value (Recursive call)
+                AngaraObject val_str = angara_to_string(record->entries[i].value);
+                sb_append(&sb, AS_CSTRING(val_str));
+                angara_decref(val_str); // Cleanup temp object
+
+                if (i < record->count - 1) {
+                    sb_append(&sb, ", ");
+                }
+            }
+            sb_append(&sb, "}");
+            return sb_to_string_obj(&sb);
+        }
+
+            if (OBJ_TYPE(value) == OBJ_RECORD) {
+                AngaraDataInstanceHeader* h = (AngaraDataInstanceHeader*)AS_OBJ(value);
+                char buffer[128];
+                // Now we can print the actual type name! e.g., <Point object>
+                snprintf(buffer, sizeof(buffer), "<%s object>", h->info->name);
+                return angara_string_from_c(buffer);
+            }
+
+
             AngaraObject type_name_obj = angara_typeof(value);
             char buffer[64];
             snprintf(buffer, sizeof(buffer), "<%s object>", AS_CSTRING(type_name_obj));
             angara_decref(type_name_obj);
             return angara_string_from_c(buffer);
         }
+
 
 
         default:
@@ -1195,3 +1367,4 @@ AngaraObject angara_record_clone(AngaraObject record_obj) {
 
     return dest_obj;
 }
+

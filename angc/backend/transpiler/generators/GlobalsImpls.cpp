@@ -11,6 +11,16 @@ namespace angara {
     ) {
         // === Stage A: Global Variable & Function Closure Storage ===
         (*m_current_out) << "// --- Global Variable & Function Closure Storage ---\n";
+
+        // --- ADD THIS LOOP ---
+        for (const auto& stmt : statements) {
+            if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
+                if (!data_stmt->is_foreign) {
+                    (*m_current_out) << "AngaraDataInfo g_Angara_" << data_stmt->name.lexeme << "_info;\n";
+                }
+            }
+        }
+
         for (const auto& stmt : statements) {
             if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
                 (*m_current_out) << "AngaraClass g_" << class_stmt->name.lexeme << "_class;\n";
@@ -73,6 +83,22 @@ namespace angara {
         std::string init_func_name = "Angara_" + module_name + "_init_globals";
         (*m_current_out) << "void " << init_func_name << "(void) {\n";
         m_indent_level = 1;
+
+        // --- ADD THIS LOOP ---
+        for (const auto& stmt : statements) {
+            if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
+                if (!data_stmt->is_foreign) {
+                    std::string struct_name = "Angara_" + data_stmt->name.lexeme;
+                    indent();
+                    // Set the name
+                    (*m_current_out) << "g_" << struct_name << "_info.name = \"" << data_stmt->name.lexeme << "\";\n";
+                    indent();
+                    // Set the equals function (cast needed to match generic void* signature)
+                    (*m_current_out) << "g_" << struct_name << "_info.equals_fn = (bool(*)(const void*, const void*))" << struct_name << "_equals;\n";
+                }
+            }
+        }
+
         for (const auto& stmt : statements) {
             if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
                 indent();

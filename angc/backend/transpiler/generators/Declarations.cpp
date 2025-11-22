@@ -14,6 +14,16 @@ namespace angara {
             }
         }
 
+        (*m_current_out) << "\n// --- Data Type Metadata Declarations ---\n";
+        for (const auto& stmt : statements) {
+            if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
+                if (!data_stmt->is_foreign) {
+                    // This makes 'g_Angara_User_info' visible to the constructors
+                    (*m_current_out) << "extern AngaraDataInfo g_Angara_" << data_stmt->name.lexeme << "_info;\n";
+                }
+            }
+        }
+
         (*m_current_out) << "\n// --- Function & Closure Forward Declarations ---\n";
         for (const auto& stmt : statements) {
             if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {

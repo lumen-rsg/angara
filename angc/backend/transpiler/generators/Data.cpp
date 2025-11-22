@@ -29,6 +29,7 @@ namespace angara {
         (*m_current_out) << "dest->obj.type = OBJ_DATA_INSTANCE;\n";
         indent();
         (*m_current_out) << "dest->obj.ref_count = 1;\n";
+        indent(); (*m_current_out) << "dest->info = src->info;\n";
 
         // 3. Copy fields and incref
         for (const auto& field : stmt.fields) {
@@ -154,6 +155,7 @@ namespace angara {
         (*m_current_out) << "data->obj.type = OBJ_DATA_INSTANCE;\n";
         indent();
         (*m_current_out) << "data->obj.ref_count = 1;\n";
+        indent(); (*m_current_out) << "data->info = &g_Angara_" << stmt.name.lexeme << "_info;\n";
 
         // 2c. Assign each parameter to its corresponding struct field.
         for (const auto& field_decl : fields) {
@@ -180,6 +182,7 @@ namespace angara {
             (*m_current_out) << "typedef struct " << c_struct_name << " {\n";
             m_indent_level++;
             indent(); (*m_current_out) << "Object obj;\n";
+            indent(); (*m_current_out) << "AngaraDataInfo* info;\n";
             // The payload is a single, opaque pointer to the real C struct.
             indent(); (*m_current_out) << "struct " << stmt.name.lexeme << "* ptr;\n";
             m_indent_level--;
@@ -192,16 +195,17 @@ namespace angara {
         (*m_current_out) << "struct " << c_struct_name << " {\n";
         m_indent_level++;
 
-        // The struct starts with the common Object header, just like a class instance.
+        // The struct starts with the common Object header.
         indent(); (*m_current_out) << "Object obj;\n";
 
+        // --- ADD THIS MISSING LINE ---
+        indent(); (*m_current_out) << "AngaraDataInfo* info;\n";
+        // -----------------------------
+
         // Define all the fields.
-        // We iterate the AST `fields` to preserve the declaration order.
         for (const auto& field_decl : stmt.fields) {
-            // We get the canonical, resolved type from the DataType.
             auto field_info = data_type->fields.at(field_decl->name.lexeme);
             indent();
-            // getCType will correctly return `AngaraObject` for all fields now.
             (*m_current_out) << getCType(field_info.type) << " "
                              << sanitize_name(field_decl->name.lexeme) << ";\n";
         }
