@@ -1166,3 +1166,32 @@ AngaraObject angara_get(AngaraObject container, AngaraObject key) {
     // Failure: Wrong type or wrong key type. Return nil (safe default for dynamic access).
     return angara_create_nil();
 }
+
+AngaraObject angara_record_clone(AngaraObject record_obj) {
+    if (!IS_RECORD(record_obj)) return angara_create_nil();
+    AngaraRecord* src = AS_RECORD(record_obj);
+
+    // 1. Allocate new record
+    AngaraObject dest_obj = angara_record_new();
+    AngaraRecord* dest = AS_RECORD(dest_obj);
+
+    // 2. Pre-allocate capacity to match source (optimization)
+    if (src->count > 0) {
+        dest->entries = (RecordEntry*)malloc(sizeof(RecordEntry) * src->count);
+        if (dest->entries == NULL) {
+            free(dest); // simplistic cleanup
+            return angara_create_nil();
+        }
+        dest->capacity = src->count;
+    }
+
+    // 3. Shallow copy entries
+    for (size_t i = 0; i < src->count; ++i) {
+        dest->entries[i].key = strdup(src->entries[i].key); // Copy key string
+        dest->entries[i].value = src->entries[i].value;     // Copy value object
+        angara_incref(dest->entries[i].value);              // Increase ref count (shallow copy)
+        dest->count++;
+    }
+
+    return dest_obj;
+}

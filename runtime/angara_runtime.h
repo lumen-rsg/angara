@@ -359,6 +359,7 @@ AngaraObject angara_from_c_u64(uint64_t value);
 AngaraObject angara_retype_c_ptr(AngaraObject c_ptr_obj, size_t wrapper_size);
 
 AngaraObject angara_get(AngaraObject container, AngaraObject key);
+AngaraObject angara_record_clone(AngaraObject record);
 
 
 #endif // ANGARA_H

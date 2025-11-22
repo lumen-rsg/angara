@@ -83,6 +83,15 @@ TranspileResult CTranspiler::generate(
         }
     }
 
+    (*m_current_out) << "\n// --- Data Clone Function Prototypes ---\n";
+    for (const auto& stmt : statements) {
+        if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
+            if (!data_stmt->is_foreign) {
+                transpileDataClonePrototype(*data_stmt);
+            }
+        }
+    }
+
     // Pass 6: Generate all public API function prototypes.
     pass_2_generate_declarations(statements, module_name);
 
@@ -110,6 +119,15 @@ TranspileResult CTranspiler::generate(
         if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
             if (!data_stmt->is_foreign) {
                 transpileDataEqualsImplementation(*data_stmt);
+            }
+        }
+    }
+
+    (*m_current_out) << "\n// --- Data Clone Function Implementations ---\n";
+    for (const auto& stmt : statements) {
+        if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
+            if (!data_stmt->is_foreign) {
+                transpileDataCloneImplementation(*data_stmt);
             }
         }
     }

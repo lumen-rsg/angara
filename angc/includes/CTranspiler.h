@@ -141,6 +141,9 @@ namespace angara {
             return std::dynamic_pointer_cast<const T>(ptr) != nullptr;
         }
 
+        void transpileDataClonePrototype(const DataStmt &stmt);
+        void transpileDataCloneImplementation(const DataStmt &stmt);
+
     private:
         TypeChecker& m_type_checker;
         ErrorHandler& m_errorHandler;

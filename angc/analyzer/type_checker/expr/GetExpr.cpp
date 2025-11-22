@@ -41,15 +41,29 @@ std::any TypeChecker::visit(const GetExpr& expr) {
     const std::string& property_name = expr.name.lexeme;
     std::shared_ptr<Type> property_type = m_type_error; // Default to error
 
+
+
     // --- Dispatch based on the kind of the unwrapped type ---
 
     if (unwrapped_object_type->kind == TypeKind::DATA) {
         auto data_type = std::dynamic_pointer_cast<DataType>(unwrapped_object_type);
-        auto field_it = data_type->fields.find(property_name);
-        if (field_it == data_type->fields.end()) {
-            error(expr.name, "Data block of type '" + data_type->name + "' has no field named '" + property_name + "'.");
-        } else {
-            property_type = field_it->second.type;
+
+        if (property_name == "clone") {
+            // Case A: The special .clone() method
+            property_type = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{},
+                data_type // Returns instance of self
+            );
+        }
+        else {
+            // Case B: Regular field lookup
+            // This must be in an ELSE block so it doesn't run for "clone"
+            auto field_it = data_type->fields.find(property_name);
+            if (field_it == data_type->fields.end()) {
+                error(expr.name, "Data block of type '" + data_type->name + "' has no field named '" + property_name + "'.");
+            } else {
+                property_type = field_it->second.type;
+            }
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::INSTANCE) {
@@ -149,6 +163,11 @@ std::any TypeChecker::visit(const GetExpr& expr) {
                 std::vector<std::shared_ptr<Type>>{},
                 list_of_strings // Returns list<string>
             );
+        } else if (property_name == "clone") { // <-- ADD THIS
+            property_type = std::make_shared<FunctionType>(
+               std::vector<std::shared_ptr<Type>>{},
+               unwrapped_object_type // Returns a record
+           );
         } else {
             error(expr.name, "Type 'record' has no property named '" + property_name + "'. Use subscript `[]` to access fields.");
         }

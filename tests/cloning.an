@@ -1,0 +1,108 @@
+attach io;
+
+// 1. Define a Data structure
+data Point {
+    let x as i64;
+    let y as i64;
+}
+
+// 2. Define a nested structure
+data Rect {
+    let origin as Point;
+    let w as i64;
+    let h as i64;
+}
+
+// Improved assert: prints PASS/FAIL status
+func assert(condition as bool, message as string) {
+    if (condition) {
+        // Stream 1 = stdout
+        io.println(1, "[PASS] " + message);
+    } else {
+        // Stream 2 = stderr
+        io.println(2, "[FAIL] " + message);
+        // We still throw to stop execution on the first failure
+        throw Exception("Assertion Failed: " + message);
+    }
+}
+
+// --- Test 1: Record Cloning ---
+func test_records() {
+    io.println(1, "\nRunning test_records()...");
+
+    // 1. Inferred Type: { id: i64, status: string }
+    let r1 = { "id": 101, "status": "active" };
+
+    // Clone it
+    let r2 = r1.clone();
+
+    // Check values match
+    assert(r1["id"] == r2["id"], "Record clone ID match");
+    assert(r1["status"] == r2["status"], "Record clone Status match");
+
+    // Modify the ORIGINAL values
+    r1["id"] = 999;
+
+    // Verify the CLONE is still 101
+    assert(r2["id"] == 101, "Record clone independence (value check)");
+}
+
+// --- Test 2: Data Struct Cloning ---
+func test_data() {
+    io.println(1, "\nRunning test_data()...");
+
+    let p1 = Point(10, 20);
+    let p2 = p1.clone();
+
+    assert(p1.x == p2.x, "Data clone X match");
+    assert(p1.y == p2.y, "Data clone Y match");
+
+    // Modify ORIGINAL
+    p1.x = 500;
+
+    // Verify CLONE is untouched
+    assert(p2.x == 10, "Data clone independence");
+    assert(p1.x == 500, "Original modification");
+}
+
+// --- Test 3: Shallow Copy Behavior ---
+func test_shallow_copy() {
+    io.println(1, "\nRunning test_shallow_copy()...");
+
+    let p = Point(0, 0);
+    let r1 = Rect(p, 100, 100);
+
+    // This copies the Rect container, but 'origin' is still a pointer to 'p'
+    let r2 = r1.clone();
+
+    // If we modify the SHARED Point object...
+    p.x = 50;
+
+    // ...both Rects see the change
+    assert(r1.origin.x == 50, "Shallow copy check 1 (shared reference)");
+    assert(r2.origin.x == 50, "Shallow copy check 2 (shared reference)");
+
+    // If we replace the field entirely on r1...
+    r1.origin = Point(99, 99);
+
+    // ...r2 still points to the old object 'p'
+    assert(r1.origin.x == 99, "Field replacement check 1");
+    assert(r2.origin.x == 50, "Field replacement check 2");
+}
+
+export func main() -> i64 {
+    try {
+        io.println(1, "=== Starting Angara Clone Test Suite ===");
+
+        test_records();
+        test_data();
+        test_shallow_copy();
+
+        io.println(1, "\n=== All Tests Passed Successfully ===");
+        return 0; // Success
+    } catch (e as Exception) {
+        io.println(2, "\n!!! Test Suite Failed !!!");
+        io.println(2, "Error: " + e.message);
+        return 1; // Failure
+    }
+}

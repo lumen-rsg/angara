@@ -33,9 +33,22 @@ namespace angara {
                 if (name == "remove_at") return "angara_list_remove_at(" + object_str + ", " + args_str + ")"; // <-- ADD THIS
                 if (name == "remove") return "angara_list_remove(" + object_str + ", " + args_str + ")"; // <-- ADD THIS
             }
-            if (object_type->kind == TypeKind::RECORD) { // <-- ADD THIS BLOCK
+            // --- ADD THIS FOR RECORD ---
+            if (object_type->kind == TypeKind::RECORD) {
                 if (name == "remove") return "angara_record_remove(" + object_str + ", " + args_str + ")";
                 if (name == "keys") return "angara_record_keys(" + object_str + ")";
+                if (name == "clone") return "angara_record_clone(" + object_str + ")"; // <--- HERE
+            }
+
+            // --- ADD THIS FOR DATA ---
+            if (object_type->kind == TypeKind::DATA) {
+                auto data_type = std::dynamic_pointer_cast<DataType>(object_type);
+                if (name == "clone" && !data_type->is_foreign) {
+                    // Generate: Angara_Point_clone(((Angara_Point*)AS_OBJ(obj)))
+                    std::string c_struct_name = "Angara_" + data_type->name;
+                    std::string cast_ptr = "((" + c_struct_name + "*)AS_OBJ(" + object_str + "))";
+                    return c_struct_name + "_clone(" + cast_ptr + ")";
+                }
             }
 
 

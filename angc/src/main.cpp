@@ -114,7 +114,7 @@ int main(const int argc, char* argv[]) {
         std::cout << "\n" << BOLD << GREEN << "Build successful." << RESET << std::endl;
         return 0;
     } else {
-        std::cout << "\n" << BOLD << RED << "Build failed." << RESET << std::endl;
+        std::cout << "\n" << BOLD << RED << "Build failed. *fish whimpers*" << RESET << std::endl;
         return 1;
     }
 }

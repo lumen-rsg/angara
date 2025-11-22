@@ -4,6 +4,50 @@
 #include "CTranspiler.h"
 namespace angara {
 
+    void CTranspiler::transpileDataClonePrototype(const DataStmt& stmt) {
+        std::string c_struct_name = "Angara_" + stmt.name.lexeme;
+        // Returns AngaraObject (the boxed wrapper)
+        (*m_current_out) << "static inline AngaraObject " << c_struct_name << "_clone(const " << c_struct_name << "* src);\n";
+    }
+
+    void CTranspiler::transpileDataCloneImplementation(const DataStmt& stmt) {
+        auto data_type = std::dynamic_pointer_cast<DataType>(m_type_checker.m_symbols.resolve(stmt.name.lexeme)->type);
+        std::string c_struct_name = "Angara_" + data_type->name;
+        std::string func_name = c_struct_name + "_clone";
+
+        (*m_current_out) << "static inline AngaraObject " << func_name << "(const " << c_struct_name << "* src) {\n";
+        m_indent_level++;
+
+        // 1. Allocate new struct
+        indent();
+        (*m_current_out) << c_struct_name << "* dest = (" << c_struct_name << "*)malloc(sizeof(" << c_struct_name << "));\n";
+        indent();
+        (*m_current_out) << "if (dest == NULL) angara_throw_error(\"Out of memory cloning " << data_type->name << "\");\n";
+
+        // 2. Header setup
+        indent();
+        (*m_current_out) << "dest->obj.type = OBJ_DATA_INSTANCE;\n";
+        indent();
+        (*m_current_out) << "dest->obj.ref_count = 1;\n";
+
+        // 3. Copy fields and incref
+        for (const auto& field : stmt.fields) {
+            std::string f_name = sanitize_name(field->name.lexeme);
+            indent();
+            (*m_current_out) << "dest->" << f_name << " = src->" << f_name << ";\n";
+            // Since all fields in data structs are AngaraObjects, we shallow copy by incrementing ref count
+            indent();
+            (*m_current_out) << "angara_incref(dest->" << f_name << ");\n";
+        }
+
+        // 4. Return boxed
+        indent();
+        (*m_current_out) << "return (AngaraObject){ VAL_OBJ, { .obj = (Object*)dest } };\n";
+
+        m_indent_level--;
+        (*m_current_out) << "}\n\n";
+    }
+
     void CTranspiler::transpileDataEqualsPrototype(const DataStmt& stmt) {
         std::string c_struct_name = "Angara_" + stmt.name.lexeme;
         (*m_current_out) << "static inline bool " << c_struct_name << "_equals(const " << c_struct_name << "* a, const " << c_struct_name << "* b);\n";
