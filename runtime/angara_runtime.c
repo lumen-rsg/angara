@@ -526,7 +526,7 @@ typedef struct {
 // The generic C function that a new pthread will execute.
 // It's a simple wrapper that calls our Angara function.
 void* thread_starter_routine(void* arg) {
-    const ThreadStartData* start_data = (ThreadStartData*)arg;
+    ThreadStartData* start_data = (ThreadStartData*)arg;
     AngaraThread* thread_obj = (AngaraThread*)start_data->args[0].as.obj;
 
     const AngaraObject result = angara_call(start_data->closure, start_data->arg_count - 1, start_data->args + 1);
@@ -716,6 +716,10 @@ AngaraObject angara_typeof(AngaraObject value) {
                         AngaraDataInstanceHeader* h = (AngaraDataInstanceHeader*)AS_OBJ(value);
                         return angara_string_from_c(h->info->name);
                 }
+                case OBJ_ENUM_INSTANCE: {
+                                AngaraEnumInstanceHeader* h = (AngaraEnumInstanceHeader*)AS_OBJ(value);
+                                return angara_string_from_c(h->info->name);
+                }
                 default:           return angara_string_from_c("unknown object");
             }
         default:
@@ -858,6 +862,21 @@ AngaraObject angara_equals(AngaraObject a, AngaraObject b) {
                             return angara_create_bool(d1 == d2);
                 }
 
+                case OBJ_ENUM_INSTANCE: {
+                            AngaraEnumInstanceHeader* e1 = (AngaraEnumInstanceHeader*)AS_OBJ(a);
+                            AngaraEnumInstanceHeader* e2 = (AngaraEnumInstanceHeader*)AS_OBJ(b);
+
+                            // 1. Check Type Identity
+                            if (e1->info != e2->info) return angara_create_bool(false);
+
+                            // 2. Use generated equality function
+                            if (e1->info->equals_fn) {
+                                return angara_create_bool(e1->info->equals_fn(e1, e2));
+                            }
+
+                            return angara_create_bool(e1 == e2);
+                }
+
                 // Fallback for other objects (Classes, Threads, etc.) -> Pointer Equality
                 default:
                     return angara_create_bool(AS_OBJ(a) == AS_OBJ(b));
@@ -950,11 +969,19 @@ AngaraObject angara_to_string(AngaraObject value) {
             return sb_to_string_obj(&sb);
         }
 
-            if (OBJ_TYPE(value) == OBJ_RECORD) {
+            if (OBJ_TYPE(value) == OBJ_DATA_INSTANCE) {
                 AngaraDataInstanceHeader* h = (AngaraDataInstanceHeader*)AS_OBJ(value);
                 char buffer[128];
                 // Now we can print the actual type name! e.g., <Point object>
                 snprintf(buffer, sizeof(buffer), "<%s object>", h->info->name);
+                return angara_string_from_c(buffer);
+            }
+
+            if (OBJ_TYPE(value) == OBJ_ENUM_INSTANCE) {
+                AngaraEnumInstanceHeader* h = (AngaraEnumInstanceHeader*)AS_OBJ(value);
+                char buffer[128];
+                // We can now print the Enum name, e.g., <ProcessState>
+                snprintf(buffer, sizeof(buffer), "<%s>", h->info->name);
                 return angara_string_from_c(buffer);
             }
 
@@ -1366,5 +1393,86 @@ AngaraObject angara_record_clone(AngaraObject record_obj) {
     }
 
     return dest_obj;
+}
+
+AngaraObject angara_deep_clone(AngaraObject value) {
+    if (!IS_OBJ(value)) {
+        // Primitives (i64, f64, bool, nil) are passed by value.
+        return value;
+    }
+
+    switch (OBJ_TYPE(value)) {
+        case OBJ_STRING:
+            // Strings are immutable in Angara. Incrementing ref is semantically
+            // equivalent to a deep copy (you can't modify the original data).
+            angara_incref(value);
+            return value;
+
+        case OBJ_LIST: {
+            AngaraList* src = AS_LIST(value);
+            AngaraObject dest_obj = angara_list_new();
+            AngaraList* dest = AS_LIST(dest_obj);
+
+            // Pre-allocate
+            if (src->count > 0) {
+                dest->capacity = src->count;
+                dest->elements = (AngaraObject*)malloc(sizeof(AngaraObject) * dest->capacity);
+            }
+
+            for (size_t i = 0; i < src->count; i++) {
+                // RECURSIVE STEP: Deep clone the element
+                dest->elements[i] = angara_deep_clone(src->elements[i]);
+                // We don't need angara_incref here because angara_deep_clone
+                // returns a new object (or an incref'd immutable) with +1 ref count.
+                dest->count++;
+            }
+            return dest_obj;
+        }
+
+        case OBJ_RECORD: {
+            AngaraRecord* src = AS_RECORD(value);
+            AngaraObject dest_obj = angara_record_new();
+            // Note: We can't easily pre-allocate using the public API,
+            // but angara_record_set handles growing.
+
+            for (size_t i = 0; i < src->count; i++) {
+                // RECURSIVE STEP: Deep clone the value
+                AngaraObject val_clone = angara_deep_clone(src->entries[i].value);
+
+                // Set key (string copy) and value.
+                // angara_record_set increments ref, so we must decref our local 'val_clone'
+                // to hand ownership over to the record.
+                angara_record_set(dest_obj, src->entries[i].key, val_clone);
+                angara_decref(val_clone);
+            }
+            return dest_obj;
+        }
+
+        case OBJ_DATA_INSTANCE: {
+            AngaraDataInstanceHeader* h = (AngaraDataInstanceHeader*)AS_OBJ(value);
+            if (h->info && h->info->deep_clone_fn) {
+                return h->info->deep_clone_fn(h);
+            }
+            // Fallback if no generator (shouldn't happen for managed types)
+            angara_throw_error("Cannot deep clone this data type.");
+            return angara_create_nil();
+        }
+
+        case OBJ_ENUM_INSTANCE: {
+            AngaraEnumInstanceHeader* h = (AngaraEnumInstanceHeader*)AS_OBJ(value);
+            if (h->info && h->info->deep_clone_fn) {
+                return h->info->deep_clone_fn(h);
+            }
+            angara_throw_error("Cannot deep clone this enum type.");
+            return angara_create_nil();
+        }
+
+        default:
+            // Classes, Closures, Threads, Mutexes:
+            // These are reference types where "deep copy" is often ambiguous or impossible.
+            // For now, we default to shallow copy (incref).
+            angara_incref(value);
+            return value;
+    }
 }
 

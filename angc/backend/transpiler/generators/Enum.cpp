@@ -4,6 +4,47 @@
 #include "CTranspiler.h"
 namespace angara {
 
+    void CTranspiler::transpileEnumEqualsPrototype(const EnumStmt& stmt) {
+        std::string c_struct_name = "Angara_" + stmt.name.lexeme;
+        (*m_current_out) << "static inline bool " << c_struct_name << "_equals(const " << c_struct_name << "* a, const " << c_struct_name << "* b);\n";
+    }
+
+    void CTranspiler::transpileEnumEqualsImplementation(const EnumStmt& stmt) {
+        std::string c_struct_name = "Angara_" + stmt.name.lexeme;
+        std::string func_name = c_struct_name + "_equals";
+
+        (*m_current_out) << "static inline bool " << func_name << "(const " << c_struct_name << "* a, const " << c_struct_name << "* b) {\n";
+        m_indent_level++;
+
+        indent(); (*m_current_out) << "if (a->tag != b->tag) return false;\n";
+
+        indent(); (*m_current_out) << "switch (a->tag) {\n";
+        m_indent_level++;
+
+        for (const auto& variant : stmt.variants) {
+            indent(); (*m_current_out) << "case " << c_struct_name << "_Tag_" << variant->name.lexeme << ":\n";
+            m_indent_level++;
+            indent();
+
+            if (variant->params.empty()) {
+                // No data to compare
+                (*m_current_out) << "return true;\n";
+            } else {
+                // Compare payload. Assumes single parameter for now (as per parser limits).
+                std::string field = sanitize_name(variant->name.lexeme);
+                (*m_current_out) << "return AS_BOOL(angara_equals(a->payload." << field << ", b->payload." << field << "));\n";
+            }
+            m_indent_level--;
+        }
+
+        m_indent_level--;
+        indent(); (*m_current_out) << "}\n";
+        indent(); (*m_current_out) << "return true;\n"; // Should be unreachable
+
+        m_indent_level--;
+        (*m_current_out) << "}\n\n";
+    }
+
     void CTranspiler::transpileEnumConstructors(const EnumStmt& stmt, bool generate_prototype_only) {
         auto enum_type = std::dynamic_pointer_cast<EnumType>(m_type_checker.m_symbols.resolve(stmt.name.lexeme)->type);
         std::string enum_name = enum_type->name;
@@ -39,6 +80,7 @@ namespace angara {
 
             indent();
             (*m_current_out) << "data->obj.type = OBJ_ENUM_INSTANCE; data->obj.ref_count = 1;\n";
+            indent(); (*m_current_out) << "data->info = &g_Angara_" << enum_name << "_info;\n";
             indent();
             (*m_current_out) << "data->tag = " << c_struct_name << "_Tag_" << variant_name << ";\n";
 
@@ -91,10 +133,52 @@ namespace angara {
         (*m_current_out) << "typedef struct " << c_base_name << " {\n";
         m_indent_level++;
         indent(); (*m_current_out) << "Object obj;\n";
+        indent(); (*m_current_out) << "AngaraEnumInfo* info;\n";
         indent(); (*m_current_out) << c_base_name << "_Tag tag;\n";
         indent(); (*m_current_out) << c_base_name << "_Payload payload;\n";
         m_indent_level--;
         (*m_current_out) << "} " << c_base_name << ";\n\n";
+    }
+
+        void CTranspiler::transpileEnumDeepClonePrototype(const EnumStmt& stmt) {
+        std::string c_struct_name = "Angara_" + stmt.name.lexeme;
+        (*m_current_out) << "static inline AngaraObject " << c_struct_name << "_deep_clone(const " << c_struct_name << "* src);\n";
+    }
+
+    void CTranspiler::transpileEnumDeepCloneImplementation(const EnumStmt& stmt) {
+        std::string c_struct_name = "Angara_" + stmt.name.lexeme;
+        std::string func_name = c_struct_name + "_deep_clone";
+
+        (*m_current_out) << "static inline AngaraObject " << func_name << "(const " << c_struct_name << "* src) {\n";
+        m_indent_level++;
+
+        indent(); (*m_current_out) << c_struct_name << "* dest = (" << c_struct_name << "*)malloc(sizeof(" << c_struct_name << "));\n";
+        indent(); (*m_current_out) << "if (dest == NULL) angara_throw_error(\"Out of memory.\");\n";
+
+        indent(); (*m_current_out) << "dest->obj.type = OBJ_ENUM_INSTANCE; dest->obj.ref_count = 1;\n";
+        indent(); (*m_current_out) << "dest->info = src->info;\n";
+        indent(); (*m_current_out) << "dest->tag = src->tag;\n";
+
+        indent(); (*m_current_out) << "switch (src->tag) {\n";
+        m_indent_level++;
+        for (const auto& variant : stmt.variants) {
+            indent(); (*m_current_out) << "case " << c_struct_name << "_Tag_" << variant->name.lexeme << ":\n";
+            m_indent_level++;
+            if (!variant->params.empty()) {
+                std::string field = sanitize_name(variant->name.lexeme);
+                indent();
+                // RECURSIVE STEP for payload
+                (*m_current_out) << "dest->payload." << field << " = angara_deep_clone(src->payload." << field << ");\n";
+            }
+            indent(); (*m_current_out) << "break;\n";
+            m_indent_level--;
+        }
+        m_indent_level--;
+        indent(); (*m_current_out) << "}\n";
+
+        indent(); (*m_current_out) << "return (AngaraObject){ VAL_OBJ, { .obj = (Object*)dest } };\n";
+        m_indent_level--;
+        (*m_current_out) << "}\n\n";
     }
 
 }

@@ -24,6 +24,12 @@ namespace angara {
             }
         }
 
+        for (const auto& stmt : statements) {
+            if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
+                (*m_current_out) << "extern AngaraEnumInfo g_Angara_" << enum_stmt->name.lexeme << "_info;\n";
+            }
+        }
+
         (*m_current_out) << "\n// --- Function & Closure Forward Declarations ---\n";
         for (const auto& stmt : statements) {
             if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {

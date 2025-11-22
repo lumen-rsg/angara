@@ -143,6 +143,13 @@ namespace angara {
 
         void transpileDataClonePrototype(const DataStmt &stmt);
         void transpileDataCloneImplementation(const DataStmt &stmt);
+        void transpileEnumEqualsPrototype(const EnumStmt& stmt);
+        void transpileEnumEqualsImplementation(const EnumStmt& stmt);
+
+        void transpileDataDeepClonePrototype(const DataStmt& stmt);
+        void transpileDataDeepCloneImplementation(const DataStmt& stmt);
+        void transpileEnumDeepClonePrototype(const EnumStmt& stmt);
+        void transpileEnumDeepCloneImplementation(const EnumStmt& stmt);
 
     private:
         TypeChecker& m_type_checker;

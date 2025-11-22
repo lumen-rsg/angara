@@ -21,6 +21,10 @@ namespace angara {
             const std::string& name = get_expr->name.lexeme;
             auto object_type = m_type_checker.m_expression_types.at(get_expr->object.get());
 
+            if (name == "deep_clone") {
+                return "angara_deep_clone(" + object_str + ")";
+            }
+
             // A) Method call on a built-in primitive type. This has the highest priority.
             if (object_type->kind == TypeKind::THREAD && name == "join") {
                 return "angara_thread_join(" + object_str + ")";

@@ -83,12 +83,33 @@ TranspileResult CTranspiler::generate(
         }
     }
 
+    (*m_current_out) << "\n// --- Enum Equals Prototypes ---\n";
+    for (const auto& stmt : statements) {
+        if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
+            transpileEnumEqualsPrototype(*enum_stmt);
+        }
+    }
+
     (*m_current_out) << "\n// --- Data Clone Function Prototypes ---\n";
     for (const auto& stmt : statements) {
         if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
             if (!data_stmt->is_foreign) {
                 transpileDataClonePrototype(*data_stmt);
             }
+        }
+    }
+
+    (*m_current_out) << "\n// --- Deep Clone Prototypes ---\n";
+    for (const auto& stmt : statements) {
+        // 1. Data Structs
+        if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
+            if (!data_stmt->is_foreign) {
+                transpileDataDeepClonePrototype(*data_stmt);
+            }
+        }
+        // 2. Enums
+        else if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
+            transpileEnumDeepClonePrototype(*enum_stmt);
         }
     }
 
@@ -136,6 +157,27 @@ TranspileResult CTranspiler::generate(
     for (const auto& stmt : statements) {
         if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
             transpileEnumConstructors(*enum_stmt, false /* generate_prototype_only */);
+        }
+    }
+
+    (*m_current_out) << "\n// --- Enum Equals Implementations ---\n";
+    for (const auto& stmt : statements) {
+        if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
+            transpileEnumEqualsImplementation(*enum_stmt);
+        }
+    }
+
+    (*m_current_out) << "\n// --- Deep Clone Implementations ---\n";
+    for (const auto& stmt : statements) {
+        // 1. Data Structs
+        if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
+            if (!data_stmt->is_foreign) {
+                transpileDataDeepCloneImplementation(*data_stmt);
+            }
+        }
+        // 2. Enums
+        else if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
+            transpileEnumDeepCloneImplementation(*enum_stmt);
         }
     }
 

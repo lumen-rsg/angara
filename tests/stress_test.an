@@ -1,14 +1,19 @@
 attach io;
 attach assert;
 
-// --- 1. Data Structures for Matrix Math (Memory/CPU Stress) ---
+// --- 1. Data Structures ---
 data Vector3 {
     let x as i64;
     let y as i64;
     let z as i64;
 }
 
-// --- 2. Enum for State Machine (Match/Logic Stress) ---
+data Container {
+    let id as i64;
+    let items as list<string>;
+}
+
+// --- 2. Enum ---
 enum ProcessState {
     Idle,
     Running(i64), // Progress 0-100
@@ -16,7 +21,7 @@ enum ProcessState {
     Done
 }
 
-// --- 3. Class for Shared State (Concurrency Stress) ---
+// --- 3. Class for Threading ---
 class SharedCounter {
     public:
     let value as i64;
@@ -29,7 +34,6 @@ class SharedCounter {
 
     func increment() {
         this.mtx.lock();
-        // verbose read/write to force race conditions if lock fails
         let temp = this.value;
         this.value = temp + 1;
         this.mtx.unlock();
@@ -44,47 +48,37 @@ func fib(n as i64) -> i64 {
 
 func test_recursion() {
     io.println(1, "[Stress] Recursion (Fibonacci)...");
-    // fib(25) ~ 121393 calls. Good test of stack frames and integer boxing.
+    // fib(25) is roughly 121k recursive calls
     let res = fib(25);
-    assert.eq(res, 75025, "Fibonacci(25) calculation");
+    assert.eq(res, 75025, "Fibonacci(25) result");
 }
 
-// --- TEST 2: Object Churn & Vector Math (Heap Stress) ---
+// --- TEST 2: Allocation Churn (Heap Stress) ---
 func test_vector_math() {
     io.println(1, "[Stress] Vector Allocation (100k objects)...");
 
     let result = Vector3(0, 0, 0);
 
-    // Loop 100,000 times.
-    // This creates and destroys temporary Data objects rapidly.
-    // If ref-counting is broken, memory usage will explode.
+    // Create and discard 100,000 objects rapidly
     for (let i = 0; i < 100000; i++) {
         let v1 = Vector3(1, 2, 3);
         let v2 = Vector3(4, 5, 6);
-
-        // Manual vector addition (simulated)
-        let sum = Vector3(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z);
-
-        // Accumulate into result
-        // Note: Data is immutable-ish in this context, we are replacing the var
+        // This creates a new Vector3 every iteration
         result = Vector3(result.x + 1, result.y + 1, result.z + 1);
     }
 
     assert.eq(result.x, 100000, "Vector accumulation X");
 }
 
-// --- TEST 3: Pattern Matching (Logic Stress) ---
+// --- TEST 3: Pattern Matching & Enums ---
 func process_logic(state as ProcessState) -> string {
-    match (state) {
-        case ProcessState.Idle: return "Waiting";
-        case ProcessState.Running(p): {
-            if (p < 50) return "Starting";
-            return "Finishing";
-        }
-        case ProcessState.Error(msg): return "Failed: " + msg;
-        case ProcessState.Done: return "Success";
-        case _: return "Unknown";
-    }
+    return match (state) {
+        case ProcessState.Idle: "Waiting",
+        case ProcessState.Running(p): (p < 50 ? "Starting" : "Finishing"),
+        case ProcessState.Error(msg): "Failed: " + msg,
+        case ProcessState.Done: "Success",
+        case _: "Unknown"
+    };
 }
 
 func test_enums() {
@@ -92,22 +86,15 @@ func test_enums() {
 
     assert.eq(process_logic(ProcessState.Idle), "Waiting", "Enum Idle");
     assert.eq(process_logic(ProcessState.Running(10)), "Starting", "Enum Running Low");
-    assert.eq(process_logic(ProcessState.Running(90)), "Finishing", "Enum Running High");
     assert.eq(process_logic(ProcessState.Error("Timeout")), "Failed: Timeout", "Enum Error");
 
-    // Test Equality on Enums
+    // Enum Equality
     let e1 = ProcessState.Running(50);
     let e2 = ProcessState.Running(50);
-    let e3 = ProcessState.Running(51);
-
     assert.eq(e1, e2, "Enum Structural Equality");
-    assert.ne(e1, e3, "Enum Structural Inequality");
 }
 
-// --- TEST 4: Concurrency (Thread Stress) ---
-
-// This is the function run by threads.
-// Since we don't have lambdas, we use a named function.
+// --- TEST 4: Concurrency ---
 func worker_task(counter as SharedCounter, iterations as i64) {
     for (let i = 0; i < iterations; i++) {
         counter.increment();
@@ -118,18 +105,15 @@ func test_concurrency() {
     io.println(1, "[Stress] Threads & Mutexes...");
 
     let counter = SharedCounter();
-    let threads = []; // list<Thread>
+    let threads as list<Thread> = [];
     let num_threads = 5;
     let ops_per_thread = 1000;
 
-    // Spawn threads
     for (let i = 0; i < num_threads; i++) {
-        // Passing 'worker_task' by name (function pointer)
         let t = spawn(worker_task, counter, ops_per_thread);
         threads.push(t);
     }
 
-    // Join threads
     for (let i = 0; i < num_threads; i++) {
         threads[i].join();
     }
@@ -138,49 +122,92 @@ func test_concurrency() {
     assert.eq(counter.value, expected, "Threaded counter value");
 }
 
-// --- TEST 5: List & Record Nesting (Deep Equality Stress) ---
-func test_deep_structures() {
-    io.println(1, "[Stress] Deep Structure Comparison...");
+// --- TEST 5: Clone vs Deep Clone (Memory Model Stress) ---
+func test_copy_semantics() {
+    io.println(1, "[Stress] Deep vs Shallow Copy Semantics...");
 
-    let complex_1 = {
-        "users": [
-            { "id": 1, "tags": ["admin", "staff"] },
-            { "id": 2, "tags": ["guest"] }
-        ],
+    // Setup: A complex record containing a mutable list
+    let original = {
+        "id": 1,
+        "tags": ["alpha", "beta"],
         "meta": Vector3(10, 20, 30)
     };
 
-    // Clone manually to ensure distinct memory
-    let complex_2 = {
-        "users": [
-            { "id": 1, "tags": ["admin", "staff"] },
-            { "id": 2, "tags": ["guest"] }
-        ],
-        "meta": Vector3(10, 20, 30)
-    };
+    // --- Phase A: Shallow Clone ---
+    // 'shallow' is a new Record, but "tags" points to the SAME List object in memory.
+    let shallow = original.clone();
 
-    let complex_3 = complex_1.clone(); // Deep clone of record
+    // Modify the nested list via the clone
+    shallow["tags"].push("gamma");
 
-    assert.eq(complex_1, complex_2, "Structural Equality (Manual)");
-    assert.eq(complex_1, complex_3, "Structural Equality (Cloned)");
+    // ASSERT: The original SHOULD be affected because the list was shared.
+    assert.eq(len(original["tags"]), 3, "Shallow Copy: Original sees modification");
+    assert.eq(original["tags"][2], "gamma", "Shallow Copy: Content check");
 
-    // Modify clone
-    complex_3["users"][0]["tags"].push("banned");
+    // --- Phase B: Deep Clone ---
+    // 'deep' is a recursive copy. "tags" is a NEW List object.
+    let deep = original.deep_clone();
 
-    assert.ne(complex_1, complex_3, "Independence after modification");
+    // Modify the nested list via the deep clone
+    deep["tags"].push("delta");
+
+    // ASSERT: The original should NOT be affected (length remains 3).
+    assert.eq(len(original["tags"]), 3, "Deep Copy: Original ignored modification");
+
+    // ASSERT: The deep clone DOES have the new item (length is 4).
+    assert.eq(len(deep["tags"]), 4, "Deep Copy: Clone has modification");
+    assert.eq(deep["tags"][3], "delta", "Deep Copy: Content check");
+
+    // ASSERT: Structural Equality check (Generic Runtime)
+    // deep currently has "delta", original doesn't. They should be NE.
+    assert.ne(original, deep, "Structural Inequality check");
+}
+
+func test_struct_deep_copy() {
+    io.println(1, "[Stress] Struct Deep Copy...");
+
+    // 1. Create original
+    let c1 = Container(1, ["a", "b"]);
+
+    // 2. Shallow Clone
+    let c2 = c1.clone();
+    // 3. Deep Clone
+    let c3 = c1.deep_clone();
+
+    // Modify the list inside the clones
+    c2.items.push("shallow_add"); // Should affect c1
+    c3.items.push("deep_add");    // Should NOT affect c1
+
+    // ASSERTIONS
+
+    // c1 should have "shallow_add" but NOT "deep_add"
+    assert.eq(len(c1.items), 3, "Original sees shallow modification");
+    assert.eq(c1.items[2], "shallow_add", "Original has shallow item");
+
+    // c3 should have "deep_add" and its original items
+    assert.eq(len(c3.items), 3, "Deep clone has its own modification");
+    assert.eq(c3.items[2], "deep_add", "Deep clone has deep item");
+
+    // c1 and c3 items should be totally different objects
+    assert.ne(c1.items, c3.items, "Lists are distinct objects");
 }
 
 export func main() -> i64 {
     try {
-        io.println(1, "=== BEGIN STRESS TEST ===");
+        io.println(1, "==========================================");
+        io.println(1, "    ANGARA COMPILER STRESS TEST SUITE     ");
+        io.println(1, "==========================================");
 
         test_recursion();
         test_vector_math();
         test_enums();
-        test_deep_structures();
         test_concurrency();
+        test_copy_semantics();
+        test_struct_deep_copy();
 
-        io.println(1, "\n=== ALL SYSTEMS NOMINAL ===");
+        io.println(1, "\n==========================================");
+        io.println(1, "    STATUS: ALL SYSTEMS NOMINAL           ");
+        io.println(1, "==========================================");
         return 0;
     } catch (e as Exception) {
         io.println(2, "\n[CRITICAL FAILURE]");

@@ -33,6 +33,8 @@ typedef struct AngaraObject {
 
 
 
+
+
 // --- Heap-Allocated Objects ---
 typedef enum {
     OBJ_STRING, OBJ_LIST, OBJ_RECORD, OBJ_EXCEPTION, OBJ_THREAD, OBJ_MUTEX,
@@ -43,6 +45,19 @@ typedef struct Object {
     ObjectType type;
     size_t ref_count;
 } Object;
+
+typedef struct AngaraEnumInfo AngaraEnumInfo;
+
+typedef struct {
+    Object obj;
+    AngaraEnumInfo* info; // VTable pointer
+} AngaraEnumInstanceHeader;
+
+struct AngaraEnumInfo {
+    const char* name;
+    bool (*equals_fn)(const void* a, const void* b);
+    AngaraObject (*deep_clone_fn)(const void* src);
+};
 
 // Forward declaration
 typedef struct AngaraDataInfo AngaraDataInfo;
@@ -58,6 +73,7 @@ typedef struct {
 struct AngaraDataInfo {
     const char* name;
     bool (*equals_fn)(const void* a, const void* b);
+    AngaraObject (*deep_clone_fn)(const void* src);
 };
 
 // --- Concrete Object Struct Definitions ---
@@ -162,6 +178,8 @@ void angara_record_set_with_angara_key(AngaraObject record_obj, AngaraObject key
 AngaraObject angara_record_get(AngaraObject record_obj, const char* key);
 void angara_record_set(AngaraObject record_obj, const char* key, AngaraObject value);
 AngaraObject angara_record_new_with_fields(size_t pair_count, AngaraObject kvs[]);
+
+AngaraObject angara_deep_clone(AngaraObject value);
 
 // --- Error Handling & Debugging ---
 void angara_throw_error(const char* message);
@@ -377,5 +395,8 @@ AngaraObject angara_retype_c_ptr(AngaraObject c_ptr_obj, size_t wrapper_size);
 AngaraObject angara_get(AngaraObject container, AngaraObject key);
 AngaraObject angara_record_clone(AngaraObject record);
 
-
+AngaraObject angara_pre_increment(AngaraObject* lvalue);
+AngaraObject angara_post_increment(AngaraObject* lvalue);
+AngaraObject angara_pre_decrement(AngaraObject* lvalue);
+AngaraObject angara_post_decrement(AngaraObject* lvalue);
 #endif // ANGARA_H

@@ -34,6 +34,12 @@ namespace angara {
         }
         (*m_current_out) << "\n";
 
+        for (const auto& stmt : statements) {
+            if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
+                (*m_current_out) << "AngaraEnumInfo g_Angara_" << enum_stmt->name.lexeme << "_info;\n";
+            }
+        }
+
         // === Stage B: COMPLETE Forward Declarations for ALL Functions/Methods ===
         (*m_current_out) << "\n// --- Internal Forward Declarations ---\n";
 
@@ -95,7 +101,19 @@ namespace angara {
                     indent();
                     // Set the equals function (cast needed to match generic void* signature)
                     (*m_current_out) << "g_" << struct_name << "_info.equals_fn = (bool(*)(const void*, const void*))" << struct_name << "_equals;\n";
+                    indent(); (*m_current_out) << "g_" << struct_name << "_info.deep_clone_fn = (AngaraObject(*)(const void*))" << struct_name << "_deep_clone;\n";
                 }
+            }
+        }
+
+        for (const auto& stmt : statements) {
+            if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
+                std::string struct_name = "Angara_" + enum_stmt->name.lexeme;
+                indent();
+                (*m_current_out) << "g_" << struct_name << "_info.name = \"" << enum_stmt->name.lexeme << "\";\n";
+                indent();
+                (*m_current_out) << "g_" << struct_name << "_info.equals_fn = (bool(*)(const void*, const void*))" << struct_name << "_equals;\n";
+                indent(); (*m_current_out) << "g_" << struct_name << "_info.deep_clone_fn = (AngaraObject(*)(const void*))" << struct_name << "_deep_clone;\n";
             }
         }
 

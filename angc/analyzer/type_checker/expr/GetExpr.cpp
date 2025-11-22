@@ -54,6 +54,11 @@ std::any TypeChecker::visit(const GetExpr& expr) {
                 std::vector<std::shared_ptr<Type>>{},
                 data_type // Returns instance of self
             );
+        } else if (property_name == "deep_clone") {
+            property_type = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{},
+                data_type // Returns instance of self (deeply copied)
+            );
         }
         else {
             // Case B: Regular field lookup
@@ -120,16 +125,6 @@ std::any TypeChecker::visit(const GetExpr& expr) {
             property_type = member_it->second;
         }
     }
-    else if (unwrapped_object_type->kind == TypeKind::MODULE) {
-        auto module_type = std::dynamic_pointer_cast<ModuleType>(unwrapped_object_type);
-        auto member_it = module_type->exports.find(property_name);
-        if (member_it != module_type->exports.end()) {
-            property_type = member_it->second;
-            if (module_type->is_native) {
-                m_used_native_symbols.insert({module_type, property_name, property_type});
-            }
-        }
-    }
     else if (unwrapped_object_type->kind == TypeKind::LIST) {
         auto list_type = std::dynamic_pointer_cast<ListType>(unwrapped_object_type);
         if (property_name == "push") {
@@ -147,7 +142,13 @@ std::any TypeChecker::visit(const GetExpr& expr) {
                std::vector<std::shared_ptr<Type>>{list_type->element_type},
                m_type_bool // Returns true or false
            );
-        } else {
+        } else if (property_name == "deep_clone") {
+            property_type = std::make_shared<FunctionType>(
+              std::vector<std::shared_ptr<Type>>{},
+              unwrapped_object_type // Returns list<T>
+          );
+        }
+        else {
             error(expr.name, "Type 'list' has no property named '" + property_name + "'.");
         }
     }
@@ -155,20 +156,29 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         if (property_name == "remove") {
             property_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{m_type_string},
-                m_type_bool // Returns true or false
+                m_type_bool
             );
         } else if (property_name == "keys") {
             auto list_of_strings = std::make_shared<ListType>(m_type_string);
             property_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{},
-                list_of_strings // Returns list<string>
+                list_of_strings
             );
-        } else if (property_name == "clone") { // <-- ADD THIS
+        } else if (property_name == "clone") {
+            property_type = std::make_shared<FunctionType>(
+               std::vector<std::shared_ptr<Type>>{},
+               unwrapped_object_type
+           );
+        }
+        // --- ADD THIS BLOCK ---
+        else if (property_name == "deep_clone") {
             property_type = std::make_shared<FunctionType>(
                std::vector<std::shared_ptr<Type>>{},
                unwrapped_object_type // Returns a record
            );
-        } else {
+        }
+        // ----------------------
+        else {
             error(expr.name, "Type 'record' has no property named '" + property_name + "'. Use subscript `[]` to access fields.");
         }
     }
