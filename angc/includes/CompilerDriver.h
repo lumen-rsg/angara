@@ -48,8 +48,8 @@ namespace angara {
         std::vector<std::string> m_compilation_stack;
 
         // --- Track files for the final link step ---
-        std::vector<std::string> m_compiled_c_files;
-        std::vector<std::string> m_compiled_h_files; // <-- ADD THIS
+        std::set<std::string> m_compiled_c_files;
+        std::set<std::string> m_compiled_h_files; // Also change for consistency
 
         int m_total_modules = 0;
         int m_modules_compiled = 0;

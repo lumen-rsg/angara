@@ -330,8 +330,8 @@ bool CompilerDriver::compile(const std::string& root_file_path) {
     std::cout << ")" << std::endl;
     std::cout << "    • " << "Total Lines of Code: " << total_lines << std::endl;
     std::cout << "    • " << "Generated C Files: ";
-    for(size_t i = 0; i < m_compiled_c_files.size(); ++i) {
-        std::cout << m_compiled_c_files[i] << (i == m_compiled_c_files.size() - 1 ? "" : ", ");
+    for (const auto& c_file : m_compiled_c_files) {
+        command_ss << " " << c_file;
     }
     std::cout << std::endl;
     std::cout << "    • " << "Build Time: " << std::fixed << std::setprecision(2) << build_duration.count() << "s" << std::endl;
@@ -436,52 +436,57 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
                 module_type->is_native = true;
             }
         } else {
+        // --- Compile an Angara source file ---
+        m_compiled_angara_files.push_back(found_path);
+        std::string source = read_file(found_path);
 
-            // --- Compile an Angara source file ---
-            m_compiled_angara_files.push_back(found_path);
-            std::string source = read_file(found_path);
+        int line_count = 1;
+        for(char c : source) { if (c == '\n') line_count++; }
+        m_line_counts[found_path] = line_count;
 
-            int line_count = 1;
-            for(char c : source) { if (c == '\n') line_count++; }
-            m_line_counts[found_path] = line_count;
+        ErrorHandler errorHandler(source);
+        Lexer lexer(source, errorHandler);
+        auto tokens = lexer.scanTokens();
+        if (errorHandler.hadError()) { m_had_error = true; m_compilation_stack.pop_back(); return nullptr; }
 
-            ErrorHandler errorHandler(source);
-            Lexer lexer(source, errorHandler);
-            auto tokens = lexer.scanTokens();
-            Parser parser(tokens, errorHandler);
-            auto statements = parser.parseStmts();
-            if (errorHandler.hadError()) { m_had_error = true; m_compilation_stack.pop_back(); return nullptr; }
+        Parser parser(tokens, errorHandler);
+        auto statements = parser.parseStmts();
+        if (errorHandler.hadError()) { m_had_error = true; m_compilation_stack.pop_back(); return nullptr; }
 
-            std::string module_name = get_base_name(found_path);
-            TypeChecker typeChecker(*this, errorHandler, module_name);
-            if (!typeChecker.check(statements)) { m_had_error = true; m_compilation_stack.pop_back(); return nullptr; }
-            auto module_type_obj = typeChecker.getModuleType();
-            m_angara_module_names.push_back(module_name);
-            CTranspiler transpiler(typeChecker, errorHandler);
-            auto [header_code, source_code] = transpiler.generate(statements, module_type_obj, m_angara_module_names);
-            if (errorHandler.hadError()) { m_had_error = true; m_compilation_stack.pop_back(); return nullptr; }
+        std::string module_name = get_base_name(found_path);
+        TypeChecker typeChecker(*this, errorHandler, module_name);
+        if (!typeChecker.check(statements)) { m_had_error = true; m_compilation_stack.pop_back(); return nullptr; }
 
-            std::string h_filename = module_name + ".h";
-            m_compiled_h_files.push_back(h_filename);
-            std::ofstream h_file(h_filename);
-            h_file << header_code;
+        auto module_type_obj = typeChecker.getModuleType();
+        m_angara_module_names.push_back(module_name);
 
-            std::string c_filename = module_name + ".c";
-            m_compiled_c_files.push_back(c_filename);
-            std::ofstream c_file(c_filename);
-            c_file << source_code;
+        CTranspiler transpiler(typeChecker, errorHandler);
+        auto [header_code, source_code] = transpiler.generate(statements, module_type_obj, m_angara_module_names);
+        if (errorHandler.hadError()) { m_had_error = true; m_compilation_stack.pop_back(); return nullptr; }
 
-            module_type = typeChecker.getModuleType();
-        }
+        // --- THIS IS THE FIX ---
+        // Using `set::insert` automatically prevents duplicates from being added.
+        std::string h_filename = module_name + ".h";
+        m_compiled_h_files.insert(h_filename);
+        std::ofstream h_file(h_filename);
+        h_file << header_code;
 
-        // 5. Clean up, cache the result, and return.
-        m_compilation_stack.pop_back();
-        if (module_type) {
-            m_module_cache[cache_key] = module_type;
-            m_modules_compiled++;
-        }
-        return module_type;
+        std::string c_filename = module_name + ".c";
+        m_compiled_c_files.insert(c_filename);
+        std::ofstream c_file(c_filename);
+        c_file << source_code;
+        // --- END OF FIX ---
+
+        module_type = typeChecker.getModuleType();
     }
+
+    m_compilation_stack.pop_back();
+    if (module_type) {
+        m_module_cache[cache_key] = module_type;
+        m_modules_compiled++;
+    }
+    return module_type;
+}
 
 
     std::shared_ptr<ModuleType> CompilerDriver::loadNativeModule(const std::string& path, const Token& import_token) {

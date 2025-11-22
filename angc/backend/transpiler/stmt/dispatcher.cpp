@@ -27,6 +27,9 @@ namespace angara {
             transpileForInStmt(*for_in_stmt);
         } else if (auto break_stmt = std::dynamic_pointer_cast<const BreakStmt>(stmt)) {
             transpileBreakStmt(*break_stmt);
+        } else if (auto block = std::dynamic_pointer_cast<const UnsafeBlockStmt>(stmt))
+        {
+            transpileUnsafeBlockStmt(*block);
         }
         else {
             indent();

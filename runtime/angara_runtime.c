@@ -1144,3 +1144,25 @@ AngaraObject angara_retype_c_ptr(AngaraObject c_ptr_obj, size_t wrapper_size) {
     // 4. Box the new wrapper struct into an AngaraObject and return it.
     return (AngaraObject){VAL_OBJ, {.obj = wrapper_obj}};
 }
+
+AngaraObject angara_get(AngaraObject container, AngaraObject key) {
+    if (!IS_OBJ(container)) return angara_create_nil();
+
+    // Case 1: It's a List, and the key is an Integer
+    if (OBJ_TYPE(container) == OBJ_LIST && IS_I64(key)) {
+        return angara_list_get(container, key);
+    }
+
+    // Case 2: It's a Record, and the key is a String
+    if (OBJ_TYPE(container) == OBJ_RECORD && IS_STRING(key)) {
+        // Use our existing helper that handles AngaraString keys
+        return angara_record_get_with_angara_key(container, key);
+    }
+
+    // Case 3: It's a Record, but the key is a C-string literal (optimization)
+    // (This handles cases like data["key"] where "key" is not yet boxed)
+    // Note: CTranspiler usually boxes literals, so Case 2 covers most.
+
+    // Failure: Wrong type or wrong key type. Return nil (safe default for dynamic access).
+    return angara_create_nil();
+}

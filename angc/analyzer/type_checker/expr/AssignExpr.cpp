@@ -32,23 +32,32 @@ namespace angara {
                 }
             }
             else if (collection_type->kind == TypeKind::RECORD) {
+                auto record_type = std::dynamic_pointer_cast<RecordType>(collection_type);
                 if (index_type->toString() != "string") {
-                    error(subscript_target->bracket, "Record key for assignment must be a string, but got '" + index_type->toString() + "'.");
+                    error(subscript_target->bracket, "Record key for assignment must be a string...");
                 } else {
-                    if (const auto key_literal = std::dynamic_pointer_cast<const Literal>(subscript_target->index)) {
-                        // STATIC ASSIGNMENT: Key is known.
-                        const auto record_type = std::dynamic_pointer_cast<RecordType>(collection_type);
-                        if (const auto field_it = record_type->fields.find(key_literal->token.lexeme); field_it == record_type->fields.end()) {
-                            error(key_literal->token, "Record of type '" + record_type->toString() + "' has no statically-known field named '" + key_literal->token.lexeme + "'. Use a variable key to add a new field.");
-                        } else if (field_it->second->toString() != rhs_type->toString()) {
-                            error(expr.op, "Type mismatch. Cannot assign value of type '" + rhs_type->toString() + "' to field '" + key_literal->token.lexeme + "' of type '" + field_it->second->toString() + "'.");
+                    // --- THIS IS THE FIX ---
+                    // If the target is the GENERIC record type `{}`, then any
+                    // assignment with a string key is valid. It's a dynamic operation.
+                    if (record_type->fields.empty()) {
+                        // This is a dynamic field addition. The operation is valid.
+                        // We don't need to do any more checks here.
+                    } else {
+                        // It's a specific record type. We must do static checking.
+                        if (auto key_literal = std::dynamic_pointer_cast<const Literal>(subscript_target->index)) {
+                            auto field_it = record_type->fields.find(key_literal->token.lexeme);
+                            if (field_it == record_type->fields.end()) {
+                                error(key_literal->token, "Record of type '" + record_type->toString() + "' has no statically-known field named '" + key_literal->token.lexeme + "'.");
+                            } else if (!check_type_compatibility(field_it->second, rhs_type)) {
+                                error(expr.op, "Type mismatch. Cannot assign value of type '" + rhs_type->toString() + "' to field '" + key_literal->token.lexeme + "' of type '" + field_it->second->toString() + "'.");
+                            }
                         }
+                        // DYNAMIC ASSIGNMENT on a specific record (e.g. rec[var_key] = val)
+                        // This is also allowed.
                     }
-                    // DYNAMIC ASSIGNMENT (key is a variable): This is allowed.
+                    // --- END OF FIX ---
                 }
             }
-
-            // Subscript assignment expression evaluates to the RHS value.
             pushAndSave(&expr, rhs_type);
             return {};
         }
