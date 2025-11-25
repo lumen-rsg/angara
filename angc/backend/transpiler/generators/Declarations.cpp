@@ -71,6 +71,9 @@ namespace angara {
                         if (auto method_member = std::dynamic_pointer_cast<const MethodMember>(member)) {
                             if (method_member->access == AccessLevel::PUBLIC) {
                                 transpileMethodSignature(class_stmt->name.lexeme, *method_member->declaration);
+                                std::string method_name = method_member->declaration->name.lexeme;
+                                std::string mangled = "Angara_" + class_stmt->name.lexeme + "_" + method_name;
+                                (*m_current_out) << "AngaraObject angara_w_" << mangled << "(int arg_count, AngaraObject args[]);\n";
                                 (*m_current_out) << ";\n";
                             }
                         }

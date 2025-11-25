@@ -365,6 +365,13 @@ static void free_object(Object* object) {
             // will cause memory leaks if a variant holds a string, list, etc.
             // TODO: Implement a GC-aware free for enums.
         case OBJ_ENUM_INSTANCE: free(object); break;
+        case OBJ_BOUND_METHOD: {
+                AngaraBoundMethod* bm = (AngaraBoundMethod*)object;
+                angara_decref(bm->receiver);
+                angara_decref(bm->method_closure);
+                free(bm);
+                break;
+        }
         default: break;
     }
 }
@@ -413,6 +420,8 @@ void printObject(AngaraObject obj) {
                     printf("}");
                     break;
                 }
+
+            case OBJ_BOUND_METHOD: printf("<bound method>"); break;
 
             case OBJ_EXCEPTION: { // <-- ADD THIS
                     AngaraException* exc = AS_EXCEPTION(obj);
@@ -618,27 +627,57 @@ AngaraObject angara_closure_new(GenericAngaraFn fn, int arity, bool is_native) {
     return (AngaraObject){VAL_OBJ, {.obj = (Object*)closure}};
 }
 
-AngaraObject angara_call(AngaraObject closure_obj, int arg_count, AngaraObject args[]) {
-    if (!IS_OBJ(closure_obj) || OBJ_TYPE(closure_obj) != OBJ_CLOSURE) {
-        angara_throw_error("Runtime Error: Attempted to call a non-function value.");
+AngaraObject angara_call(AngaraObject callee, int arg_count, AngaraObject args[]) {
+    if (!IS_OBJ(callee)) {
+        angara_throw_error("Runtime Error: Attempted to call a non-function value (not an object).");
         return angara_create_nil();
     }
 
-    AngaraClosure* closure = AS_CLOSURE(closure_obj);
+    // 1. Handle Closure (Standard Function)
+    if (OBJ_TYPE(callee) == OBJ_CLOSURE) {
+        AngaraClosure* closure = AS_CLOSURE(callee);
 
+        // Arity check for non-native, non-variadic functions
+        if (!closure->is_native && closure->arity != -1 && closure->arity != arg_count) {
+            char error_buf[256];
+            sprintf(error_buf, "Runtime Error: Arity mismatch. Function expected %d argument(s) but received %d.",
+                    closure->arity, arg_count);
+            angara_throw_error(error_buf);
+            return angara_create_nil();
+        }
 
-    // Arity check for non-native, non-variadic functions.
-    // A native function's arity check is handled by the C code itself.
-    // An arity of -1 means it's variadic.
-    if (!closure->is_native && closure->arity != -1 && closure->arity != arg_count) {
-        char error_buf[256];
-        sprintf(error_buf, "Runtime Error: Arity mismatch. Function expected %d argument(s) but received %d.",
-                closure->arity, arg_count);
-        angara_throw_error(error_buf);
-        return angara_create_nil();
+        return closure->fn(arg_count, args);
     }
 
-    return closure->fn(arg_count, args);
+    // 2. Handle Bound Method (The logic needed for the poem)
+    if (OBJ_TYPE(callee) == OBJ_BOUND_METHOD) {
+        AngaraBoundMethod* bm = (AngaraBoundMethod*)AS_OBJ(callee);
+
+        // Construct new argument list: [receiver, ...args]
+        int new_count = arg_count + 1;
+        AngaraObject* new_args = (AngaraObject*)malloc(sizeof(AngaraObject) * new_count);
+
+        if (!new_args) {
+            angara_throw_error("Out of memory calling bound method.");
+            return angara_create_nil();
+        }
+
+        new_args[0] = bm->receiver; // 'this' is the first argument
+        for (int i = 0; i < arg_count; ++i) {
+            new_args[i + 1] = args[i];
+        }
+
+        // Recursively call the underlying method wrapper (which is a Closure)
+        // Note: We assume the underlying closure expects the receiver + args.
+        AngaraObject result = angara_call(bm->method_closure, new_count, new_args);
+
+        free(new_args);
+        return result;
+    }
+
+    // Fallback
+    angara_throw_error("Runtime Error: Attempted to call a non-function value (unknown object type).");
+    return angara_create_nil();
 }
 
 AngaraObject angara_mutex_new(void) {
@@ -720,6 +759,7 @@ AngaraObject angara_typeof(AngaraObject value) {
                                 AngaraEnumInstanceHeader* h = (AngaraEnumInstanceHeader*)AS_OBJ(value);
                                 return angara_string_from_c(h->info->name);
                 }
+                case OBJ_BOUND_METHOD: return angara_string_from_c("bound_method");
                 default:           return angara_string_from_c("unknown object");
             }
         default:
@@ -1474,5 +1514,19 @@ AngaraObject angara_deep_clone(AngaraObject value) {
             angara_incref(value);
             return value;
     }
+}
+
+AngaraObject angara_bound_method_new(AngaraObject receiver, AngaraObject method_closure) {
+    AngaraBoundMethod* bm = (AngaraBoundMethod*)malloc(sizeof(AngaraBoundMethod));
+    bm->obj.type = OBJ_BOUND_METHOD;
+    bm->obj.ref_count = 1;
+    bm->receiver = receiver;
+    bm->method_closure = method_closure;
+
+    // Bind references
+    angara_incref(receiver);
+    angara_incref(method_closure);
+
+    return (AngaraObject){VAL_OBJ, {.obj = (Object*)bm}};
 }
 

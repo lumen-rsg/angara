@@ -38,7 +38,7 @@ typedef struct AngaraObject {
 // --- Heap-Allocated Objects ---
 typedef enum {
     OBJ_STRING, OBJ_LIST, OBJ_RECORD, OBJ_EXCEPTION, OBJ_THREAD, OBJ_MUTEX,
-    OBJ_CLOSURE, OBJ_CLASS, OBJ_INSTANCE, OBJ_NATIVE_INSTANCE, OBJ_DATA_INSTANCE, OBJ_ENUM_INSTANCE
+    OBJ_CLOSURE, OBJ_CLASS, OBJ_INSTANCE, OBJ_NATIVE_INSTANCE, OBJ_DATA_INSTANCE, OBJ_ENUM_INSTANCE, OBJ_BOUND_METHOD
 } ObjectType;
 
 typedef struct Object {
@@ -58,6 +58,12 @@ struct AngaraEnumInfo {
     bool (*equals_fn)(const void* a, const void* b);
     AngaraObject (*deep_clone_fn)(const void* src);
 };
+
+typedef struct {
+    Object obj;
+    AngaraObject receiver;       // The 'this' object
+    AngaraObject method_closure; // The generic function wrapper
+} AngaraBoundMethod;
 
 // Forward declaration
 typedef struct AngaraDataInfo AngaraDataInfo;
@@ -399,4 +405,6 @@ AngaraObject angara_pre_increment(AngaraObject* lvalue);
 AngaraObject angara_post_increment(AngaraObject* lvalue);
 AngaraObject angara_pre_decrement(AngaraObject* lvalue);
 AngaraObject angara_post_decrement(AngaraObject* lvalue);
+
+AngaraObject angara_bound_method_new(AngaraObject receiver, AngaraObject method_closure);
 #endif // ANGARA_H

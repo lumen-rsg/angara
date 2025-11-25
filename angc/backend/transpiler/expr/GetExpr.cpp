@@ -52,6 +52,27 @@ namespace angara{
             return "((struct " + c_struct_name + "*)AS_OBJ(" + object_str + "))->" + sanitize_name(prop_name);
         }
         else if (unwrapped_object_type->kind == TypeKind::INSTANCE) {
+            auto instance_type = std::dynamic_pointer_cast<InstanceType>(unwrapped_object_type);
+            const std::string& prop_name = expr.name.lexeme;
+
+            // 1. Check if it is a method
+            if (instance_type->class_type->methods.count(prop_name)) {
+                // It is a method access!
+                std::string global_closure = "g_m_" + instance_type->class_type->name + "_" + prop_name;
+
+                // Generate code to create a bound method at runtime
+                // object_str is the transpiled code for 'me'
+                // global_closure is the closure for 'Heart.feel'
+                std::string result = "angara_bound_method_new(" + object_str + ", " + global_closure + ")";
+
+                // Handle optional chaining ?.
+                if (expr.op.type == TokenType::QUESTION_DOT || object_type->kind == TypeKind::OPTIONAL) {
+                    return "(IS_NIL(" + object_str + ") ? angara_create_nil() : " + result + ")";
+                }
+                return result;
+            }
+
+            // 2. Fallback to existing field access logic
             access_str = transpileGetExpr_on_instance(expr, object_str);
         }
         else if (unwrapped_object_type->kind == TypeKind::MODULE) {
