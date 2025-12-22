@@ -249,16 +249,19 @@ AngaraObject angara_record_get(AngaraObject record_obj, const char* key) {
     if (!IS_OBJ(record_obj) || OBJ_TYPE(record_obj) != OBJ_RECORD) return angara_create_nil();
     AngaraRecord* record = AS_RECORD(record_obj);
 
-    // Linearly search for the key.
+    // DEBUG TRACE
+    fprintf(stderr, "[Runtime] Record Get: Looking for '%s' in record of size %zu\n", key, record->count);
+
     for (size_t i = 0; i < record->count; i++) {
+        fprintf(stderr, "[Runtime]   Checking against '%s' ... ", record->entries[i].key);
         if (strcmp(record->entries[i].key, key) == 0) {
-            // Found it. Incref the value before returning it.
+            fprintf(stderr, "MATCH!\n");
             angara_incref(record->entries[i].value);
             return record->entries[i].value;
         }
+        fprintf(stderr, "no.\n");
     }
-
-    // Not found.
+    fprintf(stderr, "[Runtime] Key '%s' NOT FOUND.\n", key);
     return angara_create_nil();
 }
 
@@ -1272,7 +1275,7 @@ AngaraObject angara_record_keys(AngaraObject record_obj) {
 AngaraObject angara_is_instance_of(AngaraObject object, const char* type_name) {
     bool result = false;
 
-    // First, check against primitive type names.
+    // 1. Check Primitives
     switch (object.type) {
         case VAL_NIL:
             result = (strcmp(type_name, "nil") == 0);
@@ -1287,34 +1290,68 @@ AngaraObject angara_is_instance_of(AngaraObject object, const char* type_name) {
             result = (strcmp(type_name, "f64") == 0 || strcmp(type_name, "float") == 0);
             break;
         case VAL_OBJ: {
-            // If it's an object, we check its internal object type.
+            // 2. Check Objects
             switch (OBJ_TYPE(object)) {
                 case OBJ_STRING:
                     result = (strcmp(type_name, "string") == 0);
                     break;
                 case OBJ_LIST:
-                    // For now, we only check the base type "list". A full implementation
-                    // would need to check the element type, which requires more runtime info.
-                    // TODO - refine
+                    // Supports checking generic "list" or specific "list<T>" (if we parsed it)
+                    // For now, "list" matches any list.
                     result = (strcmp(type_name, "list") == 0);
                     break;
                 case OBJ_RECORD:
                     result = (strcmp(type_name, "record") == 0);
                     break;
+                case OBJ_CLOSURE:
+                    result = (strcmp(type_name, "function") == 0);
+                    break;
+                case OBJ_THREAD:
+                    result = (strcmp(type_name, "Thread") == 0);
+                    break;
+                case OBJ_MUTEX:
+                    result = (strcmp(type_name, "Mutex") == 0);
+                    break;
+                case OBJ_EXCEPTION:
+                    result = (strcmp(type_name, "Exception") == 0);
+                    break;
+
+                // --- FIX: Support Native Instances (WebSocket, Channel, etc.) ---
                 case OBJ_NATIVE_INSTANCE: {
-                    // Safe check for native types
                     AngaraNativeInstance* ni = AS_NATIVE_INSTANCE(object);
                     if (ni->type_name) {
                         result = (strcmp(ni->type_name, type_name) == 0);
                     }
                     break;
                 }
-                case OBJ_INSTANCE:
-                    // This is the key case for user-defined types.
-                    // We check the instance's class's name.
-                    result = (strcmp(AS_INSTANCE(object)->klass->name, type_name) == 0);
+
+                // --- FIX: Support Class Instances ---
+                case OBJ_INSTANCE: {
+                    AngaraInstance* instance = AS_INSTANCE(object);
+                    if (instance->klass && instance->klass->name) {
+                        result = (strcmp(instance->klass->name, type_name) == 0);
+                    }
                     break;
-                    // Add cases for Exception, Thread, Mutex etc. as needed.
+                }
+
+                // --- FIX: Support Data Structs (This fixes your bug) ---
+                case OBJ_DATA_INSTANCE: {
+                    AngaraDataInstanceHeader* h = (AngaraDataInstanceHeader*)AS_OBJ(object);
+                    if (h->info && h->info->name) {
+                        result = (strcmp(h->info->name, type_name) == 0);
+                    }
+                    break;
+                }
+
+                // --- FIX: Support Enums ---
+                case OBJ_ENUM_INSTANCE: {
+                    AngaraEnumInstanceHeader* h = (AngaraEnumInstanceHeader*)AS_OBJ(object);
+                    if (h->info && h->info->name) {
+                        result = (strcmp(h->info->name, type_name) == 0);
+                    }
+                    break;
+                }
+
                 default:
                     result = false;
                     break;

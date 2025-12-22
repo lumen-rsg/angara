@@ -1,291 +1,361 @@
-#include "../runtime/angara_runtime.h" // Your provided ABI header
-#include <rabbitmq-c/amqp.h>
-#include <rabbitmq-c/tcp_socket.h>
-#include <stdlib.h>
+#include "../runtime/angara_runtime.h"
+#include <amqp_tcp_socket.h>
+#include <amqp.h>
+#include <amqp_framing.h>
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <sys/time.h>
 
-#define DEBUG false
+#define DEBUG_AMQP 1
 
-// --- Private Data Structures ---
+void dbg_amqp(const char* func, const char* msg) {
+    if (DEBUG_AMQP) fprintf(stderr, "[AMQP DEBUG] %s: %s\n", func, msg);
+}
+
+// --- Data Structures ---
+
 typedef struct {
     amqp_connection_state_t conn;
-    bool is_open;
-    amqp_channel_t next_channel_id;
+    amqp_socket_t *socket;
+    int channel_count;
+    bool is_connected;
 } ConnectionData;
 
 typedef struct {
-    AngaraObject conn_obj; // A handle back to the parent Connection object
-    amqp_channel_t id;
-    bool is_open;
+    int id;
+    AngaraObject connection_obj; // Strong ref to parent connection
+    ConnectionData* conn_data;   // Cached raw pointer for speed
 } ChannelData;
 
-// --- Helpers ---
-static inline ChannelData* get_channel_data(AngaraObject self) {
-    return (ChannelData*)AS_NATIVE_INSTANCE(self)->data;
-}
-static inline ConnectionData* get_conn_data_from_channel(ChannelData* ch_data) {
-    return (ConnectionData*)AS_NATIVE_INSTANCE(ch_data->conn_obj)->data;
-}
-
-static void check_amqp_reply(amqp_rpc_reply_t reply, const char* context) {
-    if (reply.reply_type == AMQP_RESPONSE_NORMAL) return;
-
-    char err_buf[512];
-    if (reply.reply_type == AMQP_RESPONSE_SERVER_EXCEPTION) {
-        amqp_method_t *method = (amqp_method_t *)reply.reply.decoded;
-        if (method->id == AMQP_CONNECTION_CLOSE_METHOD) {
-            amqp_connection_close_t *m = (amqp_connection_close_t *)method->decoded;
-            sprintf(err_buf, "%s: server connection error %d, message: %.*s",
-                    context, m->reply_code, (int)m->reply_text.len, (char *)m->reply_text.bytes);
-        } else if (method->id == AMQP_CHANNEL_CLOSE_METHOD) {
-            amqp_channel_close_t *m = (amqp_channel_close_t *)method->decoded;
-            sprintf(err_buf, "%s: server channel error %d, message: %.*s",
-                    context, m->reply_code, (int)m->reply_text.len, (char *)m->reply_text.bytes);
-        } else {
-            sprintf(err_buf, "%s: unexpected server exception, method id 0x%08X", context, method->id);
-        }
-    } else if (reply.reply_type == AMQP_RESPONSE_LIBRARY_EXCEPTION) {
-        sprintf(err_buf, "%s: %s", context, amqp_error_string2(reply.library_error));
-    }
-    angara_throw_error(err_buf);
-}
-
 // --- Finalizers ---
-void finalize_connection(void* data_ptr) {
-    ConnectionData* data = (ConnectionData*)data_ptr;
-    angara_debug_print("Finalizing AMQP Connection.");
-    if (data->is_open) {
-        amqp_connection_close(data->conn, AMQP_REPLY_SUCCESS);
+
+void finalize_connection(void* data) {
+    dbg_amqp("finalize_connection", "Destroying connection");
+    ConnectionData* c = (ConnectionData*)data;
+    if (c->is_connected) {
+        amqp_connection_close(c->conn, AMQP_REPLY_SUCCESS);
     }
-    amqp_destroy_connection(data->conn);
-    free(data);
+    amqp_destroy_connection(c->conn);
+    free(c);
 }
 
-void finalize_channel(void* data_ptr) {
-    ChannelData* data = (ChannelData*)data_ptr;
-    angara_debug_print("Finalizing AMQP Channel.");
-    angara_decref(data->conn_obj);
-    free(data);
+void finalize_channel(void* data) {
+    dbg_amqp("finalize_channel", "Destroying channel");
+    ChannelData* ch = (ChannelData*)data;
+    // Close channel if connection is still alive
+    if (ch->conn_data->is_connected) {
+        amqp_channel_close(ch->conn_data->conn, ch->id, AMQP_REPLY_SUCCESS);
+    }
+    // Release the parent connection
+    angara_decref(ch->connection_obj);
+    free(ch);
 }
 
+// --- Helpers ---
 
-// --- CONNECTION CLASS ---
+void check_amqp_reply(amqp_rpc_reply_t x, char const *context) {
+    if (x.reply_type == AMQP_RESPONSE_NORMAL) return;
 
-// CONSTRUCTOR: `amqp.connect(url as string) -> Connection`
+    char error_buf[512];
+    if (x.reply_type == AMQP_RESPONSE_NONE) {
+        snprintf(error_buf, 512, "%s: missing RPC reply type!", context);
+    } else if (x.reply_type == AMQP_RESPONSE_LIBRARY_EXCEPTION) {
+        snprintf(error_buf, 512, "%s: %s", context, amqp_error_string2(x.library_error));
+    } else if (x.reply_type == AMQP_RESPONSE_SERVER_EXCEPTION) {
+        if (x.reply.id == AMQP_CONNECTION_CLOSE_METHOD) {
+            amqp_connection_close_t *m = (amqp_connection_close_t *)x.reply.decoded;
+            snprintf(error_buf, 512, "%s: Server Connection Error %d: %.*s", context, m->reply_code, (int)m->reply_text.len, (char *)m->reply_text.bytes);
+        } else if (x.reply.id == AMQP_CHANNEL_CLOSE_METHOD) {
+            amqp_channel_close_t *m = (amqp_channel_close_t *)x.reply.decoded;
+            snprintf(error_buf, 512, "%s: Server Channel Error %d: %.*s", context, m->reply_code, (int)m->reply_text.len, (char *)m->reply_text.bytes);
+        } else {
+            snprintf(error_buf, 512, "%s: Unknown Server Exception", context);
+        }
+    }
+
+    // Log and throw
+    fprintf(stderr, "[AMQP ERROR] %s\n", error_buf);
+    angara_throw_error(error_buf);
+}
+
+// --- Connection Methods ---
+
+// connect(url: string) -> Connection
+// connect(url: string) -> Connection
 AngaraObject Angara_amqp_connect(int arg_count, AngaraObject* args) {
+    dbg_amqp("connect", "Starting...");
     if (arg_count != 1 || !IS_STRING(args[0])) {
-        angara_throw_error("connect(url) expects one string argument.");
+        angara_throw_error("connect(url) expects a string.");
         return angara_create_nil();
     }
-    const char* url = AS_CSTRING(args[0]);
 
-    ConnectionData* data = (ConnectionData*)malloc(sizeof(ConnectionData));
-    data->is_open = false;
-    data->next_channel_id = 1;
+    const char* url_str = AS_CSTRING(args[0]);
+    struct amqp_connection_info ci;
+    char* url_copy = strdup(url_str);
 
-    char user[128] = "guest", password[128] = "guest", host[256] = "localhost";
-    int port = 5672;
-    sscanf(url, "amqp://%127[^:]:%127[^@]@%255[^:]:%d", user, password, host, &port);
-
-    data->conn = amqp_new_connection();
-    amqp_socket_t* socket = amqp_tcp_socket_new(data->conn);
-    if (!socket || amqp_socket_open(socket, host, port) < 0) {
-        amqp_destroy_connection(data->conn); free(data);
-        angara_throw_error("Failed to open TCP socket to AMQP broker.");
+    if (amqp_parse_url(url_copy, &ci)) {
+        free(url_copy);
+        angara_throw_error("Malformed AMQP URL.");
         return angara_create_nil();
     }
-    check_amqp_reply(amqp_login(data->conn, "/", 0, 131072, 0, AMQP_SASL_METHOD_PLAIN, user, password), "Logging in");
-    data->is_open = true;
-    angara_create_native_instance(data, finalize_connection, "Connection");
+
+    // --- FIX: Handle empty vhost from trailing slash ---
+    // 'amqp://host/' parses as vhost="", but RabbitMQ needs "/"
+    if (ci.vhost == NULL || *ci.vhost == '\0') {
+        ci.vhost = "/";
+    }
+    // --------------------------------------------------
+
+    ConnectionData* conn_data = (ConnectionData*)malloc(sizeof(ConnectionData));
+    conn_data->conn = amqp_new_connection();
+    conn_data->socket = amqp_tcp_socket_new(conn_data->conn);
+    conn_data->channel_count = 0;
+    conn_data->is_connected = false;
+
+    if (!conn_data->socket) {
+        free(url_copy); free(conn_data);
+        angara_throw_error("Creating TCP socket failed.");
+        return angara_create_nil();
+    }
+
+    if (amqp_socket_open(conn_data->socket, ci.host, ci.port)) {
+        free(url_copy);
+        amqp_destroy_connection(conn_data->conn); free(conn_data);
+        angara_throw_error("Opening TCP socket failed.");
+        return angara_create_nil();
+    }
+
+    amqp_rpc_reply_t reply = amqp_login(conn_data->conn, ci.vhost, 0, 131072, 0, AMQP_SASL_METHOD_PLAIN, ci.user, ci.password);
+    check_amqp_reply(reply, "Logging in");
+
+    conn_data->is_connected = true;
+    free(url_copy);
+
+    dbg_amqp("connect", "Success");
+    return angara_create_native_instance(conn_data, finalize_connection, "Connection");
 }
 
-// Method: conn.channel() -> Channel
+// Connection.channel() -> Channel
 AngaraObject Angara_Connection_channel(int arg_count, AngaraObject* args) {
-    AngaraObject self = args[0];
-    ConnectionData* conn_data = (ConnectionData*)AS_NATIVE_INSTANCE(self)->data;
-    if (!conn_data->is_open) {
-        angara_throw_error("Cannot open a channel on a closed connection.");
-        return angara_create_nil();
-    }
+    dbg_amqp("channel", "Creating new channel");
+    // args[0] is the Connection instance
+    AngaraObject conn_obj = args[0];
+    ConnectionData* conn_data = (ConnectionData*)AS_NATIVE_INSTANCE(conn_obj)->data;
+
+    // Allocate Channel Data
     ChannelData* ch_data = (ChannelData*)malloc(sizeof(ChannelData));
-    ch_data->conn_obj = self;
-    angara_incref(self);
-    ch_data->id = conn_data->next_channel_id++;
+    ch_data->conn_data = conn_data;
+    ch_data->connection_obj = conn_obj;
+
+    // Assign ID (1-based)
+    conn_data->channel_count++;
+    ch_data->id = conn_data->channel_count;
+
+    // Open Channel on Broker
     amqp_channel_open(conn_data->conn, ch_data->id);
     check_amqp_reply(amqp_get_rpc_reply(conn_data->conn), "Opening channel");
-    ch_data->is_open = true;
-    angara_create_native_instance(ch_data, finalize_channel, "Channel");
+
+    // Keep Connection Alive!
+    angara_incref(conn_obj);
+
+    dbg_amqp("channel", "Channel created");
+    return angara_create_native_instance(ch_data, finalize_channel, "Channel");
 }
 
-// METHOD: `conn.close()`
+// Connection.close() -> nil
 AngaraObject Angara_Connection_close(int arg_count, AngaraObject* args) {
-    ConnectionData* data = (ConnectionData*)AS_NATIVE_INSTANCE(args[0])->data;
-    if (data->is_open) {
-        check_amqp_reply(amqp_connection_close(data->conn, AMQP_REPLY_SUCCESS), "Closing connection");
-        data->is_open = false;
+    ConnectionData* c = (ConnectionData*)AS_NATIVE_INSTANCE(args[0])->data;
+    if (c->is_connected) {
+        amqp_connection_close(c->conn, AMQP_REPLY_SUCCESS);
+        c->is_connected = false;
     }
     return angara_create_nil();
 }
 
+// --- Channel Methods ---
 
-// --- CHANNEL CLASS ---
+// Helper to validate channel object
+ChannelData* get_channel(AngaraObject obj) {
+    return (ChannelData*)AS_NATIVE_INSTANCE(obj)->data;
+}
 
-// METHOD: `ch.queue_declare(name as string, durable=false, exclusive=false, auto_delete=false)`
+// queue_declare(name, durable, exclusive, auto_delete) -> Record
 AngaraObject Angara_Channel_queue_declare(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || arg_count > 5 || !IS_STRING(args[1])) {
-        angara_throw_error("queue_declare(name, [durable], [exclusive], [auto_delete]) invalid arguments.");
-        return angara_create_nil();
-    }
-
-    ChannelData* ch_data = get_channel_data(args[0]);
-    ConnectionData* conn_data = get_conn_data_from_channel(ch_data);
+    dbg_amqp("queue_declare", "Called");
+    ChannelData* ch = get_channel(args[0]);
+    const char* queue = AS_CSTRING(args[1]);
 
     const char* queue_name = AS_CSTRING(args[1]);
+    int passive = (arg_count > 2 && angara_is_truthy(args[2])) ? 1 : 0;
+    int durable = (arg_count > 3 && angara_is_truthy(args[3])) ? 1 : 0;
+    int exclusive = (arg_count > 4 && angara_is_truthy(args[4])) ? 1 : 0;
+    int auto_delete = (arg_count > 5 && angara_is_truthy(args[5])) ? 1 : 0;
 
-    // Optional flags
-    int durable = (arg_count > 2 && angara_is_truthy(args[2])) ? 1 : 0;
-    int exclusive = (arg_count > 3 && angara_is_truthy(args[3])) ? 1 : 0;
-    int auto_delete = (arg_count > 4 && angara_is_truthy(args[4])) ? 1 : 0;
-
-    // Perform the declaration
-    // We capture the return value 'r' which contains the actual generated queue name
     amqp_queue_declare_ok_t *r = amqp_queue_declare(
-        conn_data->conn,
-        ch_data->id,
+        ch->conn_data->conn,
+        ch->id,
         amqp_cstring_bytes(queue_name),
-        0, // passive
+        passive, // Use parsed passive
         durable,
         exclusive,
         auto_delete,
         amqp_empty_table
     );
+    check_amqp_reply(amqp_get_rpc_reply(ch->conn_data->conn), "Queue Declare");
 
-    // Check for RPC errors
-    check_amqp_reply(amqp_get_rpc_reply(conn_data->conn), "Declaring queue");
+    // Return Info
+    AngaraObject name_obj = angara_create_string_with_len((char*)r->queue.bytes, r->queue.len);
 
-    // If we are here, success. Construct the result record.
+    AngaraObject k_q = angara_string_from_c("queue");
+    AngaraObject kvs[] = { k_q, name_obj }; // Minimal return for now
 
-    // 1. Convert the returned queue name (bytes) to Angara String
-    // Note: r->queue is NOT null-terminated, so we must use length.
-    AngaraObject real_name_obj;
-    if (r->queue.len > 0) {
-        real_name_obj = angara_create_string_with_len((char*)r->queue.bytes, r->queue.len);
-    } else {
-        real_name_obj = angara_string_from_c("");
-    }
+    AngaraObject rec = angara_record_new_with_fields(1, kvs);
+    angara_decref(k_q); angara_decref(name_obj);
 
-    // 2. Prepare keys and values for the record
-    AngaraObject k_queue = angara_string_from_c("queue");
-    AngaraObject k_msgs  = angara_string_from_c("message_count");
-    AngaraObject k_cons  = angara_string_from_c("consumer_count");
-
-    AngaraObject v_msgs  = angara_create_i64(r->message_count);
-    AngaraObject v_cons  = angara_create_i64(r->consumer_count);
-
-    AngaraObject kvs[] = {
-        k_queue, real_name_obj,
-        k_msgs,  v_msgs,
-        k_cons,  v_cons
-    };
-
-    // 3. Create the record
-    AngaraObject record = angara_record_new_with_fields(3, kvs);
-
-    // 4. Cleanup local references
-    // (The record has incref'd the values and copied the keys, so we release our ownership)
-    angara_decref(k_queue); angara_decref(real_name_obj);
-    angara_decref(k_msgs);  angara_decref(v_msgs);
-    angara_decref(k_cons);  angara_decref(v_cons);
-
-    return record;
+    return rec;
 }
 
-// METHOD: `ch.publish(exchange as string, routing_key as string, body as string, [options as record?])`
+// bind_queue(queue, exchange, routing_key)
+AngaraObject Angara_Channel_bind_queue(int arg_count, AngaraObject* args) {
+    dbg_amqp("bind_queue", "Called");
+    ChannelData* ch = get_channel(args[0]);
+    const char* q = AS_CSTRING(args[1]);
+    const char* e = AS_CSTRING(args[2]);
+    const char* k = AS_CSTRING(args[3]);
+
+    amqp_queue_bind(ch->conn_data->conn, ch->id,
+        amqp_cstring_bytes(q), amqp_cstring_bytes(e), amqp_cstring_bytes(k),
+        amqp_empty_table);
+
+    check_amqp_reply(amqp_get_rpc_reply(ch->conn_data->conn), "Queue Bind");
+    return angara_create_nil();
+}
+
+// exchange_declare(name, type, durable, auto_delete)
+AngaraObject Angara_Channel_exchange_declare(int arg_count, AngaraObject* args) {
+    ChannelData* ch = get_channel(args[0]);
+    const char* name = AS_CSTRING(args[1]);
+    const char* type = AS_CSTRING(args[2]);
+
+    // FIX: Parse 3 booleans: passive, durable, auto_delete
+    int passive = (arg_count > 3 && angara_is_truthy(args[3])) ? 1 : 0;
+    int durable = (arg_count > 4 && angara_is_truthy(args[4])) ? 1 : 0;
+    int auto_delete = (arg_count > 5 && angara_is_truthy(args[5])) ? 1 : 0;
+
+    amqp_exchange_declare(ch->conn_data->conn, ch->id,
+        amqp_cstring_bytes(name), amqp_cstring_bytes(type),
+        passive, // Use the parsed passive flag
+        durable,
+        auto_delete,
+        0,
+        amqp_empty_table);
+
+    check_amqp_reply(amqp_get_rpc_reply(ch->conn_data->conn), "Exchange Declare");
+    return angara_create_nil();
+}
+
+// publish(exchange, key, body, [props])
 AngaraObject Angara_Channel_publish(int arg_count, AngaraObject* args) {
-    // We now accept 4 or 5 arguments (self, exchange, key, body, [options])
-    if (arg_count < 4 || arg_count > 5 || !IS_STRING(args[1]) || !IS_STRING(args[2]) || !IS_STRING(args[3])) {
-        angara_throw_error("publish(exchange, routing_key, body, [options]) has invalid base arguments.");
-        return angara_create_nil();
-    }
-
-    ChannelData* ch_data = get_channel_data(args[0]);
-    ConnectionData* conn_data = get_conn_data_from_channel(ch_data);
-    const char* exchange = AS_CSTRING(args[1]);
-    const char* routing_key = AS_CSTRING(args[2]);
+    ChannelData* ch = get_channel(args[0]);
+    const char* ex = AS_CSTRING(args[1]);
+    const char* key = AS_CSTRING(args[2]);
     const char* body = AS_CSTRING(args[3]);
-    amqp_bytes_t body_bytes = amqp_cstring_bytes(body);
 
-    // --- NEW: Handle Optional Properties ---
     amqp_basic_properties_t props;
-    props._flags = 0; // Start with no properties set
+    memset(&props, 0, sizeof(props));
 
-    if (arg_count == 5 && IS_RECORD(args[4])) {
-        AngaraObject options = args[4];
+    // Handle properties record if present
+    if (arg_count > 4 && IS_RECORD(args[4])) {
+        AngaraObject p = args[4];
 
-        // Check for correlationId
-        AngaraObject corr_id_obj = angara_record_get(options, "correlationId");
-        if (IS_STRING(corr_id_obj)) {
+        // Content-Type
+        AngaraObject ctype = angara_record_get(p, "contentType");
+        if (!IS_NIL(ctype)) {
+            props._flags |= AMQP_BASIC_CONTENT_TYPE_FLAG;
+            props.content_type = amqp_cstring_bytes(AS_CSTRING(ctype));
+        }
+
+        // Correlation ID
+        AngaraObject cid = angara_record_get(p, "correlationId");
+        if (IS_NIL(cid)) cid = angara_record_get(p, "correlation_id");
+        if (!IS_NIL(cid)) {
             props._flags |= AMQP_BASIC_CORRELATION_ID_FLAG;
-            props.correlation_id = amqp_cstring_bytes(AS_CSTRING(corr_id_obj));
+            props.correlation_id = amqp_cstring_bytes(AS_CSTRING(cid));
         }
 
-        // Check for replyTo
-        AngaraObject reply_to_obj = angara_record_get(options, "replyTo");
-        if (IS_STRING(reply_to_obj)) {
+        // Reply To
+        AngaraObject rep = angara_record_get(p, "replyTo");
+        if (IS_NIL(rep)) rep = angara_record_get(p, "reply_to");
+        if (!IS_NIL(rep)) {
             props._flags |= AMQP_BASIC_REPLY_TO_FLAG;
-            props.reply_to = amqp_cstring_bytes(AS_CSTRING(reply_to_obj));
+            props.reply_to = amqp_cstring_bytes(AS_CSTRING(rep));
         }
-
-        // Decref the objects we retrieved from the record
-        angara_decref(corr_id_obj);
-        angara_decref(reply_to_obj);
     }
-    // --- END NEW ---
 
-    // The final publish call now includes the properties.
-    amqp_basic_publish(conn_data->conn, ch_data->id,
-                       amqp_cstring_bytes(exchange),
-                       amqp_cstring_bytes(routing_key),
-                       0, 0, &props, body_bytes);
+    int res = amqp_basic_publish(ch->conn_data->conn, ch->id,
+        amqp_cstring_bytes(ex), amqp_cstring_bytes(key),
+        0, 0, &props, amqp_cstring_bytes(body));
 
+    if (res < 0) angara_throw_error(amqp_error_string2(res));
     return angara_create_nil();
 }
 
+// subscribe(queue)
 AngaraObject Angara_Channel_subscribe(int arg_count, AngaraObject* args) {
-    if (DEBUG) fprintf(stderr, "[DEBUG] subscribe called.\n"); // <-- DEBUG
+    dbg_amqp("subscribe", "Called");
+    ChannelData* ch = get_channel(args[0]);
+    const char* q = AS_CSTRING(args[1]);
 
-    if (arg_count != 2 || !IS_STRING(args[1])) {
-        angara_throw_error("subscribe(queue) expects one string argument.");
-        return angara_create_nil();
-    }
-    ChannelData* ch_data = get_channel_data(args[0]);
-    ConnectionData* conn_data = get_conn_data_from_channel(ch_data);
-    const char* queue = AS_CSTRING(args[1]);
+    amqp_basic_consume(ch->conn_data->conn, ch->id,
+        amqp_cstring_bytes(q), amqp_empty_bytes,
+        0, 0, 0, amqp_empty_table);
 
-    if (DEBUG) fprintf(stderr, "[DEBUG] Subscribing to queue '%s' on Channel %d\n", queue, ch_data->id); // <-- DEBUG
-
-    amqp_basic_consume(conn_data->conn, ch_data->id, amqp_cstring_bytes(queue),
-                       amqp_empty_bytes, 0, 0, 0, amqp_empty_table);
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] amqp_basic_consume sent. Waiting for RPC reply...\n"); // <-- DEBUG
-
-    check_amqp_reply(amqp_get_rpc_reply(conn_data->conn), "Subscribing to queue");
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] subscribe success.\n"); // <-- DEBUG
+    check_amqp_reply(amqp_get_rpc_reply(ch->conn_data->conn), "Basic Consume");
     return angara_create_nil();
 }
 
+// prefetch(count)
+AngaraObject Angara_Channel_prefetch(int arg_count, AngaraObject* args) {
+    ChannelData* ch = get_channel(args[0]);
+    int count = (int)AS_I64(args[1]);
+    amqp_basic_qos(ch->conn_data->conn, ch->id, 0, count, 0);
+    check_amqp_reply(amqp_get_rpc_reply(ch->conn_data->conn), "Basic QOS");
+    return angara_create_nil();
+}
+
+// ack(tag)
+AngaraObject Angara_Channel_ack(int arg_count, AngaraObject* args) {
+    ChannelData* ch = get_channel(args[0]);
+    uint64_t tag = (uint64_t)AS_I64(args[1]);
+    amqp_basic_ack(ch->conn_data->conn, ch->id, tag, 0);
+    return angara_create_nil();
+}
+
+// nack(tag, requeue)
+AngaraObject Angara_Channel_nack(int arg_count, AngaraObject* args) {
+    ChannelData* ch = get_channel(args[0]);
+    uint64_t tag = (uint64_t)AS_I64(args[1]);
+    int requeue = angara_is_truthy(args[2]);
+    amqp_basic_nack(ch->conn_data->conn, ch->id, tag, 0, requeue);
+    return angara_create_nil();
+}
+
+// close()
+AngaraObject Angara_Channel_close(int arg_count, AngaraObject* args) {
+    ChannelData* ch = get_channel(args[0]);
+    amqp_channel_close(ch->conn_data->conn, ch->id, AMQP_REPLY_SUCCESS);
+    return angara_create_nil();
+}
+
+// next_message(timeout)
 AngaraObject Angara_Channel_next_message(int arg_count, AngaraObject* args) {
-    ChannelData* ch_data = get_channel_data(args[0]);
-    ConnectionData* conn_data = get_conn_data_from_channel(ch_data);
+    // dbg_amqp("next_message", "Called");
+    ChannelData* ch_data = get_channel(args[0]);
 
     struct timeval timeout;
     struct timeval* timeout_ptr = NULL;
 
-    // 1. Parse Timeout
-    // If arg provided, set up the struct. If NULL or < 0, timeout_ptr remains NULL (Block Forever).
     if (arg_count == 2 && IS_I64(args[1])) {
         int64_t ms = AS_I64(args[1]);
         if (ms >= 0) {
@@ -298,34 +368,22 @@ AngaraObject Angara_Channel_next_message(int arg_count, AngaraObject* args) {
     amqp_rpc_reply_t res;
     amqp_envelope_t envelope;
 
-    amqp_maybe_release_buffers(conn_data->conn);
+    amqp_maybe_release_buffers(ch_data->conn_data->conn);
 
-    // 2. Consume
-    res = amqp_consume_message(conn_data->conn, &envelope, timeout_ptr, 0);
+    res = amqp_consume_message(ch_data->conn_data->conn, &envelope, timeout_ptr, 0);
 
-    // 3. Handle Result
     if (AMQP_RESPONSE_NORMAL != res.reply_type) {
-        // If it was just a timeout, return nil (no message)
         if (AMQP_RESPONSE_LIBRARY_EXCEPTION == res.reply_type &&
             AMQP_STATUS_TIMEOUT == res.library_error) {
             return angara_create_nil();
         }
-
-        // If connection closed or other error, throw
-        // (Optional: You might want to return nil and let the user check is_open,
-        // but for now throwing ensures we don't spin-loop on a dead connection)
-        // char err_buf[256];
-        // snprintf(err_buf, 256, "AMQP Consume Error: %s", amqp_error_string2(res.library_error));
-        // angara_throw_error(err_buf);
         return angara_create_nil();
     }
 
-    // 4. Construct Angara Record from Envelope
-    // Body
+    // Build Record
     AngaraObject body_obj = angara_create_string_with_len((char*)envelope.message.body.bytes, envelope.message.body.len);
+    AngaraObject dtag_obj = angara_create_i64((int64_t)envelope.delivery_tag);
 
-    // Properties (CorrelationId, ReplyTo)
-    // Note: We need to handle cases where properties aren't set
     AngaraObject cid_obj = angara_create_nil();
     if (envelope.message.properties._flags & AMQP_BASIC_CORRELATION_ID_FLAG) {
         cid_obj = angara_create_string_with_len(
@@ -342,198 +400,31 @@ AngaraObject Angara_Channel_next_message(int arg_count, AngaraObject* args) {
         );
     }
 
-    // Delivery Tag
-    AngaraObject dtag_obj = angara_create_i64((int64_t)envelope.delivery_tag);
-
-    // Build "properties" record (Legacy support for your previous code)
-    // or flatten it. Your Director code expects msg["correlationId"] directly?
-    // Let's check director_service.an...
-    // It uses: msg["correlationId"], msg["delivery_tag"], msg["body"], msg["replyTo"]
-    // It does NOT use a nested "properties" object anymore in the latest fixes.
-
     AngaraObject k_body = angara_string_from_c("body");
     AngaraObject k_dtag = angara_string_from_c("delivery_tag");
     AngaraObject k_cid  = angara_string_from_c("correlationId");
     AngaraObject k_rep  = angara_string_from_c("replyTo");
 
-    AngaraObject kvs[] = {
-        k_body, body_obj,
-        k_dtag, dtag_obj,
-        k_cid,  cid_obj,
-        k_rep,  reply_obj
-    };
+    AngaraObject kvs[] = { k_body, body_obj, k_dtag, dtag_obj, k_cid, cid_obj, k_rep, reply_obj };
+    AngaraObject rec = angara_record_new_with_fields(4, kvs);
 
-    AngaraObject record = angara_record_new_with_fields(4, kvs);
-
-    // Cleanup
     angara_decref(k_body); angara_decref(body_obj);
     angara_decref(k_dtag); angara_decref(dtag_obj);
     angara_decref(k_cid);  angara_decref(cid_obj);
     angara_decref(k_rep);  angara_decref(reply_obj);
 
     amqp_destroy_envelope(&envelope);
-    return record;
-}
-
-// *** NEW METHOD: `ch.ack(delivery_tag as i64)` ***
-AngaraObject Angara_Channel_ack(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_I64(args[1])) {
-        angara_throw_error("ack(delivery_tag) expects one integer argument.");
-        return angara_create_nil();
-    }
-    ChannelData* ch_data = get_channel_data(args[0]);
-    ConnectionData* conn_data = get_conn_data_from_channel(ch_data);
-    uint64_t delivery_tag = (uint64_t)AS_I64(args[1]);
-
-    // Acknowledge a single message.
-    amqp_basic_ack(conn_data->conn, ch_data->id, delivery_tag, 0);
-    return angara_create_nil();
-}
-
-AngaraObject Angara_Channel_nack(int arg_count, AngaraObject* args) {
-    if (arg_count != 3 || !IS_I64(args[1]) || !IS_BOOL(args[2])) {
-        angara_throw_error("nack(delivery_tag, requeue) expects an integer and a boolean.");
-        return angara_create_nil();
-    }
-    ChannelData* ch_data = get_channel_data(args[0]);
-    ConnectionData* conn_data = get_conn_data_from_channel(ch_data);
-
-    uint64_t delivery_tag = (uint64_t)AS_I64(args[1]);
-    amqp_boolean_t requeue = AS_BOOL(args[2]);
-
-    // Acknowledge a single message negatively. `multiple` flag is false.
-    amqp_basic_nack(conn_data->conn, ch_data->id, delivery_tag, 0, requeue);
-
-    return angara_create_nil();
-}
-
-// METHOD: `ch.close()`
-AngaraObject Angara_Channel_close(int arg_count, AngaraObject* args) {
-    ChannelData* data = get_channel_data(args[0]);
-    if (data->is_open) {
-        ConnectionData* conn_data = get_conn_data_from_channel(data);
-        check_amqp_reply(amqp_channel_close(conn_data->conn, data->id, AMQP_REPLY_SUCCESS), "Closing channel");
-        data->is_open = false;
-    }
-    return angara_create_nil();
-}
-
-AngaraObject Angara_Channel_bind_queue(int arg_count, AngaraObject* args) {
-    if (DEBUG) fprintf(stderr, "[DEBUG] bind_queue called.\n"); // <-- DEBUG
-
-    if (arg_count != 4 || !IS_STRING(args[1]) || !IS_STRING(args[2]) || !IS_STRING(args[3])) {
-        angara_throw_error("bind_queue(queue, exchange, routing_key) expects three string arguments.");
-        return angara_create_nil();
-    }
-
-    ChannelData* ch_data = get_channel_data(args[0]);
-    ConnectionData* conn_data = get_conn_data_from_channel(ch_data);
-
-    const char* queue_name = AS_CSTRING(args[1]);
-    const char* exchange_name = AS_CSTRING(args[2]);
-    const char* routing_key = AS_CSTRING(args[3]);
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] Binding Q '%s' to E '%s' key '%s'\n", queue_name, exchange_name, routing_key); // <-- DEBUG
-
-    amqp_queue_bind(conn_data->conn, ch_data->id,
-                    amqp_cstring_bytes(queue_name),
-                    amqp_cstring_bytes(exchange_name),
-                    amqp_cstring_bytes(routing_key),
-                    amqp_empty_table);
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] bind_queue reply check...\n"); // <-- DEBUG
-    check_amqp_reply(amqp_get_rpc_reply(conn_data->conn), "Binding queue");
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] bind_queue success.\n"); // <-- DEBUG
-
-    return angara_create_nil();
-}
-
-AngaraObject Angara_Channel_exchange_declare(int arg_count, AngaraObject* args) {
-    if (DEBUG) fprintf(stderr, "[DEBUG] exchange_declare called. arg_count=%d\n", arg_count); // <-- DEBUG
-
-    if (arg_count < 3 || arg_count > 6 || !IS_STRING(args[1]) || !IS_STRING(args[2])) {
-        angara_throw_error("exchange_declare(name, type, ...) invalid arguments.");
-        return angara_create_nil();
-    }
-
-    ChannelData* ch_data = get_channel_data(args[0]);
-    ConnectionData* conn_data = get_conn_data_from_channel(ch_data);
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] Channel ID: %d, Connection Ptr: %p\n", ch_data->id, (void*)conn_data->conn); // <-- DEBUG
-
-    const char* exchange_name = AS_CSTRING(args[1]);
-    const char* exchange_type = AS_CSTRING(args[2]);
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] Declaring exchange '%s' type '%s'\n", exchange_name, exchange_type); // <-- DEBUG
-
-    amqp_boolean_t passive = (arg_count > 3 && angara_is_truthy(args[3])) ? 1 : 0;
-    amqp_boolean_t durable = (arg_count > 4 && angara_is_truthy(args[4])) ? 1 : 0;
-    amqp_boolean_t auto_delete = (arg_count > 5 && angara_is_truthy(args[5])) ? 1 : 0;
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] Calling amqp_exchange_declare...\n"); // <-- DEBUG
-
-    amqp_exchange_declare(conn_data->conn, ch_data->id,
-                          amqp_cstring_bytes(exchange_name),
-                          amqp_cstring_bytes(exchange_type),
-                          passive, durable, auto_delete, 0, amqp_empty_table);
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] amqp_exchange_declare returned. Checking reply...\n"); // <-- DEBUG
-
-    check_amqp_reply(amqp_get_rpc_reply(conn_data->conn), "Declaring exchange");
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] exchange_declare success.\n"); // <-- DEBUG
-
-    return angara_create_nil();
-}
-
-AngaraObject Angara_Channel_prefetch(int arg_count, AngaraObject* args) {
-    if (DEBUG) fprintf(stderr, "[DEBUG] prefetch called.\n"); // <-- DEBUG
-
-    if (arg_count != 2 || !IS_I64(args[1])) {
-        angara_throw_error("prefetch(count) expects one integer argument.");
-        return angara_create_nil();
-    }
-
-    ChannelData* ch_data = get_channel_data(args[0]);
-    ConnectionData* conn_data = get_conn_data_from_channel(ch_data);
-    uint16_t prefetch_count = (uint16_t)AS_I64(args[1]);
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] Setting prefetch to %d on Channel %d\n", prefetch_count, ch_data->id); // <-- DEBUG
-
-    // amqp_basic_qos sends the Qos method. It does NOT block waiting for QosOk.
-    amqp_basic_qos(conn_data->conn, ch_data->id, 0, prefetch_count, 0);
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] amqp_basic_qos sent. Waiting for RPC reply...\n"); // <-- DEBUG
-
-    // We must manually wait for the QosOk method frame to ensure the server accepted it.
-    amqp_rpc_reply_t res = amqp_get_rpc_reply(conn_data->conn);
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] RPC reply received. Checking status...\n"); // <-- DEBUG
-
-    check_amqp_reply(res, "Setting prefetch (QOS)");
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] prefetch success.\n"); // <-- DEBUG
-    return angara_create_nil();
+    return rec;
 }
 
 // --- ABI Definitions ---
 
-// --- Dummy Function for Class Registration ---
-// This function is never meant to be called by users. Its sole purpose
-// is to be present in the export list so that the Angara runtime can
-// learn about the Channel class via the `constructs` field.
-AngaraObject Angara_amqp_dummy_channel_ctor(__attribute__((unused)) int arg_count, __attribute__((unused)) AngaraObject* args) {
-    angara_throw_error("The _channel constructor is private and cannot be called directly.");
-    return angara_create_nil();
-}
-
 static const AngaraMethodDef CHANNEL_METHODS[] = {
-        {"queue_declare", (AngaraMethodFn)Angara_Channel_queue_declare, "sbbb?->{}"},
+        {"queue_declare", (AngaraMethodFn)Angara_Channel_queue_declare, "sbbbb?->{}"},
         {"exchange_declare", (AngaraMethodFn)Angara_Channel_exchange_declare, "ssbbb?->n"},
         {"publish",       (AngaraMethodFn)Angara_Channel_publish,       "sss{}?->n"},
-        {"subscribe",    (AngaraMethodFn)Angara_Channel_subscribe,    "s->n"},
-        {"next_message", (AngaraMethodFn)Angara_Channel_next_message, "i?->{}?"},
+        {"subscribe",     (AngaraMethodFn)Angara_Channel_subscribe,     "s->n"},
+        {"next_message",  (AngaraMethodFn)Angara_Channel_next_message,  "i?->{}?"},
         {"ack",           (AngaraMethodFn)Angara_Channel_ack,           "i->n"},
         {"close",         (AngaraMethodFn)Angara_Channel_close,         "->n"},
         {"bind_queue",    (AngaraMethodFn)Angara_Channel_bind_queue,    "sss->n"},
@@ -552,12 +443,11 @@ const AngaraClassDef CONNECTION_CLASS_DEF = { "Connection", NULL, CONNECTION_MET
 
 const AngaraFuncDef AMQP_EXPORTS[] = {
         { "connect", Angara_amqp_connect, "s->Connection", &CONNECTION_CLASS_DEF },
-        // This "private" export registers the Channel class with the runtime.
-        { "_channel", Angara_amqp_dummy_channel_ctor, "->Channel", &CHANNEL_CLASS_DEF },
+        { "_channel", NULL, "->Channel", &CHANNEL_CLASS_DEF }, // Reg only
         { NULL, NULL, NULL, NULL }
 };
 
 ANGARA_MODULE_INIT(amqp) {
-    *def_count = (sizeof(AMQP_EXPORTS) / sizeof(AngaraFuncDef)) - 1;
-    return AMQP_EXPORTS;
+        *def_count = (sizeof(AMQP_EXPORTS) / sizeof(AngaraFuncDef)) - 1;
+        return AMQP_EXPORTS;
 }
