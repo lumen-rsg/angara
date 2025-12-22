@@ -76,16 +76,29 @@ foreach(MODULE_SOURCE ${NATIVE_MODULE_SOURCES})
         target_link_libraries(${MODULE_NAME} PRIVATE ${CURL_LIBRARIES})
 
     elseif (MODULE_NAME STREQUAL "websocket")
-        target_include_directories(${MODULE_NAME} PRIVATE ${LWS_INCLUDE_DIRS} ${SSL_INCLUDE_DIRS})
-        if(APPLE)
-            set(SSL_FULL_PATH_LIBS "")
-            foreach(SSL_LIB_NAME ${SSL_LIBRARIES})
-                list(APPEND SSL_FULL_PATH_LIBS "${SSL_LIBRARY_DIRS}/lib${SSL_LIB_NAME}.dylib")
-            endforeach()
-            target_link_libraries(${MODULE_NAME} PRIVATE "${LWS_LIBRARY_DIRS}/lib${LWS_LIBRARIES}.dylib" ${SSL_FULL_PATH_LIBS})
-        else()
-            target_link_libraries(${MODULE_NAME} PRIVATE ${LWS_LIBRARIES} ${SSL_LIBRARIES})
+        # 1. Debugging: Print what pkg-config found
+        message(STATUS "LWS (PkgConfig) Include: ${LWS_INCLUDE_DIRS}")
+
+        # 2. Fallback: If pkg-config didn't give us the include dir, try to find it via Homebrew/Standard paths
+        if (NOT LWS_INCLUDE_DIRS)
+            if (APPLE AND HOMEBREW_PREFIX)
+                # Check specific brew path first
+                set(LWS_INCLUDE_DIRS
+                        "${HOMEBREW_PREFIX}/opt/libwebsockets/include"
+                        "${HOMEBREW_PREFIX}/include"
+                )
+            else()
+                # Linux fallback
+                set(LWS_INCLUDE_DIRS "/usr/include" "/usr/local/include")
+            endif()
         endif()
+
+        # 3. Apply Includes
+        target_include_directories(${MODULE_NAME} PRIVATE ${LWS_INCLUDE_DIRS} ${SSL_INCLUDE_DIRS})
+
+        # 4. Apply Linking (The robust version from before)
+        target_link_directories(${MODULE_NAME} PRIVATE ${LWS_LIBRARY_DIRS} ${SSL_LIBRARY_DIRS})
+        target_link_libraries(${MODULE_NAME} PRIVATE ${LWS_LIBRARIES} ${SSL_LIBRARIES})
 
     elseif (MODULE_NAME STREQUAL "time")
         if(NOT APPLE)

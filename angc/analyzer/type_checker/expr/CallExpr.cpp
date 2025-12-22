@@ -65,6 +65,17 @@ namespace angara {
                 result_type = data_type;
             }
         }
+        else if (callee_type->kind == TypeKind::ANY) {
+            // Allow dynamic calls on 'any' objects.
+            // Since we can't check arguments statically, we assume they are correct.
+            // This operation is dynamic, so we require an unsafe context.
+            if (m_is_in_unsafe_context) {
+                // The return type of a dynamic call is always 'any'.
+                result_type = m_type_any;
+            } else {
+                error(expr.paren, "Calling a value of type 'any' is unsafe. Wrap this call in an '@unsafe { ... }' block.");
+            }
+        }
         else {
             error(expr.paren, "This expression is not callable. Can only call functions and classes.");
         }
@@ -140,65 +151,72 @@ namespace angara {
     ) {
         size_t num_expected = func_type->param_types.size();
         size_t num_actual = arg_types.size();
+        bool arity_ok = true;
 
         // 1. Check arity (number of arguments)
         if (func_type->is_variadic) {
-            // For variadic functions, the user must supply at least the required parameters.
-            if (num_actual < num_expected) {
-                error(call.paren, "Incorrect number of arguments. Function expects at least " +
-                                  std::to_string(num_expected) + " argument(s), but got " +
-                                  std::to_string(num_actual) + ".");
-                // Add a note pointing to the function's definition.
-                if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(call.callee)) {
-                    if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
-                        note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
-                    }
-                }
-            }
+            // Variadic: Must have at least the fixed args
+            if (num_actual < num_expected) arity_ok = false;
         } else {
-            // For regular functions, the number of arguments must match exactly.
-            if (num_actual != num_expected) {
-                error(call.paren, "Incorrect number of arguments. Function expects " +
-                                  std::to_string(num_expected) + " argument(s), but got " +
-                                  std::to_string(num_actual) + ".");
-                // Add the same helpful note.
-                if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(call.callee)) {
-                    if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
-                        note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
+            // Regular: Cannot have MORE arguments
+            if (num_actual > num_expected) {
+                arity_ok = false;
+            }
+            // Can have FEWER arguments only if the missing ones are Optional
+            else if (num_actual < num_expected) {
+                for (size_t i = num_actual; i < num_expected; ++i) {
+                    if (func_type->param_types[i]->kind != TypeKind::OPTIONAL) {
+                        arity_ok = false;
+                        break;
                     }
-                } else if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(call.callee)) {
-                    // Handle notes for method calls, e.g., my_instance.method()
-                    // This requires more complex logic to find the method's declaration token
-                    // in the ClassType, which will be added later. TODO
                 }
             }
         }
 
-        // If an arity error occurred, stop checking.
+        if (!arity_ok) {
+            error(call.paren, "Incorrect number of arguments. Function expects " +
+                              std::to_string(num_expected) + " argument(s), but got " +
+                              std::to_string(num_actual) + ".");
+
+            // Add a helpful note if possible
+            if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(call.callee)) {
+                if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
+                    note(symbol->declaration_token, "function '" + symbol->name + "' is defined here.");
+                }
+            }
+            return;
+        }
+
+        // If an arity error occurred upstream, stop checking to prevent crashes.
         if (m_hadError) return;
 
-        // 2. Check types of the fixed parameters
-        for (size_t i = 0; i < num_expected; ++i) {
+        // 2. Check types of the PROVIDED arguments
+        // FIX: We must not iterate past 'num_actual'. We cannot check types for
+        // optional arguments that were omitted (because there is no expression to check).
+
+        size_t check_limit = num_actual;
+
+        // For variadic functions, we only strictly check the fixed parameters here.
+        // (Variadic arguments are usually 'any' or checked dynamically).
+        if (func_type->is_variadic && check_limit > num_expected) {
+            check_limit = num_expected;
+        }
+
+        for (size_t i = 0; i < check_limit; ++i) {
             const auto& expected_type = func_type->param_types[i];
             const auto& actual_type = arg_types[i];
-
-            // --- THIS IS THE FIX ---
-            // Get the original AST node for the argument.
             const auto& arg_expr = call.arguments[i];
 
-            // Check for the special case: is the argument an empty list literal `[]`?
+            // Special Case: Empty List Literal `[]` matches any `list<T>`
             if (auto list_lit = std::dynamic_pointer_cast<const ListExpr>(arg_expr)) {
                 if (list_lit->elements.empty()) {
-                    // It is an empty list. Is the expected type ANY kind of list?
                     if (expected_type->kind == TypeKind::LIST) {
-                        // Yes. Consider this a match and continue to the next argument.
-                        continue;
+                        continue; // Match found, skip standard check
                     }
                 }
             }
-            // --- END OF FIX ---
 
-            // If it's not the special case, perform the standard compatibility check.
+            // Standard Type Compatibility Check
             if (!check_type_compatibility(expected_type, actual_type)) {
                 error(call.paren, "Type mismatch for argument " + std::to_string(i + 1) + ". " +
                                   "Expected '" + expected_type->toString() +

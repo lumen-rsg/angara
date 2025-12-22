@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <sys/time.h>
 
 #define DEBUG false
 
@@ -97,7 +98,7 @@ AngaraObject Angara_amqp_connect(int arg_count, AngaraObject* args) {
     }
     check_amqp_reply(amqp_login(data->conn, "/", 0, 131072, 0, AMQP_SASL_METHOD_PLAIN, user, password), "Logging in");
     data->is_open = true;
-    return angara_create_native_instance(data, finalize_connection);
+    angara_create_native_instance(data, finalize_connection, "Connection");
 }
 
 // Method: conn.channel() -> Channel
@@ -115,7 +116,7 @@ AngaraObject Angara_Connection_channel(int arg_count, AngaraObject* args) {
     amqp_channel_open(conn_data->conn, ch_data->id);
     check_amqp_reply(amqp_get_rpc_reply(conn_data->conn), "Opening channel");
     ch_data->is_open = true;
-    return angara_create_native_instance(ch_data, finalize_channel);
+    angara_create_native_instance(ch_data, finalize_channel, "Channel");
 }
 
 // METHOD: `conn.close()`
@@ -133,39 +134,74 @@ AngaraObject Angara_Connection_close(int arg_count, AngaraObject* args) {
 
 // METHOD: `ch.queue_declare(name as string, durable=false, exclusive=false, auto_delete=false)`
 AngaraObject Angara_Channel_queue_declare(int arg_count, AngaraObject* args) {
-    if (DEBUG) fprintf(stderr, "[DEBUG] queue_declare called.\n"); // <-- DEBUG
-
     if (arg_count < 2 || arg_count > 5 || !IS_STRING(args[1])) {
         angara_throw_error("queue_declare(name, [durable], [exclusive], [auto_delete]) invalid arguments.");
         return angara_create_nil();
     }
+
     ChannelData* ch_data = get_channel_data(args[0]);
     ConnectionData* conn_data = get_conn_data_from_channel(ch_data);
 
-    if (DEBUG) fprintf(stderr, "[DEBUG] QD Channel ID: %d\n", ch_data->id); // <-- DEBUG
-
     const char* queue_name = AS_CSTRING(args[1]);
-    if (DEBUG) fprintf(stderr, "[DEBUG] QD Queue Name: '%s'\n", queue_name); // <-- DEBUG
 
-    amqp_boolean_t durable = (arg_count > 2 && angara_is_truthy(args[2])) ? 1 : 0;
-    amqp_boolean_t exclusive = (arg_count > 3 && angara_is_truthy(args[3])) ? 1 : 0;
-    amqp_boolean_t auto_delete = (arg_count > 4 && angara_is_truthy(args[4])) ? 1 : 0;
+    // Optional flags
+    int durable = (arg_count > 2 && angara_is_truthy(args[2])) ? 1 : 0;
+    int exclusive = (arg_count > 3 && angara_is_truthy(args[3])) ? 1 : 0;
+    int auto_delete = (arg_count > 4 && angara_is_truthy(args[4])) ? 1 : 0;
 
-    if (DEBUG) fprintf(stderr, "[DEBUG] Calling amqp_queue_declare...\n"); // <-- DEBUG
+    // Perform the declaration
+    // We capture the return value 'r' which contains the actual generated queue name
+    amqp_queue_declare_ok_t *r = amqp_queue_declare(
+        conn_data->conn,
+        ch_data->id,
+        amqp_cstring_bytes(queue_name),
+        0, // passive
+        durable,
+        exclusive,
+        auto_delete,
+        amqp_empty_table
+    );
 
-    // Note: We pass 0 for passive.
-    amqp_queue_declare_ok_t *r = amqp_queue_declare(conn_data->conn, ch_data->id, amqp_cstring_bytes(queue_name),
-                       0, durable, exclusive, auto_delete, amqp_empty_table);
-
-    if (DEBUG) fprintf(stderr, "[DEBUG] amqp_queue_declare returned. Checking reply...\n"); // <-- DEBUG
-
+    // Check for RPC errors
     check_amqp_reply(amqp_get_rpc_reply(conn_data->conn), "Declaring queue");
 
-    if (DEBUG) fprintf(stderr, "[DEBUG] queue_declare success.\n"); // <-- DEBUG
-    return angara_create_nil();
+    // If we are here, success. Construct the result record.
+
+    // 1. Convert the returned queue name (bytes) to Angara String
+    // Note: r->queue is NOT null-terminated, so we must use length.
+    AngaraObject real_name_obj;
+    if (r->queue.len > 0) {
+        real_name_obj = angara_create_string_with_len((char*)r->queue.bytes, r->queue.len);
+    } else {
+        real_name_obj = angara_string_from_c("");
+    }
+
+    // 2. Prepare keys and values for the record
+    AngaraObject k_queue = angara_string_from_c("queue");
+    AngaraObject k_msgs  = angara_string_from_c("message_count");
+    AngaraObject k_cons  = angara_string_from_c("consumer_count");
+
+    AngaraObject v_msgs  = angara_create_i64(r->message_count);
+    AngaraObject v_cons  = angara_create_i64(r->consumer_count);
+
+    AngaraObject kvs[] = {
+        k_queue, real_name_obj,
+        k_msgs,  v_msgs,
+        k_cons,  v_cons
+    };
+
+    // 3. Create the record
+    AngaraObject record = angara_record_new_with_fields(3, kvs);
+
+    // 4. Cleanup local references
+    // (The record has incref'd the values and copied the keys, so we release our ownership)
+    angara_decref(k_queue); angara_decref(real_name_obj);
+    angara_decref(k_msgs);  angara_decref(v_msgs);
+    angara_decref(k_cons);  angara_decref(v_cons);
+
+    return record;
 }
 
-// METHOD: `ch.publish(exchange as string, routing_key as string, body as string)`
 // METHOD: `ch.publish(exchange as string, routing_key as string, body as string, [options as record?])`
 AngaraObject Angara_Channel_publish(int arg_count, AngaraObject* args) {
     // We now accept 4 or 5 arguments (self, exchange, key, body, [options])
@@ -241,95 +277,102 @@ AngaraObject Angara_Channel_subscribe(int arg_count, AngaraObject* args) {
     return angara_create_nil();
 }
 
-// METHOD: `ch.next_message(timeout_ms as i64?) -> record?`
 AngaraObject Angara_Channel_next_message(int arg_count, AngaraObject* args) {
-    if (DEBUG) fprintf(stderr, "[DEBUG] next_message called.\n"); // <-- DEBUG
-
     ChannelData* ch_data = get_channel_data(args[0]);
     ConnectionData* conn_data = get_conn_data_from_channel(ch_data);
 
-    // Timeout logic
-    struct timeval* timeout = NULL;
-    struct timeval tv;
+    struct timeval timeout;
+    struct timeval* timeout_ptr = NULL;
+
+    // 1. Parse Timeout
+    // If arg provided, set up the struct. If NULL or < 0, timeout_ptr remains NULL (Block Forever).
     if (arg_count == 2 && IS_I64(args[1])) {
         int64_t ms = AS_I64(args[1]);
         if (ms >= 0) {
-            tv.tv_sec = ms / 1000;
-            tv.tv_usec = (ms % 1000) * 1000;
-            timeout = &tv;
+            timeout.tv_sec = ms / 1000;
+            timeout.tv_usec = (ms % 1000) * 1000;
+            timeout_ptr = &timeout;
         }
     }
 
-    if (DEBUG) fprintf(stderr, "[DEBUG] Calling amqp_consume_message on Channel %d...\n", ch_data->id); // <-- DEBUG
-
+    amqp_rpc_reply_t res;
     amqp_envelope_t envelope;
-    amqp_rpc_reply_t res = amqp_consume_message(conn_data->conn, &envelope, timeout, 0);
 
-    if (DEBUG) fprintf(stderr, "[DEBUG] amqp_consume_message returned type: %d\n", res.reply_type); // <-- DEBUG
+    amqp_maybe_release_buffers(conn_data->conn);
 
-    if (res.reply_type != AMQP_RESPONSE_NORMAL) {
-        if (res.library_error == AMQP_STATUS_TIMEOUT) {
-            if (DEBUG) fprintf(stderr, "[DEBUG] Timeout.\n"); // <-- DEBUG
+    // 2. Consume
+    res = amqp_consume_message(conn_data->conn, &envelope, timeout_ptr, 0);
+
+    // 3. Handle Result
+    if (AMQP_RESPONSE_NORMAL != res.reply_type) {
+        // If it was just a timeout, return nil (no message)
+        if (AMQP_RESPONSE_LIBRARY_EXCEPTION == res.reply_type &&
+            AMQP_STATUS_TIMEOUT == res.library_error) {
             return angara_create_nil();
         }
 
-        // --- FIX: DO NOT DESTROY ENVELOPE HERE ---
-        // The envelope is only valid if reply_type is NORMAL.
-        // Destroying it here causes a SEGFAULT.
-
-        if (DEBUG) fprintf(stderr, "[DEBUG] Consume error library_error: %d\n", res.library_error); // <-- DEBUG
-
-        // We should probably throw here to let the user know,
-        // but for now let's just return nil and log to stderr to see what's happening.
-        // check_amqp_reply(res, "Consuming message"); // This throws.
-
-        // Let's throw safely
-        char err_buf[512];
-        if (res.reply_type == AMQP_RESPONSE_LIBRARY_EXCEPTION) {
-             sprintf(err_buf, "Consumer library error: %s", amqp_error_string2(res.library_error));
-        } else if (res.reply_type == AMQP_RESPONSE_SERVER_EXCEPTION) {
-             sprintf(err_buf, "Consumer server exception");
-        } else {
-             sprintf(err_buf, "Consumer unknown error");
-        }
-        angara_throw_error(err_buf);
-
+        // If connection closed or other error, throw
+        // (Optional: You might want to return nil and let the user check is_open,
+        // but for now throwing ensures we don't spin-loop on a dead connection)
+        // char err_buf[256];
+        // snprintf(err_buf, 256, "AMQP Consume Error: %s", amqp_error_string2(res.library_error));
+        // angara_throw_error(err_buf);
         return angara_create_nil();
     }
 
-    if (DEBUG) fprintf(stderr, "[DEBUG] Message received! Processing...\n"); // <-- DEBUG
+    // 4. Construct Angara Record from Envelope
+    // Body
+    AngaraObject body_obj = angara_create_string_with_len((char*)envelope.message.body.bytes, envelope.message.body.len);
 
-    // --- Construct the Result Record ---
-    AngaraObject result = angara_record_new();
-
-    AngaraObject body_str = angara_create_string_with_len(
-        (const char*)envelope.message.body.bytes, envelope.message.body.len);
-    angara_record_set(result, "body", body_str);
-    angara_decref(body_str);
-
-    AngaraObject delivery_tag = angara_create_i64(envelope.delivery_tag);
-    angara_record_set(result, "delivery_tag", delivery_tag);
-    angara_decref(delivery_tag);
-
+    // Properties (CorrelationId, ReplyTo)
+    // Note: We need to handle cases where properties aren't set
+    AngaraObject cid_obj = angara_create_nil();
     if (envelope.message.properties._flags & AMQP_BASIC_CORRELATION_ID_FLAG) {
-        AngaraObject corr_id_str = angara_create_string_with_len(
-            (const char*)envelope.message.properties.correlation_id.bytes,
-            envelope.message.properties.correlation_id.len);
-        angara_record_set(result, "correlationId", corr_id_str);
-        angara_decref(corr_id_str);
+        cid_obj = angara_create_string_with_len(
+            (char*)envelope.message.properties.correlation_id.bytes,
+            envelope.message.properties.correlation_id.len
+        );
     }
 
+    AngaraObject reply_obj = angara_create_nil();
     if (envelope.message.properties._flags & AMQP_BASIC_REPLY_TO_FLAG) {
-        AngaraObject reply_to_str = angara_create_string_with_len(
-            (const char*)envelope.message.properties.reply_to.bytes,
-            envelope.message.properties.reply_to.len);
-        angara_record_set(result, "replyTo", reply_to_str);
-        angara_decref(reply_to_str);
+        reply_obj = angara_create_string_with_len(
+            (char*)envelope.message.properties.reply_to.bytes,
+            envelope.message.properties.reply_to.len
+        );
     }
+
+    // Delivery Tag
+    AngaraObject dtag_obj = angara_create_i64((int64_t)envelope.delivery_tag);
+
+    // Build "properties" record (Legacy support for your previous code)
+    // or flatten it. Your Director code expects msg["correlationId"] directly?
+    // Let's check director_service.an...
+    // It uses: msg["correlationId"], msg["delivery_tag"], msg["body"], msg["replyTo"]
+    // It does NOT use a nested "properties" object anymore in the latest fixes.
+
+    AngaraObject k_body = angara_string_from_c("body");
+    AngaraObject k_dtag = angara_string_from_c("delivery_tag");
+    AngaraObject k_cid  = angara_string_from_c("correlationId");
+    AngaraObject k_rep  = angara_string_from_c("replyTo");
+
+    AngaraObject kvs[] = {
+        k_body, body_obj,
+        k_dtag, dtag_obj,
+        k_cid,  cid_obj,
+        k_rep,  reply_obj
+    };
+
+    AngaraObject record = angara_record_new_with_fields(4, kvs);
+
+    // Cleanup
+    angara_decref(k_body); angara_decref(body_obj);
+    angara_decref(k_dtag); angara_decref(dtag_obj);
+    angara_decref(k_cid);  angara_decref(cid_obj);
+    angara_decref(k_rep);  angara_decref(reply_obj);
 
     amqp_destroy_envelope(&envelope);
-    if (DEBUG) fprintf(stderr, "[DEBUG] next_message success.\n"); // <-- DEBUG
-    return result;
+    return record;
 }
 
 // *** NEW METHOD: `ch.ack(delivery_tag as i64)` ***
@@ -486,7 +529,7 @@ AngaraObject Angara_amqp_dummy_channel_ctor(__attribute__((unused)) int arg_coun
 }
 
 static const AngaraMethodDef CHANNEL_METHODS[] = {
-        {"queue_declare", (AngaraMethodFn)Angara_Channel_queue_declare, "sbbb?->n"},
+        {"queue_declare", (AngaraMethodFn)Angara_Channel_queue_declare, "sbbb?->{}"},
         {"exchange_declare", (AngaraMethodFn)Angara_Channel_exchange_declare, "ssbbb?->n"},
         {"publish",       (AngaraMethodFn)Angara_Channel_publish,       "sss{}?->n"},
         {"subscribe",    (AngaraMethodFn)Angara_Channel_subscribe,    "s->n"},

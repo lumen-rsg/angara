@@ -202,6 +202,165 @@ AngaraObject Angara_adv_string_contains(int arg_count, AngaraObject args[]) {
     return angara_create_bool(result != NULL);
 }
 
+// join(["a", "b"], ", ") -> "a, b"
+AngaraObject Angara_adv_string_join(int arg_count, AngaraObject* args) {
+    if (arg_count != 2 || !IS_LIST(args[0]) || !IS_STRING(args[1])) {
+        return angara_create_nil();
+    }
+
+    AngaraList* list = AS_LIST(args[0]);
+    const char* sep = AS_CSTRING(args[1]);
+    size_t sep_len = strlen(sep);
+
+    if (list->count == 0) return angara_string_from_c("");
+
+    // 1. Calculate total length
+    size_t total_len = 0;
+    for (size_t i = 0; i < list->count; i++) {
+        if (IS_STRING(list->elements[i])) {
+            total_len += strlen(AS_CSTRING(list->elements[i]));
+        }
+        if (i < list->count - 1) total_len += sep_len;
+    }
+
+    // 2. Allocate
+    char* result = malloc(total_len + 1);
+    char* ptr = result;
+
+    // 3. Build
+    for (size_t i = 0; i < list->count; i++) {
+        if (IS_STRING(list->elements[i])) {
+            const char* s = AS_CSTRING(list->elements[i]);
+            size_t len = strlen(s);
+            memcpy(ptr, s, len);
+            ptr += len;
+        }
+        if (i < list->count - 1) {
+            memcpy(ptr, sep, sep_len);
+            ptr += sep_len;
+        }
+    }
+    *ptr = '\0';
+
+    return angara_create_string_no_copy(result, total_len);
+}
+
+// replace(source, search, replacement) -> string
+AngaraObject Angara_adv_string_replace(int arg_count, AngaraObject* args) {
+    if (arg_count != 3 || !IS_STRING(args[0]) || !IS_STRING(args[1]) || !IS_STRING(args[2])) {
+        angara_throw_error("string.replace expects (source: string, search: string, replacement: string).");
+        return angara_create_nil();
+    }
+
+    const char* source = AS_CSTRING(args[0]);
+    const char* search = AS_CSTRING(args[1]);
+    const char* replacement = AS_CSTRING(args[2]);
+
+    size_t source_len = strlen(source);
+    size_t search_len = strlen(search);
+    size_t replacement_len = strlen(replacement);
+
+    // Edge Case: Search string is empty.
+    // Standard behavior varies, but usually, we return the original string
+    // to avoid infinite loops or inserting replacement between every char.
+    if (search_len == 0) {
+        angara_incref(args[0]);
+        return args[0];
+    }
+
+    // --- Pass 1: Count occurrences ---
+    int count = 0;
+    const char* temp_ptr = source;
+    while ((temp_ptr = strstr(temp_ptr, search))) {
+        count++;
+        temp_ptr += search_len;
+    }
+
+    // Optimization: If no occurrences found, return original string.
+    if (count == 0) {
+        angara_incref(args[0]);
+        return args[0];
+    }
+
+    // --- Calculate new length ---
+    // The new length is: original length + (difference * count)
+    // Note: 'diff' can be negative if replacement is shorter than search.
+    // We use long long to prevent underflow during calculation before casting back.
+    long long len_diff = (long long)replacement_len - (long long)search_len;
+    size_t new_len = source_len + (count * len_diff);
+
+    // --- Pass 2: Build the new string ---
+    char* result_buffer = (char*)malloc(new_len + 1);
+    if (!result_buffer) {
+        angara_throw_error("Out of memory during string replacement.");
+        return angara_create_nil();
+    }
+
+    char* dest_ptr = result_buffer;
+    const char* src_ptr = source;
+    const char* next_match;
+
+    while (count > 0) {
+        // Find next match
+        next_match = strstr(src_ptr, search);
+
+        // Copy content BEFORE the match
+        size_t segment_len = next_match - src_ptr;
+        memcpy(dest_ptr, src_ptr, segment_len);
+        dest_ptr += segment_len;
+
+        // Copy REPLACEMENT
+        memcpy(dest_ptr, replacement, replacement_len);
+        dest_ptr += replacement_len;
+
+        // Advance pointers
+        src_ptr = next_match + search_len;
+        count--;
+    }
+
+    // Copy the remaining part of the string after the last match
+    strcpy(dest_ptr, src_ptr);
+
+    // Create the Angara object, transferring ownership of result_buffer
+    return angara_create_string_no_copy(result_buffer, new_len);
+}
+
+// index_of(haystack, needle) -> i64 (returns -1 if not found)
+AngaraObject Angara_adv_string_index_of(int arg_count, AngaraObject* args) {
+    if (arg_count != 2 || !IS_STRING(args[0]) || !IS_STRING(args[1])) {
+        return angara_create_i64(-1);
+    }
+    const char* haystack = AS_CSTRING(args[0]);
+    const char* needle = AS_CSTRING(args[1]);
+
+    char* found = strstr(haystack, needle);
+    if (!found) return angara_create_i64(-1);
+
+    return angara_create_i64((int64_t)(found - haystack));
+}
+
+// last_index_of(haystack, needle) -> i64
+AngaraObject Angara_adv_string_last_index_of(int arg_count, AngaraObject* args) {
+    if (arg_count != 2 || !IS_STRING(args[0]) || !IS_STRING(args[1])) {
+        return angara_create_i64(-1);
+    }
+    const char* haystack = AS_CSTRING(args[0]);
+    const char* needle = AS_CSTRING(args[1]);
+    size_t haystack_len = strlen(haystack);
+    size_t needle_len = strlen(needle);
+
+    if (needle_len > haystack_len) return angara_create_i64(-1);
+    if (needle_len == 0) return angara_create_i64((int64_t)haystack_len);
+
+    // Search backwards
+    for (long i = (long)(haystack_len - needle_len); i >= 0; --i) {
+        if (strncmp(haystack + i, needle, needle_len) == 0) {
+            return angara_create_i64(i);
+        }
+    }
+    return angara_create_i64(-1);
+}
+
 
 // --- Module Definition ---
 
@@ -216,6 +375,11 @@ static const AngaraFuncDef STRING_EXPORTS[] = {
         {"to_lowercase",  Angara_adv_string_to_lowercase,  "s->s",   NULL},
         {"trim",          Angara_adv_string_trim,          "s->s",   NULL},
         {"contains",      Angara_adv_string_contains,      "ss->b",  NULL},
+{"join",          Angara_adv_string_join,          "l<s>s->s", NULL},{"index_of",      Angara_adv_string_index_of,      "ss->i",  NULL}, // New
+    {"last_index_of", Angara_adv_string_last_index_of, "ss->i",  NULL}, // New
+
+    // replace(source: string, search: string, replacement: string) -> string
+    {"replace",       Angara_adv_string_replace,       "sss->s",   NULL},
         {NULL, NULL, NULL, NULL}
 };
 

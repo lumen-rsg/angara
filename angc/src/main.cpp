@@ -15,9 +15,9 @@ const auto BLUE = "\033[34m";
 const auto PURPLE = "\033[35m";
 const auto CYAN = "\033[36m";
 
-const std::string ANGC_VERSION = "2.6-staging";
+const std::string ANGC_VERSION = "2.8-staging";
 const std::string ANGARA_SPEC = "v2.5-static";
-const std::string BACKEND_VERSION = "2.9-staging";
+const std::string BACKEND_VERSION = "3.0-staging";
 
 void print_and_remove(const std::string& data) {
     std::random_device dev;
@@ -39,6 +39,7 @@ void print_and_remove(const std::string& data) {
 
     std::cout << "\r\033[K" << std::flush;
 }
+
 
 void print_easter() {
     std::cout << BOLD << CYAN << "-> analyzing request" << RESET << std::flush;

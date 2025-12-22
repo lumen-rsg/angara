@@ -354,6 +354,10 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
             return std::make_shared<RecordType>(std::map<std::string, std::shared_ptr<Type>>{});
         }
 
+        if (name == "list") {
+            return std::make_shared<ListType>(m_type_any);
+        }
+
         // If not a primitive, it must be a user-defined type. Look it up.
         auto symbol = m_symbols.resolve(name);
         if (symbol) {

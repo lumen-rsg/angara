@@ -151,6 +151,7 @@ typedef struct {
     Object obj;
     void* data;
     AngaraFinalizerFn finalizer;
+    const char* type_name; // <--- NEW FIELD
 } AngaraNativeInstance;
 
 
@@ -170,7 +171,7 @@ AngaraObject angara_create_i64(int64_t value);
 AngaraObject angara_create_f64(double value);
 AngaraObject angara_create_string(const char* chars);
 AngaraObject angara_create_string_no_copy(char* owned_chars, size_t length);
-AngaraObject angara_create_native_instance(void* data, AngaraFinalizerFn finalizer);
+AngaraObject angara_create_native_instance(void* data, AngaraFinalizerFn finalizer, const char* type_name);
 AngaraObject angara_exception_new(AngaraObject message);
 AngaraObject angara_list_new(void);
 AngaraObject angara_record_new(void);

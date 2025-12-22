@@ -1,0 +1,44 @@
+attach "unittest.an" as unit;
+attach assert;
+
+// --- Code Under Test ---
+func add(a as i64, b as i64) -> i64 {
+    return a + b;
+}
+
+func div(a as i64, b as i64) -> i64 {
+    if (b == 0) throw Exception("Division by zero");
+    return a / b;
+}
+
+// --- Test Cases ---
+
+func t_addition() {
+    assert.eq(add(2, 2), 4, "2+2 should be 4");
+    assert.ne(add(2, 2), 5, "2+2 should not be 5");
+}
+
+func t_division() {
+    assert.eq(div(10, 2), 5, "10/2 is 5");
+}
+
+func t_division_fail() {
+    // We expect this to fail
+    div(10, 0);
+}
+
+// --- Entry Point ---
+
+export func main() -> i64 {
+    let s = unit.Suite("Math Operations");
+
+    s.add("Addition Logic", t_addition);
+    s.add("Division Logic", t_division);
+    s.add("Division Error (Should Fail)", t_division_fail); // This will show up as Red X
+
+    if (s.run()) {
+        return 0;
+    } else {
+        return 1;
+    }
+}

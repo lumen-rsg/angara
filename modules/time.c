@@ -33,7 +33,7 @@ AngaraObject Angara_time_Stopwatch(int arg_count, AngaraObject* args) {
     // CLOCK_MONOTONIC is essential for measuring intervals, as it's not
     // affected by system time changes (e.g., NTP updates).
     clock_gettime(CLOCK_MONOTONIC, &data->start_time);
-    return angara_create_native_instance(data, finalize_stopwatch);
+    return angara_create_native_instance(data, finalize_stopwatch, "Stopwatch");
 }
 
 // METHOD: `sw.elapsed() -> f64`

@@ -18,7 +18,18 @@ namespace angara {
         } else if (collection_type->toString() == "string") {
             // If it's a string, the item type is also string (for each character).
             item_type = m_type_string;
-        } else {
+        } else if (collection_type->kind == TypeKind::ANY) {
+            if (m_is_in_unsafe_context) {
+                // In unsafe mode, we assume the user knows this 'any' holds a list.
+                // The item type must be 'any' because we can't infer contents.
+                item_type = m_type_any;
+            } else {
+                error(stmt->name, "Iterating over 'any' is unsafe. Wrap this loop in an '@unsafe { ... }' block or cast the collection to a list.");
+                // Return early or set error type to prevent cascading
+            }
+        }
+        // -------------------------------------------
+        else {
             error(stmt->name, "The 'for..in' loop can only iterate over a list or a string, but got '" +
                               collection_type->toString() + "'.");
         }

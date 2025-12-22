@@ -1,0 +1,106 @@
+attach io;
+attach time;
+attach assert; // Native assert module
+attach adv_string as str;
+
+// --- Constants & Styling ---
+const C_RESET as string = "\x1b[0m";
+const C_RED as string = "\x1b[31m";
+const C_GREEN as string = "\x1b[32m";
+const C_YELLOW as string = "\x1b[33m";
+const C_BOLD as string = "\x1b[1m";
+const C_DIM as string = "\x1b[2m";
+
+// --- Data Structures ---
+
+data TestResult {
+    let name as string;
+    let success as bool;
+    let message as string; // Error message if failed
+    let duration as f64;   // Seconds
+}
+
+data TestCase {
+    let name as string;
+    let callback as any; // Function pointer
+}
+
+// --- The Test Suite Class ---
+
+export class Suite {
+    public:
+    let name as string;
+    let tests as list<TestCase>;
+    let results as list<TestResult>;
+
+    func init(name as string) {
+        this.name = name;
+        this.tests = [];
+        this.results = [];
+    }
+
+    // Register a test case
+    // Usage: suite.add("Math Check", my_test_func);
+    func add(description as string, test_fn as any) {
+        this.tests.push(TestCase(description, test_fn));
+    }
+
+    // Run all tests in this suite
+    func run() -> bool {
+        io.println(1, C_BOLD + "\nRunning Suite: " + this.name + C_RESET);
+        io.println(1, "---------------------------------------------------");
+
+        let passed as i64 = 0;
+        let failed as i64 = 0;
+        let total_start as f64 = time.now();
+
+        for (t in this.tests) {
+            // io.write(1, "  Running '" + t.name + "'... "); // No flush in IO yet, so println is safer
+
+            let start as f64 = time.now();
+            let success as bool = false;
+            let error_msg as string = "";
+
+            try {
+                // CALL THE TEST FUNCTION
+                // The compiler supports calling 'any' dynamically via angara_call
+                let fn as any = t.callback;
+                @unsafe{
+                    fn();
+                }
+
+                success = true;
+            } catch (e as Exception) {
+                success = false;
+                error_msg = e.message;
+            }
+
+            let end as f64 = time.now();
+            let duration as f64 = end - start;
+
+            // Store result
+            this.results.push(TestResult(t.name, success, error_msg, duration));
+
+            if (success) {
+                passed = passed + 1;
+                // Print minimal success (Dot reporter style could be done here)
+                io.println(1, "  " + C_GREEN + "✓ PASS" + C_RESET + " " + t.name + C_DIM + " (" + string(duration) + "s)" + C_RESET);
+            } else {
+                failed = failed + 1;
+                io.println(1, "  " + C_RED + "✗ FAIL" + C_RESET + " " + t.name);
+                io.println(1, "    " + C_RED + "↳ " + error_msg + C_RESET);
+            }
+        }
+
+        let total_time as f64 = time.now() - total_start;
+
+        io.println(1, "---------------------------------------------------");
+        if (failed == 0) {
+            io.println(1, C_GREEN + "SUMMARY: " + string(passed) + "/" + string(len(this.tests)) + " passed in " + string(total_time) + "s." + C_RESET);
+            return true;
+        } else {
+            io.println(1, C_RED + "SUMMARY: " + string(failed) + " FAILED, " + string(passed) + " passed." + C_RESET);
+            return false;
+        }
+    }
+}

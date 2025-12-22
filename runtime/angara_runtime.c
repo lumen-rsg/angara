@@ -315,12 +315,13 @@ static void free_record(AngaraRecord* record) {
     free(record);
 }
 
-AngaraObject angara_create_native_instance(void* data, AngaraFinalizerFn finalizer) {
+AngaraObject angara_create_native_instance(void* data, AngaraFinalizerFn finalizer, const char* type_name) {
     AngaraNativeInstance* instance = (AngaraNativeInstance*)malloc(sizeof(AngaraNativeInstance));
     instance->obj.type = OBJ_NATIVE_INSTANCE;
     instance->obj.ref_count = 1;
     instance->data = data;
     instance->finalizer = finalizer;
+    instance->type_name = type_name; // Store it
     return (AngaraObject){VAL_OBJ, {.obj = (Object*)instance}};
 }
 
@@ -1300,7 +1301,14 @@ AngaraObject angara_is_instance_of(AngaraObject object, const char* type_name) {
                 case OBJ_RECORD:
                     result = (strcmp(type_name, "record") == 0);
                     break;
-                case OBJ_NATIVE_INSTANCE:
+                case OBJ_NATIVE_INSTANCE: {
+                    // Safe check for native types
+                    AngaraNativeInstance* ni = AS_NATIVE_INSTANCE(object);
+                    if (ni->type_name) {
+                        result = (strcmp(ni->type_name, type_name) == 0);
+                    }
+                    break;
+                }
                 case OBJ_INSTANCE:
                     // This is the key case for user-defined types.
                     // We check the instance's class's name.
