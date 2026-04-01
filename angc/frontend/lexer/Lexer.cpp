@@ -54,8 +54,8 @@ namespace angara {
             {"retype", TokenType::RETYPE},
     };
 
-    Lexer::Lexer(std::string source, ErrorHandler& errorHandler)
-            : m_source(std::move(source)), m_errorHandler(errorHandler) {}
+    Lexer::Lexer(std::string source, std::shared_ptr<std::string> filename, ErrorHandler& errorHandler)
+            : m_source(std::move(source)), m_filename(std::move(filename)), m_errorHandler(errorHandler) {}
 
     std::vector<Token> Lexer::scanTokens() {
         while (!isAtEnd()) {
@@ -63,8 +63,8 @@ namespace angara {
             scanToken();
         }
 
-        // Add one final "end of file" token.
-        m_tokens.emplace_back(TokenType::EOF_TOKEN, "", m_line, 1);
+        // Pass filename to EOF token too
+        m_tokens.emplace_back(TokenType::EOF_TOKEN, "", m_line, 1, m_filename);
         return m_tokens;
     }
 
@@ -95,15 +95,16 @@ namespace angara {
 
     void Lexer::addToken(TokenType type) {
         std::string text = m_source.substr(m_start, m_current - m_start);
-        // Calculate the start column of the token
         int token_col = m_column - text.length();
-        m_tokens.emplace_back(type, std::move(text), m_line, token_col);
+        // PASS m_filename
+        m_tokens.emplace_back(type, std::move(text), m_line, token_col, m_filename);
     }
 
+    // Updated addToken (With literal)
     void Lexer::addToken(TokenType type, const std::string &literal) {
-        // start column is current column - (total length of lexeme with quotes)
         int token_col = m_column - (m_current - m_start);
-        m_tokens.emplace_back(type, literal, m_line, token_col);
+        // PASS m_filename
+        m_tokens.emplace_back(type, literal, m_line, token_col, m_filename);
     }
 
     bool Lexer::match(char expected) {

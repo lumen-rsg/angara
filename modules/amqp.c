@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <sys/time.h>
 
-#define DEBUG_AMQP 1
+#define DEBUG_AMQP 0
 
 void dbg_amqp(const char* func, const char* msg) {
     if (DEBUG_AMQP) fprintf(stderr, "[AMQP DEBUG] %s: %s\n", func, msg);

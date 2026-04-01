@@ -46,7 +46,7 @@ namespace angara {
             } else if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
                 (*m_current_out) << "AngaraObject " << module_name << "_" << var_decl->name.lexeme << ";\n";
             } else if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
-                std::string var_name = "g_" + func_stmt->name.lexeme;
+                std::string var_name = "g_" + module_name + "_" + func_stmt->name.lexeme;
                 if (func_stmt->name.lexeme == "main") var_name = "g_angara_main_closure";
                 (*m_current_out) << "AngaraObject " << var_name << ";\n";
             }
@@ -148,6 +148,7 @@ namespace angara {
         for (const auto& stmt : statements) {
             if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
                 indent();
+                // FIX: Use module prefix for global variable being assigned
                 (*m_current_out) << module_name << "_" << var_decl->name.lexeme << " = ";
                 if (var_decl->initializer) {
                     (*m_current_out) << transpileExpr(var_decl->initializer) << ";";
@@ -158,13 +159,16 @@ namespace angara {
             }
             else if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
                 if (func_stmt->is_foreign) continue;
-                std::string var_name = "g_" + func_stmt->name.lexeme;
+
+                // FIX: Determine namespaced closure variable name
+                std::string var_name = "g_" + module_name + "_" + func_stmt->name.lexeme;
                 if (func_stmt->name.lexeme == "main") var_name = "g_angara_main_closure";
-                std::string mangled_name = "angara_f_" + module_name + "_" + func_stmt->name.lexeme;
-                if (func_stmt->name.lexeme == "main") mangled_name = "angara_f_main";
+
+                std::string mangled_impl = "angara_f_" + module_name + "_" + func_stmt->name.lexeme;
+                if (func_stmt->name.lexeme == "main") mangled_impl = "angara_f_main";
 
                 indent();
-                (*m_current_out) << var_name << " = angara_closure_new(&angara_w_" << mangled_name << ", " << func_stmt->params.size() << ", false);\n";
+                (*m_current_out) << var_name << " = angara_closure_new(&angara_w_" << mangled_impl << ", " << func_stmt->params.size() << ", false);\n";
             }
             else if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
                 indent();

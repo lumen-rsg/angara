@@ -323,6 +323,7 @@ typedef struct {
 #define AS_CLOSURE(value)  ((AngaraClosure*)AS_OBJ(value))
 #define AS_THREAD(value)   ((AngaraThread*)AS_OBJ(value))
 #define AS_MUTEX(value)    ((AngaraMutex*)AS_OBJ(value))
+#define BOX_PTR(ptr) ((AngaraObject){VAL_OBJ, {.obj = (Object*)(ptr)}})
 
 
 /*
@@ -333,9 +334,13 @@ typedef struct {
 ===========================================================================
 */
 #define ANGARA_MAX_EXCEPTION_FRAMES 256
-extern AngaraObject g_current_exception;
-typedef struct ExceptionFrame { jmp_buf buffer; struct ExceptionFrame* prev; } ExceptionFrame;
+typedef struct ExceptionFrame {
+    jmp_buf buffer;
+    struct ExceptionFrame* prev;
+} ExceptionFrame;
+
 extern ExceptionFrame* g_exception_chain_head;
+extern AngaraObject g_current_exception;
 
 extern void angara_runtime_init();
 extern void angara_runtime_shutdown();
@@ -408,4 +413,39 @@ AngaraObject angara_pre_decrement(AngaraObject* lvalue);
 AngaraObject angara_post_decrement(AngaraObject* lvalue);
 
 AngaraObject angara_bound_method_new(AngaraObject receiver, AngaraObject method_closure);
+
+// Optimized runtime type checks
+static inline bool angara_is_class(void* obj, AngaraClass* target) {
+    if (!obj) return false;
+    Object* o = (Object*)obj;
+    return o->type == OBJ_INSTANCE && ((AngaraInstance*)o)->klass == target;
+}
+
+static inline bool angara_is_data(void* obj, AngaraDataInfo* target) {
+    if (!obj) return false;
+    Object* o = (Object*)obj;
+    // We assume the info pointer is at a fixed offset in all Data instances
+    return o->type == OBJ_DATA_INSTANCE && ((AngaraDataInstanceHeader*)o)->info == target;
+}
+
+// --- Raw C API (For Transpiled Code) ---
+void angara_incref_ptr(void* ptr);
+void angara_decref_ptr(void* ptr);
+int64_t angara_len_ptr(void* collection);
+const char* angara_string_concat_raw(const char* a, const char* b);
+bool angara_is_class(void* obj, AngaraClass* target);
+
+// List helpers that handle raw void* (Any)
+void* angara_list_get_raw(void* list, int64_t index);
+void angara_list_push_raw(void* list, void* item);
+
+static inline bool angara_is_class_obj(AngaraObject wrapper, AngaraClass* target) {
+    if (!IS_OBJ(wrapper)) return false;
+    AngaraInstance* instance = (AngaraInstance*)wrapper.as.obj;
+    return instance->klass == target;
+}
+
+AngaraObject angara_from_c_object(void* ptr);
+void* angara_deep_clone_ptr(void* ptr);
+const char* angara_to_string_raw(AngaraObject val);
 #endif // ANGARA_H

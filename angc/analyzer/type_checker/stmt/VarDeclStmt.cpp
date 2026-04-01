@@ -42,9 +42,9 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         final_type = initializer_type;
 
         // Issue an informational note about the inferred type.
-        if (final_type->kind != TypeKind::ERROR && final_type->kind != TypeKind::NIL) {
-            note(stmt->name, "Type for '" + stmt->name.lexeme + "' inferred as '" + final_type->toString() + "'. Consider adding an explicit annotation for clarity.");
-        }
+        // if (final_type->kind != TypeKind::ERROR && final_type->kind != TypeKind::NIL) {
+        //     note(stmt->name, "Type for '" + stmt->name.lexeme + "' inferred as '" + final_type->toString() + "'. Consider adding an explicit annotation for clarity.");
+        // }
 
     } else { // Implies (stmt->typeAnnotation && !stmt->initializer)
         // --- CASE C: Only a type annotation is present ---

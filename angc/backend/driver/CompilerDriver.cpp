@@ -141,11 +141,24 @@ namespace angara {
         print_progress(m_last_progress_message);
     }
 
-    CompilerDriver::CompilerDriver()
-            : m_runtime_path("/opt/src/angara/runtime"),
-              m_angara_module_path("/opt/src/angara/modules"),
-              m_native_module_path("/opt/modules/angara/")
-    {}
+    CompilerDriver::CompilerDriver() {
+        // Defaults, but BuildSystem should override these via set_paths
+        m_angara_module_path = ".";
+        m_native_module_path = ".";
+    }
+
+    void CompilerDriver::set_paths(std::string std_lib_path, std::string native_lib_path) {
+        m_angara_module_path = std::move(std_lib_path);
+        m_native_module_path = std::move(native_lib_path);
+    }
+
+    const std::set<std::string>& CompilerDriver::get_generated_c_files() const {
+        return m_generated_c_files;
+    }
+
+    const std::vector<std::string>& CompilerDriver::get_native_libs_linked() const {
+        return m_native_lib_names;
+    }
 
     void CompilerDriver::print_progress(const std::string& current_file) {
         // Store the message so other functions can reprint it.
@@ -171,323 +184,269 @@ namespace angara {
 
         // \r moves to the beginning. \033[K clears the line.
         std::cout << ss.str() << "\r\033[K" << std::flush;
-}
+    }
 
-    static std::string get_lib_name(const std::string& path) {
-        std::string basename = CompilerDriver::get_base_name(path);
-        // Strip the "lib" prefix if it exists
+    std::string CompilerDriver::read_file(const std::string& path) {
+        std::ifstream file(path);
+        if (!file.is_open()) {
+            return "";
+        }
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        return buffer.str();
+    }
+
+    bool CompilerDriver::compile(const ProjectConfig& project, const std::string& root_file_path) {
+        m_build_start_time = std::chrono::high_resolution_clock::now();
+        m_had_error = false;
+        m_modules_compiled = 0;
+        m_total_modules = 1;
+        m_module_cache.clear();
+        m_compilation_stack.clear();
+        m_generated_c_files.clear();
+        m_generated_h_files.clear();
+        m_native_lib_names.clear();
+
+        // 1. Kick off the recursive resolution.
+        // This triggers resolveModule -> loadNative/compileAngara recursively.
+        auto root_module = resolveModule(root_file_path, Token());
+
+        if (!root_module || m_had_error) {
+            return false;
+        }
+
+        // 2. We are done. The C files have been written to disk by the CTranspiler.
+        // The BuildSystem will now call get_generated_c_files() and run the linker.
+        return true;
+    }
+
+    std::string CompilerDriver::get_base_name(const std::string& path) {
+        // Find the position of the last directory separator ('/' or '\')
+        size_t last_slash = path.find_last_of("/\\");
+
+        // If a separator is found, the substring starts after it. Otherwise, start at the beginning.
+        size_t start = (last_slash == std::string::npos) ? 0 : last_slash + 1;
+
+        // Find the position of the last dot (for the file extension)
+        size_t last_dot = path.find_last_of('.');
+
+        // If there's no dot, or the dot is before the last slash (e.g., "a.b/c"),
+        // then the substring goes to the end of the string.
+        if (last_dot == std::string::npos || last_dot < start) {
+            last_dot = path.length();
+        }
+
+        std::string basename = path.substr(start, last_dot - start);
+        // If the name starts with "lib", strip it. e.g., "libfs" -> "std::filesystem"
         if (basename.rfind("lib", 0) == 0) {
             return basename.substr(3);
         }
         return basename;
     }
 
-std::string CompilerDriver::read_file(const std::string& path) {
-    std::ifstream file(path);
-    if (!file.is_open()) {
-        return "";
-    }
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    return buffer.str();
-}
+    static std::optional<std::string> find_candidate(const std::filesystem::path& dir, const std::string& name) {
+        std::error_code ec;
 
-bool CompilerDriver::compile(const std::string& root_file_path) {
-    m_build_start_time = std::chrono::high_resolution_clock::now();
-    // 1. Reset state for a fresh compilation run.
-    m_had_error = false;
-    m_modules_compiled = 0;
-    m_total_modules = 1; // Will be incremented by resolveModule
-    m_module_cache.clear();
-    m_compilation_stack.clear();
-    m_compiled_c_files.clear();
-
-    // 2. Recursively compile the root module and all of its dependencies.
-    //    resolveModule is the heart of the compilation process.
-    //    The Token here is a dummy, as the root file isn't imported by anything.
-    auto root_module_type = resolveModule(root_file_path, Token());
-
-    // 3. Check if any stage of the recursive compilation failed.
-    if (!root_module_type || m_had_error) {
-        return false;
-    }
-
-    // 4. After all files are compiled, perform the final "linker" check to
-    //    ensure the root module provides a valid `main` function.
-    auto main_symbol_it = root_module_type->exports.find("main");
-    if (main_symbol_it == root_module_type->exports.end()) {
-        std::cerr << "\n" << BOLD << RED << "Linker Error: " << RESET
-                  << "Program has no exported 'main' function to act as an entry point.\n"
-                  << "Required signature: 'export func main() -> i64' or 'export func main(args as list<string>) -> i64'."
-                  << std::endl;
-        return false;
-    }
-
-    // 5. Validate the signature of the found 'main' function.
-    if (main_symbol_it->second->kind != TypeKind::FUNCTION) {
-        std::cerr << "\n" << BOLD << RED << "Linker Error: " << RESET << "The global symbol 'main' must be a function." << std::endl;
-        return false;
-    }
-    auto main_func_type = std::dynamic_pointer_cast<FunctionType>(main_symbol_it->second);
-    if (!isInteger(main_func_type->return_type)) {
-        std::cerr << "\n" << BOLD << RED << "Linker Error: " << RESET << "'main' function must be declared to return an integer type (e.g., i64), but it returns '" << main_func_type->return_type->toString() << "'." << std::endl;
-        return false;
-    }
-    if (main_func_type->param_types.size() > 1 ||
-        (main_func_type->param_types.size() == 1 && main_func_type->param_types[0]->toString() != "list<string>")) {
-         std::cerr << "\n" << BOLD << RED << "Linker Error: " << RESET << "'main' function can only have zero parameters, or one parameter of type 'list<string>'." << std::endl;
-         return false;
-    }
-
-    // 6. If all checks passed, link all the generated .c files into the final executable.
-    log_step("Linking final executable...");
-    std::string base_name = get_base_name(root_file_path);
-    std::string runtime_c_path = std::filesystem::path(m_runtime_path) / "angara_runtime.c";
-
-    std::stringstream command_ss;
-    command_ss << "clang -o " << base_name;
-
-    // Add our generated source files
-    for (const auto& c_file : m_compiled_c_files) {
-        command_ss << " " << c_file;
-    }
-    command_ss << " " << runtime_c_path;
-
-    // Add include paths
-    command_ss << " -I. -I" << m_runtime_path;
-
-    // Add library search paths (includes the standard path and any relative ones)
-    m_native_lib_paths.insert(m_native_module_path);
-    for (const auto& lib_path : m_native_lib_paths) {
-        command_ss << " -L" << lib_path;
-    }
-
-    // Add libraries to link
-    for (const auto& lib_name : m_native_lib_names) {
-        command_ss << " -l" << lib_name;
-    }
-
-    // Add final flags
-    command_ss << " -pthread -lm";
-        command_ss << " -Wl,-rpath," << m_native_module_path;
-        command_ss << " -O2";
-    std::string command = command_ss.str();
-
-        // --- NEW LOGIC: Redirect output and conditionally print ---
-        std::string temp_log_file = "angara_build.log";
-        std::string redirected_command = command + " > " + temp_log_file + " 2>&1";
-
-        int result = system(redirected_command.c_str());
-
-        if (result != 0) {
-            std::cout << "\r\033[K"; // Clear the progress bar line
-            std::cerr << BOLD << RED << "\nBuild failed." << RESET << " The system compiler returned an error." << std::endl;
-
-            // Read the contents of the log file to show the user the GCC error.
-            std::string gcc_output = read_file(temp_log_file);
-            if (!gcc_output.empty()) {
-                std::cerr << "\n" << YELLOW << "--- Compiler Output ---" << RESET << std::endl;
-                std::cerr << gcc_output;
-                std::cerr << YELLOW << "--- End Compiler Output ---" << RESET << std::endl;
+        // If the name already has an extension, check it directly
+        if (std::filesystem::path(name).has_extension()) {
+            std::filesystem::path p = dir / name;
+            if (std::filesystem::exists(p, ec) && !std::filesystem::is_directory(p, ec)) {
+                return std::filesystem::canonical(p).string();
             }
-
-            std::cerr << "\nThe command that failed was:\n" << "   $ " << command << std::endl;
-
-            return false;
         }
 
-
-        for (const auto& c_file : m_compiled_c_files) {
-            remove(c_file.c_str());
-        }
-        for (const auto& h_file : m_compiled_h_files) {
-            remove(h_file.c_str());
+        // 1. Try Angara Source (.an)
+        std::filesystem::path an_path = dir / (name + ".an");
+        if (std::filesystem::exists(an_path, ec) && !std::filesystem::is_directory(an_path, ec)) {
+            return std::filesystem::canonical(an_path).string();
         }
 
-        // On success, just clean up.
-        remove(temp_log_file.c_str());
+        // 2. Try Native Libraries (.so, .dylib)
+        const std::vector<std::string> native_exts = { ".so", ".dylib", ".dll" };
+        for (const auto& ext : native_exts) {
+            std::filesystem::path p = dir / (name + ext);
+            if (std::filesystem::exists(p, ec) && !std::filesystem::is_directory(p, ec)) return std::filesystem::canonical(p).string();
 
-    m_modules_compiled = m_total_modules > 0 ? m_total_modules : 1;
-    print_progress("Done!");
-    std::cout << "\n" << BOLD << GREEN << "Executable created: ./" << base_name << RESET << std::endl;
+            std::filesystem::path lib_p = dir / ("lib" + name + ext);
+            if (std::filesystem::exists(lib_p, ec) && !std::filesystem::is_directory(lib_p, ec)) return std::filesystem::canonical(lib_p).string();
+        }
 
-    // Calculate build duration
-    auto build_end_time = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> build_duration = build_end_time - m_build_start_time;
-
-    // Calculate total lines
-    int total_lines = 0;
-    for (const auto& [file, count] : m_line_counts) {
-        total_lines += count;
+        return std::nullopt;
     }
-
-    // Print the summary
-    std::cout << "\n" << BOLD << YELLOW << " -> Compilation Summary <- " << RESET << std::endl;
-    std::cout << " \n    • " << "Modules Compiled: " << m_compiled_angara_files.size() << " (";
-    for(size_t i = 0; i < m_compiled_angara_files.size(); ++i) {
-        std::cout << get_base_name(m_compiled_angara_files[i]) << (i == m_compiled_angara_files.size() - 1 ? "" : ", ");
-    }
-    std::cout << ")" << std::endl;
-    std::cout << "    • " << "Total Lines of Code: " << total_lines << std::endl;
-    std::cout << "    • " << "Generated C Files: ";
-    for (const auto& c_file : m_compiled_c_files) {
-        command_ss << " " << c_file;
-    }
-    std::cout << std::endl;
-    std::cout << "    • " << "Build Time: " << std::fixed << std::setprecision(2) << build_duration.count() << "s" << std::endl;
-
-    return true;
-
-}
-
-std::string CompilerDriver::get_base_name(const std::string& path) {
-    // Find the position of the last directory separator ('/' or '\')
-    size_t last_slash = path.find_last_of("/\\");
-
-    // If a separator is found, the substring starts after it. Otherwise, start at the beginning.
-    size_t start = (last_slash == std::string::npos) ? 0 : last_slash + 1;
-
-    // Find the position of the last dot (for the file extension)
-    size_t last_dot = path.find_last_of('.');
-
-    // If there's no dot, or the dot is before the last slash (e.g., "a.b/c"),
-    // then the substring goes to the end of the string.
-    if (last_dot == std::string::npos || last_dot < start) {
-        last_dot = path.length();
-    }
-
-    std::string basename = path.substr(start, last_dot - start);
-    // If the name starts with "lib", strip it. e.g., "libfs" -> "fs"
-    if (basename.rfind("lib", 0) == 0) {
-        return basename.substr(3);
-    }
-    return basename;
-}
-
 
     std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& path_or_id, const Token& import_token) {
-        // 1. Find the absolute path to the module file.
-        std::string found_path;
-        bool is_direct_path = path_or_id.find('/') != std::string::npos || path_or_id.find('\\') != std::string::npos;
+    namespace fs = std::filesystem;
+    std::string found_path = "";
+    std::string module_name = ""; // We will determine this carefully
 
-        if (is_direct_path || path_or_id.ends_with(".an") || path_or_id.ends_with(".so") || path_or_id.ends_with(".dylib") || path_or_id.ends_with(".dll")) {
-            // It's a direct path.
-            if (std::filesystem::exists(path_or_id)) {
-                found_path = std::filesystem::absolute(path_or_id).string();
-            }
+    // 1. Determine Search Context
+    fs::path base_dir = fs::current_path();
+    if (import_token.file && !import_token.file->empty()) {
+        base_dir = fs::path(*import_token.file).parent_path();
+    }
+
+    // ==========================================================
+    // PHASE A: Discovery (Find the physical file)
+    // ==========================================================
+
+    // Check if it's an absolute path already
+    fs::path input_path(path_or_id);
+    if (input_path.is_absolute()) {
+        std::error_code ec;
+        if (fs::exists(input_path, ec)) found_path = fs::canonical(input_path, ec).string();
+    }
+
+    if (found_path.empty()) {
+        bool is_relative = (path_or_id.find("./") == 0 || path_or_id.find("../") == 0);
+
+        if (is_relative) {
+            if (auto p = find_candidate(base_dir, path_or_id)) found_path = *p;
         } else {
-            // It's a logical name, like "json" or "fs". Search for it.
-            const std::vector<std::string> search_paths = { ".", m_angara_module_path, m_native_module_path };
-            for (const auto& dir : search_paths) {
-                // Check for Angara source file: e.g., ./json.an or /opt/src/angara/modules/json.an
-                std::filesystem::path an_path = std::filesystem::path(dir) / (path_or_id + ".an");
-                if (std::filesystem::exists(an_path)) {
-                    found_path = std::filesystem::absolute(an_path).string();
-                    break;
+            // Priority 1: Exact Project Name
+            if (m_project_entries.count(path_or_id)) {
+                found_path = m_project_entries.at(path_or_id);
+            }
+            // Priority 2: Local Sibling
+            if (found_path.empty()) {
+                if (auto p = find_candidate(base_dir, path_or_id)) found_path = *p;
+            }
+            // Priority 3: Internal Project Files (cross-project)
+            if (found_path.empty()) {
+                for (auto const& [name, entry_file] : m_project_entries) {
+                    fs::path proj_dir = fs::path(entry_file).parent_path();
+                    if (auto p = find_candidate(proj_dir, path_or_id)) {
+                        found_path = *p;
+                        break;
+                    }
                 }
-
-                // Check for native library: e.g., ./libfs.so or /opt/modules/angara/libfs.so
-                std::filesystem::path so_path = std::filesystem::path(dir) / ("lib" + path_or_id + ".so");
-                if (std::filesystem::exists(so_path)) {
-                    found_path = std::filesystem::absolute(so_path).string();
-                    break;
-                }
-
-                // Add other native extensions if needed (.dylib, .dll)
-                if (std::filesystem::path dylib_path = std::filesystem::path(dir) / ("lib" + path_or_id + ".dylib"); std::filesystem::exists(dylib_path)) {
-                    found_path = std::filesystem::absolute(dylib_path).string();
-                    break;
-                }
+            }
+            // Priority 4: StdLib (Source)
+            if (found_path.empty()) {
+                if (auto p = find_candidate(fs::path(m_angara_module_path), path_or_id)) found_path = *p;
+            }
+            // Priority 5: Native Modules (Binary)
+            if (found_path.empty()) {
+                if (auto p = find_candidate(fs::path(m_native_module_path), path_or_id)) found_path = *p;
             }
         }
+    }
 
-        if (found_path.empty()) {
-            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Cannot find module '" << path_or_id << "'.\n";
+    if (found_path.empty()) {
+        std::string loc = (import_token.file) ? *import_token.file : "entry point";
+        std::cerr << "Error: Module '" << path_or_id << "' not found (imported from " << loc << ")\n";
+        m_had_error = true;
+        return nullptr;
+    }
+
+    // ==========================================================
+    // PHASE B: Identification (Determine the UNIQUE Module Name)
+    // ==========================================================
+
+    // 1. Does this path match a known Project Entry Point?
+    for (auto const& [projName, entryPath] : m_project_entries) {
+        if (found_path == entryPath) {
+            module_name = projName;
+            break;
+        }
+    }
+
+    // 2. If it's a file inside a project folder but NOT the entry point
+    if (module_name.empty()) {
+        for (auto const& [projName, entryPath] : m_project_entries) {
+            fs::path proj_dir = fs::path(entryPath).parent_path();
+            if (found_path.find(proj_dir.string()) == 0) {
+                // It's a helper file. Combine Project + Filename for uniqueness
+                // e.g., "RabbitMQHelper_utils"
+                module_name = projName + "_" + get_base_name(found_path);
+                break;
+            }
+        }
+    }
+
+    // 3. Fallback to filename (StdLib or unmanaged files)
+    if (module_name.empty()) {
+        module_name = get_base_name(found_path);
+    }
+
+    // 4. CRITICAL: Never allow "main" as a module name
+    // If we are left with "main", it means it's a single file app.
+    if (module_name == "main") {
+        module_name = "app_main";
+    }
+
+    // ==========================================================
+    // PHASE C: Compilation and Caching
+    // ==========================================================
+
+    if (m_module_cache.count(found_path)) return m_module_cache[found_path];
+
+    for (const auto& s : m_compilation_stack) {
+        if (s == found_path) {
+            std::cerr << "Error: Circular dependency: " << found_path << "\n";
             m_had_error = true;
             return nullptr;
         }
+    }
 
-        // 2. Use the canonical, absolute path as the cache key.
-        const std::string& cache_key = found_path;
-        if (m_module_cache.contains(cache_key)) {
-            return m_module_cache[cache_key];
-        }
+    m_compilation_stack.push_back(found_path);
+    std::shared_ptr<ModuleType> result = nullptr;
 
-        // 3. Check for circular dependencies.
-        for (const auto& p : m_compilation_stack) {
-            if (p == cache_key) {
-                std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET << ": Circular dependency detected for module '" << path_or_id << "'.\n";
-                m_had_error = true;
-                return nullptr;
-            }
-        }
-
-        // 4. Now that we have the path, compile or load it.
-        m_compilation_stack.push_back(cache_key);
-        m_total_modules++;
-        print_progress(path_or_id);
-
-        std::shared_ptr<ModuleType> module_type = nullptr;
-        if (found_path.ends_with(".so") || found_path.ends_with(".dylib") || found_path.ends_with(".dll")) {
-            module_type = loadNativeModule(found_path, import_token);
-            if (module_type) {
-                m_native_lib_paths.insert(std::filesystem::path(found_path).parent_path().string());
-                m_native_lib_names.push_back(get_base_name(found_path));
-                module_type->is_native = true;
-            }
-        } else {
-        // --- Compile an Angara source file ---
-        m_compiled_angara_files.push_back(found_path);
-        std::string source = read_file(found_path);
-
-        int line_count = 1;
-        for(char c : source) { if (c == '\n') line_count++; }
-        m_line_counts[found_path] = line_count;
-
-        ErrorHandler errorHandler(source);
-        Lexer lexer(source, errorHandler);
-        auto tokens = lexer.scanTokens();
-        if (errorHandler.hadError()) { m_had_error = true; m_compilation_stack.pop_back(); return nullptr; }
-
-        Parser parser(tokens, errorHandler);
-        auto statements = parser.parseStmts();
-        if (errorHandler.hadError()) { m_had_error = true; m_compilation_stack.pop_back(); return nullptr; }
-
-        std::string module_name = get_base_name(found_path);
-        TypeChecker typeChecker(*this, errorHandler, module_name);
-        if (!typeChecker.check(statements)) { m_had_error = true; m_compilation_stack.pop_back(); return nullptr; }
-
-        auto module_type_obj = typeChecker.getModuleType();
-        m_angara_module_names.push_back(module_name);
-
-        CTranspiler transpiler(typeChecker, errorHandler);
-        auto [header_code, source_code] = transpiler.generate(statements, module_type_obj, m_angara_module_names);
-        if (errorHandler.hadError()) { m_had_error = true; m_compilation_stack.pop_back(); return nullptr; }
-
-        // --- THIS IS THE FIX ---
-        // Using `set::insert` automatically prevents duplicates from being added.
-        std::string h_filename = module_name + ".h";
-        m_compiled_h_files.insert(h_filename);
-        std::ofstream h_file(h_filename);
-        h_file << header_code;
-
-        std::string c_filename = module_name + ".c";
-        m_compiled_c_files.insert(c_filename);
-        std::ofstream c_file(c_filename);
-        c_file << source_code;
-        // --- END OF FIX ---
-
-        module_type = typeChecker.getModuleType();
+    if (found_path.ends_with(".so") || found_path.ends_with(".dylib") || found_path.ends_with(".dll")) {
+        result = loadNativeModule(found_path, import_token);
+        if (result) m_native_lib_names.push_back(get_base_name(found_path));
+    } else {
+        // Pass our carefully calculated module_name to the compiler
+        result = compileAngaraSource(found_path, module_name);
     }
 
     m_compilation_stack.pop_back();
-    if (module_type) {
-        m_module_cache[cache_key] = module_type;
-        m_modules_compiled++;
-    }
-    return module_type;
+    if (result) m_module_cache[found_path] = result;
+
+    return result;
 }
 
+    std::shared_ptr<ModuleType> CompilerDriver::compileAngaraSource(
+    const std::string& path,
+    const std::string& module_name
+) {
+        std::string source = read_file(path);
+        auto filename_ptr = std::make_shared<std::string>(path);
+
+        ErrorHandler errorHandler(source);
+
+        Lexer lexer(source, filename_ptr, errorHandler);
+        auto tokens = lexer.scanTokens();
+        if (errorHandler.hadError()) { m_had_error = true; return nullptr; }
+
+        Parser parser(tokens, errorHandler);
+        auto statements = parser.parseStmts();
+        if (errorHandler.hadError()) { m_had_error = true; return nullptr; }
+
+        TypeChecker typeChecker(*this, errorHandler, module_name);
+        if (!typeChecker.check(statements)) { m_had_error = true; return nullptr; }
+
+        auto mod = typeChecker.getModuleType();
+        m_angara_module_names.push_back(module_name);
+
+        CTranspiler transpiler(typeChecker, errorHandler);
+        auto [h_code, c_code] = transpiler.generate(statements, mod, m_angara_module_names);
+
+        if (!errorHandler.hadError()) {
+            std::string h_file = module_name + ".h";
+            std::string c_file = module_name + ".c";
+
+            std::ofstream out_h(h_file); out_h << h_code;
+            std::ofstream out_c(c_file); out_c << c_code;
+
+            m_generated_h_files.insert(h_file);
+            m_generated_c_files.insert(c_file);
+
+            return mod;
+        }
+
+        m_had_error = true;
+        return nullptr;
+    }
 
     std::shared_ptr<ModuleType> CompilerDriver::loadNativeModule(const std::string& path, const Token& import_token) {
         print_progress("Loading native module: " + path);
@@ -639,6 +598,5 @@ std::string CompilerDriver::get_base_name(const std::string& path) {
         m_modules_compiled++;
         return module_type;
     }
-
 
 } // namespace angara

@@ -1,22 +1,22 @@
 #pragma once
 
-#include <chrono>
 #include <string>
 #include <vector>
 #include <map>
-#include <memory>
-#include <SymbolTable.h>
-#include <Token.h>
 #include <set>
+#include <memory>
+#include <chrono>
 
-#include "Type.h" // For our internal Type representation
+#include "ConfigParser.h"
+#include "SymbolTable.h"
+#include "Token.h"
+#include "Type.h"
 
 namespace angara {
 
-    // --- ModuleType to represent the public API of a module ---
+    // --- ModuleType Definition ---
     struct ModuleType : Type {
         const std::string name;
-        // A map from exported symbol name to its Type.
         std::map<std::string, std::shared_ptr<Type>> exports;
         bool is_native = false;
 
@@ -26,51 +26,71 @@ namespace angara {
         std::string toString() const override { return "module<" + name + ">"; }
     };
 
-
     class CompilerDriver {
     public:
+        CompilerDriver();
         virtual ~CompilerDriver() = default;
 
-        CompilerDriver();
-        bool compile(const std::string& root_file_path);
-        std::shared_ptr<ModuleType> resolveModule(const std::string& path_or_id, const Token& import_token);
-        static std::string get_base_name(const std::string& path);
+        // Configuration
+        void set_paths(std::string std_lib_path, std::string native_lib_path);
 
+        // Main Entry Point
+        // Recursively transpiles 'root_file_path' and all its imports into C files.
+        // Returns true if all stages (Lex, Parse, Check, Transpile) succeeded.
+        bool compile(const ProjectConfig& project, const std::string& root_file_path);
+
+        // Core Resolution Logic
+        std::shared_ptr<ModuleType> resolveModule(
+            const std::string& path_or_id,
+            const Token& import_token
+        );
+        std::shared_ptr<ModuleType> compileAngaraSource(
+            const std::string& path,
+            const std::string& module_name
+        );
+
+        // Output Retrieval (Used by BuildSystem to know what to link)
+        const std::set<std::string>& get_generated_c_files() const;
+        const std::vector<std::string>& get_native_libs_linked() const;
+
+        // Static Utility
+        static std::string get_base_name(const std::string& path);
+        static std::string read_file(const std::string& path);
+
+        inline void set_workspace_projects(std::map<std::string, std::string> project_entries) {
+            m_project_entries = std::move(project_entries);
+        }
 
     protected:
-        virtual std::string read_file(const std::string& path);
-
+        // Internal Helpers
         void log_step(const std::string& message);
-        void print_progress(const std::string& current_file);
+        std::shared_ptr<ModuleType> loadNativeModule(const std::string& path, const Token& import_token);
+
+        // State
         bool m_had_error = false;
 
+        // Search Paths (Configured by BuildSystem)
+        std::string m_angara_module_path; // /opt/angara/src/modules
+        std::string m_native_module_path; // /opt/angara/modules
+
+        // Compilation State
         std::map<std::string, std::shared_ptr<ModuleType>> m_module_cache;
         std::vector<std::string> m_compilation_stack;
+        SymbolTable m_global_symbols; // Global symbols across the compilation unit
+        std::map<std::string, std::string> m_project_entries;
 
-        // --- Track files for the final link step ---
-        std::set<std::string> m_compiled_c_files;
-        std::set<std::string> m_compiled_h_files; // Also change for consistency
+        // Outputs
+        std::set<std::string> m_generated_c_files;
+        std::set<std::string> m_generated_h_files;
+        std::vector<std::string> m_angara_module_names; // Names for init_globals
+        std::vector<std::string> m_native_lib_names;    // For linker arguments
 
+        // Progress Tracking
         int m_total_modules = 0;
         int m_modules_compiled = 0;
-        std::vector<std::string> m_angara_module_names; // Stores names like "json", "main"
-        std::shared_ptr<ModuleType> loadNativeModule(const std::string& path, const Token& import_token);
-        SymbolTable m_global_symbols;
-        // Use a set to automatically store only unique library directories.
-        std::set<std::string> m_native_lib_paths;
-        // Store the clean library names (e.g., "fs", "http").
-        std::vector<std::string> m_native_lib_names;
-
-        const std::string m_runtime_path;
-        const std::string m_angara_module_path;
-        const std::string m_native_module_path;
-
         std::string m_last_progress_message;
-
         std::chrono::time_point<std::chrono::high_resolution_clock> m_build_start_time;
-        std::vector<std::string> m_compiled_angara_files;
-        std::map<std::string, int> m_line_counts;
-
+        void print_progress(const std::string& current_file);
     };
 
 } // namespace angara

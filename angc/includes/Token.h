@@ -2,6 +2,7 @@
 
 #include <string>
 #include <iostream>
+#include <memory>
 
 namespace angara {
 
@@ -62,17 +63,26 @@ namespace angara {
         int line{};
         int column{};
 
+        // --- NEW: Source Tracking ---
+        // Using shared_ptr to avoid copying the filename string for every token.
+        std::shared_ptr<std::string> file;
+        // ----------------------------
+
         Token();
 
-        Token(TokenType type, std::string lexeme, int line, int column)
-                : type(type), lexeme(std::move(lexeme)), line(line), column(column) {}
-
+        // Updated Constructor
+        Token(TokenType type, std::string lexeme, int line, int column, std::shared_ptr<std::string> file = nullptr)
+                : type(type), lexeme(std::move(lexeme)), line(line), column(column), file(std::move(file)) {}
 
         void print() const {
             std::cout << "Token(" << to_string(type)
                       << ", Lexeme: '" << lexeme
                       << "', Line: " << line
-                      << ", Col: " << column << ")\n";
+                      << ", Col: " << column;
+            if (file) {
+                std::cout << ", File: " << *file;
+            }
+            std::cout << ")\n";
         }
     };
 

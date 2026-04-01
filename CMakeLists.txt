@@ -173,6 +173,7 @@ file(GLOB_RECURSE ANGC_FRONTEND
         "${CMAKE_SOURCE_DIR}/angc/frontend/*.cpp"
         "${CMAKE_SOURCE_DIR}/angc/shared/*.cpp"
         "${CMAKE_SOURCE_DIR}/angc/backend/*.cpp"
+
 )
 add_executable(angara_ls ${ALS_SOURCES} ${ANGC_FRONTEND})
 target_include_directories(angara_ls PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/angara-ls/includes)

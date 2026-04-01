@@ -10,7 +10,7 @@ namespace angara {
     class Lexer {
     public:
         // Constructor takes the source code to be scanned
-        Lexer(std::string source, ErrorHandler& errorHandler);
+        Lexer(std::string source, std::shared_ptr<std::string> filename, ErrorHandler& errorHandler);
 
         // The main function that scans all tokens and returns them as a vector
         std::vector<Token> scanTokens();
@@ -37,6 +37,7 @@ namespace angara {
         int m_line = 1;
         int m_column = 1;
         bool m_isAtStartOfLine = true;
+        std::shared_ptr<std::string> m_filename;
 
         // Map to hold all reserved keywords
         static const std::map<std::string, TokenType> keywords;

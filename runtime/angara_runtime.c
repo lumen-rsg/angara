@@ -249,19 +249,12 @@ AngaraObject angara_record_get(AngaraObject record_obj, const char* key) {
     if (!IS_OBJ(record_obj) || OBJ_TYPE(record_obj) != OBJ_RECORD) return angara_create_nil();
     AngaraRecord* record = AS_RECORD(record_obj);
 
-    // DEBUG TRACE
-    fprintf(stderr, "[Runtime] Record Get: Looking for '%s' in record of size %zu\n", key, record->count);
-
     for (size_t i = 0; i < record->count; i++) {
-        fprintf(stderr, "[Runtime]   Checking against '%s' ... ", record->entries[i].key);
         if (strcmp(record->entries[i].key, key) == 0) {
-            fprintf(stderr, "MATCH!\n");
             angara_incref(record->entries[i].value);
             return record->entries[i].value;
         }
-        fprintf(stderr, "no.\n");
     }
-    fprintf(stderr, "[Runtime] Key '%s' NOT FOUND.\n", key);
     return angara_create_nil();
 }
 
@@ -461,6 +454,9 @@ Object* angara_instance_new(size_t size, AngaraClass* klass) {
 }
 
 // --- Exception Handling Implementation ---
+// Global head of the exception frame stack
+ExceptionFrame* g_exception_chain_head = NULL;
+// Global variable to transport the exception object during a longjmp
 AngaraObject g_current_exception;
 jmp_buf g_exception_stack[ANGARA_MAX_EXCEPTION_FRAMES];
 int g_exception_stack_top = 0;
@@ -477,7 +473,6 @@ void angara_try_end(void) {
     g_exception_stack_top--;
 }
 
-ExceptionFrame* g_exception_chain_head = NULL;
 
 void angara_debug_print(const char* message) {
     // We use fprintf to stderr to make sure it's not buffered
@@ -487,34 +482,36 @@ void angara_debug_print(const char* message) {
 
 // 2. Enhance the angara_throw function
 void angara_throw(AngaraObject exception) {
-    // This function is called for ALL throws. It only terminates if there's
-    // no active `try` block to jump to.
-
     if (g_exception_chain_head == NULL) {
         // --- This is the UNHANDLED exception path ---
-
         fprintf(stderr, "\n" ANSI_COLOR_BOLD_RED "[FATAL] Unhandled Angara Exception" ANSI_COLOR_RESET "\n");
 
         if (IS_OBJ(exception) && OBJ_TYPE(exception) == OBJ_EXCEPTION) {
-            // The exception is a proper, standard Exception object.
-            fprintf(stderr, ANSI_COLOR_YELLOW "  -> Message: " ANSI_COLOR_RESET "%s\n", AS_CSTRING(AS_EXCEPTION(exception)->message));
-        } else if (IS_OBJ(exception) && OBJ_TYPE(exception) == OBJ_STRING) {
-            // It was a raw string, likely from an old angara_throw_error call.
-            fprintf(stderr, ANSI_COLOR_YELLOW "  -> Message: " ANSI_COLOR_RESET "%s\n", AS_CSTRING(exception));
+            fprintf(stderr, ANSI_COLOR_YELLOW "  -> Message: " ANSI_COLOR_RESET "%s\n", AS_CSTRING(((AngaraException*)exception.as.obj)->message));
         } else {
-            // It's some other non-standard object.
-            fprintf(stderr, ANSI_COLOR_YELLOW "  -> Thrown object was not a standard Exception or String type." ANSI_COLOR_RESET "\n");
+            fprintf(stderr, ANSI_COLOR_YELLOW "  -> Thrown object was not a standard Exception." ANSI_COLOR_RESET "\n");
         }
 
         fprintf(stderr, ANSI_COLOR_CYAN "  -> No active `try` blocks were found on the call stack. Terminating program." ANSI_COLOR_RESET "\n\n");
         exit(1);
     }
 
-    // If there IS a try block, we perform the longjmp to it.
+    // --- This is the HANDLED exception path ---
+
+    // 1. Store the exception globally so the 'catch' block can find it.
     g_current_exception = exception;
-    angara_incref(g_current_exception);
+    angara_incref(g_current_exception); // The global now holds a reference
+
+    // 2. Get the topmost frame from the stack.
     ExceptionFrame* frame = g_exception_chain_head;
+
+    // 3. Unlink the frame (this happens logically before the jump).
+    // Note: The transpiler will also set this in the 'catch' block, but it's safer here.
     g_exception_chain_head = frame->prev;
+
+    // 4. JUMP!
+    // Control flow teleports back to the 'if (setjmp(...))' in the transpiled C code.
+    // The value '1' ensures setjmp returns a non-zero value.
     longjmp(frame->buffer, 1);
 }
 
@@ -772,17 +769,13 @@ AngaraObject angara_typeof(AngaraObject value) {
 }
 
 void angara_throw_error(const char* message) {
-    // 1. First, create an AngaraString for the message.
     AngaraObject message_obj = angara_string_from_c(message);
-
-    // 2. Then, create a proper AngaraException that WRAPS the message.
     AngaraObject exception_obj = angara_exception_new(message_obj);
 
-    // 3. The message object was consumed by angara_exception_new (its ref_count was
-    //    incremented), so we can now decref our local reference to it.
+    // exception_new took ownership, so we can decref our local handle
     angara_decref(message_obj);
 
-    // 4. Finally, throw the correctly-typed exception object.
+    // Use the main throw mechanism
     angara_throw(exception_obj);
 }
 
@@ -1556,6 +1549,7 @@ AngaraObject angara_deep_clone(AngaraObject value) {
             // Classes, Closures, Threads, Mutexes:
             // These are reference types where "deep copy" is often ambiguous or impossible.
             // For now, we default to shallow copy (incref).
+            // TODO
             angara_incref(value);
             return value;
     }
@@ -1575,3 +1569,70 @@ AngaraObject angara_bound_method_new(AngaraObject receiver, AngaraObject method_
     return (AngaraObject){VAL_OBJ, {.obj = (Object*)bm}};
 }
 
+void angara_incref_ptr(void* ptr) {
+    if (ptr) ((Object*)ptr)->ref_count++;
+}
+
+void angara_decref_ptr(void* ptr) {
+    if (ptr) {
+        Object* o = (Object*)ptr;
+        o->ref_count--;
+        if (o->ref_count == 0) free_object(o);
+    }
+}
+
+int64_t angara_len_ptr(void* collection) {
+    Object* o = (Object*)collection;
+    if (o->type == OBJ_STRING) return ((AngaraString*)o)->length;
+    if (o->type == OBJ_LIST) return ((AngaraList*)o)->count;
+    return 0;
+}
+
+const char* angara_string_concat_raw(const char* a, const char* b) {
+    AngaraObject sA = angara_string_from_c(a);
+    AngaraObject sB = angara_string_from_c(b);
+    AngaraObject res = angara_string_concat(sA, sB);
+    // Leak sA/sB because they are temp wrappers? No, string_from_c copies.
+    // This is inefficient. For raw C backend, we should just use malloc/memcpy directly.
+    size_t la = strlen(a), lb = strlen(b);
+    char* buf = malloc(la + lb + 1);
+    memcpy(buf, a, la);
+    memcpy(buf + la, b, lb);
+    buf[la+lb] = 0;
+    // Wrap in object to allow ARC management
+    return AS_CSTRING(angara_create_string_no_copy(buf, la + lb));
+}
+
+// List get for 'any' lists (returns void*)
+void* angara_list_get_raw(void* list, int64_t index) {
+    AngaraList* l = (AngaraList*)list;
+    if (index < 0 || index >= l->count) return NULL;
+    AngaraObject val = l->elements[index];
+    // If it's an object, return the pointer. If primitive, cast value to pointer.
+    if (IS_OBJ(val)) {
+        angara_incref(val);
+        return val.as.obj;
+    }
+    // Primitives stored as Any: return raw value cast to pointer
+    // (This matches our Transpiler's coercion logic)
+    return (void*)(intptr_t)val.as.i64;
+}
+
+AngaraObject angara_from_c_object(void* ptr) {
+    return (AngaraObject){VAL_OBJ, {.obj = (Object*)ptr}};
+}
+
+void* angara_deep_clone_ptr(void* ptr) {
+    if (!ptr) return NULL;
+    AngaraObject boxed = BOX_PTR(ptr);
+    AngaraObject cloned = angara_deep_clone(boxed);
+    if (IS_OBJ(cloned)) return cloned.as.obj;
+    return NULL; // Should not happen for pointers
+}
+
+const char* angara_to_string_raw(AngaraObject val) {
+    AngaraObject strObj = angara_to_string(val);
+    // Note: In a real driver/high-perf app, we'd need to be careful about
+    // who frees this string. For now, we return the internal buffer.
+    return AS_CSTRING(strObj);
+}

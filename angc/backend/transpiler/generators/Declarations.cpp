@@ -40,7 +40,7 @@ namespace angara {
 
                 if (func_stmt->is_exported || func_stmt->name.lexeme == "main") {
                     // Closure variable
-                    std::string var_name = "g_" + func_stmt->name.lexeme;
+                    std::string var_name = "g_" + module_name + "_" + func_stmt->name.lexeme;
                     if (func_stmt->name.lexeme == "main") var_name = "g_angara_main_closure";
                     (*m_current_out) << "extern AngaraObject " << var_name << ";\n";
 
