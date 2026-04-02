@@ -17,18 +17,17 @@ namespace angara {
 
     private:
         // Helper methods for the scanning process
-        bool isAtEnd();
+        bool isAtEnd() const;
         void scanToken();
         char advance();
         bool match(char expected);
         char peek();
-        char peekNext();
+        char peekNext() const;
         void string();
         void number();
         void identifier();
         void addToken(TokenType type);
         void addToken(TokenType type, const std::string &literal);
-        ErrorHandler& m_errorHandler;
 
         const std::string m_source;
         std::vector<Token> m_tokens;
@@ -36,8 +35,8 @@ namespace angara {
         int m_current = 0;
         int m_line = 1;
         int m_column = 1;
-        bool m_isAtStartOfLine = true;
         std::shared_ptr<std::string> m_filename;
+        ErrorHandler& m_errorHandler;
 
         // Map to hold all reserved keywords
         static const std::map<std::string, TokenType> keywords;

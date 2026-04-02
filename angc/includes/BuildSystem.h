@@ -29,7 +29,7 @@ namespace angara {
         bool link_artifacts(const ProjectConfig& config,
                         const std::set<std::string>& c_files,
                         const std::vector<std::string>& discovered_libs, // <--- Add this
-                        const std::string& project_root);
+                        const std::string& project_root) const;
         std::string m_workspace_root;
         // Map of Project Name -> Absolute Directory Path
         std::map<std::string, std::string> m_project_dirs;

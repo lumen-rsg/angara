@@ -1589,11 +1589,6 @@ int64_t angara_len_ptr(void* collection) {
 }
 
 const char* angara_string_concat_raw(const char* a, const char* b) {
-    AngaraObject sA = angara_string_from_c(a);
-    AngaraObject sB = angara_string_from_c(b);
-    AngaraObject res = angara_string_concat(sA, sB);
-    // Leak sA/sB because they are temp wrappers? No, string_from_c copies.
-    // This is inefficient. For raw C backend, we should just use malloc/memcpy directly.
     size_t la = strlen(a), lb = strlen(b);
     char* buf = malloc(la + lb + 1);
     memcpy(buf, a, la);

@@ -1,7 +1,7 @@
 #include "../runtime/angara_runtime.h"
-#include <amqp_tcp_socket.h>
-#include <amqp.h>
-#include <amqp_framing.h>
+#include <rabbitmq-c/tcp_socket.h>
+#include <rabbitmq-c/amqp.h>
+#include <rabbitmq-c/framing.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -212,6 +212,7 @@ AngaraObject Angara_Channel_queue_declare(int arg_count, AngaraObject* args) {
 
     AngaraObject rec = angara_record_new_with_fields(1, kvs);
     angara_decref(k_q); angara_decref(name_obj);
+    (void)queue;
 
     return rec;
 }

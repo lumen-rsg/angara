@@ -5,7 +5,6 @@
 #pragma once
 
 #include <vector>
-#include <string>
 #include <memory>
 #include "Token.h"
 #include "Expr.h"
@@ -73,20 +72,20 @@ namespace angara {
     };
 
     // Represents a field declaration inside a class (e.g., 'let x as i64;')
-    struct FieldMember : ClassMember {
+    struct FieldMember final : ClassMember {
         const std::shared_ptr<VarDeclStmt> declaration;
         const AccessLevel access;
 
-        FieldMember(std::shared_ptr<VarDeclStmt> decl, AccessLevel access)
+        FieldMember(std::shared_ptr<VarDeclStmt> decl, const AccessLevel access)
                 : declaration(std::move(decl)), access(access) {}
     };
 
     // Represents a method declaration inside a class (e.g., 'func my_method(...)')
-    struct MethodMember : ClassMember {
+    struct MethodMember final : ClassMember {
         const std::shared_ptr<FuncStmt> declaration;
         const AccessLevel access;
 
-        MethodMember(std::shared_ptr<FuncStmt> decl, AccessLevel access)
+        MethodMember(std::shared_ptr<FuncStmt> decl, const AccessLevel access)
                 : declaration(std::move(decl)), access(access) {}
     };
 
@@ -98,17 +97,17 @@ namespace angara {
     };
 
     // Derived classes
-    struct ExpressionStmt : Stmt {
+    struct ExpressionStmt final : Stmt {
         const std::shared_ptr<Expr> expression;
 
-        ExpressionStmt(std::shared_ptr<Expr> expression) : expression(std::move(expression)) {}
+        explicit ExpressionStmt(std::shared_ptr<Expr> expression) : expression(std::move(expression)) {}
 
-        void accept(StmtVisitor &visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor &visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const ExpressionStmt>(self));
         }
     };
 
-    struct VarDeclStmt : Stmt {
+    struct VarDeclStmt final : Stmt {
         const Token name;
         const std::shared_ptr<ASTType> typeAnnotation;
         const std::shared_ptr<Expr> initializer;
@@ -118,31 +117,31 @@ namespace angara {
         bool is_exported = false;
         bool is_unsafe = false;
 
-        VarDeclStmt(Token name, std::shared_ptr<ASTType> type, std::shared_ptr<Expr> initializer, bool is_const)
+        VarDeclStmt(Token name, std::shared_ptr<ASTType> type, std::shared_ptr<Expr> initializer, const bool is_const)
                 : name(std::move(name)),
                   typeAnnotation(std::move(type)),
                   initializer(std::move(initializer)),
                   is_const(is_const) {}
 
-        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const VarDeclStmt>(self));
         }
     };
 
     // Represents a { ... } block of statements
-    struct BlockStmt : Stmt {
+    struct BlockStmt final : Stmt {
         std::vector<std::shared_ptr<Stmt>> statements;
 
-        BlockStmt(std::vector<std::shared_ptr<Stmt>> statements)
+        explicit BlockStmt(std::vector<std::shared_ptr<Stmt>> statements)
                 : statements(std::move(statements)) {}
 
-        void accept(StmtVisitor &visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor &visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const BlockStmt>(self));
         }
     };
 
     // Represents an if-orif-else chain
-    struct IfStmt : Stmt {
+    struct IfStmt final : Stmt {
         const Token keyword;
         const std::shared_ptr<Expr> condition;
         const std::shared_ptr<Stmt> thenBranch;
@@ -150,28 +149,28 @@ namespace angara {
         const std::shared_ptr<VarDeclStmt> declaration;
 
         IfStmt(Token keyword, std::shared_ptr<Expr> condition, std::shared_ptr<Stmt> thenBranch,
-               std::shared_ptr<Stmt> elseBranch, const std::shared_ptr<VarDeclStmt> declaration)
+               std::shared_ptr<Stmt> elseBranch, const std::shared_ptr<VarDeclStmt>& declaration)
                 : keyword(std::move(keyword)),
                   condition(std::move(condition)),
                   thenBranch(std::move(thenBranch)),
                   elseBranch(std::move(elseBranch)), declaration(declaration) {}
 
-        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const IfStmt>(self));
         }
     };
 
     // Represents a lone semicolon ';'
-    struct EmptyStmt : Stmt {
+    struct EmptyStmt final : Stmt {
         EmptyStmt() = default;
 
-        void accept(StmtVisitor &visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor &visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const EmptyStmt>(self));
         }
     };
 
     // Represents a while loop
-    struct WhileStmt : Stmt {
+    struct WhileStmt final : Stmt {
         const Token keyword;
         const std::shared_ptr<Expr> condition;
         const std::shared_ptr<Stmt> body;
@@ -181,46 +180,53 @@ namespace angara {
                   condition(std::move(condition)),
                   body(std::move(body)) {}
 
-        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const WhileStmt>(self));
         }
     };
 
     // Represents a C-style for loop
-    struct ForStmt : Stmt {
-        ForStmt(Token keyword, std::shared_ptr<Stmt> initializer, std::shared_ptr<Expr> condition,
-                std::shared_ptr<Expr> increment, std::shared_ptr<Stmt> body)
-                : keyword(std::move(keyword)), initializer(std::move(initializer)), condition(std::move(condition)),
-                  increment(std::move(increment)), body(std::move(body)) {}
-
-        void accept(StmtVisitor &visitor, std::shared_ptr<const Stmt> self) override {
-            visitor.visit(std::static_pointer_cast<const ForStmt>(self));
-        }
-
+    struct ForStmt final : Stmt {
+        const Token keyword;
         const std::shared_ptr<Stmt> initializer;
         const std::shared_ptr<Expr> condition;
         const std::shared_ptr<Expr> increment;
         const std::shared_ptr<Stmt> body;
-        const Token keyword;
+
+        ForStmt(Token keyword, std::shared_ptr<Stmt> initializer, std::shared_ptr<Expr> condition,
+                std::shared_ptr<Expr> increment, std::shared_ptr<Stmt> body)
+                : keyword(std::move(keyword)),
+                  initializer(std::move(initializer)),
+                  condition(std::move(condition)),
+                  increment(std::move(increment)),
+                  body(std::move(body)) {}
+
+        void accept(StmtVisitor &visitor, const std::shared_ptr<const Stmt> self) override {
+            visitor.visit(std::static_pointer_cast<const ForStmt>(self));
+        }
     };
 
     // Represents 'foreach' (for ... in ...)
-    struct ForInStmt : Stmt {
+    struct ForInStmt final : Stmt {
         ForInStmt(Token keyword, Token name, std::shared_ptr<Expr> collection, std::shared_ptr<Stmt> body)
-                : keyword(std::move(keyword)), name(std::move(name)), collection(std::move(collection)), body(std::move(body)) {}
+                : keyword(std::move(keyword)),
+                name(std::move(name)),
+                collection(std::move(collection)),
+                body(std::move(body)) {}
 
-        void accept(StmtVisitor &visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor &visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const ForInStmt>(self));
         }
 
+        const Token keyword;
         const Token name;
         const std::shared_ptr<Expr> collection;
         const std::shared_ptr<Stmt> body;
-        const Token keyword;
+
     };
 
     // Represents a function declaration ("func name(...) { ... }")
-    struct FuncStmt : Stmt {
+    struct FuncStmt final : Stmt {
         const Token name;
         const std::vector<Parameter> params;
         // An optional return type. If not present, it's a 'void' (or 'nil') function.
@@ -246,16 +252,16 @@ namespace angara {
           has_this(has_this),
           body(std::move(body)) {}
 
-        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const FuncStmt>(self));
         }
     };
 
-    struct ReturnStmt : Stmt {
+    struct ReturnStmt final : Stmt {
         ReturnStmt(Token keyword, std::shared_ptr<Expr> value)
                 : keyword(std::move(keyword)), value(std::move(value)) {}
 
-        void accept(StmtVisitor &visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor &visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const ReturnStmt>(self));
         }
 
@@ -263,7 +269,7 @@ namespace angara {
         const std::shared_ptr<Expr> value;
     };
 
-    struct AttachStmt : Stmt {
+    struct AttachStmt final : Stmt {
         // A list of specific names to import. If empty, it's a simple attach.
         const std::vector<Token> names;
         const Token modulePath;
@@ -274,16 +280,16 @@ namespace angara {
                   modulePath(std::move(modulePath)),
                   alias(std::move(alias)) {}
 
-        void accept(StmtVisitor &visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor &visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const AttachStmt>(self));
         }
     };
 
-    struct ThrowStmt : Stmt {
+    struct ThrowStmt final : Stmt {
         ThrowStmt(Token keyword, std::shared_ptr<Expr> expression)
                 : keyword(std::move(keyword)), expression(std::move(expression)) {}
 
-        void accept(StmtVisitor &visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor &visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const ThrowStmt>(self));
         }
 
@@ -291,7 +297,7 @@ namespace angara {
         const std::shared_ptr<Expr> expression;
     };
 
-    struct TryStmt : Stmt {
+    struct TryStmt final : Stmt {
         const std::shared_ptr<Stmt> tryBlock;
         const Token catchName; // The 'e' in catch(e)
 
@@ -307,13 +313,13 @@ namespace angara {
                   catchType(std::move(catchType)), // Store the new type
                   catchBlock(std::move(catchBlock)) {}
 
-        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const TryStmt>(self));
         }
     };
 
     // Represents a "class Name signs C1, C2 inherits S uses T1, T2 { ... }" statement
-    struct ClassStmt : Stmt {
+    struct ClassStmt final : Stmt {
         const Token name;
         const std::shared_ptr<VarExpr> superclass;
         const std::vector<std::shared_ptr<VarExpr>> contracts;
@@ -332,13 +338,13 @@ namespace angara {
                   traits(std::move(traits)),
                   members(std::move(members)) {}
 
-        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const ClassStmt>(self));
         }
     };
 
     // A trait is essentially a class with no fields and no inheritance.
-    struct TraitStmt : Stmt {
+    struct TraitStmt final : Stmt {
         const Token name;
         const std::vector<std::shared_ptr<FuncStmt>> methods;
         bool is_exported = false;
@@ -346,12 +352,12 @@ namespace angara {
         TraitStmt(Token name, std::vector<std::shared_ptr<FuncStmt>> methods)
                 : name(std::move(name)), methods(std::move(methods)) {}
 
-        void accept(StmtVisitor &visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor &visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const TraitStmt>(self));
         }
     };
 
-    struct ContractStmt : Stmt {
+    struct ContractStmt final : Stmt {
         const Token name;
         const std::vector<std::shared_ptr<ClassMember>> members;
         bool is_exported = false;
@@ -359,22 +365,22 @@ namespace angara {
         ContractStmt(Token name, std::vector<std::shared_ptr<ClassMember>> members)
                 : name(std::move(name)), members(std::move(members)) {}
 
-        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const ContractStmt>(self));
         }
     };
 
-    struct BreakStmt : Stmt {
+    struct BreakStmt final : Stmt {
         const Token keyword; // The 'break' token
 
-        BreakStmt(Token keyword) : keyword(std::move(keyword)) {}
+        explicit BreakStmt(Token keyword) : keyword(std::move(keyword)) {}
 
-        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const BreakStmt>(self));
         }
     };
 
-    struct DataStmt : Stmt {
+    struct DataStmt final : Stmt {
         const Token name;
         // A data block only contains a list of field declarations.
         const std::vector<std::shared_ptr<VarDeclStmt>> fields;
@@ -385,7 +391,7 @@ namespace angara {
             : name(std::move(name)),
               fields(std::move(fields)) {}
 
-        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const DataStmt>(self));
         }
     };
@@ -414,7 +420,7 @@ namespace angara {
     // --- The EnumStmt AST Node ---
 
     // Represents a complete "enum Name { Variant1, Variant2(...) }" statement.
-    struct EnumStmt : Stmt {
+    struct EnumStmt final : Stmt {
         const Token name;
         const std::vector<std::shared_ptr<EnumVariant>> variants;
         bool is_exported = false;
@@ -423,29 +429,29 @@ namespace angara {
             : name(std::move(name)),
               variants(std::move(variants)) {}
 
-        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const EnumStmt>(self));
         }
     };
 
-    struct ForeignHeaderStmt : Stmt {
+    struct ForeignHeaderStmt final : Stmt {
         const Token header; // The string literal token
 
-        ForeignHeaderStmt(Token header) : header(std::move(header)) {}
+        explicit ForeignHeaderStmt(Token header) : header(std::move(header)) {}
 
-        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const ForeignHeaderStmt>(self));
         }
     };
 
-    struct UnsafeBlockStmt : Stmt {
+    struct UnsafeBlockStmt final : Stmt {
         const Token keyword; // The '@' token
         const std::shared_ptr<BlockStmt> block;
 
         UnsafeBlockStmt(Token keyword, std::shared_ptr<BlockStmt> block)
             : keyword(std::move(keyword)), block(std::move(block)) {}
 
-        void accept(StmtVisitor& visitor, std::shared_ptr<const Stmt> self) override {
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const UnsafeBlockStmt>(self));
         }
     };

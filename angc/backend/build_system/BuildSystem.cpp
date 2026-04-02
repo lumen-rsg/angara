@@ -10,11 +10,8 @@ const auto RESET   = "\033[0m";
 const auto BOLD    = "\033[1m";
 const auto RED     = "\033[31m";
 const auto GREEN   = "\033[32m";
-const auto YELLOW  = "\033[33m";
 const auto BLUE    = "\033[34m";
 const auto MAGENTA = "\033[35m";
-const auto CYAN    = "\033[36m";
-const auto GRAY    = "\033[90m";
 
 namespace angara {
 
@@ -72,7 +69,7 @@ namespace angara {
         driver.set_workspace_projects(project_entries);
 
         // 3. Resolve the entry point for THIS project.
-        std::string entry_file = project_entries.at(config.name);
+        const std::string& entry_file = project_entries.at(config.name);
 
         // 4. Trigger the project-aware compilation.
         // This tells the driver: "Even if this file is main.an, the module name is 'Logger'"
@@ -93,7 +90,8 @@ namespace angara {
     bool BuildSystem::link_artifacts(const ProjectConfig& config,
                                  const std::set<std::string>& c_files,
                                  const std::vector<std::string>& discovered_libs,
-                                 const std::string& project_root) {
+                                 const std::string& project_root) const
+    {
         std::stringstream cmd;
         fs::path bin_path = fs::path(project_root) / config.name;
 
@@ -127,8 +125,7 @@ namespace angara {
         cmd << " -pthread -lm -O2 -Wno-return-type";
         cmd << " -Wl,-rpath," << m_native_lib_path;
 
-        int result = system(cmd.str().c_str());
-        if (result != 0) {
+        if (int result = system(cmd.str().c_str()); result != 0) {
             std::cerr << "    Linker failed for " << config.name << "\n";
             return false;
         }

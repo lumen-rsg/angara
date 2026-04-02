@@ -70,14 +70,6 @@ ANGC_SRCS := $(shell find angc -name "*.cpp")
 ANGC_OBJS := $(patsubst %.cpp,build/obj/%.o,$(ANGC_SRCS))
 ANGC_OUT  := build/angc
 
-ALS_SRCS := $(wildcard angara-ls/*.cpp) \
-            $(wildcard angc/analyzer/*.cpp) \
-            $(wildcard angc/frontend/*.cpp) \
-            $(wildcard angc/shared/*.cpp) \
-            $(wildcard angc/backend/*.cpp)
-ALS_OBJS := $(patsubst %.cpp,build/obj/%.o,$(ALS_SRCS))
-ALS_OUT  := build/angara_ls
-
 # --- Main Targets ---
 .PHONY: all logo clean install install_runtime install_libraries install_executables
 
@@ -86,13 +78,13 @@ all: logo $(RT_OUT) $(MOD_OUTS) $(ANGC_OUT) $(ALS_OUT)
 
 logo:
 	@printf "\n"
-	@printf "$(CYAN)    ___                                  $(RESET)\n"
-	@printf "$(CYAN)   /   |  ____  ____ _____ __________    $(RESET)\n"
-	@printf "$(CYAN)  / /| | / __ \/ __ \`/ __ \`/ ___/ __ \`/  $(RESET)\n"
-	@printf "$(CYAN) / ___ |/ / / / /_/ / /_/ / /  / /_/ /   $(RESET)\n"
-	@printf "$(CYAN)/_/  |_/_/ /_/\__, /\__,_/_/   \__,_/    $(RESET)\n"
-	@printf "$(CYAN)             /____/                      $(RESET)\n"
-	@printf "$(MAGENTA)[*] Initializing Angara Compilation...$(RESET)\n\n"
+	@printf "$(CYAN) █████╗ ███╗   ██╗ ██████╗  █████╗ ██████╗  █████╗  $(RESET)\n"
+	@printf "$(CYAN) ██╔══██╗████╗  ██║██╔════╝ ██╔══██╗██╔══██╗██╔══██╗$(RESET)\n"
+	@printf "$(CYAN) ███████║██╔██╗ ██║██║  ███╗███████║██████╔╝███████║ $(RESET)\n"
+	@printf "$(CYAN) ██╔══██║██║╚██╗██║██║   ██║██╔══██║██╔══██╗██╔══██║ $(RESET)\n"
+	@printf "$(CYAN) ██║  ██║██║ ╚████║╚██████╔╝██║  ██║██║  ██║██║  ██║ $(RESET)\n"
+	@printf "$(CYAN) ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ $(RESET)\n"
+	@printf "$(MAGENTA)[MK] Building Angara v2 // cv2 was here$(RESET)\n\n"
 
 # --- Compilation Rules ---
 build/obj/%.o: %.c
@@ -102,7 +94,7 @@ build/obj/%.o: %.c
 
 build/obj/%.o: %.cpp
 	@mkdir -p $(@D)
-	@printf "$(YELLOW)[CXX] $(RESET) %s\n" "$<"
+	@printf "$(GREEN)[CX] $(RESET) %s\n" "$<"
 	@$(CXX) $(CXXFLAGS) -c $< -o $@
 
 build/obj/modules/http.o: modules/http.c
@@ -122,34 +114,29 @@ build/obj/modules/amqp.o: modules/amqp.c
 
 build/obj/modules/json_bridge.o: modules/json_bridge.cpp
 	@mkdir -p $(@D)
-	@printf "$(YELLOW)[CXX] $(RESET) %s (JSON Bridge)\n" "$<"
+	@printf "$(GREEN)[CX] $(RESET) %s (JSON Bridge)\n" "$<"
 	@$(CXX) $(CXXFLAGS) -Iangara-ls/vendor -c $< -o $@
-
-build/obj/angara-ls/%.o: angara-ls/%.cpp
-	@mkdir -p $(@D)
-	@printf "$(YELLOW)[CXX] $(RESET) %s (ALS)\n" "$<"
-	@$(CXX) $(CXXFLAGS) -Iangara-ls/includes -Iangara-ls/vendor -c $< -o $@
 
 # --- Linkage Rules (Runtime) ---
 $(RT_OUT): $(RT_OBJ)
 	@mkdir -p $(@D)
-	@printf "$(BLUE)[LNK] $(RESET) %s\n" "$@"
+	@printf "$(BLUE)[LN] $(RESET) %s\n" "$@"
 	@$(CC) $(RT_LDFLAGS) $< -o $@
 
 # --- Linkage Rules (Modules) ---
 build/modules/http.$(SO_EXT): build/obj/modules/http.o | $(RT_OUT)
 	@mkdir -p $(@D)
-	@printf "$(MAGENTA)[MOD] $(RESET) %s\n" "$@"
+	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@$(CC) $< $(LDFLAGS_MOD) $(CURL_LIBS) -o $@
 
 build/modules/websocket.$(SO_EXT): build/obj/modules/websocket.o | $(RT_OUT)
 	@mkdir -p $(@D)
-	@printf "$(MAGENTA)[MOD] $(RESET) %s\n" "$@"
+	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@$(CC) $< $(LDFLAGS_MOD) $(LWS_LIBS) -o $@
 
 build/modules/time.$(SO_EXT): build/obj/modules/time.o | $(RT_OUT)
 	@mkdir -p $(@D)
-	@printf "$(MAGENTA)[MOD] $(RESET) %s\n" "$@"
+	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 ifeq ($(UNAME_S),Darwin)
 	@$(CC) $< $(LDFLAGS_MOD) -o $@
 else
@@ -158,28 +145,28 @@ endif
 
 build/modules/amqp.$(SO_EXT): build/obj/modules/amqp.o | $(RT_OUT)
 	@mkdir -p $(@D)
-	@printf "$(MAGENTA)[MOD] $(RESET) %s\n" "$@"
+	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@$(CC) $< $(LDFLAGS_MOD) $(AMQP_LIBS) -o $@
 
 build/modules/json.$(SO_EXT): build/obj/modules/json.o $(JSON_BR_OBJ) | $(RT_OUT)
 	@mkdir -p $(@D)
-	@printf "$(MAGENTA)[MOD] $(RESET) %s\n" "$@"
+	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@$(CXX) $^ $(LDFLAGS_MOD) -o $@
 
 build/modules/%.$(SO_EXT): build/obj/modules/%.o | $(RT_OUT)
 	@mkdir -p $(@D)
-	@printf "$(MAGENTA)[MOD] $(RESET) %s\n" "$@"
+	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@$(CC) $< $(LDFLAGS_MOD) -o $@
 
 # --- Linkage Rules (Executables) ---
 $(ANGC_OUT): $(ANGC_OBJS) | $(RT_OUT)
 	@mkdir -p $(@D)
-	@printf "$(CYAN)[BIN] $(RESET) %s\n" "$@"
+	@printf "$(CYAN)[BN] $(RESET) %s\n" "$@"
 	@$(CXX) $^ $(LDFLAGS_BIN) -o $@
 
 $(ALS_OUT): $(ALS_OBJS)
 	@mkdir -p $(@D)
-	@printf "$(CYAN)[BIN] $(RESET) %s\n" "$@"
+	@printf "$(CYAN)[BN] $(RESET) %s\n" "$@"
 	@$(CXX) $^ -o $@
 
 # --- Installation Rules ---
@@ -187,23 +174,22 @@ install: install_runtime install_libraries install_executables
 	@printf "$(BOLD)$(GREEN)>>> Full Installation Complete <<<$(RESET)\n"
 
 install_runtime: $(RT_OUT)
-	@printf "$(BLUE)[INS] $(RESET) Installing Runtime to %s\n" "$(INSTALL_RT_DIR)"
+	@printf "$(BLUE)[IN] $(RESET) Installing Runtime to %s\n" "$(INSTALL_RT_DIR)"
 	@mkdir -p $(INSTALL_RT_DIR)
 	@cp $(RT_OUT) $(INSTALL_RT_DIR)/
 	@cp runtime/angara_runtime.h $(INSTALL_RT_DIR)/
 
 install_libraries: $(MOD_OUTS)
-	@printf "$(MAGENTA)[INS] $(RESET) Installing Modules to %s\n" "$(INSTALL_MOD_DIR)"
+	@printf "$(MAGENTA)[IN] $(RESET) Installing Modules to %s\n" "$(INSTALL_MOD_DIR)"
 	@mkdir -p $(INSTALL_MOD_DIR)
 	@cp build/modules/*.$(SO_EXT) $(INSTALL_MOD_DIR)/
 
 install_executables: $(ANGC_OUT) $(ALS_OUT)
-	@printf "$(CYAN)[INS] $(RESET) Installing Executables to %s\n" "$(INSTALL_BIN_DIR)"
+	@printf "$(CYAN)[IN] $(RESET) Installing Executables to %s\n" "$(INSTALL_BIN_DIR)"
 	@mkdir -p $(INSTALL_BIN_DIR)
 	@cp $(ANGC_OUT) $(INSTALL_BIN_DIR)/
-	@cp $(ALS_OUT) $(INSTALL_BIN_DIR)/
 
 # --- Clean ---
 clean:
-	@printf "$(RED)[CLN] $(RESET) Cleaning build directory...\n"
+	@printf "$(RED)[CL] $(RESET) Cleaning build directory...\n"
 	@rm -rf build

@@ -10,7 +10,6 @@ namespace angara {
     const char* const C_RESET   = "\033[0m";
     const char* const C_BOLD    = "\033[1m";
     const char* const C_DIM     = "\033[2m";
-    const char* const C_RED     = "\033[31m";
     const char* const C_GREEN   = "\033[32m";
     const char* const C_YELLOW  = "\033[33m";
     const char* const C_BLUE    = "\033[34m";
@@ -57,10 +56,6 @@ namespace angara {
 
         if (!fieldName.empty()) {
             std::cout << m_prefix << C_DIM << fieldName << ": " << C_RESET;
-            // Adjust prefix for the actual node print to align
-            // This is a simplification; complex inline labels are hard.
-            // For this printer, we'll print the node on the next line/same line logic handled in visit.
-            // Actually, let's keep it simple: Just print the tree structure.
         }
 
         stmt->accept(*this, stmt);
@@ -77,11 +72,6 @@ namespace angara {
 
         m_prefix = m_childPrefix + (isLast ? TREE_END : TREE_FORK);
         m_childPrefix = m_childPrefix + (isLast ? TREE_EMPTY : TREE_DOWN);
-
-        if (!fieldName.empty()) {
-            // Hacky: print label then back up? No, let's just embed it in the header call or print here.
-            // We will let visit() print the header.
-        }
 
         expr->accept(*this);
 
@@ -129,7 +119,6 @@ namespace angara {
         if (list.empty()) return;
 
         // Optional: Print a group header?
-        // For now, just print items.
         for (size_t i = 0; i < list.size(); ++i) {
             bool isLastItem = (i == list.size() - 1) && isLastGroup;
             printChild("", list[i], isLastItem);
@@ -428,15 +417,6 @@ namespace angara {
 
         printChildren("members", stmt->members, true);
     }
-
-    // We need a manual overload for ClassMember because it's not a Stmt
-    // But `printChildren` requires shared_ptr.
-    // In a full implementation, we'd need `ClassMember` to accept a visitor.
-    // For now, we rely on the logic in ClassStmt or assume members are Stmts (which they wrap).
-    // Since MethodMember and FieldMember hold Stmts, let's hack `printChildren` logic inline above or cast.
-    // Actually, ASTPrinter.h declares `visit(ClassStmt)` so we can iterate manually there.
-    // For this implementation, let's skip printing members in detail to save space,
-    // or assume the user implements `accept` on ClassMember.
 
     void ASTPrinter::visit(std::shared_ptr<const TraitStmt> stmt) {
         printHeader("TraitStmt", stmt->name.lexeme);

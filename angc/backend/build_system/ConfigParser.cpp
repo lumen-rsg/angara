@@ -39,22 +39,11 @@ namespace angara {
         ProjectConfig currentProject;
 
         std::string line;
-        std::string currentSection = "";
-        bool inProjectsBlock = false;
+        std::string currentSection;
 
         while (std::getline(file, line)) {
             line = trim(line);
             if (line.empty() || line[0] == '#') continue;
-
-            // Handle Tags
-            if (line == "<projects>") {
-                inProjectsBlock = true;
-                continue;
-            }
-            if (line == "<!projects>") {
-                inProjectsBlock = false;
-                continue;
-            }
 
             // Handle Headers
             if (line.front() == '[' && line.back() == ']') {

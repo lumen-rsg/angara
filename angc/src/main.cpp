@@ -13,8 +13,8 @@
 namespace fs = std::filesystem;
 
 // --- Constants ---
-const std::string ANGC_VERSION    = "2.7.0-beta"; // Updated
-const std::string BACKEND_VERSION = "3.1.0";
+const std::string ANGC_VERSION    = "2.7.1-beta";
+const std::string BACKEND_VERSION = "3.1.1";
 const std::string ANGARA_SPEC     = "v3.0-draft";
 
 // --- Colors ---
@@ -22,8 +22,6 @@ const auto RESET   = "\033[0m";
 const auto BOLD    = "\033[1m";
 const auto RED     = "\033[31m";
 const auto GREEN   = "\033[32m";
-const auto YELLOW  = "\033[33m";
-const auto BLUE    = "\033[34m";
 const auto MAGENTA = "\033[35m";
 const auto CYAN    = "\033[36m";
 const auto GRAY    = "\033[90m";

@@ -65,6 +65,8 @@ static size_t read_callback(char *buffer, size_t size, size_t nitems, void *user
 // --- Angara-Exported Function: http.request ---
 // Angara signature: func request(options as record) -> record
 AngaraObject Angara_http_request(int arg_count, AngaraObject args[]) {
+    CURLcode res = CURLE_OK;
+    struct curl_slist *headers = NULL;
     if (arg_count != 1 || !IS_RECORD(args[0])) {
         angara_throw_error("http.request() requires one record argument for options.");
         return angara_create_nil();
@@ -124,7 +126,6 @@ AngaraObject Angara_http_request(int arg_count, AngaraObject args[]) {
     } // Add other methods like PUT, DELETE as needed
 
     // Set custom headers
-    struct curl_slist *headers = NULL;
     if (IS_RECORD(headers_obj)) {
         AngaraRecord* headers_rec = AS_RECORD(headers_obj);
         for (size_t i = 0; i < headers_rec->count; ++i) {
@@ -138,7 +139,7 @@ AngaraObject Angara_http_request(int arg_count, AngaraObject args[]) {
     }
 
     // --- 4. Perform the Request ---
-    CURLcode res = curl_easy_perform(curl_handle);
+    res = curl_easy_perform(curl_handle);
     if (res != CURLE_OK) {
         char err_buf[256];
         snprintf(err_buf, sizeof(err_buf), "http.request failed: %s", curl_easy_strerror(res));

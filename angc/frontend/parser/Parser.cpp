@@ -208,6 +208,7 @@ std::shared_ptr<ASTType> Parser::type() {
                 case TokenType::WHILE:
                 case TokenType::RETURN:
                     return;
+                default: ;
             }
             advance();
         }

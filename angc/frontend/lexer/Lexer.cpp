@@ -68,8 +68,6 @@ namespace angara {
         return m_tokens;
     }
 
-
-// Helper functions
     bool isDigit(char c) {
         return c >= '0' && c <= '9';
     }
@@ -84,7 +82,8 @@ namespace angara {
         return isAlpha(c) || isDigit(c);
     }
 
-    bool Lexer::isAtEnd() {
+    bool Lexer::isAtEnd() const
+    {
         return m_current >= m_source.length();
     }
 
@@ -265,7 +264,8 @@ namespace angara {
         }
     }
 
-    char Lexer::peekNext() {
+    char Lexer::peekNext() const
+    {
         if (m_current + 1 >= m_source.length()) return '\0';
         return m_source[m_current + 1];
     }
