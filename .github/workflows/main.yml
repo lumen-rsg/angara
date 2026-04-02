@@ -51,9 +51,8 @@ jobs:
           mkdir -p release_artifacts/modules
           mkdir -p release_artifacts/runtime
           
-          # Copy the main executables
+          # Copy the main executable
           cp build/angc release_artifacts/
-          cp build/angara_ls release_artifacts/
           
           # Copy the core runtime library
           cp build/libangara_runtime.so release_artifacts/lib/
@@ -67,7 +66,7 @@ jobs:
       # Step 6: Archive the staged artifacts
       - name: Archive Release
         run: |
-          tar -czvf angara-linux-amd64.tar.gz -C release_artifacts .
+          tar -czvf angara-linux-x64.tar.gz -C release_artifacts .
 
       # Step 7: Generate a Tag
       - name: Generate Release Tag
@@ -96,6 +95,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./angara-linux-amd64.tar.gz
-          asset_name: angara-linux-amd64.tar.gz
+          asset_path: ./angara-linux-x64.tar.gz
+          asset_name: angara-linux-x64.tar.gz
           asset_content_type: application/gzip
