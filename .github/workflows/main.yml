@@ -2,7 +2,7 @@
 
 name: Continuous Build and Release
 
-# This workflow triggers on every push to the 'main' branch.
+# This workflow triggers on every push to the 'master' branch.
 on:
   push:
     branches:
@@ -22,54 +22,56 @@ jobs:
         uses: actions/checkout@v4
 
       # Step 2: Install all required build dependencies for Angara.
+      # Removed CMake since we are using pure Make now.
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake pkg-config git \
-                                  clang \
+          sudo apt-get install -y build-essential pkg-config git \
+                                  clang make \
                                   libcurl4-openssl-dev libwebsockets-dev \
                                   libssl-dev librabbitmq-dev
 
-      # Step 3: Configure the project using CMake.
-      # We create a build directory as is standard practice.
-      - name: Configure CMake
+      # Step 3: Build Project using the new Makefile.
+      # Using -j$(nproc) allows make to use all available CPU cores for faster builds.
+      - name: Build Project
         env:
           CC: clang
           CXX: clang++
-        run: cmake -B build -S .
+        run: make -j$(nproc) all
 
-      # Step 4: Build all targets.
-      # This compiles angc, angara-ls, angara_runtime, and all native modules.
-      - name: Build Project
-        run: cmake --build build
-
-      # Step 5: Prepare artifacts for release.
-      # We create a dedicated directory and copy all the distributable files into it.
+      # Step 4: Prepare artifacts for release.
+      # Paths are updated to reflect the new Makefile structure.
       - name: Stage Artifacts
         run: |
           mkdir -p release_artifacts/lib
+          mkdir -p release_artifacts/modules
+          mkdir -p release_artifacts/runtime
+          
           # Copy the main executables
           cp build/angc release_artifacts/
           cp build/angara_ls release_artifacts/
-          # Copy the core runtime library
-          cp build/lib/libangara_runtime.so release_artifacts/lib/
-          # Copy all the native module libraries
-          cp build/lib/*.so release_artifacts/lib/
-          mkdir -p release_artifacts/runtime
+          
+          # Copy the core runtime library (Outputs to build/ now instead of build/lib/)
+          cp build/libangara_runtime.so release_artifacts/lib/
+          
+          # Copy all the native module libraries (Outputs to build/modules/ now)
+          cp build/modules/*.so release_artifacts/modules/
+          
+          # Copy runtime headers/source
           cp runtime/angara_runtime.* release_artifacts/runtime/
 
-      # Step 6: Archive the staged artifacts into a single .tar.gz file.
+      # Step 5: Archive the staged artifacts into a single .tar.gz file.
       - name: Archive Release
         run: |
           tar -czvf angara-linux-amd64.tar.gz -C release_artifacts .
 
-      # Step 7: Create a new GitHub Release.
-      # The release will be tagged with the date and the short commit hash (e.g., v2025.09.28-a1b2c3d).
+      # Step 6: Create a new GitHub Release.
+      # The release will be tagged with the date and the short commit hash.
       - name: Generate Release Tag
         id: generate_tag
         run: echo "TAG_NAME=v$(date +'%Y.%m.%d')-${{ github.sha }}" >> $GITHUB_ENV
 
-      # Step 8: Create a new GitHub Release using the generated tag.
+      # Step 7: Create a new GitHub Release using the generated tag.
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -85,7 +87,7 @@ jobs:
           draft: false
           prerelease: true
 
-      # Step 9: Upload the archived build to the release.
+      # Step 8: Upload the archived build to the release.
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         env:
