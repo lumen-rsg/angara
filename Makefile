@@ -55,8 +55,8 @@ ifeq ($(UNAME_S),Darwin)
 endif
 
 # --- File Definitions ---
-RT_SRC  := runtime/angara_runtime.c
-RT_OBJ  := build/obj/$(RT_SRC:.c=.o)
+RT_SRCS := $(wildcard runtime/rt_*.c) runtime/angara_runtime.c
+RT_OBJS := $(patsubst %.c,build/obj/%.o,$(RT_SRCS))
 RT_OUT  := build/libangara_runtime.$(SO_EXT)
 
 MOD_SRCS := $(wildcard modules/*.c)
@@ -118,10 +118,10 @@ build/obj/modules/json_bridge.o: modules/json_bridge.cpp
 	@$(CXX) $(CXXFLAGS) -Iangara-ls/vendor -c $< -o $@
 
 # --- Linkage Rules (Runtime) ---
-$(RT_OUT): $(RT_OBJ)
+$(RT_OUT): $(RT_OBJS)
 	@mkdir -p $(@D)
 	@printf "$(BLUE)[LN] $(RESET) %s\n" "$@"
-	@$(CC) $(RT_LDFLAGS) $< -o $@
+	@$(CC) $(RT_LDFLAGS) $^ -o $@
 
 # --- Linkage Rules (Modules) ---
 build/modules/http.$(SO_EXT): build/obj/modules/http.o | $(RT_OUT)
