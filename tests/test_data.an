@@ -1,0 +1,16 @@
+attach io;
+
+// Test data classes
+
+data Point(x as i64, y as i64)
+
+export func main() -> i64 {
+    io.println(1, "=== Data Class Tests ===");
+
+    let p = Point(10, 20);
+    io.println(1, "Created Point");
+
+    let x = p.x;
+    io.println(1, "=== Data Class Tests Passed ===");
+    return 0;
+}

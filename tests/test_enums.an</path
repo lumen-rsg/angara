@@ -1,0 +1,27 @@
+attach io;
+
+// Test enums
+
+enum Color {
+    Red
+    Green
+    Blue
+}
+
+export func main() -> i64 {
+    io.println(1, "=== Enum Tests ===");
+
+    let c = Color.Red;
+    io.println(1, "Got enum value");
+
+    let val = 42;
+    match val {
+        0 => io.println(1, "zero"),
+        1 => io.println(1, "one"),
+        42 => io.println(1, "forty-two!"),
+        _ => io.println(1, "other"),
+    }
+
+    io.println(1, "=== Enum Tests Passed ===");
+    return 0;
+}
