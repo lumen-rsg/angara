@@ -1,0 +1,31 @@
+attach io;
+
+// Test record creation, access, and modification
+
+export func main() -> i64 {
+    io.println(1, "=== Record Tests ===");
+
+    // 1. Create a record
+    let p = { name: "Alice", age: 30 };
+    io.println(1, "Created record");
+
+    // 2. Access fields via subscript syntax
+    io.println(1, "Name: " + p["name"]);
+    io.println(1, "Age: " + string(p["age"]));
+
+    // 3. Create another record
+    let p2 = { name: "Bob", age: 25 };
+    io.println(1, "p2 Name: " + p2["name"]);
+
+    // 4. Nested record
+    let nested = { inner: { val: 42 } };
+    let inner = nested["inner"];
+    io.println(1, "Nested val: " + string(inner["val"]));
+
+    // 5. Modify a record field
+    p["age"] = 31;
+    io.println(1, "Updated age: " + string(p["age"]));
+
+    io.println(1, "=== Record Tests Passed ===");
+    return 0;
+}

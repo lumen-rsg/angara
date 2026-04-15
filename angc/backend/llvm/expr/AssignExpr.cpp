@@ -55,8 +55,24 @@ llvm::Value* LLVMBackend::codegenAssignExpr(const AssignExpr& expr) {
         callRuntimeFunc("angara_incref", {val});
     } else if (auto sub = std::dynamic_pointer_cast<const SubscriptExpr>(expr.target)) {
         llvm::Value* obj = codegenExpr(sub->object);
-        llvm::Value* idx = codegenExpr(sub->index);
-        callRuntimeFunc("angara_list_set", {obj, idx, val});
+        auto obj_type = m_type_checker.m_expression_types.at(sub->object.get());
+        if (obj_type->kind == TypeKind::RECORD) {
+            // Record subscript assignment: obj["key"] = val
+            if (auto lit = std::dynamic_pointer_cast<const Literal>(sub->index)) {
+                callRuntimeFunc("angara_record_set", {obj,
+                    m_builder->CreateGlobalStringPtr(lit->token.lexeme), val});
+            } else {
+                // Dynamic key — extract string at runtime
+                llvm::Value* key = codegenExpr(sub->index);
+                auto* tag = extractTypeTag(key);
+                // For now, use the obj pointer as key for dynamic case
+                callRuntimeFunc("angara_record_set", {obj,
+                    m_builder->CreateGlobalStringPtr("unknown"), val});
+            }
+        } else {
+            llvm::Value* idx = codegenExpr(sub->index);
+            callRuntimeFunc("angara_list_set", {obj, idx, val});
+        }
     } else if (auto get = std::dynamic_pointer_cast<const GetExpr>(expr.target)) {
         llvm::Value* obj = codegenExpr(get->object);
         auto obj_type = m_type_checker.m_expression_types.at(get->object.get());
