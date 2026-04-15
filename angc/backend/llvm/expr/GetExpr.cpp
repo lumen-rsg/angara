@@ -19,9 +19,16 @@ llvm::Value* LLVMBackend::codegenGetExpr(const GetExpr& expr) {
     if (obj_type->toString() == "string" && name == "len")
         return callRuntimeFunc("angara_len", {obj});
 
-    // Instance field/method access (returns the object, method calls handled by CallExpr)
-    if (obj_type->kind == TypeKind::INSTANCE)
-        return obj; // Method dispatch is handled in codegenCallExpr
+    // Instance field/method access
+    if (obj_type->kind == TypeKind::INSTANCE) {
+        auto inst = std::dynamic_pointer_cast<InstanceType>(obj_type);
+        // Check if it's a field (not a method)
+        if (inst->class_type->fields.count(name)) {
+            return callRuntimeFunc("angara_record_get", {obj, m_builder->CreateGlobalStringPtr(name)});
+        }
+        // Method access: return the object (method dispatch handled by CallExpr)
+        return obj;
+    }
 
     // Module export access
     if (obj_type->kind == TypeKind::MODULE) {

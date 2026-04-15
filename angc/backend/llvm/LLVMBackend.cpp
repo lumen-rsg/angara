@@ -245,6 +245,13 @@ llvm::Function* LLVMBackend::getOrDeclareRuntimeFunc(const std::string& name,
     auto it = m_runtime_funcs.find(name);
     if (it != m_runtime_funcs.end()) return it->second;
 
+    // Check if function already exists in module (e.g., class methods)
+    auto* existing = m_module->getFunction(name);
+    if (existing) {
+        m_runtime_funcs[name] = existing;
+        return existing;
+    }
+
     auto* fn = llvm::Function::Create(fn_type, llvm::Function::ExternalLinkage, name, m_module.get());
     m_runtime_funcs[name] = fn;
     return fn;

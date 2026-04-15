@@ -1,0 +1,28 @@
+attach io;
+
+// Test a simple class with methods
+
+class Greeter {
+  public:
+    let name as string;
+
+  public:
+    func init(this, name as string) -> nil {
+      this.name = name;
+    }
+
+    func greet(this) -> string {
+      return "Hello, " + this.name + "!";
+    }
+}
+
+export func main() -> i64 {
+    io.println(1, "=== Class Tests ===");
+
+    let g = Greeter("World");
+    io.println(1, g.greet());
+    io.println(1, "Name: " + g.name);
+
+    io.println(1, "=== Class Tests Passed ===");
+    return 0;
+}

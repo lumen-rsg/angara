@@ -76,7 +76,7 @@ llvm::Value* LLVMBackend::codegenAssignExpr(const AssignExpr& expr) {
     } else if (auto get = std::dynamic_pointer_cast<const GetExpr>(expr.target)) {
         llvm::Value* obj = codegenExpr(get->object);
         auto obj_type = m_type_checker.m_expression_types.at(get->object.get());
-        if (obj_type->kind == TypeKind::RECORD)
+        if (obj_type->kind == TypeKind::RECORD || obj_type->kind == TypeKind::INSTANCE)
             callRuntimeFunc("angara_record_set", {obj,
                 m_builder->CreateGlobalStringPtr(get->name.lexeme), val});
     }
