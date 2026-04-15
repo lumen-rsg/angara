@@ -67,28 +67,29 @@ namespace angara {
         // 2. Configure the driver with system and workspace paths.
         driver.set_paths(m_std_lib_path, m_native_lib_path);
         driver.set_workspace_projects(project_entries);
+        driver.set_backend(m_backend);
 
         // 3. Resolve the entry point for THIS project.
         const std::string& entry_file = project_entries.at(config.name);
 
         // 4. Trigger the project-aware compilation.
-        // This tells the driver: "Even if this file is main.an, the module name is 'Logger'"
-        std::cout << "    Transpiling source code...\n";
+        std::cout << "    " << (m_backend == BackendKind::LLVM ? "Compiling (LLVM)..." : "Transpiling source code...") << "\n";
         if (!driver.compile(config, entry_file)) {
             return false;
         }
 
         // 5. Link the generated artifacts into the final binary.
-        // Use the project directory (m_project_dirs[config.name]) as the destination.
         std::cout << "    Linking artifacts...\n";
         return link_artifacts(config,
                              driver.get_generated_c_files(),
+                             driver.get_generated_object_files(),
                              driver.get_native_libs_linked(),
                              m_project_dirs[config.name]);
     }
 
     bool BuildSystem::link_artifacts(const ProjectConfig& config,
                                  const std::set<std::string>& c_files,
+                                 const std::set<std::string>& object_files,
                                  const std::vector<std::string>& discovered_libs,
                                  const std::string& project_root) const
     {
@@ -102,6 +103,9 @@ namespace angara {
         }
 
         for (const auto& file : c_files) {
+            cmd << " " << file;
+        }
+        for (const auto& file : object_files) {
             cmd << " " << file;
         }
 
@@ -136,6 +140,9 @@ namespace angara {
             fs::path h_file = file;
             h_file.replace_extension(".h");
             if (fs::exists(h_file)) fs::remove(h_file);
+        }
+        for (const auto& file : object_files) {
+            fs::remove(file);
         }
 
         std::cout << "    ✓ Built " << bin_path.string() << "\n";

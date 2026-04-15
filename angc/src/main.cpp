@@ -45,6 +45,7 @@ void print_help() {
     std::cout << "  -v, --version               Show version information\n";
     std::cout << "  -h, --help                  Show this help message\n";
     std::cout << "  --dump-ast                  Debug: Print Abstract Syntax Tree\n";
+    std::cout << "  --backend <c|llvm>          Select compilation backend (default: c)\n";
     std::cout << std::endl;
 }
 
@@ -146,6 +147,23 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // Parse --backend flag anywhere in args
+    angara::BackendKind selected_backend = angara::BackendKind::C_TRANSPILER;
+    for (size_t i = 0; i < args.size(); i++) {
+        if (args[i] == "--backend" && i + 1 < args.size()) {
+            if (args[i + 1] == "llvm") {
+                selected_backend = angara::BackendKind::LLVM;
+            } else if (args[i + 1] == "c") {
+                selected_backend = angara::BackendKind::C_TRANSPILER;
+            } else {
+                std::cerr << RED << "Unknown backend: " << args[i + 1] << " (use 'c' or 'llvm')" << RESET << "\n";
+                return 1;
+            }
+            args.erase(args.begin() + i, args.begin() + i + 2);
+            break;
+        }
+    }
+
     // 4. Handle Explicit Path Build
     if (cmd == "--path") {
         if (args.size() < 2) {
@@ -153,6 +171,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         angara::BuildSystem builder;
+        builder.set_backend(selected_backend);
         return builder.build(args[1]) ? 0 : 1;
     }
 
@@ -169,32 +188,40 @@ int main(int argc, char* argv[]) {
         legacy_config.type = angara::ProjectType::APP;
 
         angara::CompilerDriver driver;
+        driver.set_backend(selected_backend);
         // Use the standard installation paths
         driver.set_paths("/opt/angara/src/modules", "/opt/angara/modules");
 
         if (driver.compile(legacy_config, cmd)) {
-            std::cout << GREEN << "Transpilation complete." << RESET << " Linking..." << std::endl;
+            bool use_llvm = (selected_backend == angara::BackendKind::LLVM);
+            std::cout << GREEN << (use_llvm ? "LLVM codegen complete." : "Transpilation complete.")
+                      << RESET << " Linking..." << std::endl;
 
             // 1. Build the Link Command
             std::stringstream cmd_link;
             cmd_link << "clang -o " << base_name;
 
-            // 2. Add all generated C files
-            // (The driver might have generated multiple C files if 'cmd' attached other local files)
-            for (const auto& c_file : driver.get_generated_c_files()) {
-                cmd_link << " " << c_file;
+            if (use_llvm) {
+                // LLVM backend produces .o files
+                for (const auto& o_file : driver.get_generated_object_files()) {
+                    cmd_link << " " << o_file;
+                }
+                // Add the runtime as a C file compiled alongside
+                cmd_link << " /opt/angara/src/runtime/angara_runtime.c";
+            } else {
+                // 2. Add all generated C files
+                for (const auto& c_file : driver.get_generated_c_files()) {
+                    cmd_link << " " << c_file;
+                }
+                // 3. Add Runtime implementation
+                cmd_link << " /opt/angara/src/runtime/angara_runtime.c";
             }
 
-            // 3. Add Runtime implementation
-            cmd_link << " /opt/angara/src/runtime/angara_runtime.c";
-
             // 4. Set Search Paths
-            // Include current dir, runtime dir, and stdlib dir
             cmd_link << " -I. -I/opt/angara/src/runtime -I/opt/angara/src/modules";
             cmd_link << " -L/opt/angara/modules";
 
             // 5. Add Native Dependencies
-            // Deduplicate using a set
             std::set<std::string> libs;
             for (const auto& lib : driver.get_native_libs_linked()) {
                 libs.insert(lib);
@@ -212,12 +239,14 @@ int main(int argc, char* argv[]) {
             if (res == 0) {
                 std::cout << BOLD << GREEN << "Successfully built: " << base_name << RESET << "\n";
 
-                // Cleanup generated C/H artifacts
+                // Cleanup generated artifacts
                 for (const auto& c_file : driver.get_generated_c_files()) {
                     remove(c_file.c_str());
-                    // Deduce and remove .h
                     std::string h_file = c_file.substr(0, c_file.find_last_of('.')) + ".h";
                     remove(h_file.c_str());
+                }
+                for (const auto& o_file : driver.get_generated_object_files()) {
+                    remove(o_file.c_str());
                 }
                 return 0;
             } else {

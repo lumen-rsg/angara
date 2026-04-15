@@ -30,6 +30,14 @@ else
     RT_LDFLAGS := -shared
 endif
 
+# --- LLVM Configuration ---
+LLVM_CONFIG := $(shell which llvm-config 2>/dev/null || echo /opt/homebrew/opt/llvm/bin/llvm-config)
+# Filter out flags that conflict with our own settings
+LLVM_CXXFLAGS := $(filter-out -fno-exceptions -fno-rtti -std=%,$(shell $(LLVM_CONFIG) --cxxflags 2>/dev/null))
+LLVM_LDFLAGS  := $(shell $(LLVM_CONFIG) --ldflags 2>/dev/null)
+LLVM_LIBS     := $(shell $(LLVM_CONFIG) --libs core native 2>/dev/null)
+LLVM_SYSTEM_LIBS := $(shell $(LLVM_CONFIG) --system-libs 2>/dev/null)
+
 # --- Toolchain & Flags ---
 CC  := clang
 CXX := clang++
@@ -38,7 +46,7 @@ CFLAGS   := -fPIC -Wall -Iangc/includes
 CXXFLAGS := -std=c++23 -fPIC -Wall -Wno-trigraphs -Iangc/includes
 
 LDFLAGS_MOD := -shared -Lbuild -langara_runtime
-LDFLAGS_BIN := -Lbuild -langara_runtime $(RPATH_FLAG)
+LDFLAGS_BIN := -Lbuild -langara_runtime $(RPATH_FLAG) $(LLVM_LDFLAGS) $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS)
 
 # --- Dependency Resolution (pkg-config) ---
 CURL_CFLAGS := $(shell pkg-config --cflags libcurl 2>/dev/null)
@@ -95,7 +103,7 @@ build/obj/%.o: %.c
 build/obj/%.o: %.cpp
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CX] $(RESET) %s\n" "$<"
-	@$(CXX) $(CXXFLAGS) -c $< -o $@
+	@$(CXX) $(CXXFLAGS) $(LLVM_CXXFLAGS) -c $< -o $@
 
 build/obj/modules/http.o: modules/http.c
 	@mkdir -p $(@D)

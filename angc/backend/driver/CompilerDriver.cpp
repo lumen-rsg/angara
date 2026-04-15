@@ -8,6 +8,7 @@
 #include "Parser.h"
 #include "TypeChecker.h"
 #include "CTranspiler.h"
+#include "LLVMBackend.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -156,6 +157,10 @@ namespace angara {
         return m_generated_c_files;
     }
 
+    const std::set<std::string>& CompilerDriver::get_generated_object_files() const {
+        return m_generated_object_files;
+    }
+
     const std::vector<std::string>& CompilerDriver::get_native_libs_linked() const {
         return m_native_lib_names;
     }
@@ -205,6 +210,7 @@ namespace angara {
         m_compilation_stack.clear();
         m_generated_c_files.clear();
         m_generated_h_files.clear();
+        m_generated_object_files.clear();
         m_native_lib_names.clear();
 
         // 1. Kick off the recursive resolution.
@@ -428,6 +434,21 @@ namespace angara {
         auto mod = typeChecker.getModuleType();
         m_angara_module_names.push_back(module_name);
 
+        if (m_backend == BackendKind::LLVM) {
+            // --- LLVM Backend ---
+            LLVMBackend llvmBackend(typeChecker, errorHandler);
+            if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
+                m_had_error = true;
+                return nullptr;
+            }
+            m_generated_object_files.insert(llvmBackend.get_object_file_path());
+            m_modules_compiled++;
+            print_progress("Done!");
+            std::cout << "\r\033[K" << std::flush;
+            return mod;
+        }
+
+        // --- C Transpiler Backend (default) ---
         CTranspiler transpiler(typeChecker, errorHandler);
         auto [h_code, c_code] = transpiler.generate(statements, mod, m_angara_module_names);
 
