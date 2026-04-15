@@ -1,0 +1,65 @@
+attach io;
+
+// Test control flow, lists, and basic operations
+
+func fibonacci(n as i64) -> i64 {
+    if (n <= 1) {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+export func main() -> i64 {
+    // 1. Basic arithmetic and println
+    io.println(1, "=== Basic Tests ===");
+
+    // 2. If/else
+    let x = 42;
+    if (x > 40) {
+        io.println(1, "x > 40: true");
+    } else {
+        io.println(1, "x > 40: false");
+    }
+
+    // 3. While loop
+    let sum = 0;
+    let i = 0;
+    while (i < 5) {
+        sum = sum + i;
+        i = i + 1;
+    }
+    io.println(1, "Sum 0..4 = " + string(sum));
+
+    // 4. For loop
+    let product = 1;
+    for (let j = 1; j < 6; j = j + 1) {
+        product = product * j;
+    }
+    io.println(1, "5! = " + string(product));
+
+    // 5. List literal and len
+    let items = [10, 20, 30];
+    io.println(1, "List length = " + string(len(items)));
+
+    // 6. Subscript access
+    io.println(1, "items[0] = " + string(items[0]));
+    io.println(1, "items[2] = " + string(items[2]));
+
+    // 7. For-in iteration
+    let total = 0;
+    for (item in items) {
+        total = total + item;
+    }
+    io.println(1, "Sum of items = " + string(total));
+
+    // 8. Recursive function
+    let fib10 = fibonacci(10);
+    io.println(1, "fib(10) = " + string(fib10));
+
+    // 9. String concatenation
+    let greeting = "Hello" + " " + "LLVM!";
+    io.println(1, greeting);
+
+    io.println(1, "=== All Tests Passed ===");
+    return 0;
+}

@@ -344,6 +344,22 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
         }
     }
 
+    // Call the Angara main() function if it exists
+    auto main_closure_it = m_globals.find("g_angara_main_closure");
+    if (main_closure_it == m_globals.end()) {
+        main_closure_it = m_globals.find("g_" + module_name + "_main");
+    }
+    if (main_closure_it != m_globals.end()) {
+        llvm::Value* main_closure = m_builder->CreateLoad(m_angara_obj_type, main_closure_it->second, "main_closure");
+        // Call main() with no arguments
+        auto* arr = m_builder->CreateAlloca(llvm::ArrayType::get(m_angara_obj_type, 0));
+        callRuntimeFunc("angara_call", {
+            main_closure,
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_context), 0),
+            m_builder->CreateBitCast(arr, llvm::PointerType::get(m_angara_obj_type, 0))
+        });
+    }
+
     // Decref all local variables in main before shutdown
     for (const auto& [name, alloca] : m_named_values) {
         llvm::Value* val = m_builder->CreateLoad(m_angara_obj_type, alloca, name + "_cleanup");
