@@ -44,9 +44,15 @@ llvm::Value* LLVMBackend::codegenAssignExpr(const AssignExpr& expr) {
         }
     }
 
-    // Store into target
+    // Store into target — ARC: decref old, incref new
     if (auto var = std::dynamic_pointer_cast<const VarExpr>(expr.target)) {
-        storeVariable(sanitizeName(var->name.lexeme), val);
+        const std::string vname = sanitizeName(var->name.lexeme);
+        // Decref old value
+        llvm::Value* old_val = loadVariable(vname);
+        callRuntimeFunc("angara_decref", {old_val});
+        // Store new value and incref it
+        storeVariable(vname, val);
+        callRuntimeFunc("angara_incref", {val});
     } else if (auto sub = std::dynamic_pointer_cast<const SubscriptExpr>(expr.target)) {
         llvm::Value* obj = codegenExpr(sub->object);
         llvm::Value* idx = codegenExpr(sub->index);
@@ -87,10 +93,13 @@ llvm::Value* LLVMBackend::codegenUpdateExpr(const UpdateExpr& expr) {
                 {m_builder->CreateSub(extractI64(old), extractI64(one))});
     }
 
-    // Store updated value
-    if (auto var = std::dynamic_pointer_cast<const VarExpr>(expr.target))
-        storeVariable(sanitizeName(var->name.lexeme), inc);
-    else if (auto sub = std::dynamic_pointer_cast<const SubscriptExpr>(expr.target)) {
+    // Store updated value — ARC: decref old, incref new
+    if (auto var = std::dynamic_pointer_cast<const VarExpr>(expr.target)) {
+        const std::string vname = sanitizeName(var->name.lexeme);
+        callRuntimeFunc("angara_decref", {old});
+        storeVariable(vname, inc);
+        callRuntimeFunc("angara_incref", {inc});
+    } else if (auto sub = std::dynamic_pointer_cast<const SubscriptExpr>(expr.target)) {
         llvm::Value* obj = codegenExpr(sub->object);
         llvm::Value* idx = codegenExpr(sub->index);
         callRuntimeFunc("angara_list_set", {obj, idx, inc});

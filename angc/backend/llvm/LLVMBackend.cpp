@@ -16,7 +16,9 @@
 namespace angara {
 
 LLVMBackend::LLVMBackend(TypeChecker& type_checker, ErrorHandler& errorHandler)
-    : m_type_checker(type_checker), m_errorHandler(errorHandler) {
+    : m_type_checker(type_checker), m_errorHandler(errorHandler),
+      m_exception_frame_type(nullptr), m_exc_chain_head_global(nullptr),
+      m_current_exception_global(nullptr), m_setjmp_fn(nullptr) {
     m_context = std::make_unique<llvm::LLVMContext>();
     m_module = std::make_unique<llvm::Module>("angara_module", *m_context);
     m_builder = std::make_unique<llvm::IRBuilder<>>(*m_context);
@@ -113,8 +115,7 @@ llvm::Value* LLVMBackend::createAngaraString(const std::string& str) {
 }
 
 llvm::Value* LLVMBackend::extractI64(llvm::Value* obj) {
-    auto* ptr = m_builder->CreateStructGEP(m_angara_obj_type, obj, 1, "i64_ptr");
-    return m_builder->CreateLoad(llvm::Type::getInt64Ty(*m_context), ptr, "i64_val");
+    return m_builder->CreateExtractValue(obj, {1}, "i64_val");
 }
 
 llvm::Value* LLVMBackend::extractF64(llvm::Value* obj) {
@@ -134,8 +135,7 @@ llvm::Value* LLVMBackend::extractObj(llvm::Value* obj) {
 }
 
 llvm::Value* LLVMBackend::extractTypeTag(llvm::Value* obj) {
-    auto* ptr = m_builder->CreateStructGEP(m_angara_obj_type, obj, 0, "tag_ptr");
-    return m_builder->CreateLoad(llvm::Type::getInt32Ty(*m_context), ptr, "type_tag");
+    return m_builder->CreateExtractValue(obj, {0}, "type_tag");
 }
 
 llvm::Value* LLVMBackend::isTruthy(llvm::Value* obj) {
@@ -205,16 +205,39 @@ llvm::Value* LLVMBackend::callRuntimeFunc(const std::string& name,
     } else if (name == "angara_record_set") {
         fn_type = llvm::FunctionType::get(llvm::Type::getVoidTy(*m_context),
             {m_angara_obj_type, i8ptr, m_angara_obj_type}, false);
+    } else if (name == "angara_closure_new") {
+        fn_type = llvm::FunctionType::get(m_angara_obj_type,
+            {llvm::PointerType::get(llvm::Type::getInt8Ty(*m_context), 0),
+             llvm::Type::getInt32Ty(*m_context),
+             llvm::Type::getInt1Ty(*m_context)}, false);
+    } else if (name == "angara_incref" || name == "angara_decref") {
+        fn_type = llvm::FunctionType::get(llvm::Type::getVoidTy(*m_context), {m_angara_obj_type}, false);
     } else if (name == "angara_runtime_init" || name == "angara_runtime_shutdown") {
         fn_type = llvm::FunctionType::get(llvm::Type::getVoidTy(*m_context), false);
     } else {
-        // Generic fallback: AngaraObject(AngaraObject, ...)
-        std::vector<llvm::Type*> param_types(args.size(), m_angara_obj_type);
+        // Generic fallback: use actual argument types
+        // This handles native module functions: AngaraObject(int, AngaraObject*)
+        std::vector<llvm::Type*> param_types;
+        for (auto* arg : args)
+            param_types.push_back(arg->getType());
         fn_type = llvm::FunctionType::get(m_angara_obj_type, param_types, false);
     }
 
     auto* fn = getOrDeclareRuntimeFunc(name, fn_type);
-    return m_builder->CreateCall(fn, args, "rt_" + name);
+    auto* call = m_builder->CreateCall(fn, args);
+    // Only name the result if the function returns a non-void value
+    if (!fn_type->getReturnType()->isVoidTy()) {
+        call->setName("rt_" + name);
+    }
+    return call;
+}
+
+std::string LLVMBackend::platformMangle(const std::string& name) {
+    // On macOS (Darwin), C symbols have a leading underscore prefix
+    if (m_target_triple.isOSDarwin()) {
+        return "_" + name;
+    }
+    return name;
 }
 
 llvm::Function* LLVMBackend::getOrDeclareRuntimeFunc(const std::string& name,
@@ -271,6 +294,12 @@ void LLVMBackend::declareRuntimeFunctions() {
         llvm::FunctionType::get(llvm::Type::getVoidTy(*m_context), false));
     getOrDeclareRuntimeFunc("angara_throw_error",
         llvm::FunctionType::get(llvm::Type::getVoidTy(*m_context), {i8ptr}, false));
+    getOrDeclareRuntimeFunc("angara_incref",
+        llvm::FunctionType::get(llvm::Type::getVoidTy(*m_context), {m_angara_obj_type}, false));
+    getOrDeclareRuntimeFunc("angara_decref",
+        llvm::FunctionType::get(llvm::Type::getVoidTy(*m_context), {m_angara_obj_type}, false));
+    getOrDeclareRuntimeFunc("angara_throw",
+        llvm::FunctionType::get(llvm::Type::getVoidTy(*m_context), {m_angara_obj_type}, false));
 }
 
 // --- Variable Management ---
@@ -308,6 +337,68 @@ void LLVMBackend::storeVariable(const std::string& name, llvm::Value* val) {
     m_had_error = true;
 }
 
+// --- Exception Handling Infrastructure ---
+
+llvm::StructType* LLVMBackend::getOrCreateExceptionFrameType() {
+    if (m_exception_frame_type) return m_exception_frame_type;
+
+    // ExceptionFrame { jmp_buf buffer, ExceptionFrame* prev }
+    // On macOS ARM64: jmp_buf is 26 int64s = 208 bytes
+    // We model jmp_buf as [26 x i64] for layout compatibility
+    //
+    // Use the standard LLVM recursive type pattern: create opaque struct, then setBody.
+    m_exception_frame_type = llvm::StructType::create(*m_context, "ExceptionFrame");
+    m_exception_frame_type->setBody({
+        llvm::ArrayType::get(llvm::Type::getInt64Ty(*m_context), 26), // jmp_buf buffer
+        llvm::PointerType::get(m_exception_frame_type, 0)             // ExceptionFrame* prev
+    });
+
+    return m_exception_frame_type;
+}
+
+llvm::GlobalVariable* LLVMBackend::getOrCreateExcChainGlobal() {
+    if (m_exc_chain_head_global) return m_exc_chain_head_global;
+
+    m_exc_chain_head_global = new llvm::GlobalVariable(
+        *m_module,
+        llvm::PointerType::get(getOrCreateExceptionFrameType(), 0),
+        false, // not constant
+        llvm::GlobalValue::ExternalLinkage,
+        nullptr,
+        "g_exception_chain_head"
+    );
+    return m_exc_chain_head_global;
+}
+
+llvm::GlobalVariable* LLVMBackend::getOrCreateCurrentExcGlobal() {
+    if (m_current_exception_global) return m_current_exception_global;
+
+    m_current_exception_global = new llvm::GlobalVariable(
+        *m_module,
+        m_angara_obj_type,
+        false, // not constant
+        llvm::GlobalValue::ExternalLinkage,
+        nullptr,
+        "g_current_exception"
+    );
+    return m_current_exception_global;
+}
+
+llvm::Function* LLVMBackend::getOrCreateSetjmp() {
+    if (m_setjmp_fn) return m_setjmp_fn;
+
+    // int _setjmp(jmp_buf env) — use _setjmp on macOS, setjmp elsewhere
+    auto* jmp_buf_type = llvm::PointerType::get(llvm::Type::getInt8Ty(*m_context), 0);
+    m_setjmp_fn = llvm::Function::Create(
+        llvm::FunctionType::get(llvm::Type::getInt32Ty(*m_context), {jmp_buf_type}, false),
+        llvm::Function::ExternalLinkage,
+        "_setjmp",
+        m_module.get()
+    );
+    m_setjmp_fn->addFnAttr(llvm::Attribute::NoDuplicate);
+    return m_setjmp_fn;
+}
+
 // --- Main Generate Entry Point ---
 
 bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& statements,
@@ -324,11 +415,8 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& statements,
     // 2. Process top-level declarations (structs, globals, functions)
     codegenTopLevelDecls(statements);
 
-    // 3. Generate main function if present
-    auto main_symbol = m_type_checker.m_symbols.resolve("main");
-    if (main_symbol) {
-        codegenMainFunction(statements, m_module_name, all_module_names);
-    }
+    // 3. Always generate a C main function
+    codegenMainFunction(statements, m_module_name, all_module_names);
 
     // 4. Verify the module
     std::string verify_err;

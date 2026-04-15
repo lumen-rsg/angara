@@ -52,6 +52,19 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
         idx++;
     }
 
+    // Register closure global BEFORE generating body (for recursive calls)
+    auto* closure_global = new llvm::GlobalVariable(
+        *m_module, m_angara_obj_type, false,
+        llvm::GlobalValue::PrivateLinkage,
+        llvm::ConstantStruct::get(m_angara_obj_type, {
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_context), 0),
+            llvm::ConstantInt::get(llvm::Type::getInt64Ty(*m_context), 0)
+        }),
+        "g_" + module_name + "_" + stmt.name.lexeme);
+
+    m_globals["g_" + module_name + "_" + stmt.name.lexeme] = closure_global;
+    m_globals["g_" + stmt.name.lexeme] = closure_global;
+
     // Create entry block
     auto* entry = llvm::BasicBlock::Create(*m_context, "entry", fn);
     m_builder->SetInsertPoint(entry);
@@ -82,18 +95,38 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     // Restore scope
     m_named_values = std::move(saved_values);
 
-    // Create a closure wrapper global: g_modulename_funcname
-    auto* closure_global = new llvm::GlobalVariable(
-        *m_module, m_angara_obj_type, false,
-        llvm::GlobalValue::PrivateLinkage,
-        llvm::ConstantStruct::get(m_angara_obj_type, {
-            llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_context), 0),
-            llvm::ConstantInt::get(llvm::Type::getInt64Ty(*m_context), 0)
-        }),
-        "g_" + module_name + "_" + stmt.name.lexeme);
+    // Generate wrapper function: AngaraObject angara_w_Angara_mod_fn(int argc, AngaraObject* argv)
+    {
+        std::string wrapper_name = "angara_w_" + func_name;
+        auto* i32_type = llvm::Type::getInt32Ty(*m_context);
+        auto* obj_ptr_type = llvm::PointerType::get(m_angara_obj_type, 0);
+        auto* wrapper_type = llvm::FunctionType::get(m_angara_obj_type, {i32_type, obj_ptr_type}, false);
+        auto* wrapper_fn = llvm::Function::Create(wrapper_type, llvm::Function::PrivateLinkage,
+                                                    wrapper_name, m_module.get());
 
-    m_globals["g_" + module_name + "_" + stmt.name.lexeme] = closure_global;
-    m_globals["g_" + stmt.name.lexeme] = closure_global;
+        auto* entry = llvm::BasicBlock::Create(*m_context, "entry", wrapper_fn);
+        m_builder->SetInsertPoint(entry);
+
+        auto* argc = &*wrapper_fn->arg_begin();
+        auto* argv = &*(wrapper_fn->arg_begin() + 1);
+
+        // Extract args from argv and call the actual function
+        std::vector<llvm::Value*> call_args;
+        for (size_t i = 0; i < stmt.params.size(); i++) {
+            auto* gep = m_builder->CreateGEP(m_angara_obj_type, argv,
+                {llvm::ConstantInt::get(i32_type, i)}, "arg" + std::to_string(i));
+            call_args.push_back(m_builder->CreateLoad(m_angara_obj_type, gep, "a" + std::to_string(i)));
+        }
+
+        auto* callee = m_module->getFunction(func_name);
+        if (callee) {
+            llvm::Value* result = m_builder->CreateCall(callee, call_args, "result");
+            m_builder->CreateRet(result);
+        } else {
+            m_builder->CreateRet(createAngaraNil());
+        }
+    }
+
 }
 
 void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
@@ -255,6 +288,33 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
     // Call runtime init
     callRuntimeFunc("angara_runtime_init", {});
 
+    // Initialize closure globals for all declared functions
+    for (const auto& stmt : statements) {
+        if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
+            const std::string fname = func_stmt->name.lexeme;
+            std::string closure_name = "g_" + module_name + "_" + fname;
+            if (fname == "main") closure_name = "g_angara_main_closure";
+            auto git = m_globals.find(closure_name);
+            if (git == m_globals.end()) {
+                // Also try short name
+                git = m_globals.find("g_" + fname);
+            }
+            if (git != m_globals.end()) {
+                std::string wrapper_name = "angara_w_" + mangleName(module_name, fname);
+                auto* wrapper_fn = m_module->getFunction(wrapper_name);
+                if (wrapper_fn) {
+                    auto* fn_ptr = m_builder->CreateBitCast(wrapper_fn,
+                        llvm::PointerType::get(llvm::Type::getInt8Ty(*m_context), 0), "fn_ptr");
+                    auto* arity = llvm::ConstantInt::get(llvm::Type::getInt32Ty(*m_context), func_stmt->params.size());
+                    auto* is_native = llvm::ConstantInt::get(llvm::Type::getInt1Ty(*m_context), 0);
+                    // angara_closure_new(void* fn, int arity, bool is_native)
+                    auto* closure_obj = callRuntimeFunc("angara_closure_new", {fn_ptr, arity, is_native});
+                    m_builder->CreateStore(closure_obj, git->second);
+                }
+            }
+        }
+    }
+
     // Process all top-level statements (variable decls become local, expressions are evaluated)
     for (const auto& stmt : statements) {
         if (std::dynamic_pointer_cast<const FuncStmt>(stmt)) continue;    // Already generated
@@ -282,6 +342,12 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
         } else {
             codegenStmt(stmt);
         }
+    }
+
+    // Decref all local variables in main before shutdown
+    for (const auto& [name, alloca] : m_named_values) {
+        llvm::Value* val = m_builder->CreateLoad(m_angara_obj_type, alloca, name + "_cleanup");
+        callRuntimeFunc("angara_decref", {val});
     }
 
     // Call runtime shutdown

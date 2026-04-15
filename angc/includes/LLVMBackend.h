@@ -46,6 +46,17 @@ namespace angara {
         llvm::PointerType* m_angara_obj_ptr_type;
         llvm::FunctionType* m_generic_fn_type;
 
+        // --- Exception Frame Type (matches C ExceptionFrame) ---
+        llvm::StructType* m_exception_frame_type;
+        llvm::GlobalVariable* m_exc_chain_head_global;
+        llvm::GlobalVariable* m_current_exception_global;
+        llvm::Function* m_setjmp_fn;
+
+        llvm::StructType* getOrCreateExceptionFrameType();
+        llvm::GlobalVariable* getOrCreateExcChainGlobal();
+        llvm::GlobalVariable* getOrCreateCurrentExcGlobal();
+        llvm::Function* getOrCreateSetjmp();
+
         // --- Expression Codegen ---
         llvm::Value* codegenExpr(const std::shared_ptr<Expr>& expr);
         llvm::Value* codegenLiteral(const Literal& expr);
@@ -157,6 +168,7 @@ namespace angara {
         const ClassType* findPropertyOwner(const ClassType* klass, const std::string& prop_name);
         const FuncStmt* findMethodAst(const ClassStmt& class_stmt, const std::string& name);
         std::string sanitizeName(const std::string& name);
+        std::string platformMangle(const std::string& name);
     };
 
 } // namespace angara

@@ -1,0 +1,16 @@
+// Test LLVM backend with functions and io module
+attach io;
+func add(a as i64, b as i64) -> i64 {
+    return a + b;
+}
+
+func factorial(n as i64) -> i64 {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+io.println(1, "Hello from Angara LLVM backend!");
+io.println(1, "42 + 8 = " + string(add(42, 8)));
+io.println(1, "factorial(10) = " + string(factorial(10)));

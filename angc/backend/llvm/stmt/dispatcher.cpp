@@ -37,6 +37,8 @@ void LLVMBackend::codegenVarDecl(const VarDeclStmt& stmt) {
     auto* alloca = createAlloca(fn, name);
     m_builder->CreateStore(init_val, alloca);
     m_named_values[name] = alloca;
+    // Incref the new value — it's now owned by this variable
+    callRuntimeFunc("angara_incref", {init_val});
 }
 
 void LLVMBackend::codegenExpressionStmt(const ExpressionStmt& stmt) {
@@ -47,6 +49,14 @@ void LLVMBackend::codegenBlock(const BlockStmt& stmt) {
     auto saved_values = m_named_values;
     for (const auto& s : stmt.statements)
         codegenStmt(s);
+    // Decref variables that are leaving scope (new ones not in saved_values)
+    for (const auto& [name, alloca] : m_named_values) {
+        if (saved_values.find(name) == saved_values.end()) {
+            // This variable was declared in this block — decref it
+            llvm::Value* val = m_builder->CreateLoad(m_angara_obj_type, alloca, name + "_drop");
+            callRuntimeFunc("angara_decref", {val});
+        }
+    }
     m_named_values = saved_values;
 }
 
