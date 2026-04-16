@@ -8,6 +8,7 @@
 #include "CompilerDriver.h"
 #include "BuildSystem.h"
 #include "ProjectInitializer.h"
+#include "EasterEgg.h"
 #include "../analyzer/printer/ASTPrinter.h"
 #include "Lexer.h"
 #include "Parser.h"
@@ -23,7 +24,7 @@ const std::string ANGARA_SPEC     = "v3.0";
 
 // --- Platform Detection ---
 #if defined(__APPLE__)
-    static const char* const NATIVE_EXT = ".dylib";
+    static const auto NATIVE_EXT = ".dylib";
 #elif defined(__linux__)
     static const char* const NATIVE_EXT = ".so";
 #elif defined(_WIN32)
@@ -33,14 +34,6 @@ const std::string ANGARA_SPEC     = "v3.0";
 #endif
 
 // --- UI Helpers ---
-
-void print_typing(const std::string& text, int delay_ms = 30) {
-    for (char c : text) {
-        std::cout << c << std::flush;
-        std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
-    }
-    std::cout << std::endl;
-}
 
 void print_help() {
     std::cout << CLR_BOLD << "Usage:" << CLR_RESET << "\n";
@@ -64,37 +57,6 @@ void print_version() {
     std::cout << CLR_GRAY << "  (c) 2026 Lumina Labs. This is a testing build." << CLR_RESET << "\n";
 }
 
-void run_easter_egg() {
-    std::vector<std::string> startup_seq = {
-        "You think you can just ask this...",
-        "Fine, you can.",
-        "Allocating infinite memory buffers...",
-        "Synchronizing with lumina rays...",
-        "Compiling perfection..."
-    };
-
-    std::cout << "\n";
-    for (const auto& line : startup_seq) {
-        std::cout << CLR_GRAY << "  [SYS] " << line << CLR_RESET << "\r";
-        std::this_thread::sleep_for(std::chrono::milliseconds(400));
-        std::cout << "\033[2K";
-    }
-
-    std::cout << "\033[2K";
-    print_typing(CLR_BOLD + std::string(CLR_CYAN) + "-> System Online." + CLR_RESET, 50);
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
-
-    std::cout << CLR_MAGENTA << R"(
-    ___    _   __  ______   ___     ____     ___
-   /   |  / | / / / ____/  /   |   / __ \   /   |
-  / /| | /  |/ / / / __   / /| |  / /_/ /  / /| |
- / ___ |/ /|  / / /_/ /  / ___ | / _, _/  / ___ |
-/_/  |_/_/ |_/  \____/  /_/  |_|/_/ |_|  /_/  |_|
-)" << CLR_RESET << "\n";
-
-    std::cout << "    " << CLR_BOLD << "The craft of code is the craft of thought." << CLR_RESET << "\n\n";
-}
-
 // --- Target Triple Resolution ---
 
 static std::string get_host_os_triple_suffix() {
@@ -114,7 +76,7 @@ static std::string resolve_target_triple(const std::string& input) {
         return input;
     }
 
-    std::string os_suffix = get_host_os_triple_suffix();
+    const std::string os_suffix = get_host_os_triple_suffix();
 
     if (input == "arm64" || input == "aarch64") {
         return "aarch64" + os_suffix;
@@ -156,8 +118,7 @@ int main(int argc, char* argv[]) {
 
     // Handle No Arguments (Implicit Build)
     if (args.empty()) {
-        std::string project_file = find_local_project_file();
-        if (!project_file.empty()) {
+        if (std::string project_file = find_local_project_file(); !project_file.empty()) {
             std::cout << CLR_BOLD << "Found project configuration: " << project_file << CLR_RESET << "\n";
             angara::BuildSystem builder;
             return builder.build(project_file) ? 0 : 1;
@@ -184,7 +145,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (cmd == "--make-perfect") {
-        run_easter_egg();
+        angara::run_easter_egg();
         return 0;
     }
 
