@@ -1,4 +1,4 @@
-# .github/workflows/ci_release.yml
+# .github/workflows/main.yml
 
 name: Continuous Build and Release
 
@@ -18,17 +18,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Step 2: Install core dependencies
-      # (Added cmake back so we can build rabbitmq-c from source; removed librabbitmq-dev)
+      # Install core dependencies (LLVM, curl, websockets, rabbitmq-c)
       - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config git clang cmake \
-                                  libcurl4-openssl-dev libwebsockets-dev libssl-dev
+                                  llvm-dev libcurl4-openssl-dev libwebsockets-dev libssl-dev
 
-      # Step 3: Build & Install rabbitmq-c v0.14.0 from source
-      # We install it to /usr so pkg-config and clang find it natively on Linux.
-      - name: Install latest rabbitmq-c (v0.14.0)
+      # Build & Install rabbitmq-c v0.14.0 from source
+      - name: Install rabbitmq-c (v0.14.0)
         run: |
           git clone --branch v0.14.0 https://github.com/alanxz/rabbitmq-c.git
           cd rabbitmq-c
@@ -37,64 +35,54 @@ jobs:
           cmake --build build -j$(nproc)
           sudo cmake --install build
 
-      # Step 4: Build Project using Makefile
-      - name: Build Project
+      # Build the Angara compiler (LLVM backend, self-contained, no C runtime)
+      - name: Build Compiler
         env:
           CC: clang
           CXX: clang++
         run: make -j$(nproc) all
 
-      # Step 5: Prepare artifacts for release
+      # Build all native modules (io, fs, json, http, websocket, amqp, etc.)
+      - name: Build Modules
+        env:
+          CC: clang
+          CXX: clang++
+        run: make -j$(nproc) modules
+
+      # Stage all release artifacts
       - name: Stage Artifacts
         run: |
-          mkdir -p release_artifacts/lib
           mkdir -p release_artifacts/modules
-          mkdir -p release_artifacts/runtime
-          
-          # Copy the main executable
+
+          # Main compiler executable
           cp build/angc release_artifacts/
-          
-          # Copy the core runtime library
-          cp build/libangara_runtime.so release_artifacts/lib/
-          
-          # Copy all the native module libraries
+
+          # All native module shared libraries
           cp build/modules/*.so release_artifacts/modules/
-          
-          # Copy runtime headers/source
-          cp runtime/angara_runtime.* release_artifacts/runtime/
 
-      # Step 6: Archive the staged artifacts
+      # Archive the staged artifacts
       - name: Archive Release
-        run: |
-          tar -czvf angara-linux-x64.tar.gz -C release_artifacts .
+        run: tar -czvf angara-linux-x64.tar.gz -C release_artifacts .
 
-      # Step 7: Generate a Tag
+      # Generate a date-based tag
       - name: Generate Release Tag
         id: generate_tag
         run: echo "TAG_NAME=v$(date +'%Y.%m.%d')-${{ github.sha }}" >> $GITHUB_ENV
 
-      # Step 8: Create the GitHub Release
+      # Create GitHub Release with the tarball
       - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_NAME }}
-          release_name: Angara Nightly Build ${{ github.sha }}
+          name: "Angara Nightly ${{ env.TAG_NAME }}"
           body: |
-            Automated build of Angara from commit ${{ github.sha }}.
+            Automated build of Angara from commit `${{ github.sha }}`.
+
+            **Includes:**
+            - `angc` — Angara compiler (LLVM backend, self-contained)
+            - `modules/*.so` — 12 native modules (io, fs, os, path, time, uuid, assert, adv_string, json, http, websocket, amqp)
+
             This is an unstable development build.
           draft: false
           prerelease: true
-
-      # Step 9: Upload the Tarball
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./angara-linux-x64.tar.gz
-          asset_name: angara-linux-x64.tar.gz
-          asset_content_type: application/gzip
+          files: angara-linux-x64.tar.gz
