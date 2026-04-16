@@ -49,7 +49,8 @@ namespace angara {
             {"enum",     TokenType::ENUM},
             {"match",    TokenType::MATCH},
             {"case",     TokenType::CASE},
-            {"foreign",  TokenType::FOREIGN},
+            {"foreign",   TokenType::FOREIGN},
+            {"intrinsic", TokenType::INTRINSIC},
             {"sizeof",   TokenType::SIZEOF},
             {"retype",   TokenType::RETYPE},
     };
@@ -313,11 +314,13 @@ namespace angara {
     // ---------------------------------------------------------------------------
     void Lexer::number() {
         // Check for hex (0x) or binary (0b) prefix
-        if (peek() == '0') {
-            char next = peekNext();
+        // Note: the first digit was already consumed by advance() in scanToken(),
+        // so we check m_source[m_start] instead of peek()
+        if (m_source[m_start] == '0') {
+            char next = peek();
             if (next == 'x' || next == 'X') {
                 // Hex literal: 0xFF, 0xDEAD_beef
-                advance(); // consume '0'
+                // '0' was already consumed by scanToken(), only consume 'x'
                 advance(); // consume 'x'
 
                 if (!isHexDigit(peek())) {
@@ -349,7 +352,7 @@ namespace angara {
 
             if (next == 'b' || next == 'B') {
                 // Binary literal: 0b1010, 0b1100_0011
-                advance(); // consume '0'
+                // '0' was already consumed by scanToken(), only consume 'b'
                 advance(); // consume 'b'
 
                 if (!isBinaryDigit(peek())) {
@@ -519,14 +522,13 @@ namespace angara {
                 addToken(match('|') ? TokenType::LOGICAL_OR : TokenType::PIPE);
                 break;
             case '&':
-                if (match('&')) {
-                    addToken(TokenType::LOGICAL_AND);
-                } else {
-                    m_errorHandler.report(
-                        Token(TokenType::IDENTIFIER, "&", m_line, m_column - 1, m_filename),
-                        "Unexpected character '&'. Did you mean '&&' for logical AND?"
-                    );
-                }
+                addToken(match('&') ? TokenType::LOGICAL_AND : TokenType::AMPERSAND);
+                break;
+            case '^':
+                addToken(TokenType::CARET);
+                break;
+            case '~':
+                addToken(TokenType::TILDE);
                 break;
             case '?':
                 if (match('?')) {

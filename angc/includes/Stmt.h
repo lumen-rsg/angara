@@ -239,6 +239,7 @@ namespace angara {
         bool is_exported = false;
 
         bool is_foreign = false;
+        bool is_intrinsic = false;
         // Stores the header name, e.g., "unistd.h"
         std::vector<Token> foreign_headers;
 

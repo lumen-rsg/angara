@@ -20,6 +20,19 @@ namespace angara {
                 return func_decl;
             }
 
+            if (match({TokenType::INTRINSIC})) {
+                // intrinsic func name(...) -> type;
+                if (match({TokenType::FUNC})) {
+                    auto func_decl = std::static_pointer_cast<FuncStmt>(function("function"));
+                    if (func_decl->body) {
+                        throw error(func_decl->name, "An intrinsic function declaration cannot have a body.");
+                    }
+                    func_decl->is_intrinsic = true;
+                    return func_decl;
+                }
+                throw error(peek(), "Expect 'func' after 'intrinsic'.");
+            }
+
             if (match({TokenType::FOREIGN})) {
                 // --- REVISED, CORRECTED LOGIC ---
 

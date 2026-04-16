@@ -19,6 +19,10 @@ namespace angara {
                 if (right_type->toString() == "bool") result_type = m_type_bool;
                 else error(expr.op, "Operand for '!' must be a boolean.");
                 break;
+            case TokenType::TILDE:
+                if (isNumeric(right_type)) result_type = m_type_i64;
+                else error(expr.op, "Operand for '~' must be a number.");
+                break;
             default: ;
         }
         pushAndSave(&expr, result_type);

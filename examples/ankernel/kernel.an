@@ -1,0 +1,48 @@
+// ============================================================================
+// ankernel — A bare-metal Angara kernel for ARM64 (QEMU virt)
+//
+// Uses only intrinsics, integer arithmetic, and bitwise operators.
+// No string operations, no libc — pure freestanding.
+// ============================================================================
+
+// --- Intrinsic declarations (compiler-provided, no libc needed) ---
+intrinsic func peek32(addr as i64) -> i64;
+intrinsic func poke32(addr as i64, val as i64) -> nil;
+intrinsic func halt() -> nil;
+
+// --- Print a single character to PL011 UART (QEMU virt: 0x0900_0000) ---
+func uart_putc(c as i64) -> nil {
+    // UART_FR is at offset 0x18 = 0x09000018
+    // Bit 5 (0x20) = TX FIFO full
+    while ((peek32(0x09000018) & 0x20) != 0) {}
+    // UART_DR is at base = 0x09000000
+    poke32(0x09000000, c);
+}
+
+// --- Kernel entry point ---
+func main() -> nil {
+    // Print "Hello from Angara!\r\n"
+    uart_putc(72);   // H
+    uart_putc(101);  // e
+    uart_putc(108);  // l
+    uart_putc(108);  // l
+    uart_putc(111);  // o
+    uart_putc(32);   // (space)
+    uart_putc(102);  // f
+    uart_putc(114);  // r
+    uart_putc(111);  // o
+    uart_putc(109);  // m
+    uart_putc(32);   // (space)
+    uart_putc(65);   // A
+    uart_putc(110);  // n
+    uart_putc(103);  // g
+    uart_putc(97);   // a
+    uart_putc(114);  // r
+    uart_putc(97);   // a
+    uart_putc(33);   // !
+    uart_putc(13);   // CR
+    uart_putc(10);   // LF
+
+    // Halt the CPU
+    halt();
+}

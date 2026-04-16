@@ -34,9 +34,13 @@ namespace angara {
             function_type->is_foreign = true;
         }
 
+        if (stmt.is_intrinsic) {
+            function_type->is_intrinsic = true;
+        }
+
         // For a foreign function, we simply declare it. It has no Angara-level closure.
         // The transpiler will use this symbol table entry to generate a direct C call.
-        if (stmt.is_foreign) {
+        if (stmt.is_foreign || stmt.is_intrinsic) {
             if (auto conflicting = m_symbols.declare(stmt.name, function_type, true)) {
                 error(stmt.name, "re-declaration of symbol '" + stmt.name.lexeme + "'.");
                 note(conflicting->declaration_token, "previous declaration was here.");

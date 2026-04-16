@@ -128,6 +128,7 @@ private:
     void generateThreadOps();
     void generateMiscOps();
     void generateIOOps();
+    void generateFreestandingStubs();
 
     // --- Helper: create a runtime function ---
     llvm::Function* createRuntimeFunc(

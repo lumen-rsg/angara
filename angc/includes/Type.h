@@ -94,6 +94,7 @@ namespace angara {
 
         const bool is_variadic;
         bool is_foreign = false;
+        bool is_intrinsic = false;
 
         // Update constructor to accept the flag, defaulting to false.
         FunctionType(std::vector<std::shared_ptr<Type>> params, std::shared_ptr<Type> ret, bool is_variadic = false)

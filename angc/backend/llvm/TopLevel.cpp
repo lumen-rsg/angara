@@ -7,8 +7,11 @@ void LLVMBackend::codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>&
     for (const auto& stmt : statements) {
         if (auto s = std::dynamic_pointer_cast<const VarDeclStmt>(stmt))
             codegenGlobalVarDecl(*s);
-        else if (auto s = std::dynamic_pointer_cast<const FuncStmt>(stmt))
+        else if (auto s = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
+            // Intrinsic functions are handled inline by cgCall — no LLVM function to emit
+            if (s->is_intrinsic) continue;
             codegenFunctionDecl(*s, moduleName);
+        }
         else if (auto s = std::dynamic_pointer_cast<const ClassStmt>(stmt))
             codegenClassDecl(*s);
         else if (auto s = std::dynamic_pointer_cast<const DataStmt>(stmt))
@@ -281,9 +284,11 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
         builder->CreateCall(user_main, {});
     }
 
+    if (!m_freestanding) {
     for (const auto& [name, alloca] : namedVals) {
         llvm::Value* val = builder->CreateLoad(objType, alloca);
         callRt(rt->getFuncDecref(), {val});
+    }
     }
 
     if (m_freestanding) {

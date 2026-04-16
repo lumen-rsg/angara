@@ -6,7 +6,7 @@ namespace angara {
 
     // unary → ( "!" | "-" ) unary | primary
     std::shared_ptr<Expr> Parser::unary() {
-        if (match({TokenType::BANG, TokenType::MINUS, TokenType::PLUS_PLUS, TokenType::MINUS_MINUS})) {
+        if (match({TokenType::BANG, TokenType::MINUS, TokenType::TILDE, TokenType::PLUS_PLUS, TokenType::MINUS_MINUS})) {
             Token op = previous();
             std::shared_ptr<Expr> right = unary();
             // Check if it's an update operator
