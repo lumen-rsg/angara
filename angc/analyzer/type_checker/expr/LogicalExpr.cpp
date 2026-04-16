@@ -67,6 +67,13 @@ namespace angara {
             return {};
         }
 
+        // Warn if a nil literal is used in a logical expression — it always evaluates to false.
+        if (left_type->kind == TypeKind::NIL) {
+            warning(expr.op, "Using 'nil' in a logical expression always evaluates to false.");
+        } else if (right_type->kind == TypeKind::NIL) {
+            warning(expr.op, "Using 'nil' in a logical expression always evaluates to false.");
+        }
+
         // The result of a logical '&&' or '||' expression is always a boolean.
         pushAndSave(&expr, m_type_bool);
         return {};

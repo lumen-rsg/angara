@@ -28,6 +28,16 @@ namespace angara {
             case TokenType::SLASH:
             case TokenType::PERCENT:
                 if (isNumeric(left_type) && isNumeric(right_type)) {
+                    // Warn about division/modulo by literal zero
+                    if ((expr.op.type == TokenType::SLASH || expr.op.type == TokenType::PERCENT)) {
+                        if (auto rhs_literal = std::dynamic_pointer_cast<const Literal>(expr.right)) {
+                            if (rhs_literal->token.type == TokenType::NUMBER_INT && rhs_literal->token.lexeme == "0") {
+                                warning(expr.op, std::string(expr.op.type == TokenType::SLASH
+                                    ? "Division by zero."
+                                    : "Modulo by zero."));
+                            }
+                        }
+                    }
                     if (isFloat(left_type) || isFloat(right_type)) {
                         result_type = m_type_f64;
                     } else {

@@ -284,10 +284,12 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
 }
 
     void TypeChecker::error(const Token& token, const std::string& message) {
-        // We only report the first error in a sequence to avoid spam.
-        if (m_hadError) return;
         m_hadError = true;
         m_errorHandler.report(token, message);
+    }
+
+    void TypeChecker::warning(const Token& token, const std::string& message) {
+        m_errorHandler.warning(token, message);
     }
 
     void TypeChecker::note(const Token& token, const std::string& message) {
@@ -298,8 +300,9 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     // This is used to get the result type of an expression.
     std::shared_ptr<Type> TypeChecker::popType() {
         if (m_type_stack.empty()) {
-            // This indicates a bug in the TypeChecker itself.
-            throw std::logic_error("Type stack empty during pop.");
+            // Return error type instead of crashing. This allows the compiler
+            // to continue and report more errors rather than throwing.
+            return m_type_error;
         }
         auto type = m_type_stack.top();
         m_type_stack.pop();
