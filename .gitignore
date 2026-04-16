@@ -1,0 +1,14 @@
+# Build artifacts
+build/
+*.o
+*.ll
+*.dylib
+*.so
+*.dll
+
+# OS files
+.DS_Store
+
+# IDE
+.idea/
+cmake-build-*/

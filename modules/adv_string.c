@@ -1,389 +1,244 @@
 //
-// Created by cv2 on 9/11/25.
+// adv_string.c — Angara advanced string module (rewritten for 16-byte ABI + vtable)
 //
 
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <ctype.h> // For isdigit, isspace
-#include "../runtime/angara_runtime.h"
+#include <ctype.h>
+#include "Angara.h"
 
-// --- Function Implementations ---
+#define IS_STR(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)
 
-// Gets the character (as a new string) at a given index.
+// get(string, index) -> string
 AngaraObject Angara_adv_string_get(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STRING(args[0]) || !IS_I64(args[1])) {
-        angara_throw_error("get(string, index) expects a string and an integer.");
-        return angara_create_nil();
+    if (arg_count != 2 || !IS_STR(args[0]) || !ang_is_i64(args[1])) {
+        ang_api->throw_error("get(string, index) expects a string and an integer.");
+        return ang_nil();
     }
-    AngaraString* str = (AngaraString*)args[0].as.obj;
-    int64_t index = AS_I64(args[1]);
+    size_t len = ang_api->str_len(args[0]);
+    int64_t index = ang_as_i64(args[1]);
+    if (index < 0 || (size_t)index >= len) { ang_api->throw_error("String index out of bounds."); return ang_nil(); }
 
-    if (index < 0 || (size_t)index >= str->length) {
-        angara_throw_error("String index out of bounds.");
-        return angara_create_nil();
-    }
-
-    // Create a new, null-terminated C string of length 1.
-    char* char_buf = (char*)malloc(2);
-    char_buf[0] = str->chars[index];
-    char_buf[1] = '\0';
-
-    return angara_create_string_no_copy(char_buf, 1);
+    const char* chars = ang_api->as_cstr(args[0]);
+    char* buf = (char*)malloc(2);
+    buf[0] = chars[index]; buf[1] = '\0';
+    return ang_api->string_no_copy(buf, 1);
 }
 
-// Extracts a substring. Handles bounds checking.
+// substring(string, start, end) -> string
 AngaraObject Angara_adv_string_substring(int arg_count, AngaraObject* args) {
-    if (arg_count != 3 || !IS_STRING(args[0]) || !IS_I64(args[1]) || !IS_I64(args[2])) {
-        angara_throw_error("substring(string, start, end) expects a string and two integers.");
-        return angara_create_nil();
+    if (arg_count != 3 || !IS_STR(args[0]) || !ang_is_i64(args[1]) || !ang_is_i64(args[2])) {
+        ang_api->throw_error("substring(string, start, end) expects a string and two integers.");
+        return ang_nil();
     }
-    AngaraString* str = (AngaraString*)args[0].as.obj;
-    int64_t start = AS_I64(args[1]);
-    int64_t end = AS_I64(args[2]);
+    size_t len = ang_api->str_len(args[0]);
+    int64_t start = ang_as_i64(args[1]);
+    int64_t end = ang_as_i64(args[2]);
+    if (start < 0 || (size_t)end > len || start > end) { ang_api->throw_error("Substring indices out of bounds."); return ang_nil(); }
 
-    if (start < 0 || (size_t)end > str->length || start > end) {
-        angara_throw_error("Substring indices are out of bounds or invalid.");
-        return angara_create_nil();
-    }
-
-    size_t len = end - start;
-    char* sub_buf = (char*)malloc(len + 1);
-    memcpy(sub_buf, str->chars + start, len);
-    sub_buf[len] = '\0';
-
-    return angara_create_string_no_copy(sub_buf, len);
+    size_t sub_len = end - start;
+    const char* chars = ang_api->as_cstr(args[0]);
+    char* buf = (char*)malloc(sub_len + 1);
+    memcpy(buf, chars + start, sub_len);
+    buf[sub_len] = '\0';
+    return ang_api->string_no_copy(buf, sub_len);
 }
 
-// Checks if a single-character string is a digit.
+// is_digit(char) -> bool
 AngaraObject Angara_adv_string_is_digit(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STRING(args[0])) {
-        angara_throw_error("is_digit(char) expects a string.");
-        return angara_create_nil();
-    }
-    AngaraString* str = (AngaraString*)args[0].as.obj;
-    if (str->length != 1) {
-        return angara_create_bool(false);
-    }
-    return angara_create_bool(isdigit(str->chars[0]));
+    if (arg_count != 1 || !IS_STR(args[0])) { ang_api->throw_error("is_digit(char) expects a string."); return ang_nil(); }
+    if (ang_api->str_len(args[0]) != 1) return ang_bool(false);
+    return ang_bool(isdigit((unsigned char)ang_api->as_cstr(args[0])[0]));
 }
 
-// Checks if a single-character string is whitespace.
+// is_whitespace(char) -> bool
 AngaraObject Angara_adv_string_is_whitespace(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STRING(args[0])) {
-        angara_throw_error("is_whitespace(char) expects a string.");
-        return angara_create_nil();
-    }
-    AngaraString* str = (AngaraString*)args[0].as.obj;
-    if (str->length != 1) {
-        return angara_create_bool(false);
-    }
-    return angara_create_bool(isspace(str->chars[0]));
+    if (arg_count != 1 || !IS_STR(args[0])) { ang_api->throw_error("is_whitespace(char) expects a string."); return ang_nil(); }
+    if (ang_api->str_len(args[0]) != 1) return ang_bool(false);
+    return ang_bool(isspace((unsigned char)ang_api->as_cstr(args[0])[0]));
 }
 
-// --- C Implementation of pad_end ---
-// Angara signature: func pad_end(base as string, length as i64, pad_char as string) -> string
+// pad_end(base, length, pad_char) -> string
 AngaraObject Angara_adv_string_pad_end(int arg_count, AngaraObject* args) {
-    // 1. Validate arguments (arity and types).
-    if (arg_count != 3) {
-        angara_throw_error("pad_end() requires exactly 3 arguments: (string, i64, string).");
-        return angara_create_nil(); // Unreachable, but good practice
+    if (arg_count != 3 || !IS_STR(args[0]) || !ang_is_i64(args[1]) || !IS_STR(args[2])) {
+        ang_api->throw_error("pad_end(string, i64, string) expects (string, i64, string).");
+        return ang_nil();
     }
-    if (!IS_STRING(args[0]) || !IS_I64(args[1]) || !IS_STRING(args[2])) {
-        angara_throw_error("Invalid argument types for pad_end(string, i64, string).");
-        return angara_create_nil();
-    }
+    const char* base = ang_api->as_cstr(args[0]);
+    size_t base_len = ang_api->str_len(args[0]);
+    int64_t target = ang_as_i64(args[1]);
+    const char* pad = ang_api->as_cstr(args[2]);
 
-    // 2. Unbox the Angara arguments into C types.
-    const char* base_str = AS_CSTRING(args[0]);
-    size_t base_len = AS_STRING(args[0])->length;
-    int64_t target_len = AS_I64(args[1]);
-    const char* pad_str = AS_CSTRING(args[2]);
+    if ((int64_t)base_len >= target) { ang_api->incref(args[0]); return args[0]; }
+    char pc = (ang_api->str_len(args[2]) > 0) ? pad[0] : ' ';
+    size_t pad_count = target - base_len;
 
-    // 3. Perform the logic.
-    if ((int64_t)base_len >= target_len) {
-        // The string is already long enough. Return a copy of the original.
-        angara_incref(args[0]);
-        return args[0];
-    }
-
-    // The padding character should be the first character of the padding string.
-    char pad_char = (AS_STRING(args[2])->length > 0) ? pad_str[0] : ' ';
-    size_t pad_count = target_len - base_len;
-
-    // 4. Allocate memory for the new, padded string.
-    char* result_buf = (char*)malloc(target_len + 1);
-    if (!result_buf) {
-        angara_throw_error("Out of memory in pad_end().");
-        return angara_create_nil();
-    }
-
-    // 5. Build the new string.
-    memcpy(result_buf, base_str, base_len);
-    memset(result_buf + base_len, pad_char, pad_count);
-    result_buf[target_len] = '\0';
-
-    // 6. Box the C string back into an AngaraObject and return it.
-    //    The new AngaraString takes ownership of the malloc'd buffer.
-    return angara_create_string_no_copy(result_buf, target_len);
+    char* buf = (char*)malloc(target + 1);
+    memcpy(buf, base, base_len);
+    memset(buf + base_len, pc, pad_count);
+    buf[target] = '\0';
+    return ang_api->string_no_copy(buf, target);
 }
 
+// to_uppercase(s) -> string
 AngaraObject Angara_adv_string_to_uppercase(int arg_count, AngaraObject args[]) {
-    if (arg_count != 1 || !IS_STRING(args[0])) {
-        angara_throw_error("adv_string.to_uppercase() requires one string argument.");
-        return angara_create_nil();
-    }
-
-    const char* source_str = AS_CSTRING(args[0]);
-    size_t len = AS_STRING(args[0])->length;
-
-    // 1. Allocate a new buffer for the uppercase string.
-    char* new_str = (char*)malloc(len + 1);
-    if (!new_str) {
-        angara_throw_error("Out of memory in to_uppercase().");
-        return angara_create_nil();
-    }
-
-    // 2. Iterate through the source and convert each character.
-    for (size_t i = 0; i < len; ++i) {
-        new_str[i] = toupper((unsigned char)source_str[i]);
-    }
-    new_str[len] = '\0'; // Null-terminate the new string.
-
-    // 3. Box the new C string into an AngaraObject, giving it ownership of the buffer.
-    return angara_create_string_no_copy(new_str, len);
+    if (arg_count != 1 || !IS_STR(args[0])) { ang_api->throw_error("to_uppercase() requires one string."); return ang_nil(); }
+    size_t len = ang_api->str_len(args[0]);
+    const char* src = ang_api->as_cstr(args[0]);
+    char* buf = (char*)malloc(len + 1);
+    for (size_t i = 0; i < len; ++i) buf[i] = toupper((unsigned char)src[i]);
+    buf[len] = '\0';
+    return ang_api->string_no_copy(buf, len);
 }
 
-
-// Angara signature: func to_lowercase(s as string) -> string
+// to_lowercase(s) -> string
 AngaraObject Angara_adv_string_to_lowercase(int arg_count, AngaraObject args[]) {
-    if (arg_count != 1 || !IS_STRING(args[0])) { angara_throw_error("to_lowercase() requires one string argument."); return angara_create_nil(); }
-    const char* source_str = AS_CSTRING(args[0]);
-    size_t len = AS_STRING(args[0])->length;
-    char* new_str = (char*)malloc(len + 1);
-    if (!new_str) { angara_throw_error("Out of memory in to_lowercase()."); return angara_create_nil(); }
-    for (size_t i = 0; i < len; ++i) { new_str[i] = tolower((unsigned char)source_str[i]); }
-    new_str[len] = '\0';
-    return angara_create_string_no_copy(new_str, len);
+    if (arg_count != 1 || !IS_STR(args[0])) { ang_api->throw_error("to_lowercase() requires one string."); return ang_nil(); }
+    size_t len = ang_api->str_len(args[0]);
+    const char* src = ang_api->as_cstr(args[0]);
+    char* buf = (char*)malloc(len + 1);
+    for (size_t i = 0; i < len; ++i) buf[i] = tolower((unsigned char)src[i]);
+    buf[len] = '\0';
+    return ang_api->string_no_copy(buf, len);
 }
 
-// Angara signature: func trim(s as string) -> string
+// trim(s) -> string
 AngaraObject Angara_adv_string_trim(int arg_count, AngaraObject args[]) {
-    if (arg_count != 1 || !IS_STRING(args[0])) { angara_throw_error("trim() requires one string argument."); return angara_create_nil(); }
-    const char* start = AS_CSTRING(args[0]);
-    size_t len = AS_STRING(args[0])->length;
+    if (arg_count != 1 || !IS_STR(args[0])) { ang_api->throw_error("trim() requires one string."); return ang_nil(); }
+    const char* start = ang_api->as_cstr(args[0]);
+    size_t len = ang_api->str_len(args[0]);
     const char* end = start + len - 1;
-
-    // Find the first non-whitespace character.
-    while (isspace((unsigned char)*start) && start < end) { start++; }
-    // Find the last non-whitespace character.
-    while (isspace((unsigned char)*end) && end > start) { end--; }
-
+    while (isspace((unsigned char)*start) && start < end) start++;
+    while (isspace((unsigned char)*end) && end > start) end--;
     size_t new_len = (end - start) + 1;
-
-    // Use angara_create_string_with_len which copies the substring.
-    return angara_create_string_with_len(start, new_len);
+    return ang_api->string_len(start, new_len);
 }
 
+// contains(haystack, needle) -> bool
 AngaraObject Angara_adv_string_contains(int arg_count, AngaraObject args[]) {
-    if (arg_count != 2 || !IS_STRING(args[0]) || !IS_STRING(args[1])) {
-        angara_throw_error("adv_string.contains() requires two string arguments: (haystack, needle).");
-        return angara_create_nil();
+    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
+        ang_api->throw_error("contains(haystack, needle) expects two strings.");
+        return ang_nil();
     }
-
-    const char* haystack = AS_CSTRING(args[0]);
-    const char* needle = AS_CSTRING(args[1]);
-
-    // 1. Use the standard C `strstr` function to search for the substring.
-    const char* result = strstr(haystack, needle);
-
-    // 2. If strstr returns a non-NULL pointer, the substring was found.
-    //    Return a boxed Angara boolean.
-    return angara_create_bool(result != NULL);
+    return ang_bool(strstr(ang_api->as_cstr(args[0]), ang_api->as_cstr(args[1])) != NULL);
 }
 
-// join(["a", "b"], ", ") -> "a, b"
+// join(list, separator) -> string
 AngaraObject Angara_adv_string_join(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_LIST(args[0]) || !IS_STRING(args[1])) {
-        return angara_create_nil();
+    if (arg_count != 2 || !ang_is_obj(args[0]) || !IS_STR(args[1])) return ang_nil();
+
+    size_t list_len = ang_api->list_len(args[0]);
+    const char* sep = ang_api->as_cstr(args[1]);
+    size_t sep_len = ang_api->str_len(args[1]);
+
+    if (list_len == 0) return ang_api->string("");
+
+    // Calculate total length
+    size_t total = 0;
+    for (size_t i = 0; i < list_len; i++) {
+        AngaraObject elem = ang_api->list_get(args[0], (int64_t)i);
+        if (IS_STR(elem)) total += ang_api->str_len(elem);
+        if (i < list_len - 1) total += sep_len;
+        ang_api->decref(elem);
     }
 
-    AngaraList* list = AS_LIST(args[0]);
-    const char* sep = AS_CSTRING(args[1]);
-    size_t sep_len = strlen(sep);
-
-    if (list->count == 0) return angara_string_from_c("");
-
-    // 1. Calculate total length
-    size_t total_len = 0;
-    for (size_t i = 0; i < list->count; i++) {
-        if (IS_STRING(list->elements[i])) {
-            total_len += strlen(AS_CSTRING(list->elements[i]));
-        }
-        if (i < list->count - 1) total_len += sep_len;
-    }
-
-    // 2. Allocate
-    char* result = malloc(total_len + 1);
+    char* result = (char*)malloc(total + 1);
     char* ptr = result;
-
-    // 3. Build
-    for (size_t i = 0; i < list->count; i++) {
-        if (IS_STRING(list->elements[i])) {
-            const char* s = AS_CSTRING(list->elements[i]);
-            size_t len = strlen(s);
-            memcpy(ptr, s, len);
-            ptr += len;
+    for (size_t i = 0; i < list_len; i++) {
+        AngaraObject elem = ang_api->list_get(args[0], (int64_t)i);
+        if (IS_STR(elem)) {
+            const char* s = ang_api->as_cstr(elem);
+            size_t slen = ang_api->str_len(elem);
+            memcpy(ptr, s, slen); ptr += slen;
         }
-        if (i < list->count - 1) {
-            memcpy(ptr, sep, sep_len);
-            ptr += sep_len;
-        }
+        if (i < list_len - 1) { memcpy(ptr, sep, sep_len); ptr += sep_len; }
+        ang_api->decref(elem);
     }
     *ptr = '\0';
-
-    return angara_create_string_no_copy(result, total_len);
+    return ang_api->string_no_copy(result, total);
 }
 
 // replace(source, search, replacement) -> string
 AngaraObject Angara_adv_string_replace(int arg_count, AngaraObject* args) {
-    if (arg_count != 3 || !IS_STRING(args[0]) || !IS_STRING(args[1]) || !IS_STRING(args[2])) {
-        angara_throw_error("string.replace expects (source: string, search: string, replacement: string).");
-        return angara_create_nil();
+    if (arg_count != 3 || !IS_STR(args[0]) || !IS_STR(args[1]) || !IS_STR(args[2])) {
+        ang_api->throw_error("replace(source, search, replacement) expects three strings.");
+        return ang_nil();
     }
-
-    const char* source = AS_CSTRING(args[0]);
-    const char* search = AS_CSTRING(args[1]);
-    const char* replacement = AS_CSTRING(args[2]);
-
+    const char* source = ang_api->as_cstr(args[0]);
+    const char* search = ang_api->as_cstr(args[1]);
+    const char* repl = ang_api->as_cstr(args[2]);
     size_t source_len = strlen(source);
     size_t search_len = strlen(search);
-    size_t replacement_len = strlen(replacement);
+    size_t repl_len = strlen(repl);
 
-    // Edge Case: Search string is empty.
-    // Standard behavior varies, but usually, we return the original string
-    // to avoid infinite loops or inserting replacement between every char.
-    if (search_len == 0) {
-        angara_incref(args[0]);
-        return args[0];
-    }
+    if (search_len == 0) { ang_api->incref(args[0]); return args[0]; }
 
-    // --- Pass 1: Count occurrences ---
+    // Count occurrences
     int count = 0;
-    const char* temp_ptr = source;
-    while ((temp_ptr = strstr(temp_ptr, search))) {
-        count++;
-        temp_ptr += search_len;
-    }
+    const char* p = source;
+    while ((p = strstr(p, search))) { count++; p += search_len; }
+    if (count == 0) { ang_api->incref(args[0]); return args[0]; }
 
-    // Optimization: If no occurrences found, return original string.
-    if (count == 0) {
-        angara_incref(args[0]);
-        return args[0];
-    }
-
-    // --- Calculate new length ---
-    // The new length is: original length + (difference * count)
-    // Note: 'diff' can be negative if replacement is shorter than search.
-    // We use long long to prevent underflow during calculation before casting back.
-    long long len_diff = (long long)replacement_len - (long long)search_len;
-    size_t new_len = source_len + (count * len_diff);
-
-    // --- Pass 2: Build the new string ---
-    char* result_buffer = (char*)malloc(new_len + 1);
-    if (!result_buffer) {
-        angara_throw_error("Out of memory during string replacement.");
-        return angara_create_nil();
-    }
-
-    char* dest_ptr = result_buffer;
-    const char* src_ptr = source;
-    const char* next_match;
-
+    size_t new_len = source_len + (count * (repl_len - search_len));
+    char* buf = (char*)malloc(new_len + 1);
+    char* dst = buf;
+    const char* src = source;
+    const char* next;
     while (count > 0) {
-        // Find next match
-        next_match = strstr(src_ptr, search);
-
-        // Copy content BEFORE the match
-        size_t segment_len = next_match - src_ptr;
-        memcpy(dest_ptr, src_ptr, segment_len);
-        dest_ptr += segment_len;
-
-        // Copy REPLACEMENT
-        memcpy(dest_ptr, replacement, replacement_len);
-        dest_ptr += replacement_len;
-
-        // Advance pointers
-        src_ptr = next_match + search_len;
+        next = strstr(src, search);
+        size_t seg = next - src;
+        memcpy(dst, src, seg); dst += seg;
+        memcpy(dst, repl, repl_len); dst += repl_len;
+        src = next + search_len;
         count--;
     }
-
-    // Copy the remaining part of the string after the last match
-    strcpy(dest_ptr, src_ptr);
-
-    // Create the Angara object, transferring ownership of result_buffer
-    return angara_create_string_no_copy(result_buffer, new_len);
+    strcpy(dst, src);
+    return ang_api->string_no_copy(buf, new_len);
 }
 
-// index_of(haystack, needle) -> i64 (returns -1 if not found)
+// index_of(haystack, needle) -> i64
 AngaraObject Angara_adv_string_index_of(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STRING(args[0]) || !IS_STRING(args[1])) {
-        return angara_create_i64(-1);
-    }
-    const char* haystack = AS_CSTRING(args[0]);
-    const char* needle = AS_CSTRING(args[1]);
-
-    char* found = strstr(haystack, needle);
-    if (!found) return angara_create_i64(-1);
-
-    return angara_create_i64((int64_t)(found - haystack));
+    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) return ang_i64(-1);
+    const char* found = strstr(ang_api->as_cstr(args[0]), ang_api->as_cstr(args[1]));
+    if (!found) return ang_i64(-1);
+    return ang_i64((int64_t)(found - ang_api->as_cstr(args[0])));
 }
 
 // last_index_of(haystack, needle) -> i64
 AngaraObject Angara_adv_string_last_index_of(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STRING(args[0]) || !IS_STRING(args[1])) {
-        return angara_create_i64(-1);
+    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) return ang_i64(-1);
+    const char* haystack = ang_api->as_cstr(args[0]);
+    const char* needle = ang_api->as_cstr(args[1]);
+    size_t hlen = strlen(haystack);
+    size_t nlen = strlen(needle);
+    if (nlen > hlen) return ang_i64(-1);
+    if (nlen == 0) return ang_i64((int64_t)hlen);
+    for (long i = (long)(hlen - nlen); i >= 0; --i) {
+        if (strncmp(haystack + i, needle, nlen) == 0) return ang_i64(i);
     }
-    const char* haystack = AS_CSTRING(args[0]);
-    const char* needle = AS_CSTRING(args[1]);
-    size_t haystack_len = strlen(haystack);
-    size_t needle_len = strlen(needle);
-
-    if (needle_len > haystack_len) return angara_create_i64(-1);
-    if (needle_len == 0) return angara_create_i64((int64_t)haystack_len);
-
-    // Search backwards
-    for (long i = (long)(haystack_len - needle_len); i >= 0; --i) {
-        if (strncmp(haystack + i, needle, needle_len) == 0) {
-            return angara_create_i64(i);
-        }
-    }
-    return angara_create_i64(-1);
+    return ang_i64(-1);
 }
 
-
-// --- Module Definition ---
-
-
 static const AngaraFuncDef STRING_EXPORTS[] = {
-        {"get",           Angara_adv_string_get,           "si->s",  NULL},
-        {"substring",     Angara_adv_string_substring,     "sii->s", NULL},
-        {"is_digit",      Angara_adv_string_is_digit,      "s->b",   NULL},
-        {"is_whitespace", Angara_adv_string_is_whitespace, "s->b",   NULL},
-        {"pad_end",         Angara_adv_string_pad_end,     "sis->s", NULL},
-        {"to_uppercase",  Angara_adv_string_to_uppercase,  "s->s",   NULL},
-        {"to_lowercase",  Angara_adv_string_to_lowercase,  "s->s",   NULL},
-        {"trim",          Angara_adv_string_trim,          "s->s",   NULL},
-        {"contains",      Angara_adv_string_contains,      "ss->b",  NULL},
-{"join",          Angara_adv_string_join,          "l<s>s->s", NULL},{"index_of",      Angara_adv_string_index_of,      "ss->i",  NULL}, // New
-    {"last_index_of", Angara_adv_string_last_index_of, "ss->i",  NULL}, // New
-
-    // replace(source: string, search: string, replacement: string) -> string
-    {"replace",       Angara_adv_string_replace,       "sss->s",   NULL},
-        {NULL, NULL, NULL, NULL}
+    {"get",           Angara_adv_string_get,           "si->s",  NULL},
+    {"substring",     Angara_adv_string_substring,     "sii->s", NULL},
+    {"is_digit",      Angara_adv_string_is_digit,      "s->b",   NULL},
+    {"is_whitespace", Angara_adv_string_is_whitespace, "s->b",   NULL},
+    {"pad_end",       Angara_adv_string_pad_end,       "sis->s", NULL},
+    {"to_uppercase",  Angara_adv_string_to_uppercase,  "s->s",   NULL},
+    {"to_lowercase",  Angara_adv_string_to_lowercase,  "s->s",   NULL},
+    {"trim",          Angara_adv_string_trim,          "s->s",   NULL},
+    {"contains",      Angara_adv_string_contains,      "ss->b",  NULL},
+    {"join",          Angara_adv_string_join,          "l<s>s->s", NULL},
+    {"index_of",      Angara_adv_string_index_of,      "ss->i",  NULL},
+    {"last_index_of", Angara_adv_string_last_index_of, "ss->i",  NULL},
+    {"replace",       Angara_adv_string_replace,       "sss->s", NULL},
+    ANGARA_FUNC_END
 };
 
 ANGARA_MODULE_INIT(adv_string) {
+    ang_api = api;
     *def_count = (sizeof(STRING_EXPORTS) / sizeof(AngaraFuncDef)) - 1;
     return STRING_EXPORTS;
 }

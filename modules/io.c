@@ -1,23 +1,25 @@
 //
-// Created by cv2 on 9/11/25.
+// io.c — Angara I/O module (rewritten for 16-byte ABI + vtable)
 //
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../runtime/angara_runtime.h"
+
+#include "Angara.h"
 
 // --- Function Implementations ---
 
+// io.write(stream_id, content) -> nil
 // Writes content to a specific stream (stdout or stderr).
 AngaraObject Angara_io_write(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_I64(args[0]) || !IS_STRING(args[1])) {
-        angara_throw_error("write(stream_id, content) expects an integer and a string.");
-        return angara_create_nil();
+    if (arg_count != 2 || !ang_is_i64(args[0]) || !ang_is_obj(args[1])) {
+        ang_api->throw_error("write(stream_id, content) expects an integer and a string.");
+        return ang_nil();
     }
 
-    int64_t stream_id = AS_I64(args[0]);
-    const char* content = AS_CSTRING(args[1]);
+    int64_t stream_id = ang_as_i64(args[0]);
+    const char* content = ang_api->as_cstr(args[1]);
 
     FILE* stream = NULL;
     if (stream_id == 1) {
@@ -25,22 +27,23 @@ AngaraObject Angara_io_write(int arg_count, AngaraObject* args) {
     } else if (stream_id == 2) {
         stream = stderr;
     } else {
-        angara_throw_error("Invalid stream ID for write(). Use 1 for stdout or 2 for stderr.");
-        return angara_create_nil();
+        ang_api->throw_error("Invalid stream ID for write(). Use 1 for stdout or 2 for stderr.");
+        return ang_nil();
     }
 
     fprintf(stream, "%s", content);
-    return angara_create_nil();
+    return ang_nil();
 }
 
+// io.println(stream_id, content) -> nil
 AngaraObject Angara_io_println(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_I64(args[0]) || !IS_STRING(args[1])) {
-        angara_throw_error("println(stream_id, content) expects an integer and a string.");
-        return angara_create_nil();
+    if (arg_count != 2 || !ang_is_i64(args[0]) || !ang_is_obj(args[1])) {
+        ang_api->throw_error("println(stream_id, content) expects an integer and a string.");
+        return ang_nil();
     }
 
-    int64_t stream_id = AS_I64(args[0]);
-    const char* content = AS_CSTRING(args[1]);
+    int64_t stream_id = ang_as_i64(args[0]);
+    const char* content = ang_api->as_cstr(args[1]);
 
     FILE* stream = NULL;
     if (stream_id == 1) {
@@ -48,111 +51,112 @@ AngaraObject Angara_io_println(int arg_count, AngaraObject* args) {
     } else if (stream_id == 2) {
         stream = stderr;
     } else {
-        angara_throw_error("Invalid stream ID for println(). Use 1 for stdout or 2 for stderr.");
-        return angara_create_nil();
+        ang_api->throw_error("Invalid stream ID for println(). Use 1 for stdout or 2 for stderr.");
+        return ang_nil();
     }
 
-    // Use puts, which is efficient and automatically adds a newline.
     fputs(content, stream);
     fputc('\n', stream);
-
-    return angara_create_nil();
+    return ang_nil();
 }
 
-// Flushes a stream's buffer.
+// io.flush(stream_id) -> nil
 AngaraObject Angara_io_flush(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_I64(args[0])) {
-        angara_throw_error("flush(stream_id) expects an integer stream ID.");
-        return angara_create_nil();
+    if (arg_count != 1 || !ang_is_i64(args[0])) {
+        ang_api->throw_error("flush(stream_id) expects an integer stream ID.");
+        return ang_nil();
     }
-    int64_t stream_id = AS_I64(args[0]);
 
-    if (stream_id == 1) {
-        fflush(stdout);
-    } else if (stream_id == 2) {
-        fflush(stderr);
-    } // Flushing stdin is not meaningful
+    int64_t stream_id = ang_as_i64(args[0]);
+    if (stream_id == 1) fflush(stdout);
+    else if (stream_id == 2) fflush(stderr);
 
-    return angara_create_nil();
+    return ang_nil();
 }
 
+// io.read_line() -> string?
 // Reads one line from stdin. Returns nil on EOF.
 AngaraObject Angara_io_read_line(int arg_count, AngaraObject* args) {
     if (arg_count != 0) {
-        angara_throw_error("read_line() expects no arguments.");
-        return angara_create_nil();
+        ang_api->throw_error("read_line() expects no arguments.");
+        return ang_nil();
     }
 
-    char *line_buf = NULL;
+    char* line_buf = NULL;
     size_t line_buf_size = 0;
-    // getline is a POSIX function that safely allocates memory.
     ssize_t line_size = getline(&line_buf, &line_buf_size, stdin);
 
     if (line_size < 0) {
-        free(line_buf); // Must free even on failure
-        return angara_create_nil(); // Return nil for EOF or error
+        free(line_buf);
+        return ang_nil(); // nil for EOF or error
     }
 
-    // Strip the trailing newline character, if it exists.
+    // Strip trailing newline
     if (line_size > 0 && line_buf[line_size - 1] == '\n') {
         line_buf[line_size - 1] = '\0';
         line_size--;
     }
 
-    // We can transfer ownership of the malloc'd buffer to Angara.
-    return angara_create_string_no_copy(line_buf, line_size);
+    // Transfer ownership of the malloc'd buffer to Angara.
+    // string_len takes ownership (no copy) — but the new API doesn't have
+    // a "no copy" variant, so we use string_len which copies, then free.
+    AngaraObject result = ang_api->string_len(line_buf, (size_t)line_size);
+    free(line_buf);
+    return result;
 }
 
+// io.read_all() -> string?
 // Reads all of stdin until EOF.
 AngaraObject Angara_io_read_all(int arg_count, AngaraObject* args) {
     if (arg_count != 0) {
-        angara_throw_error("read_all() expects no arguments.");
-        return angara_create_nil();
+        ang_api->throw_error("read_all() expects no arguments.");
+        return ang_nil();
     }
 
-    size_t capacity = 4096; // Start with a 4KB buffer
+    size_t capacity = 4096;
     size_t total_read = 0;
     char* buffer = (char*)malloc(capacity);
     if (!buffer) {
-        angara_throw_error("Failed to allocate memory in read_all().");
-        return angara_create_nil();
+        ang_api->throw_error("Failed to allocate memory in read_all().");
+        return ang_nil();
     }
 
     size_t bytes_read;
     while ((bytes_read = fread(buffer + total_read, 1, capacity - total_read, stdin)) > 0) {
         total_read += bytes_read;
         if (total_read == capacity) {
-            capacity *= 2; // Double the buffer size
+            capacity *= 2;
             char* new_buffer = (char*)realloc(buffer, capacity);
             if (!new_buffer) {
                 free(buffer);
-                angara_throw_error("Failed to reallocate memory in read_all().");
-                return angara_create_nil();
+                ang_api->throw_error("Failed to reallocate memory in read_all().");
+                return ang_nil();
             }
             buffer = new_buffer;
         }
     }
 
     buffer[total_read] = '\0';
-    return angara_create_string_no_copy(buffer, total_read);
+    AngaraObject result = ang_api->string_len(buffer, total_read);
+    free(buffer);
+    return result;
 }
 
+// --- Module Export Table ---
 
-// --- Module Definition ---
-
-// --- ABI Definition ---
 static const AngaraFuncDef IO_EXPORTS[] = {
-        // Angara Name | C Function Pointer  | Angara Type String | constructs
-        {"write",        Angara_io_write,        "is->n",             NULL},
-        {"println",      Angara_io_println,      "is->n",             NULL},
-        {"flush",        Angara_io_flush,        "i->n",              NULL},
-        {"read_line",    Angara_io_read_line,    "->s",               NULL},
-        {"read_all",     Angara_io_read_all,     "->s",               NULL},
-        {NULL, NULL, NULL, NULL} // Sentinel
+    //  Angara Name  | C Function Pointer     | Type Signature | Constructs
+    {"write",          Angara_io_write,          "is->n",          NULL},
+    {"println",        Angara_io_println,        "is->n",          NULL},
+    {"flush",          Angara_io_flush,          "i->n",           NULL},
+    {"read_line",      Angara_io_read_line,      "->s",            NULL},
+    {"read_all",       Angara_io_read_all,       "->s",            NULL},
+    ANGARA_FUNC_END
 };
 
 // --- Module Entry Point ---
 ANGARA_MODULE_INIT(io) {
+    ang_api = api;  // Store the vtable for use by module functions
     *def_count = (sizeof(IO_EXPORTS) / sizeof(AngaraFuncDef)) - 1;
     return IO_EXPORTS;
 }

@@ -22,8 +22,6 @@ const char* const RED = "\033[31m";
 const char* const GREEN = "\033[32m";
 const char* const YELLOW = "\033[33m";
 
-typedef const AngaraFuncDef* (*AngaraModuleInitFn)(int*);
-
 namespace angara {
 
     class TypeStringParser {
@@ -329,28 +327,6 @@ namespace angara {
     }
 
     if (found_path.empty()) {
-        // Handle intrinsic modules that don't need a physical file
-        if (path_or_id == "io") {
-            auto result = std::make_shared<ModuleType>(path_or_id);
-            result->is_native = true;
-            auto nilType = std::make_shared<NilType>();
-            auto i64Type = std::make_shared<PrimitiveType>("i64");
-            auto strType = std::make_shared<PrimitiveType>("string");
-
-            auto makeFn = [&](const std::string& name, std::vector<std::shared_ptr<Type>> params, std::shared_ptr<Type> ret) {
-                result->exports[name] = std::make_shared<FunctionType>(params, ret, false);
-            };
-            if (path_or_id == "io") {
-                auto anyType = std::make_shared<AnyType>();
-                makeFn("println", {i64Type, anyType}, nilType);
-                makeFn("print", {i64Type, anyType}, nilType);
-                makeFn("write", {i64Type, anyType}, nilType);
-                makeFn("flush", {i64Type}, nilType);
-                makeFn("read_line", {}, strType);
-                makeFn("read_all", {}, strType);
-            }
-            return result;
-        }
         std::string loc = (import_token.file) ? *import_token.file : "entry point";
         std::cerr << "Error: Module '" << path_or_id << "' not found (imported from " << loc << ")\n";
         m_had_error = true;
@@ -410,27 +386,7 @@ namespace angara {
     m_compilation_stack.push_back(found_path);
     std::shared_ptr<ModuleType> result = nullptr;
 
-    // Handle intrinsic modules without dlopen
-    if (module_name == "io") {
-        result = std::make_shared<ModuleType>("io");
-        result->is_native = true;
-        auto nilType = std::make_shared<NilType>();
-        auto i64Type = std::make_shared<PrimitiveType>("i64");
-        auto strType = std::make_shared<PrimitiveType>("string");
-        auto anyType = std::make_shared<AnyType>();
-
-        auto makeFn = [&](const std::string& name, std::vector<std::shared_ptr<Type>> params, std::shared_ptr<Type> ret) {
-            result->exports[name] = std::make_shared<FunctionType>(params, ret, false);
-        };
-
-        makeFn("println", {i64Type, anyType}, nilType);
-        makeFn("print", {i64Type, anyType}, nilType);
-        makeFn("write", {i64Type, anyType}, nilType);
-        makeFn("flush", {i64Type}, nilType);
-        makeFn("read_line", {}, strType);
-        makeFn("read_all", {}, strType);
-    }
-    else if (found_path.ends_with(".so") || found_path.ends_with(".dylib") || found_path.ends_with(".dll")) {
+    if (found_path.ends_with(".so") || found_path.ends_with(".dylib") || found_path.ends_with(".dll")) {
         result = loadNativeModule(found_path, import_token);
         if (result) m_native_lib_names.push_back(get_base_name(found_path));
     } else {
@@ -494,8 +450,10 @@ namespace angara {
         std::string module_name = get_base_name(path);
         std::string init_func_name = "Angara_" + module_name + "_Init";
 
-        // The init function returns a simple array of AngaraFuncDef.
-        typedef const AngaraFuncDef* (*AngaraModuleInitFn)(int*);
+        // The init function receives a vtable of runtime functions.
+        // At compile-time, we pass NULL — the module should only define
+        // its export table during init, not call runtime functions.
+        typedef const AngaraFuncDef* (*AngaraModuleInitFn)(int*, const AngaraAPI*);
         auto init_fn = (AngaraModuleInitFn)dlsym(handle, init_func_name.c_str());
 
         if (!init_fn) {
@@ -507,7 +465,7 @@ namespace angara {
         }
 
         int def_count = 0;
-        const AngaraFuncDef* defs = init_fn(&def_count);
+        const AngaraFuncDef* defs = init_fn(&def_count, nullptr);
 
         auto module_type = std::make_shared<ModuleType>(module_name);
         module_type->is_native = true;
