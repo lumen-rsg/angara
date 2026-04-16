@@ -22,11 +22,15 @@ namespace angara {
         }
     }
 
-    void ErrorHandler::report(const Token &token, const std::string &message) {
+    void ErrorHandler::report(const Token &token, const std::string &message, const std::string &code) {
         m_hadError = true;
+        m_errorCount++;
 
         // Standard error header (red)
         std::cerr << BOLD << RED << "[Line " << token.line << "] Error";
+        if (!code.empty()) {
+            std::cerr << " [" << code << "]";
+        }
 
         if (token.type == TokenType::EOF_TOKEN) {
             std::cerr << " at end";
@@ -39,21 +43,23 @@ namespace angara {
         if (token.line - 1 < m_lines.size()) {
             std::cerr << " " << token.line << " | " << m_lines[token.line - 1] << std::endl;
 
-            // Print the pointer line (e.g., "     ^--- Here")
+            // Print the pointer line with carets
             std::string pointer;
-            // Pad with spaces up to the column
             pointer += "   | " + std::string(token.column - 1, ' ');
-            // Use carets for the length of the token
             pointer += std::string(token.lexeme.length() > 0 ? token.lexeme.length() : 1, '^');
             std::cerr << BOLD << RED << pointer << RESET << std::endl;
         }
     }
 
-    void ErrorHandler::warning(const Token &token, const std::string &message) {
+    void ErrorHandler::warning(const Token &token, const std::string &message, const std::string &code) {
         m_hadWarning = true;
+        m_warningCount++;
 
         // Warning header (yellow)
         std::cerr << BOLD << YELLOW << "[Line " << token.line << "] Warning";
+        if (!code.empty()) {
+            std::cerr << " [" << code << "]";
+        }
 
         if (token.type == TokenType::EOF_TOKEN) {
             std::cerr << " at end";
@@ -66,9 +72,10 @@ namespace angara {
         if (token.line - 1 < m_lines.size()) {
             std::cerr << " " << token.line << " | " << m_lines[token.line - 1] << std::endl;
 
+            // Use tildes for warnings (vs carets for errors)
             std::string pointer;
             pointer += "   | " + std::string(token.column - 1, ' ');
-            pointer += std::string(token.lexeme.length() > 0 ? token.lexeme.length() : 1, '^');
+            pointer += std::string(token.lexeme.length() > 0 ? token.lexeme.length() : 1, '~');
             std::cerr << BOLD << YELLOW << pointer << RESET << std::endl;
         }
     }
@@ -99,8 +106,34 @@ namespace angara {
         return m_hadWarning;
     }
 
+    int ErrorHandler::errorCount() const {
+        return m_errorCount;
+    }
+
+    int ErrorHandler::warningCount() const {
+        return m_warningCount;
+    }
+
     void ErrorHandler::clearError() {
         m_hadError = false;
         m_hadWarning = false;
+        m_errorCount = 0;
+        m_warningCount = 0;
+    }
+
+    void ErrorHandler::printSummary() const {
+        if (m_errorCount == 0 && m_warningCount == 0) return;
+
+        std::cerr << BOLD;
+        if (m_errorCount > 0) {
+            std::cerr << RED << m_errorCount << " error" << (m_errorCount > 1 ? "s" : "");
+        }
+        if (m_errorCount > 0 && m_warningCount > 0) {
+            std::cerr << RESET << ", " << BOLD;
+        }
+        if (m_warningCount > 0) {
+            std::cerr << YELLOW << m_warningCount << " warning" << (m_warningCount > 1 ? "s" : "");
+        }
+        std::cerr << RESET << std::endl;
     }
 }

@@ -464,14 +464,14 @@ namespace angara {
 
         Lexer lexer(source, filename_ptr, errorHandler);
         auto tokens = lexer.scanTokens();
-        if (errorHandler.hadError()) { m_had_error = true; return nullptr; }
+        if (errorHandler.hadError()) { errorHandler.printSummary(); m_had_error = true; return nullptr; }
 
         Parser parser(tokens, errorHandler);
         auto statements = parser.parseStmts();
-        if (errorHandler.hadError()) { m_had_error = true; return nullptr; }
+        if (errorHandler.hadError()) { errorHandler.printSummary(); m_had_error = true; return nullptr; }
 
         TypeChecker typeChecker(*this, errorHandler, module_name);
-        if (!typeChecker.check(statements)) { m_had_error = true; return nullptr; }
+        if (!typeChecker.check(statements)) { errorHandler.printSummary(); m_had_error = true; return nullptr; }
 
         auto mod = typeChecker.getModuleType();
         m_angara_module_names.push_back(module_name);

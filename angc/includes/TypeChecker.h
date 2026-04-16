@@ -107,8 +107,8 @@ namespace angara {
         void visit(std::shared_ptr<const EnumStmt> stmt) override;
 
         // Error reporting
-        void error(const Token& token, const std::string& message);
-        void warning(const Token& token, const std::string& message);
+        void error(const Token& token, const std::string& message, const std::string& code = "");
+        void warning(const Token& token, const std::string& message, const std::string& code = "");
         void note(const Token &token, const std::string &message);
 
         bool m_is_in_trait = false;

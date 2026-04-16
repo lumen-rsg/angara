@@ -283,13 +283,13 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     return !m_hadError;
 }
 
-    void TypeChecker::error(const Token& token, const std::string& message) {
+    void TypeChecker::error(const Token& token, const std::string& message, const std::string& code) {
         m_hadError = true;
-        m_errorHandler.report(token, message);
+        m_errorHandler.report(token, message, code);
     }
 
-    void TypeChecker::warning(const Token& token, const std::string& message) {
-        m_errorHandler.warning(token, message);
+    void TypeChecker::warning(const Token& token, const std::string& message, const std::string& code) {
+        m_errorHandler.warning(token, message, code);
     }
 
     void TypeChecker::note(const Token& token, const std::string& message) {

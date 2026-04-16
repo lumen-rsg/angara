@@ -34,7 +34,7 @@ namespace angara {
                             if (rhs_literal->token.type == TokenType::NUMBER_INT && rhs_literal->token.lexeme == "0") {
                                 warning(expr.op, std::string(expr.op.type == TokenType::SLASH
                                     ? "Division by zero."
-                                    : "Modulo by zero."));
+                                    : "Modulo by zero."), "W001");
                             }
                         }
                     }
