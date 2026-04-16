@@ -80,10 +80,91 @@ static const AngaraMethodDef STOPWATCH_METHODS[] = {
 
 static const AngaraClassDef STOPWATCH_CLASS_DEF = { "Stopwatch", NULL, STOPWATCH_METHODS };
 
+// time.unix() -> i64  (current unix timestamp as integer)
+AngaraObject Angara_time_unix(int arg_count, AngaraObject* args) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return ang_i64((int64_t)ts.tv_sec);
+}
+
+// time.from_unix(seconds: i64) -> f64
+AngaraObject Angara_time_from_unix(int arg_count, AngaraObject* args) {
+    if (arg_count != 1 || !ang_is_i64(args[0])) {
+        ang_api->throw_error("from_unix(seconds) expects one i64 argument.");
+        return ang_nil();
+    }
+    return ang_f64((double)ang_as_i64(args[0]));
+}
+
+// time.format(timestamp: f64, fmt: string) -> string
+AngaraObject Angara_time_format(int arg_count, AngaraObject* args) {
+    if (arg_count != 2 || !ang_is_f64(args[0]) || !ang_is_obj(args[1]) ||
+        ang_api->obj_type(args[1]) != ANG_OBJ_STRING) {
+        ang_api->throw_error("format(timestamp, fmt) expects a float and a string.");
+        return ang_nil();
+    }
+    time_t seconds = (time_t)ang_as_f64(args[0]);
+    struct tm tm_buf;
+    gmtime_r(&seconds, &tm_buf);
+    char buf[256];
+    strftime(buf, sizeof(buf), ang_api->as_cstr(args[1]), &tm_buf);
+    return ang_api->string(buf);
+}
+
+// time.parse(time_str: string, fmt: string) -> f64?
+AngaraObject Angara_time_parse(int arg_count, AngaraObject* args) {
+    if (arg_count != 2 || !ang_is_obj(args[0]) || !ang_is_obj(args[1]) ||
+        ang_api->obj_type(args[0]) != ANG_OBJ_STRING || ang_api->obj_type(args[1]) != ANG_OBJ_STRING) {
+        ang_api->throw_error("parse(time_str, fmt) expects two strings.");
+        return ang_nil();
+    }
+    struct tm tm_buf;
+    memset(&tm_buf, 0, sizeof(tm_buf));
+    char* result = strptime(ang_api->as_cstr(args[0]), ang_api->as_cstr(args[1]), &tm_buf);
+    if (!result) return ang_nil();
+    time_t t = timegm(&tm_buf);
+    return ang_f64((double)t);
+}
+
+// time.date_parts(timestamp: f64) -> record
+AngaraObject Angara_time_date_parts(int arg_count, AngaraObject* args) {
+    if (arg_count != 1 || !ang_is_f64(args[0])) {
+        ang_api->throw_error("date_parts(timestamp) expects one float argument.");
+        return ang_nil();
+    }
+    time_t seconds = (time_t)ang_as_f64(args[0]);
+    struct tm tm_buf;
+    gmtime_r(&seconds, &tm_buf);
+
+    AngaraObject rec = ang_api->record_new();
+    ang_api->record_set(rec, "year", ang_i64(tm_buf.tm_year + 1900));
+    ang_api->record_set(rec, "month", ang_i64(tm_buf.tm_mon + 1));
+    ang_api->record_set(rec, "day", ang_i64(tm_buf.tm_mday));
+    ang_api->record_set(rec, "hour", ang_i64(tm_buf.tm_hour));
+    ang_api->record_set(rec, "minute", ang_i64(tm_buf.tm_min));
+    ang_api->record_set(rec, "second", ang_i64(tm_buf.tm_sec));
+    ang_api->record_set(rec, "weekday", ang_i64(tm_buf.tm_wday)); // 0=Sunday
+    ang_api->record_set(rec, "yday", ang_i64(tm_buf.tm_yday));     // 0-based
+    return rec;
+}
+
+// time.monotonic() -> f64  (monotonic clock, for benchmarking)
+AngaraObject Angara_time_monotonic(int arg_count, AngaraObject* args) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ang_f64(timespec_to_double(ts));
+}
+
 static const AngaraFuncDef TIME_EXPORTS[] = {
     {"now",        Angara_time_now,        "->d",    NULL},
+    {"unix",       Angara_time_unix,       "->i",    NULL},
+    {"from_unix",  Angara_time_from_unix,  "i->d",   NULL},
     {"sleep",      Angara_time_sleep,      "d->n",   NULL},
     {"format_iso", Angara_time_format_iso, "d->s",   NULL},
+    {"format",     Angara_time_format,     "ds->s",  NULL},
+    {"parse",      Angara_time_parse,      "ss->d?", NULL},
+    {"date_parts", Angara_time_date_parts, "d->{}",  NULL},
+    {"monotonic",  Angara_time_monotonic,  "->d",    NULL},
     {"Stopwatch",  Angara_time_Stopwatch,  "->Stopwatch", &STOPWATCH_CLASS_DEF},
     ANGARA_FUNC_END
 };

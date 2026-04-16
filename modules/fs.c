@@ -9,6 +9,8 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <dirent.h>
+#include <limits.h>
 #include "Angara.h"
 
 static void throw_fs_error(const char* message, const char* path) {
@@ -185,22 +187,121 @@ AngaraObject Angara_fs_append_file(int arg_count, AngaraObject* args) {
     return ang_nil();
 }
 
+// list_dir(path) -> list<string>
+AngaraObject Angara_fs_list_dir(int arg_count, AngaraObject* args) {
+    if (arg_count != 1 || !IS_STR(args[0])) {
+        ang_api->throw_error("list_dir(path) expects one string argument.");
+        return ang_nil();
+    }
+    const char* path = ang_api->as_cstr(args[0]);
+    DIR* dir = opendir(path);
+    if (!dir) { throw_fs_error("Failed to open directory", path); return ang_nil(); }
+
+    AngaraObject list = ang_api->list_new();
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        ang_api->list_push(list, ang_api->string(entry->d_name));
+    }
+    closedir(dir);
+    return list;
+}
+
+// copy_file(source, dest) -> nil
+AngaraObject Angara_fs_copy_file(int arg_count, AngaraObject* args) {
+    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
+        ang_api->throw_error("copy_file(src, dst) expects two string arguments.");
+        return ang_nil();
+    }
+    const char* src = ang_api->as_cstr(args[0]);
+    const char* dst = ang_api->as_cstr(args[1]);
+    // Preserve permissions of source file
+    struct stat st;
+    if (stat(src, &st) != 0) { throw_fs_error("copy_file: cannot stat source", src); return ang_nil(); }
+    if (copy_file_contents(src, dst) != 0) {
+        char buf[256]; snprintf(buf, 256, "copy_file: failed to copy '%s' to '%s': %s", src, dst, strerror(errno));
+        ang_api->throw_error(buf); return ang_nil();
+    }
+    chmod(dst, st.st_mode);
+    return ang_nil();
+}
+
+// file_size(path) -> i64
+AngaraObject Angara_fs_file_size(int arg_count, AngaraObject* args) {
+    if (arg_count != 1 || !IS_STR(args[0])) {
+        ang_api->throw_error("file_size(path) expects one string argument.");
+        return ang_nil();
+    }
+    struct stat st;
+    if (stat(ang_api->as_cstr(args[0]), &st) != 0) return ang_i64(-1);
+    return ang_i64((int64_t)st.st_size);
+}
+
+// file_info(path) -> record
+AngaraObject Angara_fs_file_info(int arg_count, AngaraObject* args) {
+    if (arg_count != 1 || !IS_STR(args[0])) {
+        ang_api->throw_error("file_info(path) expects one string argument.");
+        return ang_nil();
+    }
+    const char* path = ang_api->as_cstr(args[0]);
+    struct stat st;
+    if (stat(path, &st) != 0) return ang_nil();
+
+    AngaraObject rec = ang_api->record_new();
+    ang_api->record_set(rec, "size", ang_i64((int64_t)st.st_size));
+    ang_api->record_set(rec, "is_file", ang_bool(S_ISREG(st.st_mode)));
+    ang_api->record_set(rec, "is_dir", ang_bool(S_ISDIR(st.st_mode)));
+    ang_api->record_set(rec, "is_symlink", ang_bool(S_ISLNK(st.st_mode)));
+    ang_api->record_set(rec, "mode", ang_i64((int64_t)st.st_mode));
+    ang_api->record_set(rec, "modified", ang_f64((double)st.st_mtime));
+    ang_api->record_set(rec, "accessed", ang_f64((double)st.st_atime));
+    return rec;
+}
+
+// temp_dir() -> string
+AngaraObject Angara_fs_temp_dir(int arg_count, AngaraObject* args) {
+    const char* tmpdir = getenv("TMPDIR");
+    if (!tmpdir) tmpdir = getenv("TEMP");
+    if (!tmpdir) tmpdir = "/tmp";
+    return ang_api->string(tmpdir);
+}
+
+// canonical(path) -> string
+AngaraObject Angara_fs_canonical(int arg_count, AngaraObject* args) {
+    if (arg_count != 1 || !IS_STR(args[0])) {
+        ang_api->throw_error("canonical(path) expects one string argument.");
+        return ang_nil();
+    }
+    char buf[PATH_MAX];
+    if (!realpath(ang_api->as_cstr(args[0]), buf)) {
+        throw_fs_error("canonical: failed to resolve path", ang_api->as_cstr(args[0]));
+        return ang_nil();
+    }
+    return ang_api->string(buf);
+}
+
 static const AngaraFuncDef FS_EXPORTS[] = {
     {"read_file",       Angara_fs_read_file,       "s->s",    NULL},
     {"write_file",      Angara_fs_write_file,      "ss->n",   NULL},
+    {"append_file",     Angara_fs_append_file,     "ss->n",   NULL},
     {"remove_file",     Angara_fs_remove_file,     "s->n",    NULL},
+    {"copy_file",       Angara_fs_copy_file,       "ss->n",   NULL},
+    {"rename_path",     Angara_fs_rename_path,     "ss->n",   NULL},
     {"create_dir",      Angara_fs_create_dir,      "s->n",    NULL},
     {"remove_dir",      Angara_fs_remove_dir,      "s->n",    NULL},
-    {"rename_path",     Angara_fs_rename_path,     "ss->n",   NULL},
+    {"list_dir",        Angara_fs_list_dir,        "s->l<s>", NULL},
     {"create_symlink",  Angara_fs_create_symlink,  "ss->n",   NULL},
     {"create_hardlink", Angara_fs_create_hardlink, "ss->n",   NULL},
     {"exists",          Angara_fs_exists,          "s->b",    NULL},
     {"is_file",         Angara_fs_is_file,         "s->b",    NULL},
     {"is_dir",          Angara_fs_is_dir,          "s->b",    NULL},
     {"is_symlink",      Angara_fs_is_symlink,      "s->b",    NULL},
+    {"file_size",       Angara_fs_file_size,       "s->i",    NULL},
+    {"file_info",       Angara_fs_file_info,       "s->{}",   NULL},
     {"chmod",           Angara_fs_chmod,           "si->n",   NULL},
+    {"canonical",       Angara_fs_canonical,       "s->s",    NULL},
+    {"temp_dir",        Angara_fs_temp_dir,        "->s",     NULL},
     {"install",         Angara_fs_install,         "ssi->n",  NULL},
-    {"append_file",     Angara_fs_append_file,     "ss->n",   NULL},
     ANGARA_FUNC_END
 };
 

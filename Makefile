@@ -142,6 +142,15 @@ build/modules/amqp.$(SO_EXT): build/obj/modules/amqp.o
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@$(CC) $< -shared $(AMQP_LIBS) -o $@
 
+build/modules/math.$(SO_EXT): build/obj/modules/math.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
+ifeq ($(UNAME_S),Darwin)
+	@$(CC) $< -shared -o $@
+else
+	@$(CC) $< -shared -lm -o $@
+endif
+
 build/modules/json.$(SO_EXT): build/obj/modules/json.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"

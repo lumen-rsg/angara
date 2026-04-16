@@ -142,15 +142,63 @@ AngaraObject Angara_io_read_all(int arg_count, AngaraObject* args) {
     return result;
 }
 
+// --- Convenience wrappers ---
+
+// io.print(content) -> nil  (writes to stdout)
+AngaraObject Angara_io_print(int arg_count, AngaraObject* args) {
+    if (arg_count != 1 || !ang_is_obj(args[0])) {
+        ang_api->throw_error("print(content) expects one string argument.");
+        return ang_nil();
+    }
+    fprintf(stdout, "%s", ang_api->as_cstr(args[0]));
+    return ang_nil();
+}
+
+// io.println_auto(content) -> nil  (writes to stdout with newline)
+AngaraObject Angara_io_println_auto(int arg_count, AngaraObject* args) {
+    if (arg_count != 1 || !ang_is_obj(args[0])) {
+        ang_api->throw_error("println_auto(content) expects one string argument.");
+        return ang_nil();
+    }
+    fputs(ang_api->as_cstr(args[0]), stdout);
+    fputc('\n', stdout);
+    return ang_nil();
+}
+
+// io.eprint(content) -> nil  (writes to stderr)
+AngaraObject Angara_io_eprint(int arg_count, AngaraObject* args) {
+    if (arg_count != 1 || !ang_is_obj(args[0])) {
+        ang_api->throw_error("eprint(content) expects one string argument.");
+        return ang_nil();
+    }
+    fprintf(stderr, "%s", ang_api->as_cstr(args[0]));
+    return ang_nil();
+}
+
+// io.eprintln(content) -> nil  (writes to stderr with newline)
+AngaraObject Angara_io_eprintln(int arg_count, AngaraObject* args) {
+    if (arg_count != 1 || !ang_is_obj(args[0])) {
+        ang_api->throw_error("eprintln(content) expects one string argument.");
+        return ang_nil();
+    }
+    fputs(ang_api->as_cstr(args[0]), stderr);
+    fputc('\n', stderr);
+    return ang_nil();
+}
+
 // --- Module Export Table ---
 
 static const AngaraFuncDef IO_EXPORTS[] = {
-    //  Angara Name  | C Function Pointer     | Type Signature | Constructs
-    {"write",          Angara_io_write,          "is->n",          NULL},
-    {"println",        Angara_io_println,        "is->n",          NULL},
-    {"flush",          Angara_io_flush,          "i->n",           NULL},
-    {"read_line",      Angara_io_read_line,      "->s",            NULL},
-    {"read_all",       Angara_io_read_all,       "->s",            NULL},
+    //  Angara Name     | C Function Pointer         | Type Signature | Constructs
+    {"write",             Angara_io_write,             "is->n",          NULL},
+    {"println",           Angara_io_println,           "is->n",          NULL},
+    {"flush",             Angara_io_flush,             "i->n",           NULL},
+    {"read_line",         Angara_io_read_line,         "->s",            NULL},
+    {"read_all",          Angara_io_read_all,          "->s",            NULL},
+    {"print",             Angara_io_print,             "s->n",           NULL},
+    {"println_auto",      Angara_io_println_auto,      "s->n",           NULL},
+    {"eprint",            Angara_io_eprint,            "s->n",           NULL},
+    {"eprintln",          Angara_io_eprintln,          "s->n",           NULL},
     ANGARA_FUNC_END
 };
 
