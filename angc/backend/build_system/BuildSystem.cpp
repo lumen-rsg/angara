@@ -109,8 +109,17 @@ namespace angara {
             cmd << " " << file;
         }
 
-        cmd << " " << m_runtime_path << "/angara_runtime.c";
-        cmd << " -I. -I" << project_root << " -I" << m_runtime_path << " -I" << m_std_lib_path;
+        // For LLVM backend: runtime is embedded in the generated IR — no external runtime needed.
+        // For C transpiler: compile runtime.c alongside generated C files
+        bool is_llvm = !object_files.empty() && c_files.empty();
+        if (is_llvm) {
+            // No external runtime library needed — all runtime functions are
+            // generated as LLVM IR directly in the object file.
+            cmd << " -I" << project_root;
+        } else {
+            cmd << " " << m_runtime_path << "/angara_runtime.c";
+            cmd << " -I. -I" << project_root << " -I" << m_runtime_path << " -I" << m_std_lib_path;
+        }
         cmd << " -L" << m_native_lib_path;
 
         // --- SMART LINKING ---

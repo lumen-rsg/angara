@@ -3,12 +3,17 @@
 //
 
 #include "rt_internal.h"
+#include <setjmp.h>
+
 
 // --- Global Exception State ---
 ExceptionFrame* g_exception_chain_head = NULL;
 AngaraObject g_current_exception;
-jmp_buf g_exception_stack[ANGARA_MAX_EXCEPTION_FRAMES];
-int g_exception_stack_top = 0;
+
+// Frame stack for LLVM backend's try_begin/end (setjmp lives in C, not LLVM IR)
+#define ANGARA_MAX_TRY_DEPTH 64
+static ExceptionFrame angara_frame_stack[ANGARA_MAX_TRY_DEPTH];
+static int angara_frame_top = 0;
 
 // --- Exception Object Constructor ---
 AngaraObject angara_exception_new(AngaraObject message) {
@@ -25,17 +30,34 @@ AngaraObject angara_exception_new(AngaraObject message) {
     return (AngaraObject){VAL_OBJ, {.obj = (Object*)exc}};
 }
 
-// --- Try/Catch Mechanism ---
+// --- Try/Catch Mechanism (for LLVM backend) ---
+// Uses g_exception_chain_head so angara_throw() can longjmp back.
 int angara_try_begin(void) {
-    if (g_exception_stack_top >= ANGARA_MAX_EXCEPTION_FRAMES) {
-        fprintf(stderr, "Exception stack overflow!\n");
+    if (angara_frame_top >= ANGARA_MAX_TRY_DEPTH) {
+        fprintf(stderr, "Exception frame stack overflow!\n");
         exit(1);
     }
-    return setjmp(g_exception_stack[g_exception_stack_top++]);
+    ExceptionFrame* frame = &angara_frame_stack[angara_frame_top++];
+    frame->prev = g_exception_chain_head;
+    g_exception_chain_head = frame;
+
+    int result = _setjmp(frame->buffer);
+    if (result != 0) {
+        // longjmp returned here — angara_throw already popped the frame
+        // and set g_current_exception. Decrement top since we won't call
+        // try_end for this frame (it was popped by angara_throw).
+        angara_frame_top--;
+    }
+    return result;
 }
 
 void angara_try_end(void) {
-    g_exception_stack_top--;
+    // Normal path: pop our frame from the chain
+    if (g_exception_chain_head != NULL &&
+        g_exception_chain_head == &angara_frame_stack[angara_frame_top - 1]) {
+        g_exception_chain_head = g_exception_chain_head->prev;
+    }
+    if (angara_frame_top > 0) angara_frame_top--;
 }
 
 // --- Throwing ---

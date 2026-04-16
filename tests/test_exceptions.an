@@ -1,0 +1,14 @@
+attach io;
+
+export func main() -> i64 {
+    io.println(1, "=== Exception Tests ===");
+
+    try {
+        io.println(1, "In try block");
+    } catch (e as Exception) {
+        io.println(1, "Caught exception!");
+    }
+
+    io.println(1, "=== Exception Tests Passed ===");
+    return 0;
+}

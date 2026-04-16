@@ -13,9 +13,9 @@
 namespace fs = std::filesystem;
 
 // --- Constants ---
-const std::string ANGC_VERSION    = "2.7.1-beta";
-const std::string BACKEND_VERSION = "3.1.1";
-const std::string ANGARA_SPEC     = "v3.0-draft";
+const std::string ANGC_VERSION    = "2.8.0";
+const std::string BACKEND_VERSION = "4.0.0";
+const std::string ANGARA_SPEC     = "v3.0";
 
 // --- Colors ---
 const auto RESET   = "\033[0m";
@@ -202,12 +202,10 @@ int main(int argc, char* argv[]) {
             cmd_link << "clang -o " << base_name;
 
             if (use_llvm) {
-                // LLVM backend produces .o files
+                // LLVM backend: self-contained, no C runtime needed
                 for (const auto& o_file : driver.get_generated_object_files()) {
                     cmd_link << " " << o_file;
                 }
-                // Add the runtime as a C file compiled alongside
-                cmd_link << " /opt/angara/src/runtime/angara_runtime.c";
             } else {
                 // 2. Add all generated C files
                 for (const auto& c_file : driver.get_generated_c_files()) {
@@ -219,15 +217,27 @@ int main(int argc, char* argv[]) {
 
             // 4. Set Search Paths
             cmd_link << " -I. -I/opt/angara/src/runtime -I/opt/angara/src/modules";
-            cmd_link << " -L/opt/angara/modules";
 
-            // 5. Add Native Dependencies
+            // 5. Add Native Dependencies (modules are named <name>.dylib, not lib<name>.dylib)
             std::set<std::string> libs;
             for (const auto& lib : driver.get_native_libs_linked()) {
                 libs.insert(lib);
             }
+            // Resolve module paths: try local build first, then installed
             for (const auto& lib : libs) {
-                cmd_link << " -l" << lib;
+                std::string mod_path;
+                std::string local_mod = (fs::path("../build/modules") / (lib + ".dylib")).string();
+                std::string installed_mod = "/opt/angara/modules/" + lib + ".dylib";
+                if (fs::exists(local_mod)) {
+                    mod_path = fs::absolute(local_mod).string();
+                } else if (fs::exists(installed_mod)) {
+                    mod_path = installed_mod;
+                } else {
+                    // Fallback to -l flag
+                    cmd_link << " -l" << lib;
+                    continue;
+                }
+                cmd_link << " " << mod_path;
             }
 
             // 6. Standard Flags

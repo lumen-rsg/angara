@@ -2,7 +2,7 @@
 
 #include <string>
 #include <vector>
-#include <map>
+#include <unordered_map>
 #include "Token.h"
 #include "ErrorHandler.h"
 namespace angara {
@@ -23,11 +23,13 @@ namespace angara {
         bool match(char expected);
         char peek();
         char peekNext() const;
+        char peekAhead(int offset) const;
         void string();
         void number();
         void identifier();
         void addToken(TokenType type);
         void addToken(TokenType type, const std::string &literal);
+        void blockComment();
 
         const std::string m_source;
         std::vector<Token> m_tokens;
@@ -38,8 +40,8 @@ namespace angara {
         std::shared_ptr<std::string> m_filename;
         ErrorHandler& m_errorHandler;
 
-        // Map to hold all reserved keywords
-        static const std::map<std::string, TokenType> keywords;
+        // Map to hold all reserved keywords (O(1) lookup)
+        static const std::unordered_map<std::string, TokenType> keywords;
 
         void multilineString();
     };

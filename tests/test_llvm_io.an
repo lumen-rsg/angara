@@ -1,0 +1,15 @@
+// Test LLVM backend with IO intrinsics
+attach io;
+
+func main() {
+    io.println(1, "Hello from LLVM!");
+    io.println(1, "Testing arithmetic:");
+    let x = 3 + 4;
+    io.println(1, "3 + 4 = ");
+    io.println(1, x);
+
+    io.println(1, "Testing strings:");
+    let s = "world";
+    io.println(1, "Hello, ");
+    io.println(1, s);
+}

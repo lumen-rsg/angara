@@ -14,14 +14,17 @@ namespace angara {
         explicit ErrorHandler(const std::string &source);
 
         virtual void report(const Token &token, const std::string &message);
+        virtual void warning(const Token &token, const std::string &message);
         virtual void note(const Token &token, const std::string &message);
 
         bool hadError() const;
+        bool hadWarning() const;
 
         void clearError();
 
     private:
         std::vector<std::string> m_lines;
         bool m_hadError = false;
+        bool m_hadWarning = false;
     };
 }

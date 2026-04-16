@@ -1,0 +1,24 @@
+// Test LLVM backend - functions, arithmetic, control flow
+func add(a as i64, b as i64) -> i64 {
+    return a + b;
+}
+
+func factorial(n as i64) -> i64 {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+func fibonacci(n as i64) -> i64 {
+    if (n <= 1) {
+        return n;
+    }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+func main() {
+    let x = add(3, 4);
+    let f = factorial(10);
+    let fib = fibonacci(10);
+}

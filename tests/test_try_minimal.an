@@ -1,0 +1,12 @@
+attach io;
+
+export func main() -> i64 {
+    try {
+        io.println(1, "In try block");
+    } catch (e as Exception) {
+        io.println(1, "Caught!");
+    }
+
+    io.println(1, "Done");
+    return 0;
+}
