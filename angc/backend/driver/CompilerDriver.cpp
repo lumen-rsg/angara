@@ -9,18 +9,13 @@
 #include "TypeChecker.h"
 #include "LLVMBackend.h"
 #include "AngaraABI.h"
+#include "Colors.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
 
 #include <dlfcn.h> // For dlopen, dlsym
 #include <filesystem>
-
-const char* const RESET = "\033[0m";
-const char* const BOLD = "\033[1m";
-const char* const RED = "\033[31m";
-const char* const GREEN = "\033[32m";
-const char* const YELLOW = "\033[33m";
 
 namespace angara {
 
@@ -131,7 +126,7 @@ namespace angara {
         std::cout << "\r\033[K";
 
         // 2. Print the log message on its own line.
-        std::cout << BOLD << GREEN << "-> " << RESET << BOLD << message << RESET << std::endl;
+        std::cout << CLR_BOLD << CLR_GREEN << "-> " << CLR_RESET << CLR_BOLD << message << CLR_RESET << std::endl;
 
         // 3. Reprint the last known progress bar state on the new line.
         print_progress(m_last_progress_message);
@@ -169,13 +164,13 @@ namespace angara {
         int pos = bar_width * progress;
 
         std::stringstream ss;
-        ss << BOLD << GREEN << "[" << RESET;
+        ss << CLR_BOLD << CLR_GREEN << "[" << CLR_RESET;
         for (int i = 0; i < bar_width; ++i) {
-            if (i < pos) ss << BOLD << GREEN << "=" << RESET;
-            else if (i == pos && progress < 1.0) ss << BOLD << GREEN << ">" << RESET;
+            if (i < pos) ss << CLR_BOLD << CLR_GREEN << "=" << CLR_RESET;
+            else if (i == pos && progress < 1.0) ss << CLR_BOLD << CLR_GREEN << ">" << CLR_RESET;
             else ss << " ";
         }
-        ss << BOLD << GREEN << "] " << RESET << "(" << m_modules_compiled << "/" << m_total_modules << ") "
+        ss << CLR_BOLD << CLR_GREEN << "] " << CLR_RESET << "(" << m_modules_compiled << "/" << m_total_modules << ") "
            << "Compiling: " << current_file;
 
         // \r moves to the beginning. \033[K clears the line.
@@ -210,8 +205,18 @@ namespace angara {
             return false;
         }
 
-        // 2. We are done. The LLVM object files have been written to disk.
-        // The BuildSystem will now call get_generated_object_files() and run the linker.
+        // 2. Print build timing.
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - m_build_start_time);
+        double seconds = duration.count() / 1000.0;
+        int total_modules = static_cast<int>(m_generated_object_files.size());
+        int native_count = static_cast<int>(m_native_lib_names.size());
+
+        std::cout << CLR_BOLD << CLR_GREEN << "✓ " << CLR_RESET << "Compiled "
+                  << total_modules << " module" << (total_modules != 1 ? "s" : "")
+                  << (native_count > 0 ? " + " + std::to_string(native_count) + " native lib" + (native_count != 1 ? "s" : "") : "")
+                  << " in " << CLR_BOLD << seconds << "s" << CLR_RESET << std::endl;
+
         return true;
     }
 
@@ -441,7 +446,7 @@ namespace angara {
 
         void* handle = dlopen(path.c_str(), RTLD_LAZY);
         if (!handle) {
-            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET
+            std::cerr << "\n" << CLR_BOLD << CLR_RED << "Error at line " << import_token.line << CLR_RESET
                       << ": Could not load native module '" << path << "'. Reason: " << dlerror() << "\n";
             m_had_error = true;
             return nullptr;
@@ -457,7 +462,7 @@ namespace angara {
         auto init_fn = (AngaraModuleInitFn)dlsym(handle, init_func_name.c_str());
 
         if (!init_fn) {
-            std::cerr << "\n" << BOLD << RED << "Error at line " << import_token.line << RESET
+            std::cerr << "\n" << CLR_BOLD << CLR_RED << "Error at line " << import_token.line << CLR_RESET
                       << ": Invalid native module '" << path << "'. Missing entry point: " << init_func_name << "\n";
             m_had_error = true;
             dlclose(handle);
@@ -579,7 +584,7 @@ namespace angara {
                 module_type->exports[func_def.name] = func_type;
 
             } catch (const std::runtime_error& e) {
-                std::cerr << "\n" << BOLD << YELLOW << "Warning:" << RESET << " Could not parse ABI definition for '"
+                std::cerr << "\n" << CLR_BOLD << CLR_YELLOW << "Warning:" << CLR_RESET << " Could not parse ABI definition for '"
                           << (func_def.name ? func_def.name : "unknown")
                           << "' in module '" << path << "': " << e.what() << "\n";
             }

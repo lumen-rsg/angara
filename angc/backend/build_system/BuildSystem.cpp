@@ -1,17 +1,11 @@
 #include "../../includes/BuildSystem.h"
 #include "CompilerDriver.h"
+#include "Colors.h"
 #include <iostream>
 #include <filesystem>
 #include <sstream>
 
 namespace fs = std::filesystem;
-
-const auto RESET   = "\033[0m";
-const auto BOLD    = "\033[1m";
-const auto RED     = "\033[31m";
-const auto GREEN   = "\033[32m";
-const auto BLUE    = "\033[34m";
-const auto MAGENTA = "\033[35m";
 
 namespace angara {
 
@@ -28,7 +22,7 @@ namespace angara {
         m_workspace_root = spec_path.parent_path().string();
 
         WorkspaceConfig ws = *workspace_opt;
-        std::cout << BOLD << MAGENTA << "Building Workspace: " << ws.name << " v" << ws.version << RESET << "\n";
+        std::cout << CLR_BOLD << CLR_MAGENTA << "Building Workspace: " << ws.name << " v" << ws.version << CLR_RESET << "\n";
 
         // 1. Pre-scan: Map all project names to their absolute ENTRY FILE paths.
         std::map<std::string, std::string> project_entries;
@@ -42,16 +36,16 @@ namespace angara {
 
         // 2. Build each project defined in the .abs file.
         for (const auto& proj : ws.projects) {
-            std::cout << "\n" << BOLD << BLUE << "--> Project: " << proj.name
-                      << " (" << (proj.type == ProjectType::APP ? "App" : "Library") << ")" << RESET << "\n";
+            std::cout << "\n" << CLR_BOLD << CLR_BLUE << "--> Project: " << proj.name
+                      << " (" << (proj.type == ProjectType::APP ? "App" : "Library") << ")" << CLR_RESET << "\n";
 
             if (!build_project(proj, project_entries)) {
-                std::cerr << RED << "!!! Failed to build project: " << proj.name << RESET << "\n";
+                std::cerr << CLR_RED << "!!! Failed to build project: " << proj.name << CLR_RESET << "\n";
                 return false;
             }
         }
 
-        std::cout << "\n" << BOLD << GREEN << "✓ Workspace built successfully." << RESET << "\n";
+        std::cout << "\n" << CLR_BOLD << CLR_GREEN << "✓ Workspace built successfully." << CLR_RESET << "\n";
         return true;
     }
 

@@ -2,19 +2,10 @@
 // Created by cv2 on 25.11.2025.
 //
 #include "ASTPrinter.h"
+#include "Colors.h"
 #include <sstream>
 
 namespace angara {
-
-    // --- ANSI Colors ---
-    const char* const C_RESET   = "\033[0m";
-    const char* const C_BOLD    = "\033[1m";
-    const char* const C_DIM     = "\033[2m";
-    const char* const C_GREEN   = "\033[32m";
-    const char* const C_YELLOW  = "\033[33m";
-    const char* const C_BLUE    = "\033[34m";
-    const char* const C_MAGENTA = "\033[35m";
-    const char* const C_CYAN    = "\033[36m";
 
     // --- Tree Characters ---
     const char* const TREE_FORK = "├── ";
@@ -25,22 +16,22 @@ namespace angara {
     ASTPrinter::ASTPrinter() {}
 
     void ASTPrinter::print(const std::vector<std::shared_ptr<Stmt>>& statements) {
-        std::cout << C_BOLD << C_MAGENTA << "\n=== Abstract Syntax Tree ===\n" << C_RESET;
+        std::cout << CLR_BOLD << CLR_MAGENTA << "\n=== Abstract Syntax Tree ===\n" << CLR_RESET;
         for (size_t i = 0; i < statements.size(); ++i) {
             // Root level nodes
             bool isLast = (i == statements.size() - 1);
             printChild("", statements[i], isLast);
         }
-        std::cout << C_BOLD << C_MAGENTA << "============================\n\n" << C_RESET;
+        std::cout << CLR_BOLD << CLR_MAGENTA << "============================\n\n" << CLR_RESET;
     }
 
     // --- Helpers ---
 
     void ASTPrinter::printHeader(const std::string& label, const std::string& extra) {
         std::cout << m_prefix;
-        std::cout << C_BOLD << C_CYAN << label << C_RESET;
+        std::cout << CLR_BOLD << CLR_CYAN << label << CLR_RESET;
         if (!extra.empty()) {
-            std::cout << " " << C_YELLOW << extra << C_RESET;
+            std::cout << " " << CLR_YELLOW << extra << CLR_RESET;
         }
         std::cout << "\n";
     }
@@ -55,7 +46,7 @@ namespace angara {
         m_childPrefix = m_childPrefix + (isLast ? TREE_EMPTY : TREE_DOWN);
 
         if (!fieldName.empty()) {
-            std::cout << m_prefix << C_DIM << fieldName << ": " << C_RESET;
+            std::cout << m_prefix << CLR_DIM << fieldName << ": " << CLR_RESET;
         }
 
         stmt->accept(*this, stmt);
@@ -93,7 +84,7 @@ namespace angara {
             std::string access = (field->access == AccessLevel::PUBLIC) ? "public" : "private";
 
             // Print the wrapper node header
-            std::cout << m_prefix << C_BOLD << C_CYAN << "FieldMember" << C_RESET << " " << C_YELLOW << access << C_RESET << "\n";
+            std::cout << m_prefix << CLR_BOLD << CLR_CYAN << "FieldMember" << CLR_RESET << " " << CLR_YELLOW << access << CLR_RESET << "\n";
 
             // Print the underlying VarDeclStmt as a child of this wrapper
             // 'true' because it's the only child of this wrapper
@@ -103,7 +94,7 @@ namespace angara {
             std::string access = (method->access == AccessLevel::PUBLIC) ? "public" : "private";
 
             // Print the wrapper node header
-            std::cout << m_prefix << C_BOLD << C_CYAN << "MethodMember" << C_RESET << " " << C_YELLOW << access << C_RESET << "\n";
+            std::cout << m_prefix << CLR_BOLD << CLR_CYAN << "MethodMember" << CLR_RESET << " " << CLR_YELLOW << access << CLR_RESET << "\n";
 
             // Print the underlying FuncStmt as a child of this wrapper
             printChild("", method->declaration, true);
@@ -202,7 +193,7 @@ namespace angara {
             m_prefix = m_childPrefix + (isLast ? TREE_END : TREE_FORK);
             m_childPrefix = m_childPrefix + (isLast ? TREE_EMPTY : TREE_DOWN);
 
-            std::cout << m_prefix << C_GREEN << "\"" << expr.keys[i].lexeme << "\"" << C_RESET << ":\n";
+            std::cout << m_prefix << CLR_GREEN << "\"" << expr.keys[i].lexeme << "\"" << CLR_RESET << ":\n";
 
             // Print the value as a child of the key
             printChild("val", expr.values[i], true);
@@ -269,7 +260,7 @@ namespace angara {
             m_prefix = m_childPrefix + (isLast ? TREE_END : TREE_FORK);
             m_childPrefix = m_childPrefix + (isLast ? TREE_EMPTY : TREE_DOWN);
 
-            std::cout << m_prefix << C_BOLD << C_BLUE << "Case" << C_RESET;
+            std::cout << m_prefix << CLR_BOLD << CLR_BLUE << "Case" << CLR_RESET;
             if (c.variable) std::cout << " (bind: " << c.variable->lexeme << ")";
             std::cout << "\n";
 
@@ -402,7 +393,7 @@ namespace angara {
         m_prefix = m_childPrefix + TREE_END;
         m_childPrefix = m_childPrefix + TREE_EMPTY;
 
-        std::cout << m_prefix << C_BOLD << C_BLUE << "Catch" << C_RESET
+        std::cout << m_prefix << CLR_BOLD << CLR_BLUE << "Catch" << CLR_RESET
                   << " (" << stmt->catchName.lexeme << ")\n";
 
         printChild("body", stmt->catchBlock, true);

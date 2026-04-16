@@ -3,14 +3,9 @@
 //
 
 #include "ErrorHandler.h"
+#include "Colors.h"
 #include <iostream>
 #include <sstream>
-
-const auto CYAN = "\033[36m";
-const auto YELLOW = "\033[33m";
-const auto RED = "\033[31m";
-const auto RESET = "\033[0m";
-const auto BOLD = "\033[1m";
 
 namespace angara {
 
@@ -27,7 +22,7 @@ namespace angara {
         m_errorCount++;
 
         // Standard error header (red)
-        std::cerr << BOLD << RED << "[Line " << token.line << "] Error";
+        std::cerr << CLR_BOLD << CLR_RED << "[Line " << token.line << "] Error";
         if (!code.empty()) {
             std::cerr << " [" << code << "]";
         }
@@ -37,7 +32,7 @@ namespace angara {
         } else {
             std::cerr << " at '" << token.lexeme << "'";
         }
-        std::cerr << ": " << RESET << message << std::endl;
+        std::cerr << ": " << CLR_RESET << message << std::endl;
 
         // Print the line with the error
         if (token.line - 1 < m_lines.size()) {
@@ -47,7 +42,7 @@ namespace angara {
             std::string pointer;
             pointer += "   | " + std::string(token.column - 1, ' ');
             pointer += std::string(token.lexeme.length() > 0 ? token.lexeme.length() : 1, '^');
-            std::cerr << BOLD << RED << pointer << RESET << std::endl;
+            std::cerr << CLR_BOLD << CLR_RED << pointer << CLR_RESET << std::endl;
         }
     }
 
@@ -56,7 +51,7 @@ namespace angara {
         m_warningCount++;
 
         // Warning header (yellow)
-        std::cerr << BOLD << YELLOW << "[Line " << token.line << "] Warning";
+        std::cerr << CLR_BOLD << CLR_YELLOW << "[Line " << token.line << "] Warning";
         if (!code.empty()) {
             std::cerr << " [" << code << "]";
         }
@@ -66,7 +61,7 @@ namespace angara {
         } else {
             std::cerr << " at '" << token.lexeme << "'";
         }
-        std::cerr << ": " << RESET << message << std::endl;
+        std::cerr << ": " << CLR_RESET << message << std::endl;
 
         // Print the line with the warning
         if (token.line - 1 < m_lines.size()) {
@@ -76,14 +71,14 @@ namespace angara {
             std::string pointer;
             pointer += "   | " + std::string(token.column - 1, ' ');
             pointer += std::string(token.lexeme.length() > 0 ? token.lexeme.length() : 1, '~');
-            std::cerr << BOLD << YELLOW << pointer << RESET << std::endl;
+            std::cerr << CLR_BOLD << CLR_YELLOW << pointer << CLR_RESET << std::endl;
         }
     }
 
     void ErrorHandler::note(const Token &token, const std::string &message) {
         // A note is supplemental, so it does not set m_hadError = true.
 
-        std::cerr << BOLD << CYAN << "[Line " << token.line << "] note: " << RESET
+        std::cerr << CLR_BOLD << CLR_CYAN << "[Line " << token.line << "] note: " << CLR_RESET
                   << message << std::endl;
 
         // Print the line with the note's context
@@ -94,7 +89,7 @@ namespace angara {
             std::string pointer;
             pointer += "   | " + std::string(token.column > 0 ? token.column - 1 : 0, ' ');
             pointer += std::string(token.lexeme.length() > 0 ? token.lexeme.length() : 1, '^');
-            std::cerr << BOLD << CYAN << pointer << RESET << std::endl;
+            std::cerr << CLR_BOLD << CLR_CYAN << pointer << CLR_RESET << std::endl;
         }
     }
 
@@ -124,16 +119,16 @@ namespace angara {
     void ErrorHandler::printSummary() const {
         if (m_errorCount == 0 && m_warningCount == 0) return;
 
-        std::cerr << BOLD;
+        std::cerr << CLR_BOLD;
         if (m_errorCount > 0) {
-            std::cerr << RED << m_errorCount << " error" << (m_errorCount > 1 ? "s" : "");
+            std::cerr << CLR_RED << m_errorCount << " error" << (m_errorCount > 1 ? "s" : "");
         }
         if (m_errorCount > 0 && m_warningCount > 0) {
-            std::cerr << RESET << ", " << BOLD;
+            std::cerr << CLR_RESET << ", " << CLR_BOLD;
         }
         if (m_warningCount > 0) {
-            std::cerr << YELLOW << m_warningCount << " warning" << (m_warningCount > 1 ? "s" : "");
+            std::cerr << CLR_YELLOW << m_warningCount << " warning" << (m_warningCount > 1 ? "s" : "");
         }
-        std::cerr << RESET << std::endl;
+        std::cerr << CLR_RESET << std::endl;
     }
 }

@@ -1,4 +1,5 @@
 #include "ProjectInitializer.h"
+#include "Colors.h"
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -9,16 +10,8 @@ namespace fs = std::filesystem;
 
 namespace angara {
 
-    // Internal UI constants
-    const auto C_RESET   = "\033[0m";
-    const auto C_BOLD    = "\033[1m";
-    const auto C_GREEN   = "\033[32m";
-    const auto C_CYAN    = "\033[36m";
-    const auto C_YELLOW  = "\033[33m";
-    const auto C_MAGENTA = "\033[35m";
-
     std::string ProjectInitializer::prompt(const std::string& label, const std::string& defaultValue) {
-        std::cout << C_BOLD << C_CYAN << "? " << C_RESET << label;
+        std::cout << CLR_BOLD << CLR_CYAN << "? " << CLR_RESET << label;
         if (!defaultValue.empty()) {
             std::cout << " (" << defaultValue << ")";
         }
@@ -38,7 +31,7 @@ namespace angara {
     }
 
     bool ProjectInitializer::run() {
-        std::cout << C_BOLD << C_MAGENTA << "--- Angara Project Initialization ---" << C_RESET << "\n";
+        std::cout << CLR_BOLD << CLR_MAGENTA << "--- Angara Project Initialization ---" << CLR_RESET << "\n";
         std::cout << "This will create a new workspace configuration (project.abs).\n\n";
 
         // 1. Workspace Configuration
@@ -57,7 +50,7 @@ namespace angara {
         // 2. Project Loop
         bool adding = true;
         while (adding) {
-            std::cout << "\n" << C_BOLD << C_YELLOW << ">> New Project Entry" << C_RESET << "\n";
+            std::cout << "\n" << CLR_BOLD << CLR_YELLOW << ">> New Project Entry" << CLR_RESET << "\n";
 
             std::string p_name = prompt("  Project Name");
             if (p_name.empty()) {
@@ -103,8 +96,8 @@ namespace angara {
         outfile << abs_content.str();
         outfile.close();
 
-        std::cout << "\n" << C_BOLD << C_GREEN << "✓ Successfully initialized workspace in project.abs" << C_RESET << "\n";
-        std::cout << "Run " << C_BOLD << "angc" << C_RESET << " to build your new projects.\n";
+        std::cout << "\n" << CLR_BOLD << CLR_GREEN << "✓ Successfully initialized workspace in project.abs" << CLR_RESET << "\n";
+        std::cout << "Run " << CLR_BOLD << "angc" << CLR_RESET << " to build your new projects.\n";
 
         return true;
     }
