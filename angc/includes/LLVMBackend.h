@@ -84,6 +84,7 @@ namespace angara {
         void codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>& statements);
         void codegenGlobalVarDecl(const VarDeclStmt& stmt);
         void codegenFunctionDecl(const FuncStmt& stmt, const std::string& module_name);
+        void codegenForeignFuncDecl(const FuncStmt& stmt);
         void codegenClassDecl(const ClassStmt& stmt);
         void codegenDataDecl(const DataStmt& stmt);
         void codegenEnumDecl(const EnumStmt& stmt);

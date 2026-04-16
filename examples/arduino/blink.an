@@ -1,0 +1,29 @@
+// Blink — Arduino LED blink example in Angara
+// Demonstrates using foreign functions to call the Arduino SDK.
+//
+// Build:  make compile SRC=blink.an
+// Upload: make upload SRC=blink.an
+//
+// Note: Constants are inlined because top-level `let` bindings are local
+// to the _start/main scope and not accessible from named functions.
+
+// Foreign declarations — these are C functions from the Arduino SDK.
+// Angara generates thin wrappers that convert between AngaraObject and C types.
+foreign func pinMode(pin as i64, mode as i64) -> nil;
+foreign func digitalWrite(pin as i64, val as i64) -> nil;
+foreign func delay(ms as i64) -> nil;
+
+// setup() is called once by the C shim
+// Arduino Uno pin 13 = built-in LED, OUTPUT = 1
+func setup() -> nil {
+    pinMode(13, 1);
+}
+
+// loop() is called repeatedly by the C shim
+// HIGH = 1, LOW = 0
+func loop() -> nil {
+    digitalWrite(13, 1);
+    delay(1000);
+    digitalWrite(13, 0);
+    delay(1000);
+}

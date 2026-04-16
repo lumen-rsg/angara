@@ -10,6 +10,8 @@ void LLVMBackend::codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>&
         else if (auto s = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
             // Intrinsic functions are handled inline by cgCall — no LLVM function to emit
             if (s->is_intrinsic) continue;
+            // Foreign functions get a C ABI wrapper
+            if (s->is_foreign) { codegenForeignFuncDecl(*s); continue; }
             codegenFunctionDecl(*s, moduleName);
         }
         else if (auto s = std::dynamic_pointer_cast<const ClassStmt>(stmt))
@@ -221,6 +223,135 @@ void LLVMBackend::codegenDataDecl(const DataStmt& stmt) {
     namedVals = std::move(saved_values);
     // Register data class constructor
     constructorLookup[data_name] = "Angara_data_new_" + data_name;
+}
+
+void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
+    // Foreign function: generates a C ABI extern declaration + an AngaraObject wrapper.
+    //
+    // Angara code:  foreign func pinMode(pin as i64, mode as i64) -> nil;
+    // Generates:
+    //   1. LLVM declare:  declare void @pinMode(i64, i64)
+    //   2. AngaraObject wrapper:  define @__ang_main_pinMode(AngaraObject, AngaraObject) -> AngaraObject
+    //      which extracts i64 from each AngaraObject param, calls @pinMode, wraps result
+
+    // --- Resolve return type ---
+    auto isVoidType = [](const std::shared_ptr<ASTType>& type) -> bool {
+        if (!type) return true; // no return type = void/nil
+        if (auto* s = dynamic_cast<const SimpleType*>(type.get()))
+            return s->name.lexeme == "nil" || s->name.lexeme == "void";
+        return false;
+    };
+
+    auto resolveCType = [&](const std::shared_ptr<ASTType>& type) -> llvm::Type* {
+        if (!type) return llvm::Type::getInt64Ty(*ctx);
+        if (auto* s = dynamic_cast<const SimpleType*>(type.get())) {
+            const auto& n = s->name.lexeme;
+            if (n == "bool")   return llvm::Type::getInt1Ty(*ctx);
+            if (n == "i8")     return llvm::Type::getInt8Ty(*ctx);
+            if (n == "i16")    return llvm::Type::getInt16Ty(*ctx);
+            if (n == "i32")    return llvm::Type::getInt32Ty(*ctx);
+            if (n == "i64")    return llvm::Type::getInt64Ty(*ctx);
+            if (n == "f32")    return llvm::Type::getFloatTy(*ctx);
+            if (n == "f64")    return llvm::Type::getDoubleTy(*ctx);
+            if (n == "string") return llvm::PointerType::get(*ctx, 0); // const char*
+        }
+        return llvm::Type::getInt64Ty(*ctx); // default
+    };
+
+    auto getTypeName = [](const std::shared_ptr<ASTType>& type) -> std::string {
+        if (!type) return "i64";
+        if (auto* s = dynamic_cast<const SimpleType*>(type.get()))
+            return s->name.lexeme;
+        return "i64";
+    };
+
+    bool returnsVoid = isVoidType(stmt.returnType);
+    llvm::Type* cRetType = returnsVoid ? llvm::Type::getVoidTy(*ctx) : resolveCType(stmt.returnType);
+
+    // Resolve param C types
+    std::vector<llvm::Type*> cParamTypes;
+    std::vector<std::string> paramTypeNames;
+    for (const auto& param : stmt.params) {
+        cParamTypes.push_back(resolveCType(param.type));
+        paramTypeNames.push_back(getTypeName(param.type));
+    }
+
+    // 1. Declare the extern C function (resolved at link time)
+    std::string cFuncName = stmt.name.lexeme;
+    auto* cFnType = llvm::FunctionType::get(cRetType, cParamTypes, false);
+    auto* cFunc = llvm::Function::Create(cFnType, llvm::Function::ExternalLinkage, cFuncName, mod.get());
+
+    // 2. Generate AngaraObject wrapper: __ang_<module>_<name>(AngaraObject, ...) -> AngaraObject
+    std::string wrapperName = mangle(moduleName, stmt.name.lexeme);
+    std::vector<llvm::Type*> wrapperParamTypes(stmt.params.size(), objType);
+    auto* wrapperFnType = llvm::FunctionType::get(objType, wrapperParamTypes, false);
+    auto* wrapperFn = llvm::Function::Create(wrapperFnType, llvm::Function::ExternalLinkage,
+                                               wrapperName, mod.get());
+
+    auto* entry = llvm::BasicBlock::Create(*ctx, "entry", wrapperFn);
+    builder->SetInsertPoint(entry);
+
+    auto saved_values = std::move(namedVals);
+    namedVals.clear();
+
+    // Extract native C values from AngaraObject params
+    std::vector<llvm::Value*> cArgs;
+    size_t idx = 0;
+    for (auto& arg : wrapperFn->args()) {
+        std::string pname = sanitize(stmt.params[idx].name.lexeme);
+        auto* alloca = allocLocal(wrapperFn, pname);
+        builder->CreateStore(&arg, alloca);
+        namedVals[pname] = alloca;
+
+        const std::string& typeName = paramTypeNames[idx];
+
+        if (typeName == "bool") {
+            cArgs.push_back(getBool(&arg));
+        } else if (typeName == "i8" || typeName == "i16" || typeName == "i32") {
+            auto* cty = cParamTypes[idx];
+            cArgs.push_back(builder->CreateTrunc(getI64(&arg), cty));
+        } else if (typeName == "i64") {
+            cArgs.push_back(getI64(&arg));
+        } else if (typeName == "f64") {
+            cArgs.push_back(getF64(&arg));
+        } else if (typeName == "f32") {
+            cArgs.push_back(builder->CreateFPTrunc(getF64(&arg), llvm::Type::getFloatTy(*ctx)));
+        } else if (typeName == "string") {
+            // Pass raw pointer from AngaraObject payload
+            cArgs.push_back(builder->CreateIntToPtr(getI64(&arg), llvm::PointerType::get(*ctx, 0)));
+        } else {
+            cArgs.push_back(getI64(&arg));
+        }
+        idx++;
+    }
+
+    // Call the C function
+    llvm::CallInst* cResult = builder->CreateCall(cFunc, cArgs);
+
+    // Wrap C result into AngaraObject
+    if (returnsVoid) {
+        builder->CreateRet(makeNil());
+    } else {
+        const std::string retTypeName = getTypeName(stmt.returnType);
+        if (retTypeName == "bool") {
+            builder->CreateRet(makeBool(cResult));
+        } else if (retTypeName == "i8" || retTypeName == "i16" || retTypeName == "i32") {
+            builder->CreateRet(makeI64(builder->CreateZExt(cResult, llvm::Type::getInt64Ty(*ctx))));
+        } else if (retTypeName == "i64") {
+            builder->CreateRet(makeI64(cResult));
+        } else if (retTypeName == "f64") {
+            builder->CreateRet(makeF64(cResult));
+        } else if (retTypeName == "f32") {
+            builder->CreateRet(makeF64(builder->CreateFPExt(cResult, llvm::Type::getDoubleTy(*ctx))));
+        } else if (retTypeName == "string") {
+            // C string → Angara string via runtime
+            builder->CreateRet(callRt(rt->getFuncStringFromC(), {cResult}));
+        } else {
+            builder->CreateRet(makeI64(cResult));
+        }
+    }
+
+    namedVals = std::move(saved_values);
 }
 
 void LLVMBackend::codegenEnumDecl(const EnumStmt& stmt) {
