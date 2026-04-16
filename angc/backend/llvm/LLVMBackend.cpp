@@ -24,8 +24,8 @@ LLVMBackend::~LLVMBackend() {
     (void)ctx.release();
 }
 
-LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple)
-    : m_type_checker(tc), m_errorHandler(eh) {
+LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding)
+    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding) {
     ctx = std::make_unique<llvm::LLVMContext>();
     mod = std::make_unique<llvm::Module>("angara_module", *ctx);
     builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
@@ -43,7 +43,7 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
         if (auto* tm = t->createTargetMachine(targetTriple,"generic","",opt,std::nullopt))
             mod->setDataLayout(tm->createDataLayout());
     }
-    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder);
+    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding);
     rt->generateRuntime();
     objType = rt->getAngaraObjType();
 }

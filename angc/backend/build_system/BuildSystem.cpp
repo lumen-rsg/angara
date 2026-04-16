@@ -56,6 +56,8 @@ namespace angara {
         driver.set_workspace_projects(project_entries);
         if (!m_target_triple.empty()) driver.set_target(m_target_triple);
         if (!m_sysroot.empty()) driver.set_sysroot(m_sysroot);
+        if (config.freestanding) driver.set_freestanding(true);
+        if (config.nostdlib) driver.set_nostdlib(true);
 
         const std::string& entry_file = project_entries.at(config.name);
 
@@ -106,8 +108,26 @@ namespace angara {
         }
         // ----------------------
 
-        cmd << " -pthread -lm -O2 -Wno-return-type";
-        cmd << " -Wl,-rpath," << m_native_lib_path;
+        if (config.freestanding) {
+            // Freestanding: skip host linker, emit object file for bare-metal toolchain
+            std::string obj_output = bin_path.string() + ".o";
+            if (object_files.size() == 1) {
+                fs::rename(*object_files.begin(), obj_output);
+            } else {
+                obj_output = *object_files.begin();
+            }
+            std::cout << "    " << CLR_BOLD << CLR_GREEN << "Freestanding object emitted: "
+                      << obj_output << CLR_RESET << "\n";
+            std::cout << "    " << CLR_CYAN << "Link with your bare-metal toolchain." << CLR_RESET << "\n";
+            return true;
+        }
+
+        if (config.nostdlib) {
+            cmd << " -nostdlib -O2 -Wno-return-type";
+        } else {
+            cmd << " -pthread -lm -O2 -Wno-return-type";
+            cmd << " -Wl,-rpath," << m_native_lib_path;
+        }
 
         if (int result = system(cmd.str().c_str()); result != 0) {
             std::cerr << "    Linker failed for " << config.name << "\n";

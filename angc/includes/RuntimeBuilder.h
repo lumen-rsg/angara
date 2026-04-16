@@ -42,7 +42,8 @@ static constexpr int OBJ_BOUND_METHOD    = 12;
 
 class RuntimeBuilder {
 public:
-    RuntimeBuilder(llvm::LLVMContext& context, llvm::Module& module, llvm::IRBuilder<>& builder);
+    RuntimeBuilder(llvm::LLVMContext& context, llvm::Module& module, llvm::IRBuilder<>& builder,
+                   bool freestanding = false);
 
     /// Generate all runtime types and functions into the module.
     void generateRuntime();
@@ -198,6 +199,9 @@ private:
     // --- Exception globals ---
     llvm::GlobalVariable* m_g_exception_chain = nullptr;
     llvm::GlobalVariable* m_g_current_exception = nullptr;
+
+    // --- Freestanding mode ---
+    bool m_freestanding = false;
 };
 
 } // namespace angara

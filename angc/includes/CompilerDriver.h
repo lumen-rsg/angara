@@ -42,6 +42,12 @@ namespace angara {
         void set_sysroot(const std::string& path) { m_sysroot = path; }
         const std::string& get_sysroot() const { return m_sysroot; }
 
+        // Freestanding / nostdlib flags
+        void set_freestanding(bool val) { m_freestanding = val; }
+        bool is_freestanding() const { return m_freestanding; }
+        void set_nostdlib(bool val) { m_nostdlib = val; }
+        bool is_nostdlib() const { return m_nostdlib; }
+
         // Main Entry Point
         // Recursively transpiles 'root_file_path' and all its imports into C files.
         // Returns true if all stages (Lex, Parse, Check, Transpile) succeeded.
@@ -90,6 +96,10 @@ namespace angara {
         // Cross-compilation
         std::string m_target_triple; // LLVM target triple (empty = host default)
         std::string m_sysroot;       // Linker sysroot path
+
+        // Freestanding / nostdlib
+        bool m_freestanding = false;
+        bool m_nostdlib = false;
 
         // Outputs
         std::set<std::string> m_generated_object_files;

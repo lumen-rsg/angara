@@ -237,9 +237,12 @@ void LLVMBackend::codegenEnumDecl(const EnumStmt& stmt) {
 void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& statements,
                                         const std::string& module_name,
                                         const std::vector<std::string>&) {
-    auto* main_type = llvm::FunctionType::get(llvm::Type::getInt32Ty(*ctx), false);
+    // In freestanding mode, generate _start entry point (no libc dependency)
+    std::string entry_name = m_freestanding ? "_start" : "main";
+    auto* main_type = llvm::FunctionType::get(
+        m_freestanding ? llvm::Type::getVoidTy(*ctx) : llvm::Type::getInt32Ty(*ctx), false);
     auto* main_fn = llvm::Function::Create(main_type, llvm::Function::ExternalLinkage,
-                                            "main", mod.get());
+                                            entry_name, mod.get());
 
     auto* entry = llvm::BasicBlock::Create(*ctx, "entry", main_fn);
     builder->SetInsertPoint(entry);
@@ -283,7 +286,15 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
         callRt(rt->getFuncDecref(), {val});
     }
 
-    builder->CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0));
+    if (m_freestanding) {
+        // Freestanding: infinite loop (no OS to return to)
+        auto* halt_bb = llvm::BasicBlock::Create(*ctx, "halt", main_fn);
+        builder->CreateBr(halt_bb);
+        builder->SetInsertPoint(halt_bb);
+        builder->CreateBr(halt_bb); // infinite halt loop
+    } else {
+        builder->CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0));
+    }
 }
 
 } // namespace angara
