@@ -16,8 +16,8 @@ namespace angara {
             }
         }
 
-        // 3. Exit the lexical scope, destroying all variables declared within it.
-        m_symbols.exitScope();
+        // 3. Exit the lexical scope, warning about unused variables.
+        exitScopeAndWarn();
     }
 
 }

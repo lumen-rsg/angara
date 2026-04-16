@@ -34,7 +34,7 @@ namespace angara {
         stmt->catchBlock->accept(*this, stmt->catchBlock);
 
         // 5. Exit the scope for the catch block.
-        m_symbols.exitScope();
+        exitScopeAndWarn();
     }
 
 }

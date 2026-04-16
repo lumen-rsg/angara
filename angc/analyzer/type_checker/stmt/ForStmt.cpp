@@ -36,7 +36,7 @@ namespace angara {
         m_loop_depth--; // <-- EXIT a loop
 
         // 6. Exit the scope, destroying the initializer variable.
-        m_symbols.exitScope();
+        exitScopeAndWarn();
     }
 
 }

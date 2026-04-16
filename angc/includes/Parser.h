@@ -64,6 +64,7 @@ namespace angara {
         };
 
         ParseError error(const Token &token, const std::string &message);
+        void warning(const Token &token, const std::string &message);
 
         void synchronize();
 

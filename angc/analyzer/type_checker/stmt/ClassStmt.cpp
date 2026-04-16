@@ -249,7 +249,7 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
         }
 
         // 6. Restore the context.
-        m_symbols.exitScope();
+        exitScopeAndWarn();
         m_current_class = enclosing_class;
     }
 

@@ -107,7 +107,7 @@ namespace angara {
 
         // 6. Restore the context.
         m_function_return_types.pop();
-        m_symbols.exitScope();
+        exitScopeAndWarn();
     }
 
 }

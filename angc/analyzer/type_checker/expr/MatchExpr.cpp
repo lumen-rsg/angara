@@ -51,7 +51,7 @@ namespace angara {
                                                 + body_type->toString() + "'.");
                         }
                     }
-                    m_symbols.exitScope();
+                    exitScopeAndWarn();
                     continue; // Skip the rest of the loop and go to the next case.
                 }
             }
@@ -106,7 +106,7 @@ namespace angara {
                                         + body_type->toString() + "'.");
                 }
             }
-            m_symbols.exitScope();
+            exitScopeAndWarn();
         }
 
         // 4. Exhaustiveness check.

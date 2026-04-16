@@ -17,12 +17,20 @@ namespace angara {
         m_scopes.emplace_back();
     }
 
-    void SymbolTable::exitScope() {
+    std::vector<std::shared_ptr<Symbol>> SymbolTable::exitScope() {
+        std::vector<std::shared_ptr<Symbol>> unused;
         // To exit a scope, we pop the current map off the stack.
         // We should never be able to exit the bottom-most global scope.
         if (m_scopes.size() > 1) {
+            auto& scope = m_scopes.back();
+            for (const auto& [name, sym] : scope) {
+                if (!sym->used) {
+                    unused.push_back(sym);
+                }
+            }
             m_scopes.pop_back();
         }
+        return unused;
     }
 
     std::shared_ptr<Symbol> SymbolTable::declare(
@@ -49,7 +57,7 @@ namespace angara {
         return nullptr; // Success
     }
 
-    std::shared_ptr<Symbol> SymbolTable::resolve(const std::string& name) const {
+    std::shared_ptr<Symbol> SymbolTable::resolve(const std::string& name) {
         // To resolve a variable, we walk the scope stack backwards, from the
         // innermost scope to the outermost (global) scope.
 
@@ -57,7 +65,8 @@ namespace angara {
             const auto& scope = *it;
             auto symbol_it = scope.find(name);
             if (symbol_it != scope.end()) {
-                // Found the symbol in this scope. Return it.
+                // Mark this symbol as used
+                symbol_it->second->used = true;
                 return symbol_it->second;
             }
         }

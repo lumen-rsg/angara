@@ -193,6 +193,11 @@ std::shared_ptr<ASTType> Parser::type() {
         return ParseError(message);
     }
 
+    void Parser::warning(const Token &token, const std::string &message) {
+        // Warnings don't trigger panic mode
+        m_errorHandler.warning(token, message);
+    }
+
     void Parser::synchronize() {
         advance(); // Consume the token that caused the error
 

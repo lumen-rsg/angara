@@ -296,6 +296,19 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         m_errorHandler.note(token, message);
     }
 
+    void TypeChecker::exitScopeAndWarn() {
+        auto unused = m_symbols.exitScope();
+        for (const auto& sym : unused) {
+            // Don't warn about unused imports, functions, or type-level symbols
+            // Only warn about local variables (depth > 0 means not global)
+            if (sym->depth > 0 && sym->type->kind != TypeKind::FUNCTION &&
+                sym->type->kind != TypeKind::MODULE) {
+                warning(sym->declaration_token,
+                    "Unused variable '" + sym->name + "'.", "W003");
+            }
+        }
+    }
+
     // Pops a type from our internal type stack.
     // This is used to get the result type of an expression.
     std::shared_ptr<Type> TypeChecker::popType() {

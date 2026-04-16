@@ -110,6 +110,7 @@ namespace angara {
         void error(const Token& token, const std::string& message, const std::string& code = "");
         void warning(const Token& token, const std::string& message, const std::string& code = "");
         void note(const Token &token, const std::string &message);
+        void exitScopeAndWarn();
 
         bool m_is_in_trait = false;
         void find_and_report_suggestion(const Token& bad_token, const std::vector<std::string>& candidates);

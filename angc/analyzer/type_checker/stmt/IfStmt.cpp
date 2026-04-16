@@ -49,7 +49,7 @@ namespace angara {
                 // Now, check the 'then' branch.
                 stmt->thenBranch->accept(*this, stmt->thenBranch);
 
-                m_symbols.exitScope();
+                exitScopeAndWarn();
             }
 
             // Check the 'else' branch normally. The unwrapped variable is not in scope here.

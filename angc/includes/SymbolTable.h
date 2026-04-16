@@ -21,6 +21,7 @@ namespace angara {
         Token declaration_token;
         bool is_const;
         int depth;
+        bool used = false;
         std::shared_ptr<ModuleType> from_module = nullptr;
     };
 
@@ -31,12 +32,12 @@ namespace angara {
         // Enters a new scope (e.g., on entering a '{' block)
         void enterScope();
 
-        // Exits the current scope
-        void exitScope();
+        // Exits the current scope, returns unused local variables
+        std::vector<std::shared_ptr<Symbol>> exitScope();
 
         // Tries to find a symbol by walking up the scope chain.
         // Returns the symbol if found, otherwise nullptr.
-        [[nodiscard]] std::shared_ptr<Symbol> resolve(const std::string& name) const;
+        [[nodiscard]] std::shared_ptr<Symbol> resolve(const std::string& name);
 
         std::shared_ptr<Symbol> declare(
             const Token &token,
