@@ -24,7 +24,8 @@ namespace angara {
 
     class LLVMBackend {
     public:
-        LLVMBackend(TypeChecker& type_checker, ErrorHandler& errorHandler);
+        LLVMBackend(TypeChecker& type_checker, ErrorHandler& errorHandler,
+                    const std::string& target_triple = "");
         ~LLVMBackend(); // Releases LLVM objects (cleanup at process exit)
 
         bool generate(const std::vector<std::shared_ptr<Stmt>>& statements,

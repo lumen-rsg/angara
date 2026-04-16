@@ -68,6 +68,8 @@ namespace angara {
         driver.set_paths(m_std_lib_path, m_native_lib_path);
         driver.set_workspace_projects(project_entries);
         driver.set_backend(m_backend);
+        if (!m_target_triple.empty()) driver.set_target(m_target_triple);
+        if (!m_sysroot.empty()) driver.set_sysroot(m_sysroot);
 
         // 3. Resolve the entry point for THIS project.
         const std::string& entry_file = project_entries.at(config.name);
@@ -96,7 +98,10 @@ namespace angara {
         std::stringstream cmd;
         fs::path bin_path = fs::path(project_root) / config.name;
 
-        cmd << "clang -o " << bin_path.string();
+        cmd << "clang";
+        if (!m_target_triple.empty()) cmd << " -target " << m_target_triple;
+        if (!m_sysroot.empty()) cmd << " --sysroot " << m_sysroot;
+        cmd << " -o " << bin_path.string();
 
         if (config.type == ProjectType::LIBRARY) {
             cmd << " -shared -fPIC";

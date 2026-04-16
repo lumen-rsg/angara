@@ -24,12 +24,15 @@ LLVMBackend::~LLVMBackend() {
     (void)ctx.release();
 }
 
-LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh)
+LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple)
     : m_type_checker(tc), m_errorHandler(eh) {
     ctx = std::make_unique<llvm::LLVMContext>();
     mod = std::make_unique<llvm::Module>("angara_module", *ctx);
     builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
-    std::string ttStr = llvm::sys::getDefaultTargetTriple();
+    // Use provided target triple, or fall back to host default
+    std::string ttStr = target_triple.empty()
+        ? llvm::sys::getDefaultTargetTriple()
+        : target_triple;
     targetTriple = llvm::Triple(llvm::StringRef(ttStr));
     mod->setTargetTriple(targetTriple);
     llvm::InitializeAllTargetInfos(); llvm::InitializeAllTargets();
@@ -64,10 +67,10 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     std::string ve; llvm::raw_string_ostream es(ve);
     if (llvm::verifyModule(*mod, &es)) { std::cerr<<"Verify: "<<ve<<"\n"; return false; }
     std::error_code ec;
-    auto tt = llvm::Triple(std::string(llvm::sys::getDefaultTargetTriple()));
-    std::string le; auto* tgt = llvm::TargetRegistry::lookupTarget(tt.str(),le);
+    // Use the same target triple that was set in the constructor
+    std::string le; auto* tgt = llvm::TargetRegistry::lookupTarget(targetTriple.str(),le);
     if (!tgt) { std::cerr<<"No target: "<<le<<"\n"; return false; }
-    llvm::TargetOptions opt; auto* tm = tgt->createTargetMachine(tt,"generic","",opt,std::nullopt);
+    llvm::TargetOptions opt; auto* tm = tgt->createTargetMachine(targetTriple,"generic","",opt,std::nullopt);
     if (!tm) { std::cerr<<"No TM\n"; return false; }
 
     // Run O2 optimization

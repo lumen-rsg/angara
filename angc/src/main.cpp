@@ -22,6 +22,7 @@ const auto RESET   = "\033[0m";
 const auto BOLD    = "\033[1m";
 const auto RED     = "\033[31m";
 const auto GREEN   = "\033[32m";
+const auto YELLOW  = "\033[33m";
 const auto MAGENTA = "\033[35m";
 const auto CYAN    = "\033[36m";
 const auto GRAY    = "\033[90m";
@@ -46,6 +47,8 @@ void print_help() {
     std::cout << "  -h, --help                  Show this help message\n";
     std::cout << "  --dump-ast                  Debug: Print Abstract Syntax Tree\n";
     std::cout << "  --backend <c|llvm>          Select compilation backend (default: c)\n";
+    std::cout << "  --target <triple>           Cross-compile for target (LLVM only)\n";
+    std::cout << "  --sysroot <path>            Set sysroot for cross-compilation linker\n";
     std::cout << std::endl;
 }
 
@@ -87,6 +90,55 @@ void run_easter_egg() {
 )" << RESET << "\n";
 
     std::cout << "    " << BOLD << "The craft of code is the craft of thought." << RESET << "\n\n";
+}
+
+// --- Target Triple Resolution ---
+
+// Determine host OS for bare arch aliases (e.g. "arm64" → "aarch64-apple-darwin" on macOS)
+static std::string get_host_os_triple_suffix() {
+#if defined(__APPLE__)
+    return "-apple-darwin";
+#elif defined(__linux__)
+    return "-unknown-linux-gnu";
+#elif defined(_WIN32)
+    return "-pc-windows-msvc";
+#else
+    return "-unknown-elf";
+#endif
+}
+
+// Expand user-friendly target aliases into LLVM triples.
+// Returns empty string if the input is unrecognized (will cause LLVM to emit an error).
+static std::string resolve_target_triple(const std::string& input) {
+    // If it contains a dash, it's already a full triple — pass through
+    if (input.find('-') != std::string::npos) {
+        return input;
+    }
+
+    std::string os_suffix = get_host_os_triple_suffix();
+
+    // arch-os combos: "arm64-linux", "amd64-macos" (already handled by dash check above)
+    // But "arm64_linux" or "arm64.linux"? No — user should use dashes.
+
+    // Normalize arch names
+    if (input == "arm64" || input == "aarch64") {
+        return "aarch64" + os_suffix;
+    }
+    if (input == "amd64" || input == "x86_64" || input == "x64") {
+        return "x86_64" + os_suffix;
+    }
+    if (input == "riscv64") {
+        return "riscv64" + os_suffix;
+    }
+    if (input == "wasm32") {
+        return "wasm32-unknown-unknown";
+    }
+    if (input == "wasm64") {
+        return "wasm64-unknown-unknown";
+    }
+
+    // Unknown — return as-is and let LLVM report the error
+    return input;
 }
 
 // --- Logic Helpers ---
@@ -149,7 +201,10 @@ int main(int argc, char* argv[]) {
 
     // Parse --backend flag anywhere in args
     angara::BackendKind selected_backend = angara::BackendKind::C_TRANSPILER;
-    for (size_t i = 0; i < args.size(); i++) {
+    std::string resolved_target;  // Empty = host default
+    std::string resolved_sysroot; // Empty = no sysroot
+
+    for (size_t i = 0; i < args.size(); /* no increment */) {
         if (args[i] == "--backend" && i + 1 < args.size()) {
             if (args[i + 1] == "llvm") {
                 selected_backend = angara::BackendKind::LLVM;
@@ -160,8 +215,28 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             args.erase(args.begin() + i, args.begin() + i + 2);
-            break;
+        } else if (args[i] == "--target" && i + 1 < args.size()) {
+            resolved_target = resolve_target_triple(args[i + 1]);
+            args.erase(args.begin() + i, args.begin() + i + 2);
+        } else if (args[i] == "--sysroot" && i + 1 < args.size()) {
+            resolved_sysroot = args[i + 1];
+            args.erase(args.begin() + i, args.begin() + i + 2);
+        } else {
+            ++i;
         }
+    }
+
+    // Warn if --target used with C transpiler (OOL)
+    if (!resolved_target.empty() && selected_backend == angara::BackendKind::C_TRANSPILER) {
+        std::cerr << YELLOW << "Warning: --target is not supported by the C transpiler "
+                  << "(out of scope). Flag ignored." << RESET << "\n";
+        resolved_target.clear();
+    }
+
+    if (!resolved_sysroot.empty() && selected_backend == angara::BackendKind::C_TRANSPILER) {
+        std::cerr << YELLOW << "Warning: --sysroot is not supported by the C transpiler "
+                  << "(out of scope). Flag ignored." << RESET << "\n";
+        resolved_sysroot.clear();
     }
 
     // 4. Handle Explicit Path Build
@@ -172,6 +247,8 @@ int main(int argc, char* argv[]) {
         }
         angara::BuildSystem builder;
         builder.set_backend(selected_backend);
+        if (!resolved_target.empty()) builder.set_target(resolved_target);
+        if (!resolved_sysroot.empty()) builder.set_sysroot(resolved_sysroot);
         return builder.build(args[1]) ? 0 : 1;
     }
 
@@ -189,6 +266,8 @@ int main(int argc, char* argv[]) {
 
         angara::CompilerDriver driver;
         driver.set_backend(selected_backend);
+        if (!resolved_target.empty()) driver.set_target(resolved_target);
+        if (!resolved_sysroot.empty()) driver.set_sysroot(resolved_sysroot);
         // Use the standard installation paths
         driver.set_paths("/opt/angara/src/modules", "/opt/angara/modules");
 
@@ -199,7 +278,11 @@ int main(int argc, char* argv[]) {
 
             // 1. Build the Link Command
             std::stringstream cmd_link;
-            cmd_link << "clang -o " << base_name;
+            cmd_link << "clang";
+            // Cross-compilation: pass target and sysroot to linker
+            if (!resolved_target.empty()) cmd_link << " -target " << resolved_target;
+            if (!resolved_sysroot.empty()) cmd_link << " --sysroot " << resolved_sysroot;
+            cmd_link << " -o " << base_name;
 
             if (use_llvm) {
                 // LLVM backend: self-contained, no C runtime needed

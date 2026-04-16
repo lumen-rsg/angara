@@ -42,6 +42,14 @@ namespace angara {
         void set_backend(BackendKind backend) { m_backend = backend; }
         BackendKind get_backend() const { return m_backend; }
 
+        // Target triple for cross-compilation (LLVM backend only)
+        void set_target(const std::string& triple) { m_target_triple = triple; }
+        const std::string& get_target() const { return m_target_triple; }
+
+        // Sysroot for cross-compilation linker
+        void set_sysroot(const std::string& path) { m_sysroot = path; }
+        const std::string& get_sysroot() const { return m_sysroot; }
+
         // Main Entry Point
         // Recursively transpiles 'root_file_path' and all its imports into C files.
         // Returns true if all stages (Lex, Parse, Check, Transpile) succeeded.
@@ -87,6 +95,10 @@ namespace angara {
         std::vector<std::string> m_compilation_stack;
         SymbolTable m_global_symbols; // Global symbols across the compilation unit
         std::map<std::string, std::string> m_project_entries;
+
+        // Cross-compilation
+        std::string m_target_triple; // LLVM target triple (empty = host default)
+        std::string m_sysroot;       // Linker sysroot path
 
         // Outputs
         BackendKind m_backend = BackendKind::C_TRANSPILER;

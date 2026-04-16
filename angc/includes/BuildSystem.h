@@ -18,6 +18,10 @@ namespace angara {
         // Backend selection
         void set_backend(BackendKind backend) { m_backend = backend; }
 
+        // Cross-compilation (LLVM backend only)
+        void set_target(const std::string& triple) { m_target_triple = triple; }
+        void set_sysroot(const std::string& path) { m_sysroot = path; }
+
     private:
         // System Paths
         const std::string m_angara_home = "/opt/angara";
@@ -39,5 +43,7 @@ namespace angara {
         // Map of Project Name -> Absolute Directory Path
         std::map<std::string, std::string> m_project_dirs;
         BackendKind m_backend = BackendKind::C_TRANSPILER;
+        std::string m_target_triple;
+        std::string m_sysroot;
     };
 }
