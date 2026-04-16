@@ -177,7 +177,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
             size_t i = 0;
             for (auto& arg : fn->args()) {
                 if (i < class_fields.size()) {
-                    auto* key_ptr = builder->CreateGlobalStringPtr(class_fields[i]->name.lexeme);
+                    auto* key_ptr = builder->CreateGlobalString(class_fields[i]->name.lexeme);
                     callRt(rt->getFuncRecordSet(), {obj, key_ptr, &arg});
                 }
                 i++;
@@ -209,7 +209,7 @@ void LLVMBackend::codegenDataDecl(const DataStmt& stmt) {
 
     size_t i = 0;
     for (auto& arg : fn->args()) {
-        auto* key_ptr = builder->CreateGlobalStringPtr(stmt.fields[i]->name.lexeme);
+        auto* key_ptr = builder->CreateGlobalString(stmt.fields[i]->name.lexeme);
         callRt(rt->getFuncRecordSet(), {obj, key_ptr, &arg});
         i++;
     }

@@ -14,12 +14,6 @@
 
 namespace angara {
 
-    // --- Backend Selection ---
-    enum class BackendKind {
-        C_TRANSPILER,
-        LLVM
-    };
-
     // --- ModuleType Definition ---
     struct ModuleType : Type {
         const std::string name;
@@ -39,10 +33,8 @@ namespace angara {
 
         // Configuration
         void set_paths(std::string std_lib_path, std::string native_lib_path);
-        void set_backend(BackendKind backend) { m_backend = backend; }
-        BackendKind get_backend() const { return m_backend; }
 
-        // Target triple for cross-compilation (LLVM backend only)
+        // Target triple for cross-compilation
         void set_target(const std::string& triple) { m_target_triple = triple; }
         const std::string& get_target() const { return m_target_triple; }
 
@@ -66,7 +58,6 @@ namespace angara {
         );
 
         // Output Retrieval (Used by BuildSystem to know what to link)
-        const std::set<std::string>& get_generated_c_files() const;
         const std::set<std::string>& get_generated_object_files() const;
         const std::vector<std::string>& get_native_libs_linked() const;
 
@@ -101,9 +92,6 @@ namespace angara {
         std::string m_sysroot;       // Linker sysroot path
 
         // Outputs
-        BackendKind m_backend = BackendKind::C_TRANSPILER;
-        std::set<std::string> m_generated_c_files;
-        std::set<std::string> m_generated_h_files;
         std::set<std::string> m_generated_object_files;
         std::vector<std::string> m_angara_module_names; // Names for init_globals
         std::vector<std::string> m_native_lib_names;    // For linker arguments

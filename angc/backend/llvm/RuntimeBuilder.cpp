@@ -73,7 +73,7 @@ void RuntimeBuilder::generateTypes() {
     m_string_type = StructType::create(m_ctx, {
         m_obj_header_type,           // header
         Type::getInt64Ty(m_ctx),     // length
-        PointerType::get(Type::getInt8Ty(m_ctx), 0)  // chars
+        PointerType::get(m_ctx, 0)  // chars
     }, "AngaraString");
 
     // List = { ObjHeader, i64 count, i64 capacity, AngaraObject* elements }
@@ -81,12 +81,12 @@ void RuntimeBuilder::generateTypes() {
         m_obj_header_type,           // header
         Type::getInt64Ty(m_ctx),     // count
         Type::getInt64Ty(m_ctx),     // capacity
-        PointerType::get(m_angara_obj_type, 0)  // elements
+        PointerType::get(m_ctx, 0)  // elements
     }, "AngaraList");
 
     // RecordEntry = { i8* key, AngaraObject value }
     m_record_entry_type = StructType::create(m_ctx, {
-        PointerType::get(Type::getInt8Ty(m_ctx), 0),  // key
+        PointerType::get(m_ctx, 0),  // key
         m_angara_obj_type            // value
     }, "RecordEntry");
 
@@ -95,7 +95,7 @@ void RuntimeBuilder::generateTypes() {
         m_obj_header_type,           // header
         Type::getInt64Ty(m_ctx),     // count
         Type::getInt64Ty(m_ctx),     // capacity
-        PointerType::get(m_record_entry_type, 0)  // entries
+        PointerType::get(m_ctx, 0)  // entries
     }, "AngaraRecord");
 
     // Exception = { ObjHeader, AngaraObject message }
@@ -105,13 +105,7 @@ void RuntimeBuilder::generateTypes() {
     }, "AngaraException");
 
     // Closure = { ObjHeader, void* fn, i32 arity, i1 is_native }
-    auto* fn_ptr_type = PointerType::get(
-        FunctionType::get(
-            m_angara_obj_type,
-            {Type::getInt32Ty(m_ctx), PointerType::get(m_angara_obj_type, 0)},
-            false
-        ), 0
-    );
+    auto* fn_ptr_type = PointerType::get(m_ctx, 0);
     m_closure_type = StructType::create(m_ctx, {
         m_obj_header_type,           // header
         fn_ptr_type,                 // fn
@@ -129,7 +123,7 @@ void RuntimeBuilder::generateTypes() {
     // ExceptionFrame = { void* jmp_buf, void* prev }
     m_thread_type = StructType::create(m_ctx, {
         m_obj_header_type,           // header
-        PointerType::get(Type::getInt8Ty(m_ctx), 0),  // pthread_t (opaque)
+        PointerType::get(m_ctx, 0),  // pthread_t (opaque)
         m_angara_obj_type            // return_value
     }, "AngaraThread");
 
@@ -141,9 +135,9 @@ void RuntimeBuilder::generateTypes() {
 
     // Exception globals
     m_g_exception_chain = new GlobalVariable(
-        m_module, PointerType::get(Type::getInt8Ty(m_ctx), 0),
+        m_module, PointerType::get(m_ctx, 0),
         false, GlobalValue::CommonLinkage,
-        ConstantPointerNull::get(PointerType::get(Type::getInt8Ty(m_ctx), 0)),
+        ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
         "__ang_exception_chain");
 
     m_g_current_exception = new GlobalVariable(
@@ -163,7 +157,7 @@ void RuntimeBuilder::declareCLibFunctions() {
     auto* i32_ty = Type::getInt32Ty(m_ctx);
     auto* i64_ty = Type::getInt64Ty(m_ctx);
     auto* f64_ty = Type::getDoubleTy(m_ctx);
-    auto* i8_ptr = PointerType::get(i8_ty, 0);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
 
     // malloc(size_t) -> void*
     FunctionType* malloc_ty = FunctionType::get(i8_ptr, {i64_ty}, false);
@@ -198,7 +192,7 @@ void RuntimeBuilder::declareCLibFunctions() {
     m_fn_printf = m_module.getOrInsertFunction("printf", printf_ty);
 
     // fprintf(void*, const char*, ...) -> i32
-    FunctionType* fprintf_ty = FunctionType::get(i32_ty, {PointerType::get(void_ty, 0), i8_ptr}, true);
+    FunctionType* fprintf_ty = FunctionType::get(i32_ty, {PointerType::get(m_ctx, 0), i8_ptr}, true);
     m_module.getOrInsertFunction("fprintf", fprintf_ty);
 
     // snprintf(char*, size_t, const char*, ...) -> i32
@@ -206,11 +200,11 @@ void RuntimeBuilder::declareCLibFunctions() {
     m_module.getOrInsertFunction("snprintf", snprintf_ty);
 
     // strtoll(const char*, char**, int) -> i64
-    FunctionType* strtoll_ty = FunctionType::get(i64_ty, {i8_ptr, PointerType::get(i8_ptr, 0), i32_ty}, false);
+    FunctionType* strtoll_ty = FunctionType::get(i64_ty, {i8_ptr, PointerType::get(m_ctx, 0), i32_ty}, false);
     m_module.getOrInsertFunction("strtoll", strtoll_ty);
 
     // strtod(const char*, char**) -> double
-    FunctionType* strtod_ty = FunctionType::get(f64_ty, {i8_ptr, PointerType::get(i8_ptr, 0)}, false);
+    FunctionType* strtod_ty = FunctionType::get(f64_ty, {i8_ptr, PointerType::get(m_ctx, 0)}, false);
     m_module.getOrInsertFunction("strtod", strtod_ty);
 
     // setjmp(void*) -> i32
@@ -228,16 +222,16 @@ void RuntimeBuilder::declareCLibFunctions() {
     // pthread_create, pthread_join etc
     FunctionType* pthread_create_ty = FunctionType::get(
         i32_ty,
-        {PointerType::get(Type::getInt8Ty(m_ctx), 0),
-         PointerType::get(void_ty, 0),
-         PointerType::get(void_ty, 0),
-         PointerType::get(void_ty, 0)},
+        {PointerType::get(m_ctx, 0),
+         PointerType::get(m_ctx, 0),
+         PointerType::get(m_ctx, 0),
+         PointerType::get(m_ctx, 0)},
         false);
     m_module.getOrInsertFunction("pthread_create", pthread_create_ty);
 
     FunctionType* pthread_join_ty = FunctionType::get(i32_ty, {
-        PointerType::get(Type::getInt8Ty(m_ctx), 0),
-        PointerType::get(PointerType::get(void_ty, 0), 0)
+        PointerType::get(m_ctx, 0),
+        PointerType::get(m_ctx, 0)
     }, false);
     m_module.getOrInsertFunction("pthread_join", pthread_join_ty);
 
@@ -255,7 +249,7 @@ void RuntimeBuilder::generateMemoryManagement() {
     auto* i32_ty = Type::getInt32Ty(m_ctx);
     auto* i8_ty = Type::getInt8Ty(m_ctx);
     auto* i64_ty = Type::getInt64Ty(m_ctx);
-    auto* i8_ptr = PointerType::get(i8_ty, 0);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
     auto* obj_ty = m_angara_obj_type;
 
     // --- free_object(void* obj_ptr) ---
@@ -277,7 +271,7 @@ void RuntimeBuilder::generateMemoryManagement() {
         auto* obj_ptr = fn->arg_begin();
 
         // Get object type: *(i32*)(obj_ptr)
-        auto* obj_type_addr = b.CreateBitCast(obj_ptr, PointerType::get(i32_ty, 0));
+        auto* obj_type_addr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
         auto* obj_type = b.CreateLoad(i32_ty, obj_type_addr, "obj_type");
 
         auto* switch_inst = b.CreateSwitch(obj_type, default_bb, 6);
@@ -292,9 +286,9 @@ void RuntimeBuilder::generateMemoryManagement() {
         {
             IRBuilder<> bs(is_string_bb);
             // chars is at offset: header(16) + length(8) = 24
-            auto* str_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_string_type, 0));
+            auto* str_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
             auto* chars_ptr = bs.CreateStructGEP(m_string_type, str_ptr, 2);
-            auto* chars = bs.CreateLoad(PointerType::get(i8_ty, 0), chars_ptr, "chars");
+            auto* chars = bs.CreateLoad(PointerType::get(m_ctx, 0), chars_ptr, "chars");
             auto* free_fn = m_module.getFunction("free");
             bs.CreateCall(free_fn, {chars});
             bs.CreateCall(free_fn, {obj_ptr});
@@ -304,11 +298,11 @@ void RuntimeBuilder::generateMemoryManagement() {
         // --- List free: decref all elements, free(elements), free(list) ---
         {
             IRBuilder<> bl(is_list_bb);
-            auto* list_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_list_type, 0));
+            auto* list_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
             auto* count_ptr = bl.CreateStructGEP(m_list_type, list_ptr, 1);
             auto* count = bl.CreateLoad(i64_ty, count_ptr, "count");
             auto* elems_ptr = bl.CreateStructGEP(m_list_type, list_ptr, 3);
-            auto* elems = bl.CreateLoad(PointerType::get(obj_ty, 0), elems_ptr, "elems");
+            auto* elems = bl.CreateLoad(PointerType::get(m_ctx, 0), elems_ptr, "elems");
 
             // Loop to decref each element
             auto* loop_bb = BasicBlock::Create(m_ctx, "loop", fn);
@@ -345,11 +339,11 @@ void RuntimeBuilder::generateMemoryManagement() {
         // --- Record free: free each key, decref each value, free(entries), free(record) ---
         {
             IRBuilder<> br(is_record_bb);
-            auto* rec_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_record_type, 0));
+            auto* rec_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
             auto* count_ptr = br.CreateStructGEP(m_record_type, rec_ptr, 1);
             auto* count = br.CreateLoad(i64_ty, count_ptr, "count");
             auto* entries_ptr_addr = br.CreateStructGEP(m_record_type, rec_ptr, 3);
-            auto* entries = br.CreateLoad(PointerType::get(m_record_entry_type, 0), entries_ptr_addr, "entries");
+            auto* entries = br.CreateLoad(PointerType::get(m_ctx, 0), entries_ptr_addr, "entries");
 
             auto* loop_bb = BasicBlock::Create(m_ctx, "rloop", fn);
             auto* body_bb = BasicBlock::Create(m_ctx, "rbody", fn);
@@ -388,7 +382,7 @@ void RuntimeBuilder::generateMemoryManagement() {
         // --- Exception free: decref message, free(exception) ---
         {
             IRBuilder<> be(is_exception_bb);
-            auto* exc_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_exception_type, 0));
+            auto* exc_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
             auto* msg_ptr = be.CreateStructGEP(m_exception_type, exc_ptr, 1);
             auto* msg = be.CreateLoad(obj_ty, msg_ptr, "msg");
             auto* decref_fn = m_module.getFunction("__ang_decref");
@@ -409,7 +403,7 @@ void RuntimeBuilder::generateMemoryManagement() {
         // --- BoundMethod free: decref receiver, decref method_closure, free ---
         {
             IRBuilder<> bb(is_bound_bb);
-            auto* bm_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_bound_method_type, 0));
+            auto* bm_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
             auto* recv_ptr = bb.CreateStructGEP(m_bound_method_type, bm_ptr, 1);
             auto* recv = bb.CreateLoad(obj_ty, recv_ptr);
             auto* meth_ptr = bb.CreateStructGEP(m_bound_method_type, bm_ptr, 2);
@@ -452,7 +446,7 @@ void RuntimeBuilder::generateMemoryManagement() {
         // Extract pointer from payload
         auto* payload = b2.CreateExtractValue(val, {1}, "payload");
         auto* ptr_i64 = b2.CreateBitCast(payload, i64_ty, "ptr_as_i64");
-        auto* obj_ptr = b2.CreateIntToPtr(ptr_i64, PointerType::get(m_obj_header_type, 0), "obj_ptr");
+        auto* obj_ptr = b2.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0), "obj_ptr");
         // ref_count is at offset 1 in header
         auto* rc_addr = b2.CreateStructGEP(m_obj_header_type, obj_ptr, 1);
         auto* rc = b2.CreateLoad(i64_ty, rc_addr, "rc");
@@ -486,7 +480,7 @@ void RuntimeBuilder::generateMemoryManagement() {
         IRBuilder<> b2(is_obj_bb);
         auto* payload = b2.CreateExtractValue(val, {1}, "payload");
         auto* ptr_i64 = b2.CreateBitCast(payload, i64_ty, "ptr_as_i64");
-        auto* obj_ptr = b2.CreateIntToPtr(ptr_i64, PointerType::get(m_obj_header_type, 0), "obj_ptr");
+        auto* obj_ptr = b2.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0), "obj_ptr");
         auto* rc_addr = b2.CreateStructGEP(m_obj_header_type, obj_ptr, 1);
         auto* rc = b2.CreateLoad(i64_ty, rc_addr, "rc");
         auto* new_rc = b2.CreateSub(rc, ConstantInt::get(i64_ty, 1), "new_rc");
@@ -499,7 +493,7 @@ void RuntimeBuilder::generateMemoryManagement() {
 
         IRBuilder<> b4(free_bb);
         auto* free_fn = m_module.getFunction("__ang_free_object");
-        auto* raw_ptr = b4.CreateBitCast(obj_ptr, PointerType::get(i8_ty, 0));
+        auto* raw_ptr = b4.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
         b4.CreateCall(free_fn, {raw_ptr});
         b4.CreateBr(done_bb);
 
@@ -517,7 +511,7 @@ void RuntimeBuilder::generateStringOps() {
     auto* i8_ty = Type::getInt8Ty(m_ctx);
     auto* i32_ty = Type::getInt32Ty(m_ctx);
     auto* i64_ty = Type::getInt64Ty(m_ctx);
-    auto* i8_ptr = PointerType::get(i8_ty, 0);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
     auto* obj_ty = m_angara_obj_type;
 
     auto* malloc_fn = m_module.getFunction("malloc");
@@ -553,7 +547,7 @@ void RuntimeBuilder::generateStringOps() {
         auto* str_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_string_type));
         auto* mem = b.CreateCall(malloc_fn, {str_size}, "mem");
-        auto* str_ptr = b.CreateBitCast(mem, PointerType::get(m_string_type, 0), "str_ptr");
+        auto* str_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0), "str_ptr");
 
         // Set header: obj_type = OBJ_STRING, ref_count = 1
         auto* header_ptr = b.CreateStructGEP(m_string_type, str_ptr, 0);
@@ -589,7 +583,7 @@ void RuntimeBuilder::generateStringOps() {
         // Extract string a
         auto* a_payload = b.CreateExtractValue(a, {1});
         auto* a_ptr_i64 = b.CreateBitCast(a_payload, i64_ty);
-        auto* a_str = b.CreateIntToPtr(a_ptr_i64, PointerType::get(m_string_type, 0));
+        auto* a_str = b.CreateIntToPtr(a_ptr_i64, PointerType::get(m_ctx, 0));
         auto* a_chars_ptr = b.CreateStructGEP(m_string_type, a_str, 2);
         auto* a_chars = b.CreateLoad(i8_ptr, a_chars_ptr);
         auto* a_len_ptr = b.CreateStructGEP(m_string_type, a_str, 1);
@@ -598,7 +592,7 @@ void RuntimeBuilder::generateStringOps() {
         // Extract string b
         auto* b_payload = b.CreateExtractValue(b_arg, {1});
         auto* b_ptr_i64 = b.CreateBitCast(b_payload, i64_ty);
-        auto* b_str = b.CreateIntToPtr(b_ptr_i64, PointerType::get(m_string_type, 0));
+        auto* b_str = b.CreateIntToPtr(b_ptr_i64, PointerType::get(m_ctx, 0));
         auto* b_chars_ptr = b.CreateStructGEP(m_string_type, b_str, 2);
         auto* b_chars = b.CreateLoad(i8_ptr, b_chars_ptr);
         auto* b_len_ptr = b.CreateStructGEP(m_string_type, b_str, 1);
@@ -622,7 +616,7 @@ void RuntimeBuilder::generateStringOps() {
         auto* str_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_string_type));
         auto* mem = b.CreateCall(malloc_fn, {str_size}, "mem");
-        auto* str_ptr = b.CreateBitCast(mem, PointerType::get(m_string_type, 0));
+        auto* str_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
 
         // Header
         auto* header_ptr = b.CreateStructGEP(m_string_type, str_ptr, 0);
@@ -670,7 +664,7 @@ void RuntimeBuilder::generateStringOps() {
         // nil -> "nil"
         {
             IRBuilder<> bn(nil_bb);
-            auto* gsptr = bn.CreateGlobalStringPtr("nil");
+            auto* gsptr = bn.CreateGlobalString("nil");
             auto* str_from_c = m_module.getFunction("__ang_string_from_c");
             auto* result = bn.CreateCall(str_from_c, {gsptr});
             bn.CreateRet(result);
@@ -686,12 +680,12 @@ void RuntimeBuilder::generateStringOps() {
             bb.CreateCondBr(bool_val, true_bb, false_bb);
 
             IRBuilder<> bt(true_bb);
-            auto* gsptr_t = bt.CreateGlobalStringPtr("true");
+            auto* gsptr_t = bt.CreateGlobalString("true");
             auto* str_from_c = m_module.getFunction("__ang_string_from_c");
             bt.CreateRet(bt.CreateCall(str_from_c, {gsptr_t}));
 
             IRBuilder<> bf(false_bb);
-            auto* gsptr_f = bf.CreateGlobalStringPtr("false");
+            auto* gsptr_f = bf.CreateGlobalString("false");
             bf.CreateRet(bf.CreateCall(str_from_c, {gsptr_f}));
         }
 
@@ -703,7 +697,7 @@ void RuntimeBuilder::generateStringOps() {
             // Buffer for int64: max 21 chars
             auto* buf = bi.CreateAlloca(ArrayType::get(i8_ty, 32));
             auto* buf_ptr = bi.CreateBitCast(buf, i8_ptr);
-            auto* fmt = bi.CreateGlobalStringPtr("%ld");
+            auto* fmt = bi.CreateGlobalString("%ld");
             auto* snprintf_fn = m_module.getFunction("snprintf");
             bi.CreateCall(snprintf_fn, {buf_ptr, ConstantInt::get(i64_ty, 32), fmt, i64_val});
             auto* str_from_c = m_module.getFunction("__ang_string_from_c");
@@ -717,7 +711,7 @@ void RuntimeBuilder::generateStringOps() {
             auto* f64_val = bf.CreateBitCast(payload, Type::getDoubleTy(m_ctx), "dval");
             auto* buf = bf.CreateAlloca(ArrayType::get(i8_ty, 64));
             auto* buf_ptr = bf.CreateBitCast(buf, i8_ptr);
-            auto* fmt = bf.CreateGlobalStringPtr("%.15g");
+            auto* fmt = bf.CreateGlobalString("%.15g");
             auto* snprintf_fn = m_module.getFunction("snprintf");
             bf.CreateCall(snprintf_fn, {buf_ptr, ConstantInt::get(i64_ty, 64), fmt, f64_val});
             auto* str_from_c = m_module.getFunction("__ang_string_from_c");
@@ -729,7 +723,7 @@ void RuntimeBuilder::generateStringOps() {
             IRBuilder<> bo(obj_bb);
             auto* payload = bo.CreateExtractValue(val, {1});
             auto* ptr_i64 = bo.CreateBitCast(payload, i64_ty);
-            auto* obj_ptr = bo.CreateIntToPtr(ptr_i64, PointerType::get(m_obj_header_type, 0));
+            auto* obj_ptr = bo.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
             auto* obj_type_addr = bo.CreateStructGEP(m_obj_header_type, obj_ptr, 0);
             auto* obj_type = bo.CreateLoad(i32_ty, obj_type_addr, "obj_type");
             auto* is_str = bo.CreateICmpEQ(obj_type, ConstantInt::get(i32_ty, OBJ_STRING));
@@ -743,7 +737,7 @@ void RuntimeBuilder::generateStringOps() {
             bs.CreateRet(val);
 
             IRBuilder<> bns(not_str_bb);
-            auto* gsptr = bns.CreateGlobalStringPtr("<object>");
+            auto* gsptr = bns.CreateGlobalString("<object>");
             auto* str_from_c = m_module.getFunction("__ang_string_from_c");
             bns.CreateRet(bns.CreateCall(str_from_c, {gsptr}));
         }
@@ -764,7 +758,7 @@ void RuntimeBuilder::generateListOps() {
     auto* i8_ty = Type::getInt8Ty(m_ctx);
     auto* i32_ty = Type::getInt32Ty(m_ctx);
     auto* i64_ty = Type::getInt64Ty(m_ctx);
-    auto* i8_ptr = PointerType::get(i8_ty, 0);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
     auto* obj_ty = m_angara_obj_type;
 
     auto* malloc_fn = m_module.getFunction("malloc");
@@ -793,7 +787,7 @@ void RuntimeBuilder::generateListOps() {
         auto* list_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_list_type));
         auto* mem = b.CreateCall(malloc_fn, {list_size}, "mem");
-        auto* list_ptr = b.CreateBitCast(mem, PointerType::get(m_list_type, 0));
+        auto* list_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
 
         // Header
         auto* header_ptr = b.CreateStructGEP(m_list_type, list_ptr, 0);
@@ -805,7 +799,7 @@ void RuntimeBuilder::generateListOps() {
         // count = 0, capacity = 0, elements = null
         b.CreateStore(ConstantInt::get(i64_ty, 0), b.CreateStructGEP(m_list_type, list_ptr, 1));
         b.CreateStore(ConstantInt::get(i64_ty, 0), b.CreateStructGEP(m_list_type, list_ptr, 2));
-        b.CreateStore(ConstantPointerNull::get(PointerType::get(obj_ty, 0)),
+        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             b.CreateStructGEP(m_list_type, list_ptr, 3));
 
         b.CreateRet(pack_obj(b, list_ptr));
@@ -813,7 +807,7 @@ void RuntimeBuilder::generateListOps() {
 
     // --- list_new_with_elements(i64 count, AngaraObject* elems) -> AngaraObject ---
     {
-        auto* fn_ty = FunctionType::get(obj_ty, {i64_ty, PointerType::get(obj_ty, 0)}, false);
+        auto* fn_ty = FunctionType::get(obj_ty, {i64_ty, PointerType::get(m_ctx, 0)}, false);
         auto* fn = createRuntimeFunc("__ang_list_new_with_elements", fn_ty);
         m_fn_list_new_with_elements = FunctionCallee(fn);
 
@@ -825,7 +819,7 @@ void RuntimeBuilder::generateListOps() {
         auto* list_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_list_type));
         auto* mem = b.CreateCall(malloc_fn, {list_size});
-        auto* list_ptr = b.CreateBitCast(mem, PointerType::get(m_list_type, 0));
+        auto* list_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
 
         auto* header_ptr = b.CreateStructGEP(m_list_type, list_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_LIST),
@@ -843,7 +837,7 @@ void RuntimeBuilder::generateListOps() {
         // memcpy from source
         b.CreateCall(m_module.getFunction("memcpy"),
             {elems_mem, b.CreateBitCast(elems, i8_ptr), total});
-        b.CreateStore(b.CreateBitCast(elems_mem, PointerType::get(obj_ty, 0)),
+        b.CreateStore(b.CreateBitCast(elems_mem, PointerType::get(m_ctx, 0)),
             b.CreateStructGEP(m_list_type, list_ptr, 3));
 
         // Incref all elements
@@ -859,7 +853,7 @@ void RuntimeBuilder::generateListOps() {
         bl.CreateCondBr(cmp, body_bb, done_bb);
 
         IRBuilder<> bb(body_bb);
-        auto* new_elems = b.CreateBitCast(elems_mem, PointerType::get(obj_ty, 0));
+        auto* new_elems = b.CreateBitCast(elems_mem, PointerType::get(m_ctx, 0));
         auto* elem_ptr = bb.CreateGEP(obj_ty, new_elems, {i_phi});
         auto* elem = bb.CreateLoad(obj_ty, elem_ptr);
         bb.CreateCall(m_module.getFunction("__ang_incref"), {elem});
@@ -888,7 +882,7 @@ void RuntimeBuilder::generateListOps() {
         // Extract list pointer
         auto* payload = b.CreateExtractValue(list_arg, {1});
         auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
-        auto* list_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_list_type, 0));
+        auto* list_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
 
         auto* count_addr = b.CreateStructGEP(m_list_type, list_ptr, 1);
         auto* cap_addr = b.CreateStructGEP(m_list_type, list_ptr, 2);
@@ -909,10 +903,10 @@ void RuntimeBuilder::generateListOps() {
         auto* elem_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(obj_ty));
         auto* alloc_size = bg.CreateMul(new_cap, elem_size);
-        auto* old_elems = bg.CreateLoad(PointerType::get(obj_ty, 0), elems_addr);
+        auto* old_elems = bg.CreateLoad(PointerType::get(m_ctx, 0), elems_addr);
         auto* old_raw = bg.CreateBitCast(old_elems, i8_ptr);
         auto* new_raw = bg.CreateCall(realloc_fn, {old_raw, alloc_size}, "new_raw");
-        bg.CreateStore(bg.CreateBitCast(new_raw, PointerType::get(obj_ty, 0)), elems_addr);
+        bg.CreateStore(bg.CreateBitCast(new_raw, PointerType::get(m_ctx, 0)), elems_addr);
         bg.CreateStore(new_cap, cap_addr);
         bg.CreateBr(store_bb);
 
@@ -920,7 +914,7 @@ void RuntimeBuilder::generateListOps() {
         IRBuilder<> bs(store_bb);
         // Re-read count and elems (may have changed in grow)
         auto* count2 = bs.CreateLoad(i64_ty, count_addr, "count2");
-        auto* elems2 = bs.CreateLoad(PointerType::get(obj_ty, 0), elems_addr, "elems2");
+        auto* elems2 = bs.CreateLoad(PointerType::get(m_ctx, 0), elems_addr, "elems2");
         auto* elem_ptr = bs.CreateGEP(obj_ty, elems2, {count2});
         bs.CreateStore(val_arg, elem_ptr);
         // Incref the pushed value
@@ -951,7 +945,7 @@ void RuntimeBuilder::generateListOps() {
         // Extract list pointer
         auto* payload = b.CreateExtractValue(list_arg, {1});
         auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
-        auto* list_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_list_type, 0));
+        auto* list_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
 
         auto* count = b.CreateLoad(i64_ty, b.CreateStructGEP(m_list_type, list_ptr, 1), "count");
         auto* in_bounds = b.CreateAnd(
@@ -960,7 +954,7 @@ void RuntimeBuilder::generateListOps() {
         b.CreateCondBr(in_bounds, in_bounds_bb, done_bb);
 
         IRBuilder<> bib(in_bounds_bb);
-        auto* elems = bib.CreateLoad(PointerType::get(obj_ty, 0),
+        auto* elems = bib.CreateLoad(PointerType::get(m_ctx, 0),
             bib.CreateStructGEP(m_list_type, list_ptr, 3), "elems");
         auto* elem_ptr = bib.CreateGEP(obj_ty, elems, {idx});
         auto* result = bib.CreateLoad(obj_ty, elem_ptr, "result");
@@ -995,9 +989,9 @@ void RuntimeBuilder::generateListOps() {
 
         auto* payload = b.CreateExtractValue(list_arg, {1});
         auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
-        auto* list_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_list_type, 0));
+        auto* list_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
 
-        auto* elems = b.CreateLoad(PointerType::get(obj_ty, 0),
+        auto* elems = b.CreateLoad(PointerType::get(m_ctx, 0),
             b.CreateStructGEP(m_list_type, list_ptr, 3), "elems");
         auto* elem_ptr = b.CreateGEP(obj_ty, elems, {idx});
 
@@ -1019,7 +1013,7 @@ void RuntimeBuilder::generateRecordOps() {
     auto* i8_ty = Type::getInt8Ty(m_ctx);
     auto* i32_ty = Type::getInt32Ty(m_ctx);
     auto* i64_ty = Type::getInt64Ty(m_ctx);
-    auto* i8_ptr = PointerType::get(i8_ty, 0);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
     auto* obj_ty = m_angara_obj_type;
 
     auto* malloc_fn = m_module.getFunction("malloc");
@@ -1047,7 +1041,7 @@ void RuntimeBuilder::generateRecordOps() {
         auto* rec_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_record_type));
         auto* mem = b.CreateCall(malloc_fn, {rec_size});
-        auto* rec_ptr = b.CreateBitCast(mem, PointerType::get(m_record_type, 0));
+        auto* rec_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
 
         auto* header_ptr = b.CreateStructGEP(m_record_type, rec_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_RECORD),
@@ -1056,7 +1050,7 @@ void RuntimeBuilder::generateRecordOps() {
             b.CreateStructGEP(m_obj_header_type, header_ptr, 1));
         b.CreateStore(ConstantInt::get(i64_ty, 0), b.CreateStructGEP(m_record_type, rec_ptr, 1));
         b.CreateStore(ConstantInt::get(i64_ty, 0), b.CreateStructGEP(m_record_type, rec_ptr, 2));
-        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_record_entry_type, 0)),
+        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             b.CreateStructGEP(m_record_type, rec_ptr, 3));
 
         b.CreateRet(pack_obj(b, rec_ptr));
@@ -1080,10 +1074,10 @@ void RuntimeBuilder::generateRecordOps() {
 
         auto* payload = b.CreateExtractValue(rec_arg, {1});
         auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
-        auto* rec_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_record_type, 0));
+        auto* rec_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
 
         auto* count = b.CreateLoad(i64_ty, b.CreateStructGEP(m_record_type, rec_ptr, 1), "count");
-        auto* entries = b.CreateLoad(PointerType::get(m_record_entry_type, 0),
+        auto* entries = b.CreateLoad(PointerType::get(m_ctx, 0),
             b.CreateStructGEP(m_record_type, rec_ptr, 3), "entries");
         b.CreateBr(loop_bb);
 
@@ -1146,14 +1140,14 @@ void RuntimeBuilder::generateRecordOps() {
 
         auto* payload = b.CreateExtractValue(rec_arg, {1});
         auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
-        auto* rec_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_record_type, 0));
+        auto* rec_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
 
         auto* count_addr = b.CreateStructGEP(m_record_type, rec_ptr, 1);
         auto* cap_addr = b.CreateStructGEP(m_record_type, rec_ptr, 2);
         auto* entries_addr = b.CreateStructGEP(m_record_type, rec_ptr, 3);
 
         auto* count = b.CreateLoad(i64_ty, count_addr, "count");
-        auto* entries = b.CreateLoad(PointerType::get(m_record_entry_type, 0), entries_addr, "entries");
+        auto* entries = b.CreateLoad(PointerType::get(m_ctx, 0), entries_addr, "entries");
         b.CreateBr(loop_bb);
 
         // Linear search for existing key
@@ -1204,14 +1198,14 @@ void RuntimeBuilder::generateRecordOps() {
         auto* alloc_size = bg.CreateMul(new_cap, entry_size);
         auto* old_raw = bg.CreateBitCast(entries, i8_ptr);
         auto* new_raw = bg.CreateCall(realloc_fn, {old_raw, alloc_size});
-        auto* new_entries = bg.CreateBitCast(new_raw, PointerType::get(m_record_entry_type, 0));
+        auto* new_entries = bg.CreateBitCast(new_raw, PointerType::get(m_ctx, 0));
         bg.CreateStore(new_entries, entries_addr);
         bg.CreateStore(new_cap, cap_addr);
         bg.CreateBr(insert_bb);
 
         // Insert the new entry
         IRBuilder<> bi(insert_bb);
-        auto* cur_entries = bi.CreateLoad(PointerType::get(m_record_entry_type, 0), entries_addr);
+        auto* cur_entries = bi.CreateLoad(PointerType::get(m_ctx, 0), entries_addr);
         auto* cur_count = bi.CreateLoad(i64_ty, count_addr);
         auto* new_entry = bi.CreateGEP(m_record_entry_type, cur_entries, {cur_count});
 
@@ -1242,7 +1236,7 @@ void RuntimeBuilder::generateConversions() {
     auto* i32_ty = Type::getInt32Ty(m_ctx);
     auto* i64_ty = Type::getInt64Ty(m_ctx);
     auto* f64_ty = Type::getDoubleTy(m_ctx);
-    auto* i8_ptr = PointerType::get(i8_ty, 0);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
     auto* obj_ty = m_angara_obj_type;
 
     // Helper: create nil
@@ -1420,19 +1414,19 @@ void RuntimeBuilder::generateConversions() {
         auto* str_from_c = m_module.getFunction("__ang_string_from_c");
 
         IRBuilder<> bn(nil_bb);
-        bn.CreateRet(bn.CreateCall(str_from_c, {bn.CreateGlobalStringPtr("nil")}));
+        bn.CreateRet(bn.CreateCall(str_from_c, {bn.CreateGlobalString("nil")}));
 
         IRBuilder<> bb(bool_bb);
-        bb.CreateRet(bb.CreateCall(str_from_c, {bb.CreateGlobalStringPtr("bool")}));
+        bb.CreateRet(bb.CreateCall(str_from_c, {bb.CreateGlobalString("bool")}));
 
         IRBuilder<> bi(i64_bb);
-        bi.CreateRet(bi.CreateCall(str_from_c, {bi.CreateGlobalStringPtr("i64")}));
+        bi.CreateRet(bi.CreateCall(str_from_c, {bi.CreateGlobalString("i64")}));
 
         IRBuilder<> bf(f64_bb);
-        bf.CreateRet(bf.CreateCall(str_from_c, {bf.CreateGlobalStringPtr("f64")}));
+        bf.CreateRet(bf.CreateCall(str_from_c, {bf.CreateGlobalString("f64")}));
 
         IRBuilder<> bo(obj_bb);
-        bo.CreateRet(bo.CreateCall(str_from_c, {bo.CreateGlobalStringPtr("object")}));
+        bo.CreateRet(bo.CreateCall(str_from_c, {bo.CreateGlobalString("object")}));
     }
 }
 
@@ -1444,7 +1438,7 @@ void RuntimeBuilder::generateEquality() {
     auto* i32_ty = Type::getInt32Ty(m_ctx);
     auto* i64_ty = Type::getInt64Ty(m_ctx);
     auto* f64_ty = Type::getDoubleTy(m_ctx);
-    auto* i8_ptr = PointerType::get(Type::getInt8Ty(m_ctx), 0);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
     auto* obj_ty = m_angara_obj_type;
 
     auto pack_bool = [&](IRBuilder<>& b, Value* bool_val) -> Value* {
@@ -1546,10 +1540,10 @@ void RuntimeBuilder::generateEquality() {
             auto* is_string_bb = BasicBlock::Create(m_ctx, "is_str_eq", fn);
             auto* ptr_eq_bb = BasicBlock::Create(m_ctx, "ptr_eq", fn);
             // Check if both are strings
-            auto* ptr_a = boe.CreateIntToPtr(pa, PointerType::get(m_obj_header_type, 0));
+            auto* ptr_a = boe.CreateIntToPtr(pa, PointerType::get(m_ctx, 0));
             auto* obj_type_a = boe.CreateLoad(i32_ty, boe.CreateStructGEP(m_obj_header_type, ptr_a, 0));
             auto* is_str_a = boe.CreateICmpEQ(obj_type_a, ConstantInt::get(i32_ty, OBJ_STRING));
-            auto* ptr_b = boe.CreateIntToPtr(pb, PointerType::get(m_obj_header_type, 0));
+            auto* ptr_b = boe.CreateIntToPtr(pb, PointerType::get(m_ctx, 0));
             auto* obj_type_b = boe.CreateLoad(i32_ty, boe.CreateStructGEP(m_obj_header_type, ptr_b, 0));
             auto* is_str_b = boe.CreateICmpEQ(obj_type_b, ConstantInt::get(i32_ty, OBJ_STRING));
             auto* both_str = boe.CreateAnd(is_str_a, is_str_b);
@@ -1557,8 +1551,8 @@ void RuntimeBuilder::generateEquality() {
 
             // String comparison
             IRBuilder<> bse(is_string_bb);
-            auto* str_a = bse.CreateIntToPtr(pa, PointerType::get(m_string_type, 0));
-            auto* str_b = bse.CreateIntToPtr(pb, PointerType::get(m_string_type, 0));
+            auto* str_a = bse.CreateIntToPtr(pa, PointerType::get(m_ctx, 0));
+            auto* str_b = bse.CreateIntToPtr(pb, PointerType::get(m_ctx, 0));
             auto* chars_a = bse.CreateLoad(i8_ptr, bse.CreateStructGEP(m_string_type, str_a, 2));
             auto* chars_b = bse.CreateLoad(i8_ptr, bse.CreateStructGEP(m_string_type, str_b, 2));
             auto* strcmp_fn = m_module.getFunction("strcmp");
@@ -1613,7 +1607,7 @@ void RuntimeBuilder::generateClosureOps() {
     auto* i32_ty = Type::getInt32Ty(m_ctx);
     auto* i64_ty = Type::getInt64Ty(m_ctx);
     auto* i1_ty = Type::getInt1Ty(m_ctx);
-    auto* i8_ptr = PointerType::get(i8_ty, 0);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
     auto* obj_ty = m_angara_obj_type;
 
     auto* malloc_fn = m_module.getFunction("malloc");
@@ -1630,8 +1624,7 @@ void RuntimeBuilder::generateClosureOps() {
 
     // --- closure_new(void* fn, i32 arity, i1 is_native) -> AngaraObject ---
     {
-        auto* fn_ptr_type = PointerType::get(
-            FunctionType::get(obj_ty, {i32_ty, PointerType::get(obj_ty, 0)}, false), 0);
+        auto* fn_ptr_type = PointerType::get(m_ctx, 0);
         auto* fn_ty = FunctionType::get(obj_ty, {fn_ptr_type, i32_ty, i1_ty}, false);
         auto* fn = createRuntimeFunc("__ang_closure_new", fn_ty);
         m_fn_closure_new = FunctionCallee(fn);
@@ -1645,7 +1638,7 @@ void RuntimeBuilder::generateClosureOps() {
         auto* closure_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_closure_type));
         auto* mem = b.CreateCall(malloc_fn, {closure_size});
-        auto* closure_ptr = b.CreateBitCast(mem, PointerType::get(m_closure_type, 0));
+        auto* closure_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
 
         auto* header_ptr = b.CreateStructGEP(m_closure_type, closure_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_CLOSURE),
@@ -1661,7 +1654,7 @@ void RuntimeBuilder::generateClosureOps() {
 
     // --- call(AngaraObject callee, i32 argc, AngaraObject* args) -> AngaraObject ---
     {
-        auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, i32_ty, PointerType::get(obj_ty, 0)}, false);
+        auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, i32_ty, PointerType::get(m_ctx, 0)}, false);
         auto* fn = createRuntimeFunc("__ang_call", fn_ty);
         m_fn_call = FunctionCallee(fn);
 
@@ -1677,7 +1670,7 @@ void RuntimeBuilder::generateClosureOps() {
 
         auto* payload = b.CreateExtractValue(callee, {1});
         auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
-        auto* obj_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_obj_header_type, 0));
+        auto* obj_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
         auto* obj_type = b.CreateLoad(i32_ty, b.CreateStructGEP(m_obj_header_type, obj_ptr, 0));
 
         auto* sw = b.CreateSwitch(obj_type, error_bb, 2);
@@ -1686,18 +1679,17 @@ void RuntimeBuilder::generateClosureOps() {
 
         // Closure call
         IRBuilder<> bc(is_closure_bb);
-        auto* closure_ptr = bc.CreateIntToPtr(ptr_i64, PointerType::get(m_closure_type, 0));
+        auto* closure_ptr = bc.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
         auto* fn_field = bc.CreateLoad(
-            PointerType::get(
-                FunctionType::get(obj_ty, {i32_ty, PointerType::get(obj_ty, 0)}, false), 0),
+            PointerType::get(m_ctx, 0),
             bc.CreateStructGEP(m_closure_type, closure_ptr, 1), "fn");
-        auto* closure_fn_ty = FunctionType::get(obj_ty, {i32_ty, PointerType::get(obj_ty, 0)}, false);
+        auto* closure_fn_ty = FunctionType::get(obj_ty, {i32_ty, PointerType::get(m_ctx, 0)}, false);
         auto* result = bc.CreateCall(closure_fn_ty, fn_field, {argc, args});
         bc.CreateRet(result);
 
         // Bound method call: prepend receiver to args
         IRBuilder<> bbm(is_bound_bb);
-        auto* bm_ptr = bbm.CreateIntToPtr(ptr_i64, PointerType::get(m_bound_method_type, 0));
+        auto* bm_ptr = bbm.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
         auto* receiver = bbm.CreateLoad(obj_ty, bbm.CreateStructGEP(m_bound_method_type, bm_ptr, 1));
         auto* method = bbm.CreateLoad(obj_ty, bbm.CreateStructGEP(m_bound_method_type, bm_ptr, 2));
 
@@ -1708,7 +1700,7 @@ void RuntimeBuilder::generateClosureOps() {
         auto* new_args_size = bbm.CreateSExt(new_argc, i64_ty);
         auto* alloc_size = bbm.CreateMul(new_args_size, elem_size);
         auto* new_args = bbm.CreateCall(malloc_fn, {alloc_size});
-        auto* new_args_typed = bbm.CreateBitCast(new_args, PointerType::get(obj_ty, 0));
+        auto* new_args_typed = bbm.CreateBitCast(new_args, PointerType::get(m_ctx, 0));
         // Store receiver at [0]
         bbm.CreateStore(receiver, new_args_typed);
         // Copy original args starting at [1]
@@ -1720,12 +1712,11 @@ void RuntimeBuilder::generateClosureOps() {
         // Get closure fn from method
         auto* m_payload = bbm.CreateExtractValue(method, {1});
         auto* m_ptr_i64 = bbm.CreateBitCast(m_payload, i64_ty);
-        auto* m_closure_ptr = bbm.CreateIntToPtr(m_ptr_i64, PointerType::get(m_closure_type, 0));
+        auto* m_closure_ptr = bbm.CreateIntToPtr(m_ptr_i64, PointerType::get(m_ctx, 0));
         auto* m_fn = bbm.CreateLoad(
-            PointerType::get(
-                FunctionType::get(obj_ty, {i32_ty, PointerType::get(obj_ty, 0)}, false), 0),
+            PointerType::get(m_ctx, 0),
             bbm.CreateStructGEP(m_closure_type, m_closure_ptr, 1));
-        auto* method_fn_ty = FunctionType::get(obj_ty, {i32_ty, PointerType::get(obj_ty, 0)}, false);
+        auto* method_fn_ty = FunctionType::get(obj_ty, {i32_ty, PointerType::get(m_ctx, 0)}, false);
         auto* call_result = bbm.CreateCall(method_fn_ty, m_fn, {new_argc, new_args_typed});
         bbm.CreateCall(m_module.getFunction("free"), {new_args});
         bbm.CreateRet(call_result);
@@ -1753,7 +1744,7 @@ void RuntimeBuilder::generateClosureOps() {
         auto* bm_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_bound_method_type));
         auto* mem = b.CreateCall(malloc_fn, {bm_size});
-        auto* bm_ptr = b.CreateBitCast(mem, PointerType::get(m_bound_method_type, 0));
+        auto* bm_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
 
         auto* header_ptr = b.CreateStructGEP(m_bound_method_type, bm_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_BOUND_METHOD),
@@ -1779,7 +1770,7 @@ void RuntimeBuilder::generateExceptionOps() {
     auto* i8_ty = Type::getInt8Ty(m_ctx);
     auto* i32_ty = Type::getInt32Ty(m_ctx);
     auto* i64_ty = Type::getInt64Ty(m_ctx);
-    auto* i8_ptr = PointerType::get(i8_ty, 0);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
     auto* obj_ty = m_angara_obj_type;
 
     auto* malloc_fn = m_module.getFunction("malloc");
@@ -1807,7 +1798,7 @@ void RuntimeBuilder::generateExceptionOps() {
         auto* exc_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_exception_type));
         auto* mem = b.CreateCall(malloc_fn, {exc_size});
-        auto* exc_ptr = b.CreateBitCast(mem, PointerType::get(m_exception_type, 0));
+        auto* exc_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
 
         auto* header_ptr = b.CreateStructGEP(m_exception_type, exc_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_EXCEPTION),
@@ -1843,7 +1834,7 @@ void RuntimeBuilder::generateExceptionOps() {
 
         IRBuilder<> ba(abort_bb);
         // Print error and exit
-        auto* msg = ba.CreateGlobalStringPtr("Unhandled exception\n");
+        auto* msg = ba.CreateGlobalString("Unhandled exception\n");
         auto* fprintf_fn = m_module.getFunction("fprintf");
         // stderr is typically at a fixed address, but we can't easily get it.
         // Use printf instead
@@ -1862,7 +1853,7 @@ void RuntimeBuilder::generateExceptionOps() {
             i8_ptr                        // prev
         }, "ExceptionFrame");
 
-        auto* frame = bu.CreateBitCast(chain, PointerType::get(frame_type, 0));
+        auto* frame = bu.CreateBitCast(chain, PointerType::get(m_ctx, 0));
         auto* prev_ptr = bu.CreateStructGEP(frame_type, frame, 1);
         auto* prev = bu.CreateLoad(i8_ptr, prev_ptr, "prev");
         bu.CreateStore(prev, m_g_exception_chain);
@@ -1891,7 +1882,7 @@ void RuntimeBuilder::generateExceptionOps() {
             i8_ptr
         }, "ExceptionFrame");
 
-        auto* frame = b.CreateBitCast(frame_arg, PointerType::get(frame_type, 0));
+        auto* frame = b.CreateBitCast(frame_arg, PointerType::get(m_ctx, 0));
         auto* prev_addr = b.CreateStructGEP(frame_type, frame, 1);
         auto* old_chain = b.CreateLoad(i8_ptr, m_g_exception_chain, "old_chain");
         b.CreateStore(old_chain, prev_addr);
@@ -1919,7 +1910,7 @@ void RuntimeBuilder::generateExceptionOps() {
         }, "ExceptionFrame");
 
         auto* chain = b.CreateLoad(i8_ptr, m_g_exception_chain, "chain");
-        auto* frame = b.CreateBitCast(chain, PointerType::get(frame_type, 0));
+        auto* frame = b.CreateBitCast(chain, PointerType::get(m_ctx, 0));
         auto* prev = b.CreateLoad(i8_ptr, b.CreateStructGEP(frame_type, frame, 1), "prev");
         b.CreateStore(prev, m_g_exception_chain);
         b.CreateRetVoid();
@@ -1936,7 +1927,7 @@ void RuntimeBuilder::generateThreadOps() {
     auto* i64_ty = Type::getInt64Ty(m_ctx);
 
     // Stubs that return nil
-    auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, i32_ty, PointerType::get(obj_ty, 0)}, false);
+    auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, i32_ty, PointerType::get(m_ctx, 0)}, false);
     auto* fn = createRuntimeFunc("__ang_spawn_thread", fn_ty);
     m_fn_thread_spawn = FunctionCallee(fn);
     {
@@ -2002,7 +1993,7 @@ void RuntimeBuilder::generateMiscOps() {
     auto* i8_ty = Type::getInt8Ty(m_ctx);
     auto* i32_ty = Type::getInt32Ty(m_ctx);
     auto* i64_ty = Type::getInt64Ty(m_ctx);
-    auto* i8_ptr = PointerType::get(i8_ty, 0);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
     auto* obj_ty = m_angara_obj_type;
 
     auto pack_obj = [&](IRBuilder<>& b, Value* raw_ptr) -> Value* {
@@ -2039,7 +2030,7 @@ void RuntimeBuilder::generateMiscOps() {
         IRBuilder<> bo(is_obj_bb);
         auto* payload = bo.CreateExtractValue(val, {1});
         auto* ptr_i64 = bo.CreateBitCast(payload, i64_ty);
-        auto* obj_ptr = bo.CreateIntToPtr(ptr_i64, PointerType::get(m_obj_header_type, 0));
+        auto* obj_ptr = bo.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
         auto* obj_type = bo.CreateLoad(i32_ty, bo.CreateStructGEP(m_obj_header_type, obj_ptr, 0));
         auto* sw = bo.CreateSwitch(obj_type, default_bb, 2);
         sw->addCase(ConstantInt::get(i32_ty, OBJ_STRING), obj_is_string_bb);
@@ -2047,7 +2038,7 @@ void RuntimeBuilder::generateMiscOps() {
 
         // String length
         IRBuilder<> bs(obj_is_string_bb);
-        auto* str_ptr = bs.CreateIntToPtr(ptr_i64, PointerType::get(m_string_type, 0));
+        auto* str_ptr = bs.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
         auto* len = bs.CreateLoad(i64_ty, bs.CreateStructGEP(m_string_type, str_ptr, 1), "len");
         Value* result = UndefValue::get(obj_ty);
         result = bs.CreateInsertValue(result, ConstantInt::get(i32_ty, TAG_I64), {0});
@@ -2056,7 +2047,7 @@ void RuntimeBuilder::generateMiscOps() {
 
         // List count
         IRBuilder<> bl(obj_is_list_bb);
-        auto* list_ptr = bl.CreateIntToPtr(ptr_i64, PointerType::get(m_list_type, 0));
+        auto* list_ptr = bl.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
         auto* count = bl.CreateLoad(i64_ty, bl.CreateStructGEP(m_list_type, list_ptr, 1), "count");
         Value* result2 = UndefValue::get(obj_ty);
         result2 = bl.CreateInsertValue(result2, ConstantInt::get(i32_ty, TAG_I64), {0});
@@ -2086,7 +2077,7 @@ void RuntimeBuilder::generateIOOps() {
     auto* i8_ty = Type::getInt8Ty(m_ctx);
     auto* i32_ty = Type::getInt32Ty(m_ctx);
     auto* i64_ty = Type::getInt64Ty(m_ctx);
-    auto* i8_ptr = PointerType::get(i8_ty, 0);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
     auto* obj_ty = m_angara_obj_type;
 
     auto* malloc_fn = m_module.getFunction("malloc");
@@ -2098,7 +2089,7 @@ void RuntimeBuilder::generateIOOps() {
     auto get_cstr = [&](IRBuilder<>& b, Value* str_obj) -> Value* {
         auto* payload = b.CreateExtractValue(str_obj, {1});
         auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
-        auto* str_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_string_type, 0));
+        auto* str_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
         auto* chars_ptr = b.CreateStructGEP(m_string_type, str_ptr, 2);
         return b.CreateLoad(i8_ptr, chars_ptr, "cstr");
     };
@@ -2131,15 +2122,15 @@ void RuntimeBuilder::generateIOOps() {
         auto* is_stderr = b.CreateICmpEQ(stream_id, ConstantInt::get(i64_ty, 2));
 
         auto* stdout_var = m_module.getOrInsertGlobal("__stdoutp",
-            PointerType::get(void_ty, 0));
+            PointerType::get(m_ctx, 0));
         auto* stderr_var = m_module.getOrInsertGlobal("__stderrp",
-            PointerType::get(void_ty, 0));
+            PointerType::get(m_ctx, 0));
         auto* file_ptr = b.CreateSelect(is_stderr,
-            b.CreateLoad(PointerType::get(void_ty, 0), stderr_var, "stderr"),
-            b.CreateLoad(PointerType::get(void_ty, 0), stdout_var, "stdout"));
+            b.CreateLoad(PointerType::get(m_ctx, 0), stderr_var, "stderr"),
+            b.CreateLoad(PointerType::get(m_ctx, 0), stdout_var, "stdout"));
 
         auto* fprintf_fn = m_module.getFunction("fprintf");
-        auto* fmt = b.CreateGlobalStringPtr("%s");
+        auto* fmt = b.CreateGlobalString("%s");
         b.CreateCall(fprintf_fn, {file_ptr, fmt, cstr});
         // decref the temporary string
         b.CreateCall(m_module.getFunction("__ang_decref"), {str_obj});
@@ -2168,15 +2159,15 @@ void RuntimeBuilder::generateIOOps() {
         auto* is_stderr = b.CreateICmpEQ(stream_id, ConstantInt::get(i64_ty, 2));
 
         auto* stdout_var = m_module.getOrInsertGlobal("__stdoutp",
-            PointerType::get(void_ty, 0));
+            PointerType::get(m_ctx, 0));
         auto* stderr_var = m_module.getOrInsertGlobal("__stderrp",
-            PointerType::get(void_ty, 0));
+            PointerType::get(m_ctx, 0));
         auto* file_ptr = b.CreateSelect(is_stderr,
-            b.CreateLoad(PointerType::get(void_ty, 0), stderr_var, "stderr"),
-            b.CreateLoad(PointerType::get(void_ty, 0), stdout_var, "stdout"));
+            b.CreateLoad(PointerType::get(m_ctx, 0), stderr_var, "stderr"),
+            b.CreateLoad(PointerType::get(m_ctx, 0), stdout_var, "stdout"));
 
         auto* fprintf_fn = m_module.getFunction("fprintf");
-        auto* fmt = b.CreateGlobalStringPtr("%s\n");
+        auto* fmt = b.CreateGlobalString("%s\n");
         b.CreateCall(fprintf_fn, {file_ptr, fmt, cstr});
         b.CreateCall(m_module.getFunction("__ang_decref"), {str_obj});
         b.CreateRetVoid();
@@ -2208,17 +2199,17 @@ void RuntimeBuilder::generateIOOps() {
 
         // Declare stderr and stdout as external globals
         auto* stdout_var = m_module.getOrInsertGlobal("__stdoutp",
-            PointerType::get(void_ty, 0));
+            PointerType::get(m_ctx, 0));
         auto* stderr_var = m_module.getOrInsertGlobal("__stderrp",
-            PointerType::get(void_ty, 0));
+            PointerType::get(m_ctx, 0));
 
         // macOS uses __stdoutp/__stderrp. We'll also declare the standard ones.
         auto* file_ptr = b.CreateSelect(is_stderr,
-            b.CreateLoad(PointerType::get(void_ty, 0), stderr_var, "stderr"),
-            b.CreateLoad(PointerType::get(void_ty, 0), stdout_var, "stdout"));
+            b.CreateLoad(PointerType::get(m_ctx, 0), stderr_var, "stderr"),
+            b.CreateLoad(PointerType::get(m_ctx, 0), stdout_var, "stdout"));
 
         auto* fprintf_fn = m_module.getFunction("fprintf");
-        auto* fmt = b.CreateGlobalStringPtr("%s");
+        auto* fmt = b.CreateGlobalString("%s");
         b.CreateCall(fprintf_fn, {file_ptr, fmt, cstr});
         b.CreateCall(m_module.getFunction("__ang_decref"), {str_obj});
         b.CreateRetVoid();
@@ -2235,7 +2226,7 @@ void RuntimeBuilder::generateIOOps() {
         auto* stream_arg = fn->arg_begin();
 
         // Declare fflush
-        FunctionType* fflush_ty = FunctionType::get(i32_ty, {PointerType::get(void_ty, 0)}, false);
+        FunctionType* fflush_ty = FunctionType::get(i32_ty, {PointerType::get(m_ctx, 0)}, false);
         auto fflush_fn = m_module.getOrInsertFunction("fflush", fflush_ty);
 
         auto* stream_payload = b.CreateExtractValue(stream_arg, {1});
@@ -2243,13 +2234,13 @@ void RuntimeBuilder::generateIOOps() {
         auto* is_stderr = b.CreateICmpEQ(stream_id, ConstantInt::get(i64_ty, 2));
 
         auto* stdout_var = m_module.getOrInsertGlobal("__stdoutp",
-            PointerType::get(void_ty, 0));
+            PointerType::get(m_ctx, 0));
         auto* stderr_var = m_module.getOrInsertGlobal("__stderrp",
-            PointerType::get(void_ty, 0));
+            PointerType::get(m_ctx, 0));
 
         auto* file_ptr = b.CreateSelect(is_stderr,
-            b.CreateLoad(PointerType::get(void_ty, 0), stderr_var),
-            b.CreateLoad(PointerType::get(void_ty, 0), stdout_var));
+            b.CreateLoad(PointerType::get(m_ctx, 0), stderr_var),
+            b.CreateLoad(PointerType::get(m_ctx, 0), stdout_var));
 
         b.CreateCall(fflush_fn, {file_ptr});
         b.CreateRetVoid();
@@ -2271,8 +2262,8 @@ void RuntimeBuilder::generateIOOps() {
         auto* ssize_ty = i64_ty; // ssize_t is i64 on macOS
         auto* size_ty = i64_ty;
         FunctionType* getline_ty = FunctionType::get(ssize_ty,
-            {PointerType::get(i8_ptr, 0), PointerType::get(size_ty, 0),
-             PointerType::get(void_ty, 0)}, false);
+            {PointerType::get(m_ctx, 0), PointerType::get(m_ctx, 0),
+             PointerType::get(m_ctx, 0)}, false);
         auto getline_fn = m_module.getOrInsertFunction("getline", getline_ty);
 
         // char* line_buf = NULL; size_t buf_size = 0;
@@ -2283,8 +2274,8 @@ void RuntimeBuilder::generateIOOps() {
 
         // Get stdin — on macOS, use __stdinp
         auto* stdin_var = m_module.getOrInsertGlobal("__stdinp",
-            PointerType::get(void_ty, 0));
-        auto* stdin_ptr = b.CreateLoad(PointerType::get(void_ty, 0), stdin_var, "stdin");
+            PointerType::get(m_ctx, 0));
+        auto* stdin_ptr = b.CreateLoad(PointerType::get(m_ctx, 0), stdin_var, "stdin");
 
         // ssize_t line_size = getline(&line_buf, &buf_size, stdin)
         auto* line_size = b.CreateCall(getline_fn,
@@ -2363,11 +2354,11 @@ void RuntimeBuilder::generateIOOps() {
 
         // Declare fread: size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream)
         FunctionType* fread_ty = FunctionType::get(i64_ty,
-            {i8_ptr, i64_ty, i64_ty, PointerType::get(void_ty, 0)}, false);
+            {i8_ptr, i64_ty, i64_ty, PointerType::get(m_ctx, 0)}, false);
         auto fread_fn = m_module.getOrInsertFunction("fread", fread_ty);
 
         auto* stdin_var = m_module.getOrInsertGlobal("__stdinp",
-            PointerType::get(void_ty, 0));
+            PointerType::get(m_ctx, 0));
 
         b.CreateBr(loop_bb);
 
@@ -2380,7 +2371,7 @@ void RuntimeBuilder::generateIOOps() {
         auto* remaining = bl.CreateSub(cap, total);
         // bytes_read = fread(buf + total, 1, remaining, stdin)
         auto* write_ptr = bl.CreateGEP(i8_ty, buf, {total});
-        auto* stdin_ptr = bl.CreateLoad(PointerType::get(void_ty, 0), stdin_var, "stdin");
+        auto* stdin_ptr = bl.CreateLoad(PointerType::get(m_ctx, 0), stdin_var, "stdin");
         auto* bytes_read = bl.CreateCall(fread_fn,
             {write_ptr, ConstantInt::get(i64_ty, 1), remaining, stdin_ptr}, "bytes_read");
 

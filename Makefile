@@ -1,6 +1,5 @@
 # --- Configuration & Paths ---
 INSTALL_MOD_DIR := /opt/angara/modules
-INSTALL_RT_DIR  := /opt/angara/src/runtime
 INSTALL_BIN_DIR := /opt/homebrew/bin
 
 # --- Colors & Formatting ---
@@ -22,17 +21,12 @@ ifeq ($(UNAME_S),Darwin)
     ifneq ($(BREW_DIR),)
         export PKG_CONFIG_PATH := $(BREW_DIR)/lib/pkgconfig:$(PKG_CONFIG_PATH)
     endif
-    RPATH_FLAG := -Wl,-rpath,$(INSTALL_RT_DIR) -Wl,-rpath,@executable_path/../lib
-    RT_LDFLAGS := -dynamiclib -install_name @rpath/libangara_runtime.$(SO_EXT)
 else
     SO_EXT   := so
-    RPATH_FLAG := -Wl,-rpath=$(INSTALL_RT_DIR) -Wl,-rpath='$$ORIGIN/../lib'
-    RT_LDFLAGS := -shared
 endif
 
 # --- LLVM Configuration ---
 LLVM_CONFIG := $(shell which llvm-config 2>/dev/null || echo /opt/homebrew/opt/llvm/bin/llvm-config)
-# Filter out flags that conflict with our own settings
 LLVM_CXXFLAGS := $(filter-out -fno-exceptions -fno-rtti -std=%,$(shell $(LLVM_CONFIG) --cxxflags 2>/dev/null))
 LLVM_LDFLAGS  := $(shell $(LLVM_CONFIG) --ldflags 2>/dev/null)
 LLVM_LIBS     := $(shell $(LLVM_CONFIG) --libs core native 2>/dev/null)
@@ -45,8 +39,7 @@ CXX := clang++
 CFLAGS   := -fPIC -Wall -Iangc/includes
 CXXFLAGS := -std=c++23 -fPIC -Wall -Wno-trigraphs -Iangc/includes
 
-LDFLAGS_MOD := -shared -Lbuild -langara_runtime
-LDFLAGS_BIN := -Lbuild -langara_runtime $(RPATH_FLAG) $(LLVM_LDFLAGS) $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS)
+LDFLAGS_BIN := $(LLVM_LDFLAGS) $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS)
 
 # --- Dependency Resolution (pkg-config) ---
 CURL_CFLAGS := $(shell pkg-config --cflags libcurl 2>/dev/null)
@@ -63,10 +56,6 @@ ifeq ($(UNAME_S),Darwin)
 endif
 
 # --- File Definitions ---
-RT_SRCS := $(wildcard runtime/rt_*.c) runtime/angara_runtime.c
-RT_OBJS := $(patsubst %.c,build/obj/%.o,$(RT_SRCS))
-RT_OUT  := build/libangara_runtime.$(SO_EXT)
-
 MOD_SRCS := $(wildcard modules/*.c)
 MOD_OBJS := $(patsubst %.c,build/obj/%.o,$(MOD_SRCS))
 MOD_OUTS := $(patsubst modules/%.c,build/modules/%.$(SO_EXT),$(MOD_SRCS))
@@ -79,10 +68,13 @@ ANGC_OBJS := $(patsubst %.cpp,build/obj/%.o,$(ANGC_SRCS))
 ANGC_OUT  := build/angc
 
 # --- Main Targets ---
-.PHONY: all logo clean install install_runtime install_libraries install_executables
+.PHONY: all logo clean install
 
-all: logo $(RT_OUT) $(MOD_OUTS) $(ANGC_OUT) $(ALS_OUT)
+all: logo $(ANGC_OUT)
 	@printf "$(BOLD)$(GREEN)>>> Build Completed Successfully <<<$(RESET)\n"
+
+modules: logo $(MOD_OUTS)
+	@printf "$(BOLD)$(GREEN)>>> Modules Built Successfully <<<$(RESET)\n"
 
 logo:
 	@printf "\n"
@@ -92,7 +84,7 @@ logo:
 	@printf "$(CYAN) ██╔══██║██║╚██╗██║██║   ██║██╔══██║██╔══██╗██╔══██║ $(RESET)\n"
 	@printf "$(CYAN) ██║  ██║██║ ╚████║╚██████╔╝██║  ██║██║  ██║██║  ██║ $(RESET)\n"
 	@printf "$(CYAN) ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ $(RESET)\n"
-	@printf "$(MAGENTA)[MK] Building Angara v2 // cv2 was here$(RESET)\n\n"
+	@printf "$(MAGENTA)[MK] Building Angara v3 (LLVM) // cv2 was here$(RESET)\n\n"
 
 # --- Compilation Rules ---
 build/obj/%.o: %.c
@@ -123,77 +115,60 @@ build/obj/modules/amqp.o: modules/amqp.c
 build/obj/modules/json_bridge.o: modules/json_bridge.cpp
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CX] $(RESET) %s (JSON Bridge)\n" "$<"
-	@$(CXX) $(CXXFLAGS) -Iangara-ls/vendor -c $< -o $@
-
-# --- Linkage Rules (Runtime) ---
-$(RT_OUT): $(RT_OBJS)
-	@mkdir -p $(@D)
-	@printf "$(BLUE)[LN] $(RESET) %s\n" "$@"
-	@$(CC) $(RT_LDFLAGS) $^ -o $@
+	@$(CXX) $(CXXFLAGS) -Iangc-ls/vendor -c $< -o $@
 
 # --- Linkage Rules (Modules) ---
-build/modules/http.$(SO_EXT): build/obj/modules/http.o | $(RT_OUT)
+build/modules/http.$(SO_EXT): build/obj/modules/http.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< $(LDFLAGS_MOD) $(CURL_LIBS) -o $@
+	@$(CC) $< -shared $(CURL_LIBS) -o $@
 
-build/modules/websocket.$(SO_EXT): build/obj/modules/websocket.o | $(RT_OUT)
+build/modules/websocket.$(SO_EXT): build/obj/modules/websocket.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< $(LDFLAGS_MOD) $(LWS_LIBS) -o $@
+	@$(CC) $< -shared $(LWS_LIBS) -o $@
 
-build/modules/time.$(SO_EXT): build/obj/modules/time.o | $(RT_OUT)
+build/modules/time.$(SO_EXT): build/obj/modules/time.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 ifeq ($(UNAME_S),Darwin)
-	@$(CC) $< $(LDFLAGS_MOD) -o $@
+	@$(CC) $< -shared -o $@
 else
-	@$(CC) $< $(LDFLAGS_MOD) -lrt -o $@
+	@$(CC) $< -shared -lrt -o $@
 endif
 
-build/modules/amqp.$(SO_EXT): build/obj/modules/amqp.o | $(RT_OUT)
+build/modules/amqp.$(SO_EXT): build/obj/modules/amqp.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< $(LDFLAGS_MOD) $(AMQP_LIBS) -o $@
+	@$(CC) $< -shared $(AMQP_LIBS) -o $@
 
-build/modules/json.$(SO_EXT): build/obj/modules/json.o $(JSON_BR_OBJ) | $(RT_OUT)
+build/modules/json.$(SO_EXT): build/obj/modules/json.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CXX) $^ $(LDFLAGS_MOD) -o $@
+	@$(CXX) $^ -shared -o $@
 
-build/modules/%.$(SO_EXT): build/obj/modules/%.o | $(RT_OUT)
+build/modules/%.$(SO_EXT): build/obj/modules/%.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< $(LDFLAGS_MOD) -o $@
+	@$(CC) $< -shared -o $@
 
-# --- Linkage Rules (Executables) ---
-$(ANGC_OUT): $(ANGC_OBJS) | $(RT_OUT)
+# --- Linkage Rules (Compiler) ---
+$(ANGC_OUT): $(ANGC_OBJS)
 	@mkdir -p $(@D)
 	@printf "$(CYAN)[BN] $(RESET) %s\n" "$@"
 	@$(CXX) $^ $(LDFLAGS_BIN) -o $@
 
-$(ALS_OUT): $(ALS_OBJS)
-	@mkdir -p $(@D)
-	@printf "$(CYAN)[BN] $(RESET) %s\n" "$@"
-	@$(CXX) $^ -o $@
-
 # --- Installation Rules ---
-install: install_runtime install_libraries install_executables
+install: install_libraries install_executables
 	@printf "$(BOLD)$(GREEN)>>> Full Installation Complete <<<$(RESET)\n"
-
-install_runtime: $(RT_OUT)
-	@printf "$(BLUE)[IN] $(RESET) Installing Runtime to %s\n" "$(INSTALL_RT_DIR)"
-	@mkdir -p $(INSTALL_RT_DIR)
-	@cp $(RT_OUT) $(INSTALL_RT_DIR)/
-	@cp runtime/angara_runtime.h $(INSTALL_RT_DIR)/
 
 install_libraries: $(MOD_OUTS)
 	@printf "$(MAGENTA)[IN] $(RESET) Installing Modules to %s\n" "$(INSTALL_MOD_DIR)"
 	@mkdir -p $(INSTALL_MOD_DIR)
 	@cp build/modules/*.$(SO_EXT) $(INSTALL_MOD_DIR)/
 
-install_executables: $(ANGC_OUT) $(ALS_OUT)
-	@printf "$(CYAN)[IN] $(RESET) Installing Executables to %s\n" "$(INSTALL_BIN_DIR)"
+install_executables: $(ANGC_OUT)
+	@printf "$(CYAN)[IN] $(RESET) Installing Executable to %s\n" "$(INSTALL_BIN_DIR)"
 	@mkdir -p $(INSTALL_BIN_DIR)
 	@cp $(ANGC_OUT) $(INSTALL_BIN_DIR)/
 

@@ -1,5 +1,5 @@
 #include "../../includes/BuildSystem.h"
-#include "CompilerDriver.h" // We still use this for recursive source compilation
+#include "CompilerDriver.h"
 #include <iostream>
 #include <filesystem>
 #include <sstream>
@@ -16,12 +16,9 @@ const auto MAGENTA = "\033[35m";
 namespace angara {
 
     BuildSystem::BuildSystem()
-        : m_runtime_path(m_angara_home + "/src/runtime"),
-          m_native_lib_path(m_angara_home + "/modules"),
+        : m_native_lib_path(m_angara_home + "/modules"),
           m_std_lib_path(m_angara_home + "/src/modules")
     {}
-
-    // backend/build_system/BuildSystem.cpp
 
     bool BuildSystem::build(const std::string& spec_file) {
         auto workspace_opt = ConfigParser::parse(spec_file);
@@ -34,7 +31,6 @@ namespace angara {
         std::cout << BOLD << MAGENTA << "Building Workspace: " << ws.name << " v" << ws.version << RESET << "\n";
 
         // 1. Pre-scan: Map all project names to their absolute ENTRY FILE paths.
-        // This map is shared with the CompilerDriver so 'attach ProjectName' works.
         std::map<std::string, std::string> project_entries;
         for (const auto& proj : ws.projects) {
             fs::path project_dir = (fs::path(m_workspace_root) / proj.path).lexically_normal();
@@ -49,7 +45,6 @@ namespace angara {
             std::cout << "\n" << BOLD << BLUE << "--> Project: " << proj.name
                       << " (" << (proj.type == ProjectType::APP ? "App" : "Library") << ")" << RESET << "\n";
 
-            // Pass the specific project configuration to the build worker.
             if (!build_project(proj, project_entries)) {
                 std::cerr << RED << "!!! Failed to build project: " << proj.name << RESET << "\n";
                 return false;
@@ -61,36 +56,28 @@ namespace angara {
     }
 
     bool BuildSystem::build_project(const ProjectConfig& config, const std::map<std::string, std::string>& project_entries) {
-        // 1. Instantiate a fresh driver for this project scope.
         CompilerDriver driver;
 
-        // 2. Configure the driver with system and workspace paths.
         driver.set_paths(m_std_lib_path, m_native_lib_path);
         driver.set_workspace_projects(project_entries);
-        driver.set_backend(m_backend);
         if (!m_target_triple.empty()) driver.set_target(m_target_triple);
         if (!m_sysroot.empty()) driver.set_sysroot(m_sysroot);
 
-        // 3. Resolve the entry point for THIS project.
         const std::string& entry_file = project_entries.at(config.name);
 
-        // 4. Trigger the project-aware compilation.
-        std::cout << "    " << (m_backend == BackendKind::LLVM ? "Compiling (LLVM)..." : "Transpiling source code...") << "\n";
+        std::cout << "    Compiling (LLVM)...\n";
         if (!driver.compile(config, entry_file)) {
             return false;
         }
 
-        // 5. Link the generated artifacts into the final binary.
         std::cout << "    Linking artifacts...\n";
         return link_artifacts(config,
-                             driver.get_generated_c_files(),
                              driver.get_generated_object_files(),
                              driver.get_native_libs_linked(),
                              m_project_dirs[config.name]);
     }
 
     bool BuildSystem::link_artifacts(const ProjectConfig& config,
-                                 const std::set<std::string>& c_files,
                                  const std::set<std::string>& object_files,
                                  const std::vector<std::string>& discovered_libs,
                                  const std::string& project_root) const
@@ -107,32 +94,17 @@ namespace angara {
             cmd << " -shared -fPIC";
         }
 
-        for (const auto& file : c_files) {
-            cmd << " " << file;
-        }
+        // LLVM backend: runtime is embedded in the generated IR — no external runtime needed.
         for (const auto& file : object_files) {
             cmd << " " << file;
         }
 
-        // For LLVM backend: runtime is embedded in the generated IR — no external runtime needed.
-        // For C transpiler: compile runtime.c alongside generated C files
-        bool is_llvm = !object_files.empty() && c_files.empty();
-        if (is_llvm) {
-            // No external runtime library needed — all runtime functions are
-            // generated as LLVM IR directly in the object file.
-            cmd << " -I" << project_root;
-        } else {
-            cmd << " " << m_runtime_path << "/angara_runtime.c";
-            cmd << " -I. -I" << project_root << " -I" << m_runtime_path << " -I" << m_std_lib_path;
-        }
+        cmd << " -I" << project_root;
         cmd << " -L" << m_native_lib_path;
 
         // --- SMART LINKING ---
-        // Use a set to avoid duplicate -l flags
         std::set<std::string> all_libs;
-        // 1. Add libs explicitly defined in project.abs
         for (const auto& lib : config.dependencies) all_libs.insert(lib);
-        // 2. Add libs automatically discovered by the compiler (e.g., 'io', 'adv_string')
         for (const auto& lib : discovered_libs) all_libs.insert(lib);
 
         for (const auto& lib : all_libs) {
@@ -148,13 +120,7 @@ namespace angara {
             return false;
         }
 
-        // Cleanup artifacts
-        for (const auto& file : c_files) {
-            fs::remove(file);
-            fs::path h_file = file;
-            h_file.replace_extension(".h");
-            if (fs::exists(h_file)) fs::remove(h_file);
-        }
+        // Cleanup object files
         for (const auto& file : object_files) {
             fs::remove(file);
         }

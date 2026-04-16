@@ -38,7 +38,7 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
     llvm::InitializeAllTargetInfos(); llvm::InitializeAllTargets();
     llvm::InitializeAllTargetMCs(); llvm::InitializeAllAsmParsers(); llvm::InitializeAllAsmPrinters();
     std::string te;
-    if (auto* t = llvm::TargetRegistry::lookupTarget(targetTriple.str(), te)) {
+    if (auto* t = llvm::TargetRegistry::lookupTarget(llvm::Triple(targetTriple.str()), te)) {
         llvm::TargetOptions opt;
         if (auto* tm = t->createTargetMachine(targetTriple,"generic","",opt,std::nullopt))
             mod->setDataLayout(tm->createDataLayout());
@@ -68,7 +68,7 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     if (llvm::verifyModule(*mod, &es)) { std::cerr<<"Verify: "<<ve<<"\n"; return false; }
     std::error_code ec;
     // Use the same target triple that was set in the constructor
-    std::string le; auto* tgt = llvm::TargetRegistry::lookupTarget(targetTriple.str(),le);
+    std::string le; auto* tgt = llvm::TargetRegistry::lookupTarget(llvm::Triple(targetTriple.str()),le);
     if (!tgt) { std::cerr<<"No target: "<<le<<"\n"; return false; }
     llvm::TargetOptions opt; auto* tm = tgt->createTargetMachine(targetTriple,"generic","",opt,std::nullopt);
     if (!tm) { std::cerr<<"No TM\n"; return false; }
@@ -147,7 +147,7 @@ llvm::Value* LLVMBackend::makeF64(llvm::Value* v) {
     return r;
 }
 llvm::Value* LLVMBackend::makeStr(const std::string& s) {
-    return callRt(rt->getFuncStringFromC(), {builder->CreateGlobalStringPtr(s)});
+    return callRt(rt->getFuncStringFromC(), {builder->CreateGlobalString(s)});
 }
 
 // ============================================================================
@@ -288,7 +288,7 @@ llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
     if (auto* get = dynamic_cast<const GetExpr*>(e.target.get())) {
         // obj.field = value → record_set(obj, "field", value)
         auto* obj = cg(get->object);
-        callRt(rt->getFuncRecordSet(), {obj, builder->CreateGlobalStringPtr(get->name.lexeme), v});
+        callRt(rt->getFuncRecordSet(), {obj, builder->CreateGlobalString(get->name.lexeme), v});
         return v;
     }
     if (auto* sub = dynamic_cast<const SubscriptExpr*>(e.target.get())) {
@@ -296,7 +296,7 @@ llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
         auto* obj = cg(sub->object);
         if (auto* lit = dynamic_cast<const Literal*>(sub->index.get())) {
             if (lit->token.type == TokenType::STRING) {
-                callRt(rt->getFuncRecordSet(), {obj, builder->CreateGlobalStringPtr(lit->token.lexeme), v});
+                callRt(rt->getFuncRecordSet(), {obj, builder->CreateGlobalString(lit->token.lexeme), v});
                 return v;
             }
         }
@@ -435,9 +435,9 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
                  llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),i)});
             builder->CreateStore(cg(args[i]), ep);
         }
-        llvmArgs.push_back(builder->CreateBitCast(aa, llvm::PointerType::get(objType,0)));
+        llvmArgs.push_back(builder->CreateBitCast(aa, llvm::PointerType::get(*ctx, 0)));
     } else {
-        llvmArgs.push_back(llvm::ConstantPointerNull::get(llvm::PointerType::get(objType,0)));
+        llvmArgs.push_back(llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)));
     }
     return builder->CreateCall(f, llvmArgs);
 }
@@ -445,7 +445,7 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
 llvm::Value* LLVMBackend::cgGet(const GetExpr& e) {
     auto* obj = cg(e.object);
     // Property access: obj.field → record_get(obj, "field")
-    return callRt(rt->getFuncRecordGet(), {obj, builder->CreateGlobalStringPtr(e.name.lexeme)});
+    return callRt(rt->getFuncRecordGet(), {obj, builder->CreateGlobalString(e.name.lexeme)});
 }
 
 llvm::Value* LLVMBackend::cgList(const ListExpr& e) {
@@ -491,7 +491,7 @@ llvm::Value* LLVMBackend::cgSubscript(const SubscriptExpr& e) {
     // Compile-time dispatch: if index is a string literal, use record_get; else list_get
     if (auto* lit = dynamic_cast<const Literal*>(e.index.get())) {
         if (lit->token.type == TokenType::STRING) {
-            return callRt(rt->getFuncRecordGet(), {obj, builder->CreateGlobalStringPtr(lit->token.lexeme)});
+            return callRt(rt->getFuncRecordGet(), {obj, builder->CreateGlobalString(lit->token.lexeme)});
         }
     }
     return callRt(rt->getFuncListGet(), {obj, cg(e.index)});
@@ -500,7 +500,7 @@ llvm::Value* LLVMBackend::cgSubscript(const SubscriptExpr& e) {
 llvm::Value* LLVMBackend::cgRecord(const RecordExpr& e) {
     auto* r = callRt(rt->getFuncRecordNew(),{});
     for (size_t i=0; i<e.keys.size(); i++)
-        callRt(rt->getFuncRecordSet(), {r, builder->CreateGlobalStringPtr(e.keys[i].lexeme), cg(e.values[i])});
+        callRt(rt->getFuncRecordSet(), {r, builder->CreateGlobalString(e.keys[i].lexeme), cg(e.values[i])});
     return r;
 }
 
@@ -678,12 +678,12 @@ void LLVMBackend::cgTry(const TryStmt& s) {
     auto* afterAll = llvm::BasicBlock::Create(*ctx,"after_try",fn);
     auto* frameType = llvm::StructType::create(*ctx,
         {llvm::ArrayType::get(llvm::Type::getInt8Ty(*ctx),200),
-         llvm::PointerType::get(llvm::Type::getInt8Ty(*ctx),0)}, "EF");
+         llvm::PointerType::get(*ctx, 0)}, "EF");
     auto* frame = builder->CreateAlloca(frameType);
     // __ang_try_begin: push exception frame via setjmp.
     // Returns 0 on first call (normal entry), non-zero if longjmp'd (exception thrown)
     auto* sr = callRt(rt->getFuncTryBegin(),
-        {builder->CreateBitCast(frame, llvm::PointerType::get(llvm::Type::getInt8Ty(*ctx),0))});
+        {builder->CreateBitCast(frame, llvm::PointerType::get(*ctx, 0))});
     // sr == 0 → enter try block; sr != 0 → exception was thrown, enter catch
     builder->CreateCondBr(
         builder->CreateICmpEQ(sr, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx),0)),

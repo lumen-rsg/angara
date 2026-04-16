@@ -1,7 +1,7 @@
 ; ModuleID = 'angara_module'
 source_filename = "angara_module"
 target datalayout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32"
-target triple = "aarch64-apple-darwin"
+target triple = "arm64-apple-darwin25.4.0"
 
 %AngaraObject = type { i32, i64 }
 %AngaraString = type { %ObjHeader, i64, ptr }

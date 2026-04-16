@@ -4,7 +4,6 @@
 #include <filesystem>
 #include <thread>
 #include <chrono>
-#include <random>
 
 #include "CompilerDriver.h"
 #include "BuildSystem.h"
@@ -13,8 +12,8 @@
 namespace fs = std::filesystem;
 
 // --- Constants ---
-const std::string ANGC_VERSION    = "2.8.0";
-const std::string BACKEND_VERSION = "4.0.0";
+const std::string ANGC_VERSION    = "3.0.0";
+const std::string BACKEND_VERSION = "5.0.0";
 const std::string ANGARA_SPEC     = "v3.0";
 
 // --- Colors ---
@@ -41,13 +40,12 @@ void print_help() {
     std::cout << BOLD << "Usage:" << RESET << "\n";
     std::cout << "  angc                        Build the project in the current directory (.abs file)\n";
     std::cout << "  angc --path <project.abs>   Build a specific project configuration\n";
-    std::cout << "  angc <file.an>              Compile a single source file (Legacy Mode)\n";
+    std::cout << "  angc <file.an>              Compile a single source file\n";
     std::cout << "\n" << BOLD << "Options:" << RESET << "\n";
     std::cout << "  -v, --version               Show version information\n";
     std::cout << "  -h, --help                  Show this help message\n";
     std::cout << "  --dump-ast                  Debug: Print Abstract Syntax Tree\n";
-    std::cout << "  --backend <c|llvm>          Select compilation backend (default: c)\n";
-    std::cout << "  --target <triple>           Cross-compile for target (LLVM only)\n";
+    std::cout << "  --target <triple>           Cross-compile for target triple\n";
     std::cout << "  --sysroot <path>            Set sysroot for cross-compilation linker\n";
     std::cout << std::endl;
 }
@@ -55,7 +53,7 @@ void print_help() {
 void print_version() {
     std::cout << GREEN << BOLD << "angc" << RESET << ": Angara Compiler\n";
     std::cout << CYAN << "  • Compiler: " << RESET << ANGC_VERSION << "\n";
-    std::cout << CYAN << "  • Backend:  " << RESET << BACKEND_VERSION << "\n";
+    std::cout << CYAN << "  • Backend:  " << RESET << BACKEND_VERSION << " (LLVM)" << "\n";
     std::cout << CYAN << "  • Spec:     " << RESET << ANGARA_SPEC << "\n";
     std::cout << GRAY << "  (c) 2026 Lumina Labs. This is a testing build." << RESET << "\n";
 }
@@ -73,11 +71,10 @@ void run_easter_egg() {
     for (const auto& line : startup_seq) {
         std::cout << GRAY << "  [SYS] " << line << RESET << "\r";
         std::this_thread::sleep_for(std::chrono::milliseconds(400));
-        // Clear line
         std::cout << "\033[2K";
     }
 
-    std::cout << "\033[2K"; // Clear line
+    std::cout << "\033[2K";
     print_typing(BOLD + std::string(CYAN) + "-> System Online." + RESET, 50);
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
@@ -94,7 +91,6 @@ void run_easter_egg() {
 
 // --- Target Triple Resolution ---
 
-// Determine host OS for bare arch aliases (e.g. "arm64" → "aarch64-apple-darwin" on macOS)
 static std::string get_host_os_triple_suffix() {
 #if defined(__APPLE__)
     return "-apple-darwin";
@@ -107,20 +103,13 @@ static std::string get_host_os_triple_suffix() {
 #endif
 }
 
-// Expand user-friendly target aliases into LLVM triples.
-// Returns empty string if the input is unrecognized (will cause LLVM to emit an error).
 static std::string resolve_target_triple(const std::string& input) {
-    // If it contains a dash, it's already a full triple — pass through
     if (input.find('-') != std::string::npos) {
         return input;
     }
 
     std::string os_suffix = get_host_os_triple_suffix();
 
-    // arch-os combos: "arm64-linux", "amd64-macos" (already handled by dash check above)
-    // But "arm64_linux" or "arm64.linux"? No — user should use dashes.
-
-    // Normalize arch names
     if (input == "arm64" || input == "aarch64") {
         return "aarch64" + os_suffix;
     }
@@ -137,7 +126,6 @@ static std::string resolve_target_triple(const std::string& input) {
         return "wasm64-unknown-unknown";
     }
 
-    // Unknown — return as-is and let LLVM report the error
     return input;
 }
 
@@ -150,20 +138,17 @@ std::string find_local_project_file() {
                 return entry.path().string();
             }
         }
-    } catch (...) {
-        // Ignore filesystem errors
-    }
+    } catch (...) {}
     return "";
 }
 
 // --- Entry Point ---
 
 int main(int argc, char* argv[]) {
-    // 1. Argument Pre-processing
     std::vector<std::string> args;
     for (int i = 1; i < argc; ++i) args.emplace_back(argv[i]);
 
-    // 2. Handle No Arguments (Implicit Build)
+    // Handle No Arguments (Implicit Build)
     if (args.empty()) {
         std::string project_file = find_local_project_file();
         if (!project_file.empty()) {
@@ -171,7 +156,6 @@ int main(int argc, char* argv[]) {
             angara::BuildSystem builder;
             return builder.build(project_file) ? 0 : 1;
         } else {
-            // No project found, print help
             print_help();
             return 1;
         }
@@ -183,7 +167,6 @@ int main(int argc, char* argv[]) {
         return angara::ProjectInitializer::run() ? 0 : 1;
     }
 
-    // 3. Handle Flags
     if (cmd == "-v" || cmd == "--version") {
         print_version();
         return 0;
@@ -199,23 +182,12 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // Parse --backend flag anywhere in args
-    angara::BackendKind selected_backend = angara::BackendKind::C_TRANSPILER;
-    std::string resolved_target;  // Empty = host default
-    std::string resolved_sysroot; // Empty = no sysroot
+    // Parse --target and --sysroot flags
+    std::string resolved_target;
+    std::string resolved_sysroot;
 
-    for (size_t i = 0; i < args.size(); /* no increment */) {
-        if (args[i] == "--backend" && i + 1 < args.size()) {
-            if (args[i + 1] == "llvm") {
-                selected_backend = angara::BackendKind::LLVM;
-            } else if (args[i + 1] == "c") {
-                selected_backend = angara::BackendKind::C_TRANSPILER;
-            } else {
-                std::cerr << RED << "Unknown backend: " << args[i + 1] << " (use 'c' or 'llvm')" << RESET << "\n";
-                return 1;
-            }
-            args.erase(args.begin() + i, args.begin() + i + 2);
-        } else if (args[i] == "--target" && i + 1 < args.size()) {
+    for (size_t i = 0; i < args.size(); ) {
+        if (args[i] == "--target" && i + 1 < args.size()) {
             resolved_target = resolve_target_triple(args[i + 1]);
             args.erase(args.begin() + i, args.begin() + i + 2);
         } else if (args[i] == "--sysroot" && i + 1 < args.size()) {
@@ -226,87 +198,53 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Warn if --target used with C transpiler (OOL)
-    if (!resolved_target.empty() && selected_backend == angara::BackendKind::C_TRANSPILER) {
-        std::cerr << YELLOW << "Warning: --target is not supported by the C transpiler "
-                  << "(out of scope). Flag ignored." << RESET << "\n";
-        resolved_target.clear();
-    }
-
-    if (!resolved_sysroot.empty() && selected_backend == angara::BackendKind::C_TRANSPILER) {
-        std::cerr << YELLOW << "Warning: --sysroot is not supported by the C transpiler "
-                  << "(out of scope). Flag ignored." << RESET << "\n";
-        resolved_sysroot.clear();
-    }
-
-    // 4. Handle Explicit Path Build
+    // Handle Explicit Path Build
     if (cmd == "--path") {
         if (args.size() < 2) {
             std::cerr << RED << "Error: --path requires a filename." << RESET << "\n";
             return 1;
         }
         angara::BuildSystem builder;
-        builder.set_backend(selected_backend);
         if (!resolved_target.empty()) builder.set_target(resolved_target);
         if (!resolved_sysroot.empty()) builder.set_sysroot(resolved_sysroot);
         return builder.build(args[1]) ? 0 : 1;
     }
 
-    // 5. Handle Legacy/Single File Compilation
-    // If it ends in .an, treat it as a source file.
+    // Handle Single File Compilation
     if (cmd.length() >= 3 && cmd.substr(cmd.length() - 3) == ".an") {
         std::string base_name = angara::CompilerDriver::get_base_name(cmd);
 
-        // --- Create an on-the-fly ProjectConfig ---
         angara::ProjectConfig legacy_config;
         legacy_config.name = base_name;
         legacy_config.entry_point = cmd;
-        legacy_config.path = "."; // Current directory
+        legacy_config.path = ".";
         legacy_config.type = angara::ProjectType::APP;
 
         angara::CompilerDriver driver;
-        driver.set_backend(selected_backend);
         if (!resolved_target.empty()) driver.set_target(resolved_target);
         if (!resolved_sysroot.empty()) driver.set_sysroot(resolved_sysroot);
-        // Use the standard installation paths
         driver.set_paths("/opt/angara/src/modules", "/opt/angara/modules");
 
         if (driver.compile(legacy_config, cmd)) {
-            bool use_llvm = (selected_backend == angara::BackendKind::LLVM);
-            std::cout << GREEN << (use_llvm ? "LLVM codegen complete." : "Transpilation complete.")
-                      << RESET << " Linking..." << std::endl;
+            std::cout << GREEN << "LLVM codegen complete." << RESET << " Linking..." << std::endl;
 
-            // 1. Build the Link Command
+            // Build the link command (LLVM backend is self-contained)
             std::stringstream cmd_link;
             cmd_link << "clang";
-            // Cross-compilation: pass target and sysroot to linker
             if (!resolved_target.empty()) cmd_link << " -target " << resolved_target;
             if (!resolved_sysroot.empty()) cmd_link << " --sysroot " << resolved_sysroot;
             cmd_link << " -o " << base_name;
 
-            if (use_llvm) {
-                // LLVM backend: self-contained, no C runtime needed
-                for (const auto& o_file : driver.get_generated_object_files()) {
-                    cmd_link << " " << o_file;
-                }
-            } else {
-                // 2. Add all generated C files
-                for (const auto& c_file : driver.get_generated_c_files()) {
-                    cmd_link << " " << c_file;
-                }
-                // 3. Add Runtime implementation
-                cmd_link << " /opt/angara/src/runtime/angara_runtime.c";
+            // Add all generated object files
+            for (const auto& o_file : driver.get_generated_object_files()) {
+                cmd_link << " " << o_file;
             }
 
-            // 4. Set Search Paths
-            cmd_link << " -I. -I/opt/angara/src/runtime -I/opt/angara/src/modules";
-
-            // 5. Add Native Dependencies (modules are named <name>.dylib, not lib<name>.dylib)
+            // Add native module dependencies
             std::set<std::string> libs;
             for (const auto& lib : driver.get_native_libs_linked()) {
                 libs.insert(lib);
             }
-            // Resolve module paths: try local build first, then installed
             for (const auto& lib : libs) {
                 std::string mod_path;
                 std::string local_mod = (fs::path("../build/modules") / (lib + ".dylib")).string();
@@ -316,28 +254,21 @@ int main(int argc, char* argv[]) {
                 } else if (fs::exists(installed_mod)) {
                     mod_path = installed_mod;
                 } else {
-                    // Fallback to -l flag
                     cmd_link << " -l" << lib;
                     continue;
                 }
                 cmd_link << " " << mod_path;
             }
 
-            // 6. Standard Flags
+            // Standard flags
             cmd_link << " -pthread -lm -O2 -Wno-return-type";
             cmd_link << " -Wl,-rpath,/opt/angara/modules";
 
-            // 7. Execute Linker
             int res = system(cmd_link.str().c_str());
             if (res == 0) {
                 std::cout << BOLD << GREEN << "Successfully built: " << base_name << RESET << "\n";
 
-                // Cleanup generated artifacts
-                for (const auto& c_file : driver.get_generated_c_files()) {
-                    remove(c_file.c_str());
-                    std::string h_file = c_file.substr(0, c_file.find_last_of('.')) + ".h";
-                    remove(h_file.c_str());
-                }
+                // Cleanup generated object files
                 for (const auto& o_file : driver.get_generated_object_files()) {
                     remove(o_file.c_str());
                 }
@@ -350,7 +281,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // 6. Unknown Command
+    // Unknown Command
     std::cerr << RED << "Unknown argument: " << cmd << RESET << "\n";
     print_help();
     return 1;

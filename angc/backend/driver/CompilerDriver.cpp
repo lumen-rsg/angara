@@ -7,17 +7,14 @@
 #include "Lexer.h"
 #include "Parser.h"
 #include "TypeChecker.h"
-#include "CTranspiler.h"
 #include "LLVMBackend.h"
+#include "AngaraABI.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
 
 #include <dlfcn.h> // For dlopen, dlsym
 #include <filesystem>
-#include <thread>
-
-#include "../../runtime/angara_runtime.h"
 
 const char* const RESET = "\033[0m";
 const char* const BOLD = "\033[1m";
@@ -153,10 +150,6 @@ namespace angara {
         m_native_module_path = std::move(native_lib_path);
     }
 
-    const std::set<std::string>& CompilerDriver::get_generated_c_files() const {
-        return m_generated_c_files;
-    }
-
     const std::set<std::string>& CompilerDriver::get_generated_object_files() const {
         return m_generated_object_files;
     }
@@ -208,8 +201,6 @@ namespace angara {
         m_total_modules = 1;
         m_module_cache.clear();
         m_compilation_stack.clear();
-        m_generated_c_files.clear();
-        m_generated_h_files.clear();
         m_generated_object_files.clear();
         m_native_lib_names.clear();
 
@@ -221,8 +212,8 @@ namespace angara {
             return false;
         }
 
-        // 2. We are done. The C files have been written to disk by the CTranspiler.
-        // The BuildSystem will now call get_generated_c_files() and run the linker.
+        // 2. We are done. The LLVM object files have been written to disk.
+        // The BuildSystem will now call get_generated_object_files() and run the linker.
         return true;
     }
 
@@ -338,8 +329,8 @@ namespace angara {
     }
 
     if (found_path.empty()) {
-        // LLVM backend: handle intrinsic modules that don't need a physical file
-        if (m_backend == BackendKind::LLVM && (path_or_id == "io")) {
+        // Handle intrinsic modules that don't need a physical file
+        if (path_or_id == "io") {
             auto result = std::make_shared<ModuleType>(path_or_id);
             result->is_native = true;
             auto nilType = std::make_shared<NilType>();
@@ -419,8 +410,8 @@ namespace angara {
     m_compilation_stack.push_back(found_path);
     std::shared_ptr<ModuleType> result = nullptr;
 
-    // LLVM backend: handle intrinsic modules without dlopen
-    if (m_backend == BackendKind::LLVM && module_name == "io") {
+    // Handle intrinsic modules without dlopen
+    if (module_name == "io") {
         result = std::make_shared<ModuleType>("io");
         result->is_native = true;
         auto nilType = std::make_shared<NilType>();
@@ -476,39 +467,17 @@ namespace angara {
         auto mod = typeChecker.getModuleType();
         m_angara_module_names.push_back(module_name);
 
-        if (m_backend == BackendKind::LLVM) {
-            // --- LLVM Backend ---
-            LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple);
-            if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
-                m_had_error = true;
-                return nullptr;
-            }
-            m_generated_object_files.insert(llvmBackend.get_object_file_path());
-            m_modules_compiled++;
-            print_progress("Done!");
-            std::cout << "\r\033[K" << std::flush;
-            return mod;
+        // --- LLVM Backend ---
+        LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple);
+        if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
+            m_had_error = true;
+            return nullptr;
         }
-
-        // --- C Transpiler Backend (default) ---
-        CTranspiler transpiler(typeChecker, errorHandler);
-        auto [h_code, c_code] = transpiler.generate(statements, mod, m_angara_module_names);
-
-        if (!errorHandler.hadError()) {
-            std::string h_file = module_name + ".h";
-            std::string c_file = module_name + ".c";
-
-            std::ofstream out_h(h_file); out_h << h_code;
-            std::ofstream out_c(c_file); out_c << c_code;
-
-            m_generated_h_files.insert(h_file);
-            m_generated_c_files.insert(c_file);
-
-            return mod;
-        }
-
-        m_had_error = true;
-        return nullptr;
+        m_generated_object_files.insert(llvmBackend.get_object_file_path());
+        m_modules_compiled++;
+        print_progress("Done!");
+        std::cout << "\r\033[K" << std::flush;
+        return mod;
     }
 
     std::shared_ptr<ModuleType> CompilerDriver::loadNativeModule(const std::string& path, const Token& import_token) {
