@@ -25,7 +25,8 @@ namespace angara {
     class LLVMBackend {
     public:
         LLVMBackend(TypeChecker& type_checker, ErrorHandler& errorHandler,
-                    const std::string& target_triple = "");
+                    const std::string& target_triple = "",
+                    bool freestanding = false);
         ~LLVMBackend(); // Releases LLVM objects (cleanup at process exit)
 
         bool generate(const std::vector<std::shared_ptr<Stmt>>& statements,
@@ -140,6 +141,9 @@ namespace angara {
         std::map<std::string, std::string> constructorLookup;
         // Maps method name → mangled function name (for dispatch)
         std::map<std::string, std::string> methodLookup;
+
+        // Freestanding mode
+        bool m_freestanding = false;
 
         // Output paths
         std::string objPath;

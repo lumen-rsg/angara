@@ -16,8 +16,8 @@ namespace angara {
 // Constructor
 // ============================================================================
 
-RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>& builder)
-    : m_ctx(context), m_module(module), m_builder(builder) {}
+RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>& builder, bool freestanding)
+    : m_ctx(context), m_module(module), m_builder(builder), m_freestanding(freestanding) {}
 
 // ============================================================================
 // Top-level: generate everything
@@ -25,6 +25,15 @@ RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>
 
 void RuntimeBuilder::generateRuntime() {
     generateTypes();
+
+    if (m_freestanding) {
+        // Freestanding mode: minimal runtime — no libc, no heap, no exceptions.
+        // Only generate stubs for functions that may be referenced but are never
+        // actually called in a correctly-written bare-metal program.
+        generateFreestandingStubs();
+        return;
+    }
+
     declareCLibFunctions();
     generateMemoryManagement();  // incref defined first, then free_object, then decref
     generateStringOps();
@@ -238,6 +247,88 @@ void RuntimeBuilder::declareCLibFunctions() {
     // memset(void*, int, size_t)
     FunctionType* memset_ty = FunctionType::get(i8_ptr, {i8_ptr, i32_ty, i64_ty}, false);
     m_module.getOrInsertFunction("memset", memset_ty);
+
+    // --- Freestanding: provide built-in implementations of key functions ---
+    if (m_freestanding) {
+        // __ang_builtin_memcpy(i8* dst, i8* src, i64 n) -> i8*
+        {
+            auto* fn_ty = FunctionType::get(i8_ptr, {i8_ptr, i8_ptr, i64_ty}, false);
+            auto* fn = createRuntimeFunc("__ang_builtin_memcpy", fn_ty);
+            auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+            IRBuilder<> b(entry);
+            auto* dst = fn->arg_begin();
+            auto* src = fn->arg_begin() + 1;
+            auto* n = fn->arg_begin() + 2;
+            // Use LLVM's intrinsic memcpy (no libc needed)
+            auto* size = b.CreateSExt(n, Type::getInt64Ty(m_ctx));
+            b.CreateMemCpy(dst, Align(1), src, Align(1), size);
+            b.CreateRet(dst);
+        }
+        // __ang_builtin_strlen(i8* s) -> i64
+        {
+            auto* fn_ty = FunctionType::get(i64_ty, {i8_ptr}, false);
+            auto* fn = createRuntimeFunc("__ang_builtin_strlen", fn_ty);
+            auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+            auto* loop_bb = BasicBlock::Create(m_ctx, "loop", fn);
+            auto* body_bb = BasicBlock::Create(m_ctx, "body", fn);
+            auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+            IRBuilder<> b(entry);
+            auto* s = fn->arg_begin();
+            b.CreateBr(loop_bb);
+            IRBuilder<> bl(loop_bb);
+            auto* i_phi = bl.CreatePHI(i64_ty, 2, "i");
+            i_phi->addIncoming(ConstantInt::get(i64_ty, 0), entry);
+            auto* c = bl.CreateLoad(i8_ty, bl.CreateGEP(i8_ty, s, {i_phi}), "c");
+            bl.CreateCondBr(bl.CreateICmpEQ(c, ConstantInt::get(i8_ty, 0)), done_bb, body_bb);
+            IRBuilder<> bb(body_bb);
+            auto* next = bb.CreateAdd(i_phi, ConstantInt::get(i64_ty, 1));
+            bb.CreateBr(loop_bb);
+            i_phi->addIncoming(next, body_bb);
+            IRBuilder<> bd(done_bb);
+            bd.CreateRet(i_phi);
+        }
+        // __ang_builtin_strcmp(i8* a, i8* b) -> i32
+        {
+            auto* fn_ty = FunctionType::get(i32_ty, {i8_ptr, i8_ptr}, false);
+            auto* fn = createRuntimeFunc("__ang_builtin_strcmp", fn_ty);
+            auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+            auto* loop_bb = BasicBlock::Create(m_ctx, "loop", fn);
+            auto* diff_bb = BasicBlock::Create(m_ctx, "diff", fn);
+            IRBuilder<> b(entry);
+            b.CreateBr(loop_bb);
+            IRBuilder<> bl(loop_bb);
+            auto* i_phi = bl.CreatePHI(i64_ty, 2, "i");
+            i_phi->addIncoming(ConstantInt::get(i64_ty, 0), entry);
+            auto* a = fn->arg_begin();
+            auto* b_arg = fn->arg_begin() + 1;
+            auto* ca = bl.CreateLoad(i8_ty, bl.CreateGEP(i8_ty, a, {i_phi}));
+            auto* cb = bl.CreateLoad(i8_ty, bl.CreateGEP(i8_ty, b_arg, {i_phi}));
+            auto* both_null = bl.CreateAnd(
+                bl.CreateICmpEQ(ca, ConstantInt::get(i8_ty, 0)),
+                bl.CreateICmpEQ(cb, ConstantInt::get(i8_ty, 0)));
+            auto* differ = bl.CreateICmpNE(ca, cb);
+            auto* cont = bl.CreateAnd(bl.CreateNot(both_null), bl.CreateNot(differ));
+            auto* next = bl.CreateAdd(i_phi, ConstantInt::get(i64_ty, 1));
+            i_phi->addIncoming(next, loop_bb);
+            bl.CreateCondBr(cont, loop_bb, diff_bb);
+            IRBuilder<> bd(diff_bb);
+            auto* sa = bd.CreateSExt(ca, i32_ty);
+            auto* sb = bd.CreateSExt(cb, i32_ty);
+            bd.CreateRet(bd.CreateSub(sa, sb));
+        }
+        // __ang_builtin_memset(i8* s, i32 c, i64 n) -> i8*
+        {
+            auto* fn_ty = FunctionType::get(i8_ptr, {i8_ptr, i32_ty, i64_ty}, false);
+            auto* fn = createRuntimeFunc("__ang_builtin_memset", fn_ty);
+            auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+            IRBuilder<> b(entry);
+            auto* s = fn->arg_begin();
+            auto* c = fn->arg_begin() + 1;
+            auto* n = fn->arg_begin() + 2;
+            b.CreateMemSet(s, b.CreateTrunc(c, i8_ty), b.CreateSExt(n, i64_ty), Align(1));
+            b.CreateRet(s);
+        }
+    }
 }
 
 // ============================================================================
@@ -2410,5 +2501,76 @@ void RuntimeBuilder::generateIOOps() {
         bd.CreateRet(result);
     }
 }
+
+void RuntimeBuilder::generateFreestandingStubs() {
+    auto* void_ty = Type::getVoidTy(m_ctx);
+    auto* i32_ty = Type::getInt32Ty(m_ctx);
+    auto* i64_ty = Type::getInt64Ty(m_ctx);
+    auto* obj_ty = m_angara_obj_type;
+    auto make_nil = [&](IRBuilder<>& b) -> Value* {
+        Value* v = UndefValue::get(obj_ty);
+        v = b.CreateInsertValue(v, ConstantInt::get(i32_ty, TAG_NIL), {0});
+        v = b.CreateInsertValue(v, ConstantInt::get(i64_ty, 0), {1});
+        return v;
+    };
+    auto stub_void = [&](const std::string& name, FunctionType* ty, FunctionCallee& fc) {
+        auto* fn = createRuntimeFunc(name, ty); fc = FunctionCallee(fn);
+        auto* e = BasicBlock::Create(m_ctx, "entry", fn); IRBuilder<>(e).CreateRetVoid();
+    };
+    auto stub_nil = [&](const std::string& name, FunctionType* ty, FunctionCallee& fc) {
+        auto* fn = createRuntimeFunc(name, ty); fc = FunctionCallee(fn);
+        auto* e = BasicBlock::Create(m_ctx, "entry", fn); IRBuilder<> b(e); b.CreateRet(make_nil(b));
+    };
+    // Memory management — no-ops (no heap)
+    stub_void("__ang_decref", FunctionType::get(void_ty, {obj_ty}, false), m_fn_decref);
+    stub_void("__ang_incref", FunctionType::get(void_ty, {obj_ty}, false), m_fn_incref);
+    // Equality — simple payload compare
+    {
+        auto* fn = createRuntimeFunc("__ang_equals", FunctionType::get(obj_ty, {obj_ty, obj_ty}, false));
+        m_fn_equals = FunctionCallee(fn);
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+        auto* pa = b.CreateExtractValue(fn->arg_begin(), {1});
+        auto* pb = b.CreateExtractValue(fn->arg_begin() + 1, {1});
+        auto* eq = b.CreateICmpEQ(pa, pb);
+        auto* ext = b.CreateZExt(eq, i64_ty);
+        Value* r = UndefValue::get(obj_ty);
+        r = b.CreateInsertValue(r, ConstantInt::get(i32_ty, TAG_BOOL), {0});
+        r = b.CreateInsertValue(r, ext, {1});
+        b.CreateRet(r);
+    }
+    // Exception stubs
+    stub_nil("__ang_exception_new", FunctionType::get(obj_ty, {obj_ty}, false), m_fn_exception_new);
+    stub_void("__ang_throw", FunctionType::get(void_ty, {obj_ty}, false), m_fn_throw);
+    {
+        auto* fn = createRuntimeFunc("__ang_try_begin", FunctionType::get(i32_ty, {PointerType::get(m_ctx, 0)}, false));
+        m_fn_try_begin = FunctionCallee(fn);
+        auto* e = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<>(e).CreateRet(ConstantInt::get(i32_ty, 0));
+    }
+    stub_void("__ang_try_end", FunctionType::get(void_ty, {}, false), m_fn_try_end);
+    // String stubs
+    stub_nil("__ang_string_from_c", FunctionType::get(obj_ty, {PointerType::get(m_ctx, 0)}, false), m_fn_string_from_c);
+    stub_nil("__ang_string_concat", FunctionType::get(obj_ty, {obj_ty, obj_ty}, false), m_fn_string_concat);
+    stub_nil("__ang_to_string", FunctionType::get(obj_ty, {obj_ty}, false), m_fn_to_string);
+    // Record stubs
+    stub_nil("__ang_record_new", FunctionType::get(obj_ty, {}, false), m_fn_record_new);
+    stub_nil("__ang_record_get", FunctionType::get(obj_ty, {obj_ty, PointerType::get(m_ctx, 0)}, false), m_fn_record_get);
+    stub_void("__ang_record_set", FunctionType::get(void_ty, {obj_ty, PointerType::get(m_ctx, 0), obj_ty}, false), m_fn_record_set);
+    // Len
+    stub_nil("__ang_len", FunctionType::get(obj_ty, {obj_ty}, false), m_fn_len);
+    // IO stubs
+    stub_void("__ang_io_print", FunctionType::get(void_ty, {obj_ty, obj_ty}, false), m_fn_io_print);
+    stub_void("__ang_io_println", FunctionType::get(void_ty, {obj_ty, obj_ty}, false), m_fn_io_println);
+    stub_void("__ang_io_write", FunctionType::get(void_ty, {obj_ty, obj_ty}, false), m_fn_io_write);
+    stub_void("__ang_io_flush", FunctionType::get(void_ty, {obj_ty}, false), m_fn_io_flush);
+    stub_nil("__ang_io_read_line", FunctionType::get(obj_ty, {}, false), m_fn_io_read_line);
+    stub_nil("__ang_io_read_all", FunctionType::get(obj_ty, {}, false), m_fn_io_read_all);
+    // List stubs
+    stub_nil("__ang_list_new", FunctionType::get(obj_ty, {}, false), m_fn_list_new);
+    stub_nil("__ang_list_get", FunctionType::get(obj_ty, {obj_ty, obj_ty}, false), m_fn_list_get);
+    stub_void("__ang_list_push", FunctionType::get(void_ty, {obj_ty, obj_ty}, false), m_fn_list_push);
+}
+
 
 } // namespace angara

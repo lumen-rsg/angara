@@ -20,6 +20,8 @@ namespace angara {
         ProjectType type;
         std::string entry_point; // e.g., "main.an"
         std::vector<std::string> dependencies; // Native modules: "rmq", "json"
+        bool freestanding = false;  // -ffreestanding: no libc dependency in runtime
+        bool nostdlib = false;      // -nostdlib: don't link standard libraries
     };
 
     struct WorkspaceConfig {

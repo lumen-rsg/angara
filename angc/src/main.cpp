@@ -46,6 +46,8 @@ void print_help() {
     std::cout << "  --dump-ast                  Debug: Print Abstract Syntax Tree\n";
     std::cout << "  --target <triple>           Cross-compile for target triple\n";
     std::cout << "  --sysroot <path>            Set sysroot for cross-compilation linker\n";
+    std::cout << "  --freestanding              Freestanding mode (no libc, _start entry, bare-metal)\n";
+    std::cout << "  --nostdlib                  Don't link standard libraries (libc, libm, pthread)\n";
     std::cout << std::endl;
 }
 
@@ -153,6 +155,8 @@ int main(int argc, char* argv[]) {
     std::string resolved_target;
     std::string resolved_sysroot;
     bool dump_ast = false;
+    bool flag_freestanding = false;
+    bool flag_nostdlib = false;
 
     for (size_t i = 0; i < args.size(); ) {
         if (args[i] == "--target" && i + 1 < args.size()) {
@@ -163,6 +167,12 @@ int main(int argc, char* argv[]) {
             args.erase(args.begin() + i, args.begin() + i + 2);
         } else if (args[i] == "--dump-ast") {
             dump_ast = true;
+            args.erase(args.begin() + i);
+        } else if (args[i] == "--freestanding") {
+            flag_freestanding = true;
+            args.erase(args.begin() + i);
+        } else if (args[i] == "--nostdlib") {
+            flag_nostdlib = true;
             args.erase(args.begin() + i);
         } else {
             ++i;
@@ -209,18 +219,24 @@ int main(int argc, char* argv[]) {
     }
 
     // Handle Single File Compilation
-    if (cmd.length() >= 3 && cmd.substr(cmd.length() - 3) == ".an") {
-        std::string base_name = angara::CompilerDriver::get_base_name(cmd);
+    // Check remaining args (after flag stripping) for .an file
+    if (!args.empty() && args[0].length() >= 3 && args[0].substr(args[0].length() - 3) == ".an") {
+        const std::string& source_file = args[0];
+        std::string base_name = angara::CompilerDriver::get_base_name(source_file);
 
         angara::ProjectConfig legacy_config;
         legacy_config.name = base_name;
-        legacy_config.entry_point = cmd;
+        legacy_config.entry_point = source_file;
         legacy_config.path = ".";
         legacy_config.type = angara::ProjectType::APP;
+        legacy_config.freestanding = flag_freestanding;
+        legacy_config.nostdlib = flag_nostdlib;
 
         angara::CompilerDriver driver;
         if (!resolved_target.empty()) driver.set_target(resolved_target);
         if (!resolved_sysroot.empty()) driver.set_sysroot(resolved_sysroot);
+        if (flag_freestanding) driver.set_freestanding(true);
+        if (flag_nostdlib) driver.set_nostdlib(true);
         // Search locally-built modules first, then installed ones
         std::string native_mod_path = "/opt/angara/modules";
         if (fs::exists("build/modules")) {
@@ -228,7 +244,7 @@ int main(int argc, char* argv[]) {
         }
         driver.set_paths("/opt/angara/src/modules", native_mod_path);
 
-        if (driver.compile(legacy_config, cmd)) {
+        if (driver.compile(legacy_config, source_file)) {
             std::cout << CLR_GREEN << "LLVM codegen complete." << CLR_RESET << " Linking..." << std::endl;
 
             // Build the link command (LLVM backend is self-contained)
@@ -263,9 +279,34 @@ int main(int argc, char* argv[]) {
                 cmd_link << " " << mod_path;
             }
 
+            // Freestanding: skip host linker, emit object file for bare-metal toolchain
+            if (flag_freestanding) {
+                std::string obj_output = base_name + ".o";
+                // If multiple object files, just keep them; rename if single
+                const auto& objs = driver.get_generated_object_files();
+                if (objs.size() == 1) {
+                    fs::rename(*objs.begin(), obj_output);
+                } else {
+                    obj_output = *objs.begin();
+                }
+                std::cout << CLR_BOLD << CLR_GREEN << "Freestanding object emitted: " << obj_output << CLR_RESET << "\n";
+                std::cout << CLR_CYAN << "  Link with your bare-metal toolchain, e.g.:" << CLR_RESET << "\n";
+                std::cout << CLR_GRAY << "  aarch64-unknown-none-elf-gcc -nostdlib -T linker.ld -o kernel "
+                          << obj_output << CLR_RESET << "\n";
+                return 0;
+            }
+
             // Standard flags
-            cmd_link << " -pthread -lm -O2 -Wno-return-type";
-            cmd_link << " -Wl,-rpath,/opt/angara/modules";
+            if (flag_nostdlib) {
+#if defined(__APPLE__)
+                cmd_link << " -nodefaultlibs -lSystem -O2 -Wno-return-type";
+#else
+                cmd_link << " -nostdlib -O2 -Wno-return-type";
+#endif
+            } else {
+                cmd_link << " -pthread -lm -O2 -Wno-return-type";
+                cmd_link << " -Wl,-rpath,/opt/angara/modules";
+            }
 
             int res = system(cmd_link.str().c_str());
             if (res == 0) {

@@ -27,6 +27,9 @@ namespace angara {
             case TokenType::STAR:
             case TokenType::SLASH:
             case TokenType::PERCENT:
+            case TokenType::AMPERSAND:
+            case TokenType::PIPE:
+            case TokenType::CARET:
                 if (isNumeric(left_type) && isNumeric(right_type)) {
                     // Warn about division/modulo by literal zero
                     if ((expr.op.type == TokenType::SLASH || expr.op.type == TokenType::PERCENT)) {

@@ -1,6 +1,7 @@
 // Angara LLVM Backend — Self-contained, no C runtime dependency
 #include "LLVMBackend.h"
 #include "RuntimeBuilder.h"
+#include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
@@ -24,8 +25,8 @@ LLVMBackend::~LLVMBackend() {
     (void)ctx.release();
 }
 
-LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple)
-    : m_type_checker(tc), m_errorHandler(eh) {
+LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding)
+    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding) {
     ctx = std::make_unique<llvm::LLVMContext>();
     mod = std::make_unique<llvm::Module>("angara_module", *ctx);
     builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
@@ -43,7 +44,7 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
         if (auto* tm = t->createTargetMachine(targetTriple,"generic","",opt,std::nullopt))
             mod->setDataLayout(tm->createDataLayout());
     }
-    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder);
+    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding);
     rt->generateRuntime();
     objType = rt->getAngaraObjType();
 }
@@ -223,7 +224,7 @@ llvm::Value* LLVMBackend::cgLiteral(const Literal& e) {
     if (tok.type == TokenType::NIL) return makeNil();
     if (tok.type == TokenType::TRUE) return makeBool(true);
     if (tok.type == TokenType::FALSE) return makeBool(false);
-    if (tok.type == TokenType::NUMBER_INT) return makeI64(std::stoll(tok.lexeme));
+    if (tok.type == TokenType::NUMBER_INT) return makeI64(std::stoll(tok.lexeme, nullptr, 0));
     if (tok.type == TokenType::NUMBER_FLOAT) return makeF64(std::stod(tok.lexeme));
     if (tok.type == TokenType::STRING) return makeStr(tok.lexeme);
     return makeNil();
@@ -262,6 +263,9 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
         case TokenType::STAR: return makeI64(builder->CreateMul(getI64(l),getI64(r)));
         case TokenType::SLASH: return makeI64(builder->CreateSDiv(getI64(l),getI64(r)));
         case TokenType::PERCENT: return makeI64(builder->CreateSRem(getI64(l),getI64(r)));
+        case TokenType::AMPERSAND: return makeI64(builder->CreateAnd(getI64(l),getI64(r)));
+        case TokenType::PIPE:      return makeI64(builder->CreateOr(getI64(l),getI64(r)));
+        case TokenType::CARET:     return makeI64(builder->CreateXor(getI64(l),getI64(r)));
         case TokenType::LESS: return makeBool(builder->CreateICmpSLT(getI64(l),getI64(r)));
         case TokenType::LESS_EQUAL: return makeBool(builder->CreateICmpSLE(getI64(l),getI64(r)));
         case TokenType::GREATER: return makeBool(builder->CreateICmpSGT(getI64(l),getI64(r)));
@@ -275,6 +279,7 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
 llvm::Value* LLVMBackend::cgUnary(const Unary& e) {
     auto* o=cg(e.right); if(!o) return makeNil();
     if (e.op.type==TokenType::MINUS) return makeI64(builder->CreateNeg(getI64(o)));
+    if (e.op.type==TokenType::TILDE) return makeI64(builder->CreateNot(getI64(o)));
     if (e.op.type==TokenType::BANG) return makeBool(builder->CreateNot(isTruthy(o)));
     return o;
 }
@@ -373,6 +378,61 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
     }
     if (auto* var = dynamic_cast<const VarExpr*>(expr.callee.get())) {
         std::string fn = var->name.lexeme;
+
+        // ====================================================================
+        // Intrinsics: inline volatile IR generation (no function call overhead)
+        // ====================================================================
+        // peek8/peek16/peek32/peek64 — volatile memory read
+        if (fn == "peek8" || fn == "peek16" || fn == "peek32" || fn == "peek64") {
+            if (!expr.arguments.empty()) {
+                auto* addr = getI64(cg(expr.arguments[0]));
+                auto* ptr = builder->CreateIntToPtr(addr, llvm::PointerType::get(*ctx, 0));
+                llvm::Type* loadTy = (fn == "peek8")  ? llvm::Type::getInt8Ty(*ctx)
+                                   : (fn == "peek16") ? llvm::Type::getInt16Ty(*ctx)
+                                   : (fn == "peek32") ? llvm::Type::getInt32Ty(*ctx)
+                                   :                      llvm::Type::getInt64Ty(*ctx);
+                auto* val = builder->CreateLoad(loadTy, ptr, "peek");
+                val->setVolatile(true);
+                return makeI64(builder->CreateZExt(val, llvm::Type::getInt64Ty(*ctx)));
+            }
+            return makeI64((int64_t)0);
+        }
+        // poke8/poke16/poke32/poke64 — volatile memory write
+        if (fn == "poke8" || fn == "poke16" || fn == "poke32" || fn == "poke64") {
+            if (expr.arguments.size() >= 2) {
+                auto* addr = getI64(cg(expr.arguments[0]));
+                auto* val  = getI64(cg(expr.arguments[1]));
+                auto* ptr = builder->CreateIntToPtr(addr, llvm::PointerType::get(*ctx, 0));
+                llvm::Type* storeTy = (fn == "poke8")  ? llvm::Type::getInt8Ty(*ctx)
+                                    : (fn == "poke16") ? llvm::Type::getInt16Ty(*ctx)
+                                    : (fn == "poke32") ? llvm::Type::getInt32Ty(*ctx)
+                                    :                      llvm::Type::getInt64Ty(*ctx);
+                auto* trunc = builder->CreateTrunc(val, storeTy, "poke_val");
+                auto* store = builder->CreateStore(trunc, ptr);
+                store->setVolatile(true);
+            }
+            return makeNil();
+        }
+        // halt — trap + infinite loop
+        if (fn == "halt") {
+            // Emit llvm.trap intrinsic, then an unreachable infinite loop
+            auto* trap = llvm::Intrinsic::getOrInsertDeclaration(mod.get(), llvm::Intrinsic::trap);
+            builder->CreateCall(trap, {});
+            auto* parentFn = builder->GetInsertBlock()->getParent();
+            auto* haltBB = llvm::BasicBlock::Create(*ctx, "halt", parentFn);
+            builder->CreateBr(haltBB);
+            builder->SetInsertPoint(haltBB);
+            builder->CreateBr(haltBB); // infinite loop — truly unreachable
+            // Return a dummy value for the dead code path
+            return makeNil();
+        }
+        // nop — no operation (emits llvm.donothing)
+        if (fn == "nop") {
+            auto* donothing = llvm::Intrinsic::getOrInsertDeclaration(mod.get(), llvm::Intrinsic::donothing);
+            builder->CreateCall(donothing, {});
+            return makeNil();
+        }
+
         if (fn=="string") {
             if (!expr.arguments.empty()) return callRt(rt->getFuncToString(),{cg(expr.arguments[0])});
             return makeStr("");

@@ -89,6 +89,12 @@ namespace angara {
                     else if (key == "dependencies") {
                         currentProject.dependencies = parse_list(value);
                     }
+                    else if (key == "freestanding") {
+                        currentProject.freestanding = (value == "true" || value == "1" || value == "yes");
+                    }
+                    else if (key == "nostdlib") {
+                        currentProject.nostdlib = (value == "true" || value == "1" || value == "yes");
+                    }
                 }
             }
         }

@@ -4,12 +4,12 @@
 #include "Parser.h"
 namespace angara {
 
-    // comparison → term ( ( ">" | ">=" | "<" | "<=" ) term )*
+    // comparison → bitwise ( ( ">" | ">=" | "<" | "<=" ) bitwise )*
     std::shared_ptr<Expr> Parser::comparison() {
-        std::shared_ptr<Expr> expr = term();
+        std::shared_ptr<Expr> expr = bitwise();
         while (match({TokenType::GREATER, TokenType::GREATER_EQUAL, TokenType::LESS, TokenType::LESS_EQUAL})) {
             Token op = previous();
-            std::shared_ptr<Expr> right = term();
+            std::shared_ptr<Expr> right = bitwise();
             expr = std::make_shared<Binary>(std::move(expr), std::move(op), std::move(right));
         }
         return expr;
