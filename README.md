@@ -476,7 +476,3 @@ Angara is distributed under the terms of the MIT license. See `LICENSE` for deta
 ---
 
 *Built with ❤️ by [Lumina Labs](https://github.com/lumen-rsg)*
-
-</div>
-</task_progress>
-</write_to_file>
