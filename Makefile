@@ -49,6 +49,16 @@ LWS_LIBS    := $(shell pkg-config --libs libwebsockets openssl 2>/dev/null)
 AMQP_CFLAGS := $(shell pkg-config --cflags librabbitmq 2>/dev/null)
 AMQP_LIBS   := $(shell pkg-config --libs librabbitmq 2>/dev/null)
 
+IMGUI_DIR   := vendor/imgui
+IMGUI_SRCS  := $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
+IMGUI_OBJS  := $(patsubst $(IMGUI_DIR)/%.cpp,build/obj/imgui/%.o,$(IMGUI_SRCS))
+GLFW_CFLAGS := $(shell pkg-config --cflags glfw3 2>/dev/null)
+GLFW_LIBS   := $(shell pkg-config --libs glfw3 2>/dev/null)
+IMGUI_FRAMEWORKS :=
+ifeq ($(UNAME_S),Darwin)
+    IMGUI_FRAMEWORKS := -framework OpenGL -framework Cocoa -framework IOKit -framework CoreVideo
+endif
+
 ifeq ($(UNAME_S),Darwin)
     ifeq ($(LWS_CFLAGS),)
         LWS_CFLAGS := -I$(BREW_DIR)/opt/libwebsockets/include -I$(BREW_DIR)/include
@@ -73,8 +83,11 @@ ANGC_OUT  := build/angc
 all: logo $(ANGC_OUT)
 	@printf "$(BOLD)$(GREEN)>>> Build Completed Successfully <<<$(RESET)\n"
 
-modules: logo $(MOD_OUTS)
+modules: logo $(MOD_OUTS) build/modules/imgui.$(SO_EXT)
 	@printf "$(BOLD)$(GREEN)>>> Modules Built Successfully <<<$(RESET)\n"
+
+imgui: logo build/modules/imgui.$(SO_EXT)
+	@printf "$(BOLD)$(GREEN)>>> ImGui Module Built Successfully <<<$(RESET)\n"
 
 logo:
 	@printf "\n"
@@ -117,6 +130,18 @@ build/obj/modules/json_bridge.o: modules/json_bridge.cpp
 	@printf "$(GREEN)[CX] $(RESET) %s (JSON Bridge)\n" "$<"
 	@$(CXX) $(CXXFLAGS) -Iangc-ls/vendor -c $< -o $@
 
+build/obj/modules/imgui.o: modules/imgui.cpp
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CX] $(RESET) %s (ImGui Module)\n" "$<"
+	@$(CXX) $(CXXFLAGS) -DGL_SILENCE_DEPRECATION=1 \
+		-I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends $(GLFW_CFLAGS) -c $< -o $@
+
+build/obj/imgui/%.o: $(IMGUI_DIR)/%.cpp
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CX] $(RESET) %s (Dear ImGui)\n" "$<"
+	@$(CXX) $(CXXFLAGS) -DGL_SILENCE_DEPRECATION=1 \
+		-I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends $(GLFW_CFLAGS) -c $< -o $@
+
 # --- Linkage Rules (Modules) ---
 build/modules/http.$(SO_EXT): build/obj/modules/http.o
 	@mkdir -p $(@D)
@@ -155,6 +180,13 @@ build/modules/json.$(SO_EXT): build/obj/modules/json.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@$(CXX) $^ -shared -o $@
+
+build/modules/imgui.$(SO_EXT): build/obj/modules/imgui.o $(IMGUI_OBJS)
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (ImGui+GLFW+OpenGL)\n" "$@"
+	@$(CXX) -shared $^ $(GLFW_LIBS) $(IMGUI_FRAMEWORKS) \
+		-Wl,-install_name,@rpath/libimgui.$(SO_EXT) \
+		-o $@
 
 build/modules/%.$(SO_EXT): build/obj/modules/%.o
 	@mkdir -p $(@D)

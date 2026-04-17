@@ -4,6 +4,7 @@
 namespace angara {
 
 void LLVMBackend::codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>& statements) {
+    codegenNativeModuleDecls(statements);
     for (const auto& stmt : statements) {
         if (auto s = std::dynamic_pointer_cast<const VarDeclStmt>(stmt))
             codegenGlobalVarDecl(*s);
@@ -430,6 +431,124 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
         builder->CreateBr(halt_bb); // infinite halt loop
     } else {
         builder->CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0));
+    }
+}
+
+// ============================================================================
+// Native Module Support — declare externals for attach'd native modules
+// ============================================================================
+void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stmt>>& statements) {
+    // Use m_module_resolutions from type checker, keyed by raw AttachStmt ptr.
+    // The shared_ptrs in 'statements' keep the objects alive.
+    for (const auto& stmt : statements) {
+        auto attach = std::dynamic_pointer_cast<const AttachStmt>(stmt);
+        if (!attach) continue;
+        auto res_it = m_type_checker.m_module_resolutions.find(attach.get());
+        if (res_it == m_type_checker.m_module_resolutions.end()) continue;
+        auto& mod_type = res_it->second;
+        if (!mod_type || !mod_type->is_native) continue;
+        const std::string& mod_name = mod_type->name;
+
+        // Declare exported functions and create wrappers
+        for (auto& [export_name, export_type] : mod_type->exports) {
+            auto func_type = std::dynamic_pointer_cast<FunctionType>(export_type);
+            if (!func_type) {
+                // It's a class type — register methods
+                auto class_type = std::dynamic_pointer_cast<ClassType>(export_type);
+                if (class_type && class_type->is_native) {
+                    for (auto& [method_name, method_info] : class_type->methods) {
+                        auto mft = std::dynamic_pointer_cast<FunctionType>(method_info.type);
+                        if (!mft) continue;
+                        int mpc = (int)mft->param_types.size();
+                        std::string nmn = "Angara_" + class_type->name + "_" + method_name;
+                        auto* nmt = llvm::FunctionType::get(objType,
+                            {llvm::Type::getInt32Ty(*ctx), llvm::PointerType::get(*ctx, 0)}, false);
+                        llvm::Function::Create(nmt, llvm::Function::ExternalLinkage, nmn, mod.get());
+
+                        std::string mwn = mangleMethod(class_type->name, method_name);
+                        std::vector<llvm::Type*> mwp(mpc, objType);
+                        auto* mwt = llvm::FunctionType::get(objType, mwp, false);
+                        auto* mw = llvm::Function::Create(mwt, llvm::Function::ExternalLinkage, mwn, mod.get());
+                        auto* me = llvm::BasicBlock::Create(*ctx, "entry", mw);
+                        auto* ms = builder->GetInsertBlock();
+                        builder->SetInsertPoint(me);
+                        if (mpc > 0) {
+                            auto* mat = llvm::ArrayType::get(objType, mpc);
+                            auto* ma = builder->CreateAlloca(mat);
+                            int mi = 0;
+                            for (auto& marg : mw->args()) {
+                                auto* ep2 = builder->CreateGEP(mat, ma,
+                                    {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
+                                     llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), mi++)});
+                                builder->CreateStore(&marg, ep2);
+                            }
+                            auto* nmf = mod->getFunction(nmn);
+                            auto* mr = builder->CreateCall(nmf, {
+                                llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), mpc),
+                                builder->CreateBitCast(ma, llvm::PointerType::get(*ctx, 0))});
+                            builder->CreateRet(mr);
+                        } else {
+                            auto* nmf = mod->getFunction(nmn);
+                            auto* mr = builder->CreateCall(nmf, {
+                                llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0),
+                                llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0))});
+                            builder->CreateRet(mr);
+                        }
+                        if (ms) builder->SetInsertPoint(ms);
+                        methodLookup[method_name] = mwn;
+                    }
+                }
+                continue;
+            }
+            int param_count = (int)func_type->param_types.size();
+
+            // Declare native: AngaraObject Angara_<mod>_<name>(i32, AngaraObject*)
+            std::string native_name = "Angara_" + mod_name + "_" + export_name;
+            auto* native_fn_type = llvm::FunctionType::get(objType,
+                {llvm::Type::getInt32Ty(*ctx), llvm::PointerType::get(*ctx, 0)}, false);
+            llvm::Function::Create(native_fn_type, llvm::Function::ExternalLinkage,
+                                    native_name, mod.get());
+
+            // Wrapper: __ang_<mod>_<name>(AngaraObject...) -> AngaraObject
+            std::string wrapper_name = mangle(mod_name, export_name);
+            std::vector<llvm::Type*> wpt(param_count, objType);
+            auto* wft = llvm::FunctionType::get(objType, wpt, false);
+            auto* wf = llvm::Function::Create(wft, llvm::Function::ExternalLinkage, wrapper_name, mod.get());
+            auto* we = llvm::BasicBlock::Create(*ctx, "entry", wf);
+            auto* sb = builder->GetInsertBlock();
+            builder->SetInsertPoint(we);
+            if (param_count > 0) {
+                auto* at = llvm::ArrayType::get(objType, param_count);
+                auto* aa = builder->CreateAlloca(at);
+                int ai = 0;
+                for (auto& arg : wf->args()) {
+                    auto* ep = builder->CreateGEP(at, aa,
+                        {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
+                         llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), ai++)});
+                    builder->CreateStore(&arg, ep);
+                }
+                auto* nf = mod->getFunction(native_name);
+                auto* cr = builder->CreateCall(nf, {
+                    llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), param_count),
+                    builder->CreateBitCast(aa, llvm::PointerType::get(*ctx, 0))});
+                builder->CreateRet(cr);
+            } else {
+                auto* nf = mod->getFunction(native_name);
+                auto* cr = builder->CreateCall(nf, {
+                    llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0),
+                    llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0))});
+                builder->CreateRet(cr);
+            }
+            if (sb) builder->SetInsertPoint(sb);
+
+            // Register as constructor if returns native class instance
+            if (func_type->return_type) {
+                if (auto it = std::dynamic_pointer_cast<InstanceType>(func_type->return_type)) {
+                    auto ct = it->class_type;
+                    if (ct && ct->is_native) constructorLookup[export_name] = wrapper_name;
+                }
+            }
+        }
     }
 }
 

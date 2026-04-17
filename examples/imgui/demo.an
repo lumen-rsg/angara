@@ -1,0 +1,90 @@
+// demo.an — Angara Dear ImGui Demo Application
+//
+// Demonstrates the core ImGui widgets available through the Angara imgui module.
+//
+// Build:  make
+// Run:    ./demo
+//
+// Dependencies: Dear ImGui, GLFW3, OpenGL3
+// The Makefile handles downloading and compiling ImGui from source.
+
+attach imgui;
+
+// Main entry point — creates an ImGui context and runs a demo loop
+func main() -> i64 {
+    // Create a windowed ImGui context with a title and dimensions
+    let ctx = imgui.Context("Angara ImGui Demo", 1280, 720);
+    ctx.style_colors_dark();
+
+    // Mutable state for our demo widgets
+    let counter as i64 = 0;
+    let show_demo as bool = true;
+    let checked as bool = false;
+    let slider_val as f64 = 0.5;
+    let name as string = "Angara";
+    let r as f64 = 1.0;
+    let g as f64 = 0.5;
+    let b as f64 = 0.2;
+
+    // Main application loop
+    while (!ctx.window_should_close()) {
+        ctx.poll_events();
+        ctx.new_frame();
+
+        // --- Demo Window ---
+        if (ctx.begin("Hello, Angara!")) {
+            ctx.text("Welcome to the Angara ImGui demo!");
+            ctx.separator();
+            ctx.spacing();
+
+            // Button widget — returns true when clicked
+            if (ctx.button("Click Me!")) {
+                counter = counter + 1;
+            }
+
+            // Display counter using text
+            ctx.same_line();
+            ctx.text("Counter: " + string(counter));
+            ctx.spacing();
+
+            // Checkbox — toggles a boolean
+            let new_checked = ctx.checkbox("Enable Feature", checked);
+            if (new_checked != checked) {
+                checked = new_checked;
+            }
+
+            ctx.spacing();
+
+            // Slider — returns the new float value
+            let new_slider = ctx.slider_float("Speed", slider_val, 0.0, 2.0);
+            slider_val = new_slider;
+
+            // Integer slider
+            ctx.spacing();
+
+            ctx.spacing();
+
+            // Text input — returns the new string value
+            let new_name = ctx.input_text("Name", name);
+            name = new_name;
+
+            ctx.spacing();
+
+            // Color picker — returns a record with r, g, b fields
+            let color = ctx.color_edit("Color", r, g, b);
+
+            ctx.spacing();
+            ctx.separator();
+            ctx.text("FPS: " + string(ctx.get_fps()));
+        }
+        ctx.end();
+
+        // Render the frame
+        ctx.render();
+        ctx.swap_buffers();
+    }
+
+    // Clean up
+    ctx.destroy();
+    return 0;
+}
