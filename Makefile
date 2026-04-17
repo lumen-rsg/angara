@@ -48,6 +48,8 @@ LWS_CFLAGS  := $(shell pkg-config --cflags libwebsockets openssl 2>/dev/null)
 LWS_LIBS    := $(shell pkg-config --libs libwebsockets openssl 2>/dev/null)
 AMQP_CFLAGS := $(shell pkg-config --cflags librabbitmq 2>/dev/null)
 AMQP_LIBS   := $(shell pkg-config --libs librabbitmq 2>/dev/null)
+MQTT_CFLAGS := $(shell pkg-config --cflags libmosquitto libcjson 2>/dev/null)
+MQTT_LIBS   := $(shell pkg-config --libs libmosquitto libcjson 2>/dev/null)
 
 IMGUI_DIR   := vendor/imgui
 IMGUI_SRCS  := $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
@@ -125,6 +127,16 @@ build/obj/modules/amqp.o: modules/amqp.c
 	@printf "$(GREEN)[CC]  $(RESET) %s (AMQP)\n" "$<"
 	@$(CC) $(CFLAGS) $(AMQP_CFLAGS) -c $< -o $@
 
+build/obj/modules/mqtt.o: modules/mqtt.c
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CC]  $(RESET) %s (MQTT)\n" "$<"
+	@$(CC) $(CFLAGS) $(MQTT_CFLAGS) -c $< -o $@
+
+build/obj/modules/matter.o: modules/matter.c
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CC]  $(RESET) %s (MATTER/CURL)\n" "$<"
+	@$(CC) $(CFLAGS) $(CURL_CFLAGS) -c $< -o $@
+
 build/obj/modules/json_bridge.o: modules/json_bridge.cpp
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CX] $(RESET) %s (JSON Bridge)\n" "$<"
@@ -166,6 +178,16 @@ build/modules/amqp.$(SO_EXT): build/obj/modules/amqp.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@$(CC) $< -shared $(AMQP_LIBS) -o $@
+
+build/modules/mqtt.$(SO_EXT): build/obj/modules/mqtt.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
+	@$(CC) $< -shared $(MQTT_LIBS) -o $@
+
+build/modules/matter.$(SO_EXT): build/obj/modules/matter.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
+	@$(CC) $< -shared $(CURL_LIBS) -o $@
 
 build/modules/math.$(SO_EXT): build/obj/modules/math.o
 	@mkdir -p $(@D)

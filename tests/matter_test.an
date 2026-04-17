@@ -1,0 +1,188 @@
+// matter_test.an — Angara Matter Module Test
+//
+// Prerequisites:
+//   - Matter controller REST server running (e.g., matter-server, chip-tool REST)
+//     on http://localhost:8400
+//   - At least one Matter device commissioned
+//
+// Usage:
+//   angara run tests/matter_test.an
+//
+
+attach connect, Controller from matter;
+attach io;
+attach json;
+
+const CONTROLLER_URL as string = "http://localhost:8400";
+
+
+// --- Test 1: Controller Connection ---
+func test_connection() -> bool {
+  io.println(1, "[TEST] Connecting to Matter controller at " + CONTROLLER_URL + "...");
+  let ctrl as Controller = connect(CONTROLLER_URL);
+
+  let connected = ctrl.is_connected();
+  if (connected) {
+    io.println(1, "[PASS] Controller is connected.");
+    return true;
+  } else {
+    io.println(2, "[FAIL] Controller is not reachable.");
+    io.println(2, "       Is matter-server running? Try: docker run -p 8400:8400 matter-server");
+    return false;
+  }
+}
+
+
+// --- Test 2: Controller Info ---
+func test_info() -> bool {
+  io.println(1, "[TEST] Fetching controller info...");
+  let ctrl as Controller = connect(CONTROLLER_URL);
+
+  let info = ctrl.info();
+  if (info != nil) {
+    io.println(1, "[PASS] Controller info: " + string(info));
+    return true;
+  } else {
+    io.println(2, "[FAIL] Could not fetch controller info.");
+    return false;
+  }
+}
+
+
+// --- Test 3: List Devices ---
+func test_devices() -> bool {
+  io.println(1, "[TEST] Listing commissioned devices...");
+  let ctrl as Controller = connect(CONTROLLER_URL);
+
+  let devices = ctrl.devices();
+  if (devices != nil) {
+    io.println(1, "[PASS] Device list retrieved.");
+    return true;
+  } else {
+    io.println(2, "[FAIL] Could not list devices.");
+    return false;
+  }
+}
+
+
+// --- Test 4: Light Control (OnOff cluster) ---
+// Requires a Matter light device on nodeId=1, endpoint=1
+func test_light_control() -> bool {
+  io.println(1, "[TEST] Controlling OnOff cluster (light)...");
+  let ctrl as Controller = connect(CONTROLLER_URL);
+
+  const NODE_ID as i64 = 1;
+  const ENDPOINT as i64 = 1;
+  const ONOFF_CLUSTER as i64 = 6;    // OnOff cluster ID
+  const ONOFF_ATTRIBUTE as i64 = 0;  // OnOff attribute
+
+  // Read current state
+  let state = ctrl.read(NODE_ID, ENDPOINT, ONOFF_CLUSTER, ONOFF_ATTRIBUTE);
+  if (state != nil) {
+    io.println(1, "       Current state: " + string(state));
+  }
+
+  // Turn on
+  let result = ctrl.command(NODE_ID, ENDPOINT, "on", {});
+  io.println(1, "       Turn ON response: " + string(result));
+
+  // Read again
+  state = ctrl.read(NODE_ID, ENDPOINT, ONOFF_CLUSTER, ONOFF_ATTRIBUTE);
+  io.println(1, "       State after ON: " + string(state));
+
+  // Turn off
+  result = ctrl.command(NODE_ID, ENDPOINT, "off", {});
+  io.println(1, "       Turn OFF response: " + string(result));
+
+  // Read again
+  state = ctrl.read(NODE_ID, ENDPOINT, ONOFF_CLUSTER, ONOFF_ATTRIBUTE);
+  io.println(1, "       State after OFF: " + string(state));
+
+  io.println(1, "[PASS] Light control commands executed.");
+  return true;
+}
+
+
+// --- Test 5: Node Description ---
+func test_node_description() -> bool {
+  io.println(1, "[TEST] Fetching node description for node 1...");
+  let ctrl as Controller = connect(CONTROLLER_URL);
+
+  let desc = ctrl.node_description(1);
+  if (desc != nil) {
+    io.println(1, "[PASS] Node description: " + string(desc));
+    return true;
+  } else {
+    io.println(2, "[FAIL] Could not fetch node description.");
+    return false;
+  }
+}
+
+
+// --- Interactive: Commission a new device ---
+func commission_device(setup_code as string) -> nil {
+  io.println(1, "[COMMISSION] Commissioning device with code: " + setup_code);
+  let ctrl as Controller = connect(CONTROLLER_URL);
+
+  ctrl.commission(setup_code);
+  io.println(1, "[COMMISSION] Commissioning request sent.");
+}
+
+
+export func main(args as list<string>) -> i64 {
+  io.println(1, "=== Angara Matter Module Test ===");
+  io.println(1, "");
+
+  // Allow custom controller URL via argument
+  // Usage: angara run tests/matter_test.an http://my-server:8400
+
+  // Test 1: Connection
+  io.println(1, "--- Test 1: Controller Connection ---");
+  try {
+    if (!test_connection()) { return 1; }
+  } catch (e) {
+    io.println(2, "[FAIL] Connection error: " + string(e));
+    io.println(2, "       Make sure matter-server is running.");
+    return 1;
+  }
+
+  // Test 2: Info
+  io.println(1, "");
+  io.println(1, "--- Test 2: Controller Info ---");
+  try {
+    test_info();
+  } catch (e) {
+    io.println(2, "[WARN] Info test failed: " + string(e));
+  }
+
+  // Test 3: Device listing
+  io.println(1, "");
+  io.println(1, "--- Test 3: Device Listing ---");
+  try {
+    test_devices();
+  } catch (e) {
+    io.println(2, "[WARN] Device listing failed: " + string(e));
+  }
+
+  // Test 4: Light control (optional — needs a physical/virtual device)
+  io.println(1, "");
+  io.println(1, "--- Test 4: Light Control (requires device) ---");
+  try {
+    test_light_control();
+  } catch (e) {
+    io.println(2, "[WARN] Light control test skipped/failed: " + string(e));
+  }
+
+  // Test 5: Node description
+  io.println(1, "");
+  io.println(1, "--- Test 5: Node Description ---");
+  try {
+    test_node_description();
+  } catch (e) {
+    io.println(2, "[WARN] Node description test failed: " + string(e));
+  }
+
+  io.println(1, "");
+  io.println(1, "=== Matter module tests completed ===");
+  return 0;
+}

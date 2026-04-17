@@ -1,0 +1,184 @@
+// mqtt_test.an — Angara MQTT Module Test
+//
+// Prerequisites:
+//   - Mosquitto broker running on localhost:1883
+//     brew services start mosquitto
+//   - Or: mosquitto -c /opt/homebrew/etc/mosquitto/mosquitto.conf
+//
+// Usage:
+//   angara run tests/mqtt_test.an
+//
+
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+
+const BROKER_URL as string = "mqtt://localhost:1883";
+const TEST_TOPIC as string = "angara/test/hello";
+const TEST_PAYLOAD as string = "Hello from Angara!";
+
+
+// --- Publisher: sends messages to a topic ---
+func run_publisher() -> nil {
+  io.println(1, "[PUBLISHER] Connecting to " + BROKER_URL + "...");
+  let conn as Connection = connect(BROKER_URL);
+
+  // Wait for connection
+  let attempts as i64 = 0;
+  while (!conn.is_connected() && attempts < 20) {
+    time.sleep(0.1);
+    attempts = attempts + 1;
+  }
+
+  if (!conn.is_connected()) {
+    io.println(2, "[PUBLISHER] Failed to connect!");
+    conn.disconnect();
+    return;
+  }
+
+  io.println(1, "[PUBLISHER] Connected. Client ID: " + conn.client_id());
+
+  // Publish test messages
+  let count as i64 = 0;
+  while (count < 5) {
+    let message = TEST_PAYLOAD + " #" + string(count + 1);
+    conn.publish(TEST_TOPIC, message, 0);
+    io.println(1, "[PUBLISHER] Published: '" + message + "'");
+    time.sleep(0.5);
+    count = count + 1;
+  }
+
+  io.println(1, "[PUBLISHER] Done publishing.");
+  conn.disconnect();
+}
+
+
+// --- Subscriber: listens for messages on a topic ---
+func run_subscriber() -> nil {
+  io.println(1, "[SUBSCRIBER] Connecting to " + BROKER_URL + "...");
+  let conn as Connection = connect(BROKER_URL, {
+    "clientId": "angara_subscriber",
+    "cleanSession": true
+  });
+
+  // Wait for connection
+  let attempts as i64 = 0;
+  while (!conn.is_connected() && attempts < 20) {
+    time.sleep(0.1);
+    attempts = attempts + 1;
+  }
+
+  if (!conn.is_connected()) {
+    io.println(2, "[SUBSCRIBER] Failed to connect!");
+    conn.disconnect();
+    return;
+  }
+
+  io.println(1, "[SUBSCRIBER] Connected. Subscribing to '" + TEST_TOPIC + "'...");
+  conn.subscribe(TEST_TOPIC, 0);
+
+  // Listen for messages for up to 10 seconds
+  let received as i64 = 0;
+  let start_time as f64 = time.now();
+  while (received < 5 && (time.now() - start_time) < 10.0) {
+    let msg = conn.next_message(1000);
+    if (msg != nil) {
+      io.println(1, "[SUBSCRIBER] Received: topic='" + msg["topic"] +
+                     "' payload='" + msg["payload"] +
+                     "' qos=" + string(msg["qos"]));
+      received = received + 1;
+    }
+  }
+
+  io.println(1, "[SUBSCRIBER] Received " + string(received) + " messages.");
+  conn.unsubscribe(TEST_TOPIC);
+  conn.disconnect();
+}
+
+
+// --- Combined Test: single connection pub/sub ---
+func run_combined_test() -> bool {
+  io.println(1, "[TEST] Running combined pub/sub test...");
+  let conn as Connection = connect(BROKER_URL);
+
+  // Wait for connection
+  let attempts as i64 = 0;
+  while (!conn.is_connected() && attempts < 20) {
+    time.sleep(0.1);
+    attempts = attempts + 1;
+  }
+
+  if (!conn.is_connected()) {
+    io.println(2, "[TEST] Connection failed.");
+    return false;
+  }
+
+  // Subscribe
+  conn.subscribe("angara/test/echo", 1);
+  time.sleep(0.2);
+
+  // Publish
+  conn.publish("angara/test/echo", "echo test", 1);
+  time.sleep(0.2);
+
+  // Check message
+  let msg = conn.next_message(2000);
+  if (msg != nil) {
+    io.println(1, "[TEST] Echo received: '" + msg["payload"] + "'");
+    conn.disconnect();
+    return true;
+  }
+
+  io.println(2, "[TEST] No echo received.");
+  conn.disconnect();
+  return false;
+}
+
+
+export func main() -> i64 {
+  io.println(1, "=== Angara MQTT Module Test ===");
+  io.println(1, "");
+
+  // Test 1: Connection test
+  io.println(1, "--- Test 1: Connection ---");
+  try {
+    let conn as Connection = connect(BROKER_URL);
+    let attempts as i64 = 0;
+    while (!conn.is_connected() && attempts < 30) {
+      time.sleep(0.1);
+      attempts = attempts + 1;
+    }
+    if (conn.is_connected()) {
+      io.println(1, "[PASS] Connected to MQTT broker.");
+      io.println(1, "       Client ID: " + conn.client_id());
+      conn.disconnect();
+    } else {
+      io.println(2, "[FAIL] Could not connect to MQTT broker.");
+      io.println(2, "       Is mosquitto running? Try: brew services start mosquitto");
+      return 1;
+    }
+  } catch (e) {
+    io.println(2, "[FAIL] Connection error: " + string(e));
+    return 1;
+  }
+
+  // Test 2: Combined pub/sub
+  io.println(1, "");
+  io.println(1, "--- Test 2: Pub/Sub Echo ---");
+  try {
+    let result = run_combined_test();
+    if (result) {
+      io.println(1, "[PASS] Echo test succeeded.");
+    } else {
+      io.println(2, "[FAIL] Echo test failed.");
+      return 1;
+    }
+  } catch (e) {
+    io.println(2, "[FAIL] Echo test error: " + string(e));
+    return 1;
+  }
+
+  io.println(1, "");
+  io.println(1, "=== All MQTT tests passed! ===");
+  return 0;
+}
