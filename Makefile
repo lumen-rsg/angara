@@ -137,6 +137,11 @@ build/obj/modules/matter.o: modules/matter.c
 	@printf "$(GREEN)[CC]  $(RESET) %s (MATTER/CURL)\n" "$<"
 	@$(CC) $(CFLAGS) $(CURL_CFLAGS) -c $< -o $@
 
+build/obj/modules/rpc.o: modules/rpc.c
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CC]  $(RESET) %s (RPC)\n" "$<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 build/obj/modules/json_bridge.o: modules/json_bridge.cpp
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CX] $(RESET) %s (JSON Bridge)\n" "$<"
@@ -198,9 +203,23 @@ else
 	@$(CC) $< -shared -lm -o $@
 endif
 
+build/modules/sys.$(SO_EXT): build/obj/modules/sys.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
+ifeq ($(UNAME_S),Darwin)
+	@$(CC) $< -shared -lproc -o $@
+else
+	@$(CC) $< -shared -o $@
+endif
+
 build/modules/json.$(SO_EXT): build/obj/modules/json.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
+	@$(CXX) $^ -shared -o $@
+
+build/modules/rpc.$(SO_EXT): build/obj/modules/rpc.o $(JSON_BR_OBJ)
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (RPC+JSON)\n" "$@"
 	@$(CXX) $^ -shared -o $@
 
 build/modules/imgui.$(SO_EXT): build/obj/modules/imgui.o $(IMGUI_OBJS)
