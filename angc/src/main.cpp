@@ -18,9 +18,9 @@
 namespace fs = std::filesystem;
 
 // --- Constants ---
-const std::string ANGC_VERSION    = "3.0.0";
+const std::string ANGC_VERSION    = "3.1.0";
 const std::string BACKEND_VERSION = "5.0.0";
-const std::string ANGARA_SPEC     = "v3.0";
+const std::string ANGARA_SPEC     = "v3.1";
 
 // --- Platform Detection ---
 #if defined(__APPLE__)
@@ -37,17 +37,28 @@ const std::string ANGARA_SPEC     = "v3.0";
 
 void print_help() {
     std::cout << CLR_BOLD << "Usage:" << CLR_RESET << "\n";
-    std::cout << "  angc                        Build the project in the current directory (.abs file)\n";
-    std::cout << "  angc --path <project.abs>   Build a specific project configuration\n";
+    std::cout << "  angc                        Build the project in the current directory\n";
+    std::cout << "  angc run                    Build and run the first app project\n";
+    std::cout << "  angc clean                  Remove build artifacts\n";
+    std::cout << "  angc init                   Initialize a new project (interactive)\n";
+    std::cout << "  angc init <template>        Initialize from a template (app, lib, embedded, gui)\n";
     std::cout << "  angc <file.an>              Compile a single source file\n";
+    std::cout << "\n" << CLR_BOLD << "Commands:" << CLR_RESET << "\n";
+    std::cout << "  run                         Build and execute the project\n";
+    std::cout << "  clean                       Remove .angara/build directory\n";
+    std::cout << "  init                        Create a new project interactively\n";
+    std::cout << "  modules                     List installed native modules\n";
     std::cout << "\n" << CLR_BOLD << "Options:" << CLR_RESET << "\n";
     std::cout << "  -v, --version               Show version information\n";
     std::cout << "  -h, --help                  Show this help message\n";
+    std::cout << "  --path <project.abs>        Build a specific project configuration\n";
+    std::cout << "  --release                   Build in release mode (opt level 2)\n";
+    std::cout << "  --debug                     Build in debug mode (default, opt level 0)\n";
     std::cout << "  --dump-ast                  Debug: Print Abstract Syntax Tree\n";
     std::cout << "  --target <triple>           Cross-compile for target triple\n";
     std::cout << "  --sysroot <path>            Set sysroot for cross-compilation linker\n";
-    std::cout << "  --freestanding              Freestanding mode (no libc, _start entry, bare-metal)\n";
-    std::cout << "  --nostdlib                  Don't link standard libraries (libc, libm, pthread)\n";
+    std::cout << "  --freestanding              Freestanding mode (no libc, bare-metal)\n";
+    std::cout << "  --nostdlib                  Don't link standard libraries\n";
     std::cout << std::endl;
 }
 
@@ -57,6 +68,36 @@ void print_version() {
     std::cout << CLR_CYAN << "  • Backend:  " << CLR_RESET << BACKEND_VERSION << " (LLVM)" << "\n";
     std::cout << CLR_CYAN << "  • Spec:     " << CLR_RESET << ANGARA_SPEC << "\n";
     std::cout << CLR_GRAY << "  (c) 2026 Lumina Labs. This is a testing build." << CLR_RESET << "\n";
+}
+
+void list_modules() {
+    const std::string mod_path = "/opt/angara/modules";
+    std::cout << CLR_BOLD << "Installed Native Modules:" << CLR_RESET << "\n";
+    std::cout << CLR_GRAY << "  Path: " << mod_path << CLR_RESET << "\n\n";
+
+    int count = 0;
+    try {
+        for (const auto& entry : fs::directory_iterator(mod_path)) {
+            if (!entry.is_regular_file()) continue;
+            std::string name = entry.path().filename().string();
+            // Strip "lib" prefix and extension
+            if (name.rfind("lib") == 0) name = name.substr(3);
+            auto ext = entry.path().extension().string();
+            if (ext == ".dylib" || ext == ".so" || ext == ".dll") {
+                name = name.substr(0, name.size() - ext.size());
+                std::cout << CLR_GREEN << "  • " << CLR_RESET << name
+                          << CLR_GRAY << " (" << entry.path().filename().string() << ")" << CLR_RESET << "\n";
+                count++;
+            }
+        }
+    } catch (...) {
+        std::cout << CLR_YELLOW << "  (module directory not found)" << CLR_RESET << "\n";
+    }
+
+    if (count == 0) {
+        std::cout << CLR_YELLOW << "  No modules installed." << CLR_RESET << "\n";
+    }
+    std::cout << "\n";
 }
 
 // --- Target Triple Resolution ---
@@ -130,10 +171,55 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    const std::string cmd = args[0];  // Copy, since args may be modified later
+    const std::string cmd = args[0];
 
+    // --- Subcommands ---
     if (cmd == "init") {
-        return angara::ProjectInitializer::run() ? 0 : 1;
+        std::string template_name = (args.size() > 1) ? args[1] : "";
+        return angara::ProjectInitializer::run(template_name) ? 0 : 1;
+    }
+
+    if (cmd == "run") {
+        std::string project_file;
+        if (args.size() > 1 && !args[1].empty() && args[1][0] != '-') {
+            project_file = args[1];
+        } else {
+            project_file = find_local_project_file();
+        }
+        if (project_file.empty()) {
+            std::cerr << CLR_RED << "No .abs project file found." << CLR_RESET << "\n";
+            return 1;
+        }
+        angara::BuildSystem builder;
+        return builder.run(project_file) ? 0 : 1;
+    }
+
+    if (cmd == "clean") {
+        std::string project_file;
+        if (args.size() > 1 && !args[1].empty() && args[1][0] != '-') {
+            project_file = args[1];
+        } else {
+            project_file = find_local_project_file();
+        }
+        if (project_file.empty()) {
+            // If no .abs file, just clean .angara/ if it exists
+            fs::path angara_dir = fs::absolute(".angara");
+            if (fs::exists(angara_dir)) {
+                std::cout << CLR_BOLD << CLR_RED << "[CL] " << CLR_RESET << "Cleaning .angara/\n";
+                fs::remove_all(angara_dir);
+                std::cout << CLR_BOLD << CLR_GREEN << "✓ Clean complete." << CLR_RESET << "\n";
+                return 0;
+            }
+            std::cerr << CLR_YELLOW << "No project file or .angara directory found." << CLR_RESET << "\n";
+            return 1;
+        }
+        angara::BuildSystem builder;
+        return builder.clean(project_file) ? 0 : 1;
+    }
+
+    if (cmd == "modules") {
+        list_modules();
+        return 0;
     }
 
     if (cmd == "-v" || cmd == "--version") {
@@ -157,6 +243,8 @@ int main(int argc, char* argv[]) {
     bool dump_ast = false;
     bool flag_freestanding = false;
     bool flag_nostdlib = false;
+    bool flag_release = false;
+    // flag_debug: debug is the default, --debug is a no-op
 
     for (size_t i = 0; i < args.size(); ) {
         if (args[i] == "--target" && i + 1 < args.size()) {
@@ -173,6 +261,11 @@ int main(int argc, char* argv[]) {
             args.erase(args.begin() + i);
         } else if (args[i] == "--nostdlib") {
             flag_nostdlib = true;
+            args.erase(args.begin() + i);
+        } else if (args[i] == "--release") {
+            flag_release = true;
+            args.erase(args.begin() + i);
+        } else if (args[i] == "--debug") {
             args.erase(args.begin() + i);
         } else {
             ++i;
@@ -215,6 +308,7 @@ int main(int argc, char* argv[]) {
         angara::BuildSystem builder;
         if (!resolved_target.empty()) builder.set_target(resolved_target);
         if (!resolved_sysroot.empty()) builder.set_sysroot(resolved_sysroot);
+        if (flag_release) builder.set_build_mode(angara::BuildMode::RELEASE);
         return builder.build(args[1]) ? 0 : 1;
     }
 
@@ -231,6 +325,11 @@ int main(int argc, char* argv[]) {
         legacy_config.type = angara::ProjectType::APP;
         legacy_config.freestanding = flag_freestanding;
         legacy_config.nostdlib = flag_nostdlib;
+
+        if (flag_release) {
+            legacy_config.profile.mode = angara::BuildMode::RELEASE;
+            legacy_config.profile.opt_level = 2;
+        }
 
         angara::CompilerDriver driver;
         if (!resolved_target.empty()) driver.set_target(resolved_target);
@@ -252,6 +351,11 @@ int main(int argc, char* argv[]) {
             cmd_link << "clang";
             if (!resolved_target.empty()) cmd_link << " -target " << resolved_target;
             if (!resolved_sysroot.empty()) cmd_link << " --sysroot " << resolved_sysroot;
+
+            // Optimization
+            if (flag_release) cmd_link << " -O2";
+            else cmd_link << " -O0";
+
             cmd_link << " -o " << base_name;
 
             // Add all generated object files
@@ -282,7 +386,6 @@ int main(int argc, char* argv[]) {
             // Freestanding: skip host linker, emit object file for bare-metal toolchain
             if (flag_freestanding) {
                 std::string obj_output = base_name + ".o";
-                // If multiple object files, just keep them; rename if single
                 const auto& objs = driver.get_generated_object_files();
                 if (objs.size() == 1) {
                     fs::rename(*objs.begin(), obj_output);
@@ -299,12 +402,12 @@ int main(int argc, char* argv[]) {
             // Standard flags
             if (flag_nostdlib) {
 #if defined(__APPLE__)
-                cmd_link << " -nodefaultlibs -lSystem -O2 -Wno-return-type";
+                cmd_link << " -nodefaultlibs -lSystem -Wno-return-type";
 #else
-                cmd_link << " -nostdlib -O2 -Wno-return-type";
+                cmd_link << " -nostdlib -Wno-return-type";
 #endif
             } else {
-                cmd_link << " -pthread -lm -O2 -Wno-return-type";
+                cmd_link << " -pthread -lm -Wno-return-type";
                 cmd_link << " -Wl,-rpath,/opt/angara/modules";
             }
 

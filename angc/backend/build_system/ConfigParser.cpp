@@ -15,17 +15,29 @@ namespace angara {
     }
 
     // Helper to parse lists: "[a, b, c]" -> vector
-    std::vector<std::string> parse_list(std::string value) {
+    std::vector<std::string> parse_list(const std::string& value) {
         std::vector<std::string> list;
-        if (value.front() == '[' && value.back() == ']') {
-            value = value.substr(1, value.size() - 2); // Strip []
-            std::stringstream ss(value);
+        std::string v = trim(value);
+        if (v.size() >= 2 && v.front() == '[' && v.back() == ']') {
+            v = v.substr(1, v.size() - 2); // Strip []
+            std::stringstream ss(v);
             std::string item;
             while (std::getline(ss, item, ',')) {
-                list.push_back(trim(item));
+                std::string trimmed = trim(item);
+                if (!trimmed.empty()) list.push_back(trimmed);
             }
         }
         return list;
+    }
+
+    // Helper to detect if sources contain C++ files
+    bool has_cpp_sources(const std::vector<std::string>& sources) {
+        for (const auto& s : sources) {
+            if (s.size() >= 4 && s.substr(s.size() - 4) == ".cpp") return true;
+            if (s.size() >= 3 && s.substr(s.size() - 3) == ".cc") return true;
+            if (s.size() >= 3 && s.substr(s.size() - 3) == ".cxx") return true;
+        }
+        return false;
     }
 
     std::optional<WorkspaceConfig> ConfigParser::parse(const std::string& path) {
@@ -37,72 +49,159 @@ namespace angara {
 
         WorkspaceConfig workspace;
         ProjectConfig currentProject;
+        NativeModuleConfig currentNativeModule;
+        BuildStep currentBuildStep;
 
-        std::string line;
+        // Section tracking
+        // "workspace", "project", "native-module", "pre-build", "post-build", "profile"
         std::string currentSection;
 
+        auto push_project = [&]() {
+            if (!currentProject.name.empty()) {
+                workspace.projects.push_back(currentProject);
+            }
+            currentProject = ProjectConfig();
+        };
+
+        auto push_native_module = [&]() {
+            if (!currentNativeModule.name.empty() && !currentNativeModule.sources.empty()) {
+                if (!currentNativeModule.is_cpp) {
+                    currentNativeModule.is_cpp = has_cpp_sources(currentNativeModule.sources);
+                }
+                currentProject.native_modules.push_back(currentNativeModule);
+            }
+            currentNativeModule = NativeModuleConfig();
+        };
+
+        std::string line;
         while (std::getline(file, line)) {
             line = trim(line);
             if (line.empty() || line[0] == '#') continue;
 
-            // Handle Headers
+            // --- Handle Section Headers ---
             if (line.front() == '[' && line.back() == ']') {
                 std::string header = line.substr(1, line.size() - 2);
+
+                // Before switching section, flush any pending native module
+                if (currentSection == "native-module") {
+                    push_native_module();
+                }
 
                 if (header == "workspace") {
                     currentSection = "workspace";
                 } else if (header == "project" || header == "project-entry") {
-                    if (!currentProject.name.empty()) {
-                        // Push previous project before starting new one
-                        workspace.projects.push_back(currentProject);
-                    }
-                    currentProject = ProjectConfig(); // Reset
+                    push_project();
                     currentSection = "project";
+                } else if (header == "native-module") {
+                    currentSection = "native-module";
+                } else if (header == "pre-build") {
+                    currentSection = "pre-build";
+                    currentBuildStep = BuildStep();
+                } else if (header == "post-build") {
+                    currentSection = "post-build";
+                    currentBuildStep = BuildStep();
+                } else if (header == "profile") {
+                    currentSection = "profile";
                 }
                 continue;
             }
 
-            // Handle Key-Value pairs
+            // --- Handle Key-Value Pairs ---
             size_t eqPos = line.find('=');
-            if (eqPos != std::string::npos) {
-                std::string key = trim(line.substr(0, eqPos));
-                std::string value = trim(line.substr(eqPos + 1));
+            if (eqPos == std::string::npos) continue;
 
-                if (currentSection == "workspace") {
-                    if (key == "name") workspace.name = value;
-                    else if (key == "author") workspace.author = value;
-                    else if (key == "version") workspace.version = value;
+            std::string key = trim(line.substr(0, eqPos));
+            std::string value = trim(line.substr(eqPos + 1));
+
+            // === WORKSPACE SECTION ===
+            if (currentSection == "workspace") {
+                if (key == "name") workspace.name = value;
+                else if (key == "author") workspace.author = value;
+                else if (key == "version") workspace.version = value;
+                else if (key == "description") workspace.description = value;
+                else if (key == "angara_version" || key == "angara-version") workspace.angara_version = value;
+            }
+
+            // === PROJECT SECTION ===
+            else if (currentSection == "project") {
+                if (key == "name") {
+                    currentProject.name = value;
+                    if (currentProject.path.empty()) currentProject.path = value;
                 }
-                else if (currentSection == "project") {
-                    if (key == "name") {
-                        currentProject.name = value;
-                        if (currentProject.path.empty()) currentProject.path = value; // Default path to name
-                    }
-                    else if (key == "path") currentProject.path = value;
-                    else if (key == "author") currentProject.author = value;
-                    else if (key == "version") currentProject.version = value;
-                    else if (key == "entry") currentProject.entry_point = value;
-                    else if (key == "type") {
-                        if (value == "library" || value == "lib") currentProject.type = ProjectType::LIBRARY;
-                        else currentProject.type = ProjectType::APP;
-                    }
-                    else if (key == "dependencies") {
-                        currentProject.dependencies = parse_list(value);
-                    }
-                    else if (key == "freestanding") {
-                        currentProject.freestanding = (value == "true" || value == "1" || value == "yes");
-                    }
-                    else if (key == "nostdlib") {
-                        currentProject.nostdlib = (value == "true" || value == "1" || value == "yes");
-                    }
+                else if (key == "path") currentProject.path = value;
+                else if (key == "author") currentProject.author = value;
+                else if (key == "version") currentProject.version = value;
+                else if (key == "description") currentProject.description = value;
+                else if (key == "entry") currentProject.entry_point = value;
+                else if (key == "type") {
+                    if (value == "library" || value == "lib") currentProject.type = ProjectType::LIBRARY;
+                    else currentProject.type = ProjectType::APP;
+                }
+                else if (key == "dependencies") {
+                    currentProject.dependencies = parse_list(value);
+                }
+                else if (key == "freestanding") {
+                    currentProject.freestanding = (value == "true" || value == "1" || value == "yes");
+                }
+                else if (key == "nostdlib") {
+                    currentProject.nostdlib = (value == "true" || value == "1" || value == "yes");
+                }
+            }
+
+            // === NATIVE-MODULE SECTION ===
+            else if (currentSection == "native-module") {
+                if (key == "name") currentNativeModule.name = value;
+                else if (key == "sources") currentNativeModule.sources = parse_list(value);
+                else if (key == "include_dirs" || key == "includes") currentNativeModule.include_dirs = parse_list(value);
+                else if (key == "libs" || key == "link_libs") currentNativeModule.link_libs = parse_list(value);
+                else if (key == "frameworks") currentNativeModule.link_frameworks = parse_list(value);
+                else if (key == "cflags") currentNativeModule.cflags = value;
+                else if (key == "ldflags") currentNativeModule.ldflags = value;
+                else if (key == "cpp" || key == "is_cpp") {
+                    currentNativeModule.is_cpp = (value == "true" || value == "1" || value == "yes");
+                }
+            }
+
+            // === PRE-BUILD SECTION ===
+            else if (currentSection == "pre-build") {
+                if (key == "command") currentBuildStep.command = value;
+                else if (key == "description") currentBuildStep.description = value;
+                // Support inline command on first unnamed line
+                if (currentProject.pre_build.command.empty() && !value.empty()) {
+                    currentProject.pre_build = currentBuildStep;
+                }
+            }
+
+            // === POST-BUILD SECTION ===
+            else if (currentSection == "post-build") {
+                if (key == "command") currentBuildStep.command = value;
+                else if (key == "description") currentBuildStep.description = value;
+                if (currentProject.post_build.command.empty() && !value.empty()) {
+                    currentProject.post_build = currentBuildStep;
+                }
+            }
+
+            // === PROFILE SECTION ===
+            else if (currentSection == "profile") {
+                if (key == "mode") {
+                    if (value == "release" || value == "Release") currentProject.profile.mode = BuildMode::RELEASE;
+                    else currentProject.profile.mode = BuildMode::DEBUG;
+                }
+                else if (key == "cflags") currentProject.profile.cflags = value;
+                else if (key == "ldflags") currentProject.profile.ldflags = value;
+                else if (key == "output_dir" || key == "output") currentProject.profile.output_dir = value;
+                else if (key == "target") currentProject.profile.target = value;
+                else if (key == "opt" || key == "opt_level" || key == "optimization") {
+                    try { currentProject.profile.opt_level = std::stoi(value); } catch (...) {}
                 }
             }
         }
 
-        // Push the final project
-        if (!currentProject.name.empty()) {
-            workspace.projects.push_back(currentProject);
+        // Flush any pending native module and project
+        if (currentSection == "native-module") {
+            push_native_module();
         }
+        push_project();
 
         return workspace;
     }
