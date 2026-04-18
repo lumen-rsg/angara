@@ -1,0 +1,22 @@
+attach collections;
+
+export func main() -> i64 {
+    let nums as list<any> = [1, 2, 3, 4, 5];
+    let empty as list<any> = [];
+    let words as list<any> = ["hello", "world"];
+
+    // Test basic operations that don't need arithmetic on any
+    let rev = collections.reverse(nums);
+    let emp1 = collections.is_empty(empty);
+    let emp2 = collections.is_empty(nums);
+    let f = collections.first(nums);
+    let l = collections.last(nums);
+    let first3 = collections.take(nums, 3);
+    let skipped = collections.skip(nums, 2);
+    let extra as list<any> = [6, 7];
+    let combined = collections.concat(nums, extra);
+    let joined = collections.join(words, "-");
+
+    // Return 0 = success
+    return 0;
+}

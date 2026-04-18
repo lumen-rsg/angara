@@ -118,6 +118,12 @@ namespace angara {
         llvm::Value* loadVar(const std::string& name);
         void storeVar(const std::string& name, llvm::Value* val);
 
+        // --- Integer narrowing helpers (Option B: semantic truncation) ---
+        llvm::Value* truncateForType(llvm::Value* val, const std::shared_ptr<Type>& type);
+        static bool isUnsignedIntType(const std::shared_ptr<Type>& type);
+        static bool isSizedIntType(const std::shared_ptr<Type>& type);
+        static int getIntBitWidth(const std::shared_ptr<Type>& type);
+
         // --- Helpers ---
         std::string mangle(const std::string& module, const std::string& name);
         std::string mangleMethod(const std::string& class_name, const std::string& method);
@@ -135,6 +141,8 @@ namespace angara {
 
         // Named values in current scope
         std::map<std::string, llvm::AllocaInst*> namedVals;
+        // Named value types (mirrors namedVals scope lifecycle)
+        std::map<std::string, std::shared_ptr<Type>> namedTypes;
         // Global variables
         std::map<std::string, llvm::GlobalVariable*> globals;
 

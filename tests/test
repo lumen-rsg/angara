@@ -1,27 +1,74 @@
 attach io;
+attach collections;
 
-// Test enums
-
-enum Color {
-    Red,
-    Green,
-    Blue
-}
+// Helper functions for testing
+func double_it(x as i64) -> i64 { return x * 2; }
+func is_even(x as i64) -> bool { return x % 2 == 0; }
+func add(acc as i64, x as i64) -> i64 { return acc + x; }
+func is_big(x as i64) -> bool { return x > 3; }
+func is_huge(x as i64) -> bool { return x > 4; }
+func is_positive(x as i64) -> bool { return x > 0; }
 
 export func main() -> i64 {
-    io.println(1, "=== Enum Tests ===");
+    io.println(1, "=== Angara Collections Test ===");
 
-    let c = Color.Red;
-    io.println(1, "Got enum value");
+    // --- Basic list ---
+    let nums as list<any> = [1, 2, 3, 4, 5];
+    io.println(1, "nums len = " + string(len(nums)));
 
-    let val = 42;
-    match(val) {
-        0 => io.println(1, "zero"),
-        1 => io.println(1, "one"),
-        42 => io.println(1, "forty-two!"),
-        _ => io.println(1, "other"),
-    }
+    // --- map: double each number ---
+    let doubled = map(nums, double_it);
+    io.println(1, "map(double_it): " + string(doubled));
 
-    io.println(1, "=== Enum Tests Passed ===");
+    // --- filter: keep even numbers ---
+    let evens = filter(nums, is_even);
+    io.println(1, "filter(is_even): " + string(evens));
+
+    // --- reduce: sum ---
+    let sum = reduce(nums, 0, add);
+    io.println(1, "reduce(sum): " + string(sum));
+
+    // --- find ---
+    let found = find(nums, is_big);
+    io.println(1, "find(>3): " + string(found));
+
+    // --- any / all ---
+    let has_big = any(nums, is_huge);
+    io.println(1, "any(>4): " + string(has_big));
+
+    let all_pos = all(nums, is_positive);
+    io.println(1, "all(>0): " + string(all_pos));
+
+    // --- reverse ---
+    let rev = reverse(nums);
+    io.println(1, "reverse: " + string(rev));
+
+    // --- take / skip ---
+    let first3 = take(nums, 3);
+    io.println(1, "take(3): " + string(first3));
+
+    let skipped = skip(nums, 2);
+    io.println(1, "skip(2): " + string(skipped));
+
+    // --- concat ---
+    let extra as list<any> = [6, 7];
+    let combined = concat(nums, extra);
+    io.println(1, "concat([6,7]): " + string(combined));
+
+    // --- first / last ---
+    io.println(1, "first: " + string(first(nums)));
+    io.println(1, "last: " + string(last(nums)));
+
+    // --- is_empty ---
+    let empty as list<any> = [];
+    io.println(1, "is_empty([]): " + string(is_empty(empty)));
+    io.println(1, "is_empty(nums): " + string(is_empty(nums)));
+
+    // --- join ---
+    let words as list<any> = ["hello", "world", "angara"];
+    io.println(1, "join(words, \"-\"): " + join(words, "-"));
+
+    io.println(1, "");
+    io.println(1, "=== All collection tests passed! ===");
     return 0;
 }

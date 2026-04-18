@@ -44,7 +44,27 @@ namespace angara {
                     if (isFloat(left_type) || isFloat(right_type)) {
                         result_type = m_type_f64;
                     } else {
-                        result_type = m_type_i64;
+                        // Preserve specific integer types (i8, i16, i32, u8, u16, u32, u64)
+                        // If both are i64 (default), result is i64.
+                        // Otherwise, result is the wider of the two operand types.
+                        auto left_name = left_type->toString();
+                        auto right_name = right_type->toString();
+                        if (left_name == "i64" || right_name == "i64") {
+                            result_type = m_type_i64;
+                        } else if (left_name == "u64" || right_name == "u64") {
+                            result_type = (left_name == "u64") ? left_type : right_type;
+                        } else {
+                            // Return the wider type; if equal width, prefer signed
+                            auto width = [](const std::string& n) -> int {
+                                if (n == "i8"  || n == "u8")  return 8;
+                                if (n == "i16" || n == "u16") return 16;
+                                if (n == "i32" || n == "u32") return 32;
+                                return 64;
+                            };
+                            int lw = width(left_name), rw = width(right_name);
+                            if (lw >= rw) result_type = left_type;
+                            else result_type = right_type;
+                        }
                     }
                 } else {
                     error(expr.op, "Operands for this arithmetic operator must be numbers.");

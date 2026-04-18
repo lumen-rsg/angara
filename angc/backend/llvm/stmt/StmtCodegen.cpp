@@ -22,17 +22,30 @@ void LLVMBackend::cgStmt(const std::shared_ptr<Stmt>& s) {
 
 void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
     auto* v = s.initializer ? cg(s.initializer) : makeNil();
+
+    // Look up the variable's type from the type checker
+    auto type_it = m_type_checker.m_variable_types.find(&s);
+    auto var_type = (type_it != m_type_checker.m_variable_types.end()) ? type_it->second : nullptr;
+
+    // Apply semantic narrowing for sized integer types
+    if (var_type && isSizedIntType(var_type)) {
+        v = truncateForType(v, var_type);
+    }
+
     if (auto* fn = builder->GetInsertBlock()->getParent()) {
         auto* a = allocLocal(fn, s.name.lexeme);
         builder->CreateStore(v, a);
         namedVals[s.name.lexeme] = a;
+        if (var_type) namedTypes[s.name.lexeme] = var_type;
     }
 }
 
 void LLVMBackend::cgBlock(const BlockStmt& s) {
     auto sv = namedVals;
-    for (auto& st : s.statements) cgStmt(st);
+    auto st = namedTypes;
+    for (auto& stmt : s.statements) cgStmt(stmt);
     namedVals = sv;
+    namedTypes = st;
 }
 
 void LLVMBackend::cgIf(const IfStmt& s) {
@@ -69,6 +82,7 @@ void LLVMBackend::cgWhile(const WhileStmt& s) {
 void LLVMBackend::cgFor(const ForStmt& s) {
     auto* fn = builder->GetInsertBlock()->getParent();
     auto sv = namedVals;
+    auto stv = namedTypes;
     if (s.initializer) cgStmt(s.initializer);
     auto* lp = llvm::BasicBlock::Create(*ctx,"fc",fn);
     auto* bd = llvm::BasicBlock::Create(*ctx,"fb",fn);
@@ -85,12 +99,13 @@ void LLVMBackend::cgFor(const ForStmt& s) {
         builder->CreateBr(lp);
     }
     builder->SetInsertPoint(en);
-    loopExit = sv2; loopDepth--; namedVals = sv;
+    loopExit = sv2; loopDepth--; namedVals = sv; namedTypes = stv;
 }
 
 void LLVMBackend::cgForIn(const ForInStmt& s) {
     auto* fn = builder->GetInsertBlock()->getParent();
     auto sv = namedVals;
+    auto stv = namedTypes;
     auto* iter = cg(s.collection);
     auto* len = callRt(rt->getFuncLen(),{iter});
     auto* cnt = getI64(len);
@@ -114,7 +129,7 @@ void LLVMBackend::cgForIn(const ForInStmt& s) {
         builder->CreateBr(lp);
     }
     builder->SetInsertPoint(en);
-    loopExit = sv2; loopDepth--; namedVals = sv;
+    loopExit = sv2; loopDepth--; namedVals = sv; namedTypes = stv;
 }
 
 void LLVMBackend::cgReturn(const ReturnStmt& s) {
@@ -151,11 +166,13 @@ void LLVMBackend::cgTry(const TryStmt& s) {
     if (s.catchBlock) {
         auto* exc = builder->CreateLoad(objType, rt->getCurrentException(), "exc");
         auto sv = namedVals;
+        auto st = namedTypes;
         auto* ea = allocLocal(fn,"__exc");
         builder->CreateStore(exc, ea);
         namedVals["__exception"] = ea;
         cgStmt(s.catchBlock);
         namedVals = sv;
+        namedTypes = st;
     }
     if (!builder->GetInsertBlock()->getTerminator()) {
         builder->CreateBr(afterAll);

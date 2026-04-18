@@ -50,6 +50,10 @@ AMQP_CFLAGS := $(shell pkg-config --cflags librabbitmq 2>/dev/null)
 AMQP_LIBS   := $(shell pkg-config --libs librabbitmq 2>/dev/null)
 MQTT_CFLAGS := $(shell pkg-config --cflags libmosquitto libcjson 2>/dev/null)
 MQTT_LIBS   := $(shell pkg-config --libs libmosquitto libcjson 2>/dev/null)
+ARCHIVE_CFLAGS := $(shell pkg-config --cflags libarchive zlib 2>/dev/null)
+ARCHIVE_LIBS  := $(shell pkg-config --libs libarchive zlib 2>/dev/null)
+SQLITE_CFLAGS := $(shell pkg-config --cflags sqlite3 2>/dev/null)
+SQLITE_LIBS   := $(shell pkg-config --libs sqlite3 2>/dev/null)
 
 IMGUI_DIR   := vendor/imgui
 IMGUI_SRCS  := $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
@@ -142,6 +146,26 @@ build/obj/modules/rpc.o: modules/rpc.c
 	@printf "$(GREEN)[CC]  $(RESET) %s (RPC)\n" "$<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+build/obj/modules/archive.o: modules/archive.c
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CC]  $(RESET) %s (ARCHIVE)\n" "$<"
+	@$(CC) $(CFLAGS) $(ARCHIVE_CFLAGS) -c $< -o $@
+
+build/obj/modules/sqlite.o: modules/sqlite.c
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CC]  $(RESET) %s (SQLITE)\n" "$<"
+	@$(CC) $(CFLAGS) $(SQLITE_CFLAGS) -c $< -o $@
+
+build/obj/modules/jwt.o: modules/jwt.c
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CC]  $(RESET) %s (JWT)\n" "$<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
+build/obj/modules/net.o: modules/net.c
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CC]  $(RESET) %s (NET)\n" "$<"
+	@$(CC) $(CFLAGS) -c $< -o $@
+
 build/obj/modules/json_bridge.o: modules/json_bridge.cpp
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CX] $(RESET) %s (JSON Bridge)\n" "$<"
@@ -221,6 +245,26 @@ build/modules/rpc.$(SO_EXT): build/obj/modules/rpc.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (RPC+JSON)\n" "$@"
 	@$(CXX) $^ -shared -o $@
+
+build/modules/archive.$(SO_EXT): build/obj/modules/archive.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (ARCHIVE+ZLIB)\n" "$@"
+	@$(CC) $< -shared $(ARCHIVE_LIBS) -o $@
+
+build/modules/sqlite.$(SO_EXT): build/obj/modules/sqlite.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (SQLITE3)\n" "$@"
+	@$(CC) $< -shared $(SQLITE_LIBS) -o $@
+
+build/modules/jwt.$(SO_EXT): build/obj/modules/jwt.o $(JSON_BR_OBJ)
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (JWT+JSON)\n" "$@"
+	@$(CXX) $^ -shared -o $@
+
+build/modules/net.$(SO_EXT): build/obj/modules/net.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (NET)\n" "$@"
+	@$(CC) $< -shared -o $@
 
 build/modules/imgui.$(SO_EXT): build/obj/modules/imgui.o $(IMGUI_OBJS)
 	@mkdir -p $(@D)

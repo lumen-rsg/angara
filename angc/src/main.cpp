@@ -40,18 +40,21 @@ void print_help() {
     std::cout << "  angc                        Build the project in the current directory\n";
     std::cout << "  angc run                    Build and run the first app project\n";
     std::cout << "  angc clean                  Remove build artifacts\n";
+    std::cout << "  angc publish                Build and copy targets to publish directory\n";
     std::cout << "  angc init                   Initialize a new project (interactive)\n";
     std::cout << "  angc init <template>        Initialize from a template (app, lib, embedded, gui)\n";
     std::cout << "  angc <file.an>              Compile a single source file\n";
     std::cout << "\n" << CLR_BOLD << "Commands:" << CLR_RESET << "\n";
     std::cout << "  run                         Build and execute the project\n";
     std::cout << "  clean                       Remove .angara/build directory\n";
+    std::cout << "  publish                     Build and copy artifacts to a publish folder\n";
     std::cout << "  init                        Create a new project interactively\n";
     std::cout << "  modules                     List installed native modules\n";
     std::cout << "\n" << CLR_BOLD << "Options:" << CLR_RESET << "\n";
     std::cout << "  -v, --version               Show version information\n";
     std::cout << "  -h, --help                  Show this help message\n";
     std::cout << "  --path <project.abs>        Build a specific project configuration\n";
+    std::cout << "  -o, --output <dir>          Output directory for publish command\n";
     std::cout << "  --release                   Build in release mode (opt level 2)\n";
     std::cout << "  --debug                     Build in debug mode (default, opt level 0)\n";
     std::cout << "  --dump-ast                  Debug: Print Abstract Syntax Tree\n";
@@ -215,6 +218,34 @@ int main(int argc, char* argv[]) {
         }
         angara::BuildSystem builder;
         return builder.clean(project_file) ? 0 : 1;
+    }
+
+    if (cmd == "publish") {
+        std::string project_file;
+        std::string publish_output;
+
+        // Parse publish-specific arguments
+        for (size_t i = 1; i < args.size(); ) {
+            if ((args[i] == "-o" || args[i] == "--output") && i + 1 < args.size()) {
+                publish_output = args[i + 1];
+                i += 2;
+            } else if (args[i][0] != '-') {
+                project_file = args[i];
+                ++i;
+            } else {
+                ++i;
+            }
+        }
+
+        if (project_file.empty()) {
+            project_file = find_local_project_file();
+        }
+        if (project_file.empty()) {
+            std::cerr << CLR_RED << "No .abs project file found." << CLR_RESET << "\n";
+            return 1;
+        }
+        angara::BuildSystem builder;
+        return builder.publish(project_file, publish_output) ? 0 : 1;
     }
 
     if (cmd == "modules") {

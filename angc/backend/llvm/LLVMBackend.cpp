@@ -56,7 +56,12 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     const std::shared_ptr<ModuleType>& moduleType, std::vector<std::string>& allMods) {
     moduleName = moduleType ? moduleType->name : "main";
     codegenTopLevelDecls(stmts);
-    codegenMainFunction(stmts, moduleName, allMods);
+    // Only generate the C main entry point if this module defines a user "main" function.
+    // Library modules (like collections) have no main — skip to avoid duplicate symbols.
+    std::string user_main_name = mangle(moduleName, "main");
+    if (mod->getFunction(user_main_name)) {
+        codegenMainFunction(stmts, moduleName, allMods);
+    }
     std::string base = "ang_" + moduleName;
     {
         std::error_code ec;
@@ -197,5 +202,49 @@ void LLVMBackend::storeVar(const std::string& n, llvm::Value* v) {
 std::string LLVMBackend::mangle(const std::string& m, const std::string& n) { return "__ang_"+m+"_"+sanitize(n); }
 std::string LLVMBackend::mangleMethod(const std::string& c, const std::string& m) { return "__ang_"+sanitize(c)+"_"+sanitize(m); }
 std::string LLVMBackend::sanitize(const std::string& n) { std::string r; for(char c:n) r+=(std::isalnum(c)||c=='_')?c:'_'; return r; }
+
+// ============================================================================
+// Integer narrowing helpers (Option B: semantic truncation at boundaries)
+// ============================================================================
+
+bool LLVMBackend::isSizedIntType(const std::shared_ptr<Type>& type) {
+    if (!type || type->kind != TypeKind::PRIMITIVE) return false;
+    const auto& name = type->toString();
+    return name == "i8"  || name == "i16" || name == "i32" || name == "i64" ||
+           name == "u8"  || name == "u16" || name == "u32" || name == "u64";
+}
+
+bool LLVMBackend::isUnsignedIntType(const std::shared_ptr<Type>& type) {
+    if (!type || type->kind != TypeKind::PRIMITIVE) return false;
+    const auto& name = type->toString();
+    return name == "u8" || name == "u16" || name == "u32" || name == "u64";
+}
+
+int LLVMBackend::getIntBitWidth(const std::shared_ptr<Type>& type) {
+    if (!type || type->kind != TypeKind::PRIMITIVE) return 64;
+    const auto& name = type->toString();
+    if (name == "i8"  || name == "u8")  return 8;
+    if (name == "i16" || name == "u16") return 16;
+    if (name == "i32" || name == "u32") return 32;
+    return 64; // i64, u64, or anything else
+}
+
+llvm::Value* LLVMBackend::truncateForType(llvm::Value* val, const std::shared_ptr<Type>& type) {
+    if (!isSizedIntType(type)) return val;
+    int bits = getIntBitWidth(type);
+    if (bits >= 64) return val; // i64/u64 — no truncation needed
+
+    // Extract the raw i64 payload
+    llvm::Value* payload = getI64(val);
+
+    // Truncate to the target bit width
+    llvm::Type* truncTy = llvm::IntegerType::get(*ctx, bits);
+    llvm::Value* truncated = builder->CreateTrunc(payload, truncTy, "narrow");
+
+    // Zero-extend back to i64 (this masks out the high bits)
+    llvm::Value* masked = builder->CreateZExt(truncated, llvm::Type::getInt64Ty(*ctx), "masked");
+
+    return makeI64(masked);
+}
 
 } // namespace angara

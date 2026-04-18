@@ -74,15 +74,57 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
         }
         case TokenType::MINUS: return makeI64(builder->CreateSub(getI64(l),getI64(r)));
         case TokenType::STAR: return makeI64(builder->CreateMul(getI64(l),getI64(r)));
-        case TokenType::SLASH: return makeI64(builder->CreateSDiv(getI64(l),getI64(r)));
-        case TokenType::PERCENT: return makeI64(builder->CreateSRem(getI64(l),getI64(r)));
+        case TokenType::SLASH: {
+            auto lt = m_type_checker.m_expression_types.find(e.left.get());
+            auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
+            bool unsigned_div = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
+                                (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
+            return makeI64(unsigned_div ? builder->CreateUDiv(getI64(l),getI64(r))
+                                        : builder->CreateSDiv(getI64(l),getI64(r)));
+        }
+        case TokenType::PERCENT: {
+            auto lt = m_type_checker.m_expression_types.find(e.left.get());
+            auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
+            bool unsigned_mod = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
+                                (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
+            return makeI64(unsigned_mod ? builder->CreateURem(getI64(l),getI64(r))
+                                        : builder->CreateSRem(getI64(l),getI64(r)));
+        }
         case TokenType::AMPERSAND: return makeI64(builder->CreateAnd(getI64(l),getI64(r)));
         case TokenType::PIPE:      return makeI64(builder->CreateOr(getI64(l),getI64(r)));
         case TokenType::CARET:     return makeI64(builder->CreateXor(getI64(l),getI64(r)));
-        case TokenType::LESS: return makeBool(builder->CreateICmpSLT(getI64(l),getI64(r)));
-        case TokenType::LESS_EQUAL: return makeBool(builder->CreateICmpSLE(getI64(l),getI64(r)));
-        case TokenType::GREATER: return makeBool(builder->CreateICmpSGT(getI64(l),getI64(r)));
-        case TokenType::GREATER_EQUAL: return makeBool(builder->CreateICmpSGE(getI64(l),getI64(r)));
+        case TokenType::LESS: {
+            auto lt = m_type_checker.m_expression_types.find(e.left.get());
+            auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
+            bool unsigned_cmp = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
+                                (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
+            return makeBool(unsigned_cmp ? builder->CreateICmpULT(getI64(l),getI64(r))
+                                        : builder->CreateICmpSLT(getI64(l),getI64(r)));
+        }
+        case TokenType::LESS_EQUAL: {
+            auto lt = m_type_checker.m_expression_types.find(e.left.get());
+            auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
+            bool unsigned_cmp = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
+                                (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
+            return makeBool(unsigned_cmp ? builder->CreateICmpULE(getI64(l),getI64(r))
+                                        : builder->CreateICmpSLE(getI64(l),getI64(r)));
+        }
+        case TokenType::GREATER: {
+            auto lt = m_type_checker.m_expression_types.find(e.left.get());
+            auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
+            bool unsigned_cmp = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
+                                (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
+            return makeBool(unsigned_cmp ? builder->CreateICmpUGT(getI64(l),getI64(r))
+                                        : builder->CreateICmpSGT(getI64(l),getI64(r)));
+        }
+        case TokenType::GREATER_EQUAL: {
+            auto lt = m_type_checker.m_expression_types.find(e.left.get());
+            auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
+            bool unsigned_cmp = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
+                                (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
+            return makeBool(unsigned_cmp ? builder->CreateICmpUGE(getI64(l),getI64(r))
+                                        : builder->CreateICmpSGE(getI64(l),getI64(r)));
+        }
         case TokenType::EQUAL_EQUAL: return callRt(rt->getFuncEquals(),{l,r});
         case TokenType::BANG_EQUAL: { auto* eq=callRt(rt->getFuncEquals(),{l,r}); return makeBool(builder->CreateNot(getBool(eq))); }
         default: return makeNil();
@@ -100,6 +142,11 @@ llvm::Value* LLVMBackend::cgUnary(const Unary& e) {
 llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
     auto* v = cg(e.value);
     if (auto* var = dynamic_cast<const VarExpr*>(e.target.get())) {
+        // Apply semantic narrowing for typed integer variables
+        auto type_it = namedTypes.find(var->name.lexeme);
+        if (type_it != namedTypes.end() && isSizedIntType(type_it->second)) {
+            v = truncateForType(v, type_it->second);
+        }
         storeVar(var->name.lexeme, v);
         return v;
     }

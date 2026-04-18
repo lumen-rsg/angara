@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <sstream>
 #include <cstdlib>
+#include <chrono>
+#include <iomanip>
 
 namespace fs = std::filesystem;
 
@@ -74,6 +76,72 @@ namespace angara {
     }
 
     // =====================================================
+    // Utility: Format File Size
+    // =====================================================
+
+    std::string BuildSystem::format_file_size(std::uintmax_t bytes) {
+        const char* units[] = {"B", "KB", "MB", "GB"};
+        int unit_idx = 0;
+        double size = static_cast<double>(bytes);
+        while (size >= 1024.0 && unit_idx < 3) {
+            size /= 1024.0;
+            unit_idx++;
+        }
+        std::ostringstream oss;
+        if (unit_idx == 0) {
+            oss << bytes << " " << units[unit_idx];
+        } else {
+            oss << std::fixed << std::setprecision(1) << size << " " << units[unit_idx];
+        }
+        return oss.str();
+    }
+
+    // =====================================================
+    // Build Summary
+    // =====================================================
+
+    void BuildSystem::print_build_summary() const {
+        if (m_built_artifacts.empty()) return;
+
+        std::cout << "\n" << CLR_BOLD << "📦 Artifacts:" << CLR_RESET << "\n";
+        for (const auto& artifact : m_built_artifacts) {
+            fs::path p(artifact);
+            std::string name = p.filename().string();
+            std::string size_str;
+            try {
+                size_str = format_file_size(fs::file_size(p));
+            } catch (...) {
+                size_str = "?";
+            }
+            std::cout << CLR_GREEN << "  • " << CLR_RESET
+                      << CLR_BOLD << name << CLR_RESET
+                      << CLR_GRAY << "  (" << size_str << ")" << CLR_RESET << "\n";
+        }
+    }
+
+    // =====================================================
+    // Publish Easter Egg (C# inspired)
+    // =====================================================
+
+    void BuildSystem::print_publish_easter_egg() const {
+        std::cout << "\n";
+        std::cout << CLR_BOLD << CLR_CYAN
+                  << "  ═════════════════════════════════════════════════════════════════\n"
+                  << CLR_RESET;
+        std::cout << CLR_BOLD << CLR_YELLOW
+                  << "    \"C# developers need NuGet, MSBuild, and dotnet publish\n"
+                  << "     just to say Hello World. We kept it simple. 😎\"\n"
+                  << CLR_RESET;
+        std::cout << CLR_MAGENTA
+                  << "                          — The Angara Compiler\n"
+                  << CLR_RESET;
+        std::cout << CLR_BOLD << CLR_CYAN
+                  << "  ═════════════════════════════════════════════════════════════════\n"
+                  << CLR_RESET;
+        std::cout << "\n";
+    }
+
+    // =====================================================
     // Main Build Entry
     // =====================================================
 
@@ -95,6 +163,12 @@ namespace angara {
         if (!ws.description.empty()) {
             std::cout << CLR_GRAY << "  " << ws.description << CLR_RESET << "\n";
         }
+
+        // Start build timer
+        auto build_start = std::chrono::high_resolution_clock::now();
+
+        // Clear artifact tracking
+        m_built_artifacts.clear();
 
         // 1. Pre-scan: Map all project names to their absolute ENTRY FILE paths.
         std::map<std::string, std::string> project_entries;
@@ -123,7 +197,17 @@ namespace angara {
             }
         }
 
-        std::cout << "\n" << CLR_BOLD << CLR_GREEN << "✓ Workspace built successfully." << CLR_RESET << "\n";
+        // Build timing
+        auto build_end = std::chrono::high_resolution_clock::now();
+        double elapsed = std::chrono::duration<double>(build_end - build_start).count();
+
+        std::cout << "\n" << CLR_BOLD << CLR_GREEN << "✓ Workspace built successfully"
+                  << CLR_GRAY << " in " << std::fixed << std::setprecision(1) << elapsed << "s"
+                  << CLR_RESET << "\n";
+
+        // Print artifact summary
+        print_build_summary();
+
         return true;
     }
 
@@ -186,6 +270,114 @@ namespace angara {
     }
 
     // =====================================================
+    // Publish (Build + Copy to Output Directory)
+    // =====================================================
+
+    bool BuildSystem::publish(const std::string& spec_file, const std::string& output_dir) {
+        auto workspace_opt = ConfigParser::parse(spec_file);
+        if (!workspace_opt) return false;
+
+        fs::path spec_path = fs::absolute(spec_file);
+        m_workspace_root = spec_path.parent_path().string();
+
+        // Determine publish directory
+        fs::path publish_dir;
+        if (!output_dir.empty()) {
+            publish_dir = fs::absolute(output_dir);
+        } else {
+            publish_dir = fs::path(m_workspace_root) / ".angara" / "publish";
+        }
+
+        std::cout << CLR_BOLD << CLR_MAGENTA << "Publishing Workspace: " << workspace_opt->name
+                  << " v" << workspace_opt->version << CLR_RESET << "\n";
+
+        // Step 1: Build the workspace
+        if (!build(spec_file)) {
+            std::cerr << CLR_RED << "Publish failed: build unsuccessful." << CLR_RESET << "\n";
+            return false;
+        }
+
+        // Step 2: Re-parse to get project configs (workspace state already populated by build)
+        std::cout << "\n" << CLR_BOLD << CLR_CYAN << "Determining projects to publish..." << CLR_RESET << "\n";
+
+        fs::create_directories(publish_dir);
+
+        int published_count = 0;
+
+        // Collect all publishable targets from built artifacts
+        for (const auto& proj : workspace_opt->projects) {
+            fs::path project_dir = (fs::path(m_workspace_root) / proj.path).lexically_normal();
+            fs::path artifact_path;
+
+            if (proj.type == ProjectType::LIBRARY) {
+                // Libraries: look for the shared lib in the project dir or build dir
+                std::string lib_name = "lib" + proj.name + SO_EXT;
+                fs::path in_project = project_dir / lib_name;
+                fs::path in_build = fs::path(m_build_dir) / "modules" / lib_name;
+
+                if (fs::exists(in_project)) {
+                    artifact_path = in_project;
+                } else if (fs::exists(in_build)) {
+                    artifact_path = in_build;
+                } else {
+                    // Try without "lib" prefix
+                    fs::path alt_name = project_dir / (proj.name + SO_EXT);
+                    if (fs::exists(alt_name)) {
+                        artifact_path = alt_name;
+                    }
+                }
+            } else {
+                // Apps: binary is in the project dir
+                artifact_path = project_dir / proj.name;
+            }
+
+            if (!artifact_path.empty() && fs::exists(artifact_path)) {
+                fs::path dest = publish_dir / artifact_path.filename();
+                fs::copy_file(artifact_path, dest, fs::copy_options::overwrite_existing);
+
+                std::cout << CLR_GREEN << "  " << proj.name << CLR_RESET
+                          << CLR_GRAY << " → " << CLR_RESET
+                          << CLR_BOLD << dest.string() << CLR_RESET << "\n";
+                published_count++;
+            } else {
+                std::cout << CLR_YELLOW << "  " << proj.name
+                          << " (no artifact found, skipping)" << CLR_RESET << "\n";
+            }
+        }
+
+        // Also copy any native modules from the build directory
+        fs::path local_mod_dir = fs::path(m_build_dir) / "modules";
+        if (fs::exists(local_mod_dir)) {
+            for (const auto& entry : fs::directory_iterator(local_mod_dir)) {
+                if (entry.is_regular_file()) {
+                    fs::path dest = publish_dir / entry.path().filename();
+                    fs::copy_file(entry.path(), dest, fs::copy_options::overwrite_existing);
+
+                    std::cout << CLR_GREEN << "  " << entry.path().filename().string() << CLR_RESET
+                              << CLR_GRAY << " → " << CLR_RESET
+                              << CLR_BOLD << dest.string() << CLR_RESET
+                              << CLR_GRAY << " (native module)" << CLR_RESET << "\n";
+                    published_count++;
+                }
+            }
+        }
+
+        if (published_count == 0) {
+            std::cerr << CLR_YELLOW << "No artifacts were published." << CLR_RESET << "\n";
+            return false;
+        }
+
+        std::cout << "\n" << CLR_BOLD << CLR_GREEN << "Successfully published "
+                  << published_count << " target(s) to '"
+                  << publish_dir.string() << "'" << CLR_RESET << "\n";
+
+        // Print the C# inspired easter egg
+        print_publish_easter_egg();
+
+        return true;
+    }
+
+    // =====================================================
     // Project Build Pipeline
     // =====================================================
 
@@ -228,6 +420,13 @@ namespace angara {
                             driver.get_native_libs_linked(),
                             project_root)) {
             return false;
+        }
+
+        // Track the built artifact
+        std::string output_dir = resolve_output_dir(config);
+        fs::path bin_path = fs::path(output_dir) / config.name;
+        if (fs::exists(bin_path)) {
+            m_built_artifacts.push_back(bin_path.string());
         }
 
         // 5. Post-build step

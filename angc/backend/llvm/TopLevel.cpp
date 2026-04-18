@@ -56,7 +56,9 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     builder->SetInsertPoint(entry);
 
     auto saved_values = std::move(namedVals);
+    auto saved_types = std::move(namedTypes);
     namedVals.clear();
+    namedTypes.clear();
 
     idx = 0;
     for (auto& arg : fn->args()) {
@@ -75,6 +77,7 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
         builder->CreateRet(makeNil());
 
     namedVals = std::move(saved_values);
+    namedTypes = std::move(saved_types);
 }
 
 void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
@@ -117,7 +120,9 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
             builder->SetInsertPoint(entry);
 
             auto saved_values = std::move(namedVals);
+            auto saved_types = std::move(namedTypes);
             namedVals.clear();
+            namedTypes.clear();
 
             // First arg is always 'this'
             auto* this_alloca = allocLocal(fn, "this");
@@ -142,6 +147,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
                 builder->CreateRet(makeNil());
 
             namedVals = std::move(saved_values);
+            namedTypes = std::move(saved_types);
         }
     }
 
@@ -383,6 +389,7 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
     builder->SetInsertPoint(entry);
 
     namedVals.clear();
+    namedTypes.clear();
 
     for (const auto& stmt : statements) {
         if (std::dynamic_pointer_cast<const FuncStmt>(stmt)) continue;

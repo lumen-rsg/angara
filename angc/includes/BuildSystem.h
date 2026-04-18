@@ -6,6 +6,7 @@
 #include <vector>
 #include <set>
 #include <map>
+#include <chrono>
 
 namespace angara {
 
@@ -17,6 +18,7 @@ namespace angara {
         bool build(const std::string& spec_file);
         bool clean(const std::string& spec_file);
         bool run(const std::string& spec_file);
+        bool publish(const std::string& spec_file, const std::string& output_dir = "");
 
         // --- Cross-compilation ---
         void set_target(const std::string& triple) { m_target_triple = triple; }
@@ -38,6 +40,9 @@ namespace angara {
         std::string m_target_triple;
         std::string m_sysroot;
         BuildMode m_build_mode = BuildMode::DEBUG;
+
+        // --- Build artifacts (tracked for publish/summary) ---
+        std::vector<std::string> m_built_artifacts;
 
         // --- Core build logic ---
         bool build_project(const ProjectConfig& config,
@@ -65,5 +70,10 @@ namespace angara {
 
         // --- Utilities ---
         std::string get_module_output_path(const std::string& module_name) const;
+
+        // --- Build summary & publish helpers ---
+        void print_build_summary() const;
+        void print_publish_easter_egg() const;
+        static std::string format_file_size(std::uintmax_t bytes);
     };
 }

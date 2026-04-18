@@ -1,98 +1,100 @@
-// Angara Standard Library: Collections
-// Higher-order functions for list<T> and record types.
-// 
-// This module is part of the Angara standard library.
-// Import with: attach collections;
+//
+// Angara Standard Collections Library
+//
+// Collection operations for list<any>.
+// Uses Angara's dynamic runtime internally.
+//
 
-// ============================================================================
-// List Functions
-// ============================================================================
+// --- Transformers ---
 
-/// Transform each element of a list using the given function.
-export func map<T, U>(items as list<T>, fn as function(T) -> U) -> list<U> {
-    let result as list<U> = [];
+// Apply a function to every element, returning a new list.
+export func map(transform as function(any) -> any, items as list<any>) -> list<any> {
+    let result as list<any> = [];
     for (item in items) {
-        result.push(fn(item));
+        result.push(transform(item));
     }
     return result;
 }
 
-/// Keep only elements that satisfy the predicate.
-export func filter<T>(items as list<T>, fn as function(T) -> bool) -> list<T> {
-    let result as list<T> = [];
+// Keep only elements that satisfy a predicate.
+export func filter(predicate as function(any) -> bool, items as list<any>) -> list<any> {
+    let result as list<any> = [];
     for (item in items) {
-        if (fn(item)) {
+        if (predicate(item)) {
             result.push(item);
         }
     }
     return result;
 }
 
-/// Reduce a list to a single value by accumulating from left to right.
-export func reduce<T, U>(items as list<T>, initial as U, fn as function(U, T) -> U) -> U {
+// Reduce a list to a single value.
+export func reduce(items as list<any>, initial as any, accumulator as function(any, any) -> any) -> any {
     let acc = initial;
     for (item in items) {
-        acc = fn(acc, item);
+        acc = accumulator(acc, item);
     }
     return acc;
 }
 
-/// Find the first element satisfying the predicate, or nil if none found.
-export func find<T>(items as list<T>, fn as function(T) -> bool) -> T? {
+// --- Search ---
+
+// Find the first element matching a predicate, or nil.
+export func find(predicate as function(any) -> bool, items as list<any>) -> any {
     for (item in items) {
-        if (fn(item)) {
+        if (predicate(item)) {
             return item;
         }
     }
     return nil;
 }
 
-/// Check if any element satisfies the predicate.
-export func any<T>(items as list<T>, fn as function(T) -> bool) -> bool {
+// True if any element satisfies the predicate.
+export func any(items as list<any>, predicate as function(any) -> bool) -> bool {
     for (item in items) {
-        if (fn(item)) {
+        if (predicate(item)) {
             return true;
         }
     }
     return false;
 }
 
-/// Check if all elements satisfy the predicate.
-export func all<T>(items as list<T>, fn as function(T) -> bool) -> bool {
+// True if all elements satisfy the predicate.
+export func all(items as list<any>, predicate as function(any) -> bool) -> bool {
     for (item in items) {
-        if (!fn(item)) {
+        if (!predicate(item)) {
             return false;
         }
     }
     return true;
 }
 
-/// Check if the list contains the given value.
-export func contains<T>(items as list<T>, val as T) -> bool {
+// True if the list contains the given value.
+export func contains(items as list<any>, value as any) -> bool {
     for (item in items) {
-        if (item == val) {
+        if (item == value) {
             return true;
         }
     }
     return false;
 }
 
-/// Return the number of elements satisfying the predicate.
-export func count<T>(items as list<T>, fn as function(T) -> bool) -> i64 {
+// Count elements satisfying a predicate.
+export func count(predicate as function(any) -> bool, items as list<any>) -> i64 {
     let c = 0;
     for (item in items) {
-        if (fn(item)) {
+        if (predicate(item)) {
             c = c + 1;
         }
     }
     return c;
 }
 
-/// Return a new list with elements in reverse order.
-export func reverse<T>(items as list<T>) -> list<T> {
-    let n = len(items);
-    let result as list<T> = [];
-    let i = n - 1;
+// --- Ordering & Slicing ---
+
+// Return a new list in reverse order.
+export func reverse(items as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = len(items) - 1;
     while (i >= 0) {
         result.push(items[i]);
         i = i - 1;
@@ -100,21 +102,18 @@ export func reverse<T>(items as list<T>) -> list<T> {
     return result;
 }
 
-/// Concatenate two lists into a new list.
-export func concat<T>(a as list<T>, b as list<T>) -> list<T> {
-    let result as list<T> = [];
-    for (item in a) {
-        result.push(item);
-    }
+// Concatenate two lists.
+export func concat(a as list<any>, b as list<any>) -> list<any> {
+    let result = a;
     for (item in b) {
         result.push(item);
     }
     return result;
 }
 
-/// Take the first n elements from a list.
-export func take<T>(items as list<T>, n as i64) -> list<T> {
-    let result as list<T> = [];
+// Take the first n elements.
+export func take(items as list<any>, n as i64) -> list<any> {
+    let result as list<any> = [];
     let i = 0;
     while (i < n && i < len(items)) {
         result.push(items[i]);
@@ -123,9 +122,9 @@ export func take<T>(items as list<T>, n as i64) -> list<T> {
     return result;
 }
 
-/// Skip the first n elements and return the rest.
-export func skip<T>(items as list<T>, n as i64) -> list<T> {
-    let result as list<T> = [];
+// Skip the first n elements.
+export func skip(items as list<any>, n as i64) -> list<any> {
+    let result as list<any> = [];
     let i = n;
     while (i < len(items)) {
         result.push(items[i]);
@@ -134,69 +133,58 @@ export func skip<T>(items as list<T>, n as i64) -> list<T> {
     return result;
 }
 
-/// Get the first element of the list, or nil if empty.
-export func first<T>(items as list<T>) -> T? {
-    if (len(items) == 0) {
-        return nil;
+// --- Accessors ---
+
+// First element, or nil.
+export func first(items as list<any>) -> any {
+    if (len(items) > 0) {
+        return items[0];
     }
-    return items[0];
+    return nil;
 }
 
-/// Get the last element of the list, or nil if empty.
-export func last<T>(items as list<T>) -> T? {
-    if (len(items) == 0) {
-        return nil;
+// Last element, or nil.
+export func last(items as list<any>) -> any {
+    if (len(items) > 0) {
+        return items[len(items) - 1];
     }
-    return items[len(items) - 1];
+    return nil;
 }
 
-/// Check if the list is empty.
-export func is_empty<T>(items as list<T>) -> bool {
+// True if the list is empty.
+export func is_empty(items as list<any>) -> bool {
     return len(items) == 0;
 }
 
-/// Flatten a list of lists into a single list.
-export func flatten<T>(items as list<list<T>>) -> list<T> {
-    let result as list<T> = [];
-    for (sub in items) {
-        for (item in sub) {
-            result.push(item);
-        }
-    }
-    return result;
-}
+// --- Utilities ---
 
-/// Execute a function for each element (side effects only).
-export func for_each<T>(items as list<T>, fn as function(T) -> nil) {
+// Apply a function to each element (side-effects only).
+export func for_each(items as list<any>, action as function(any) -> nil) {
     for (item in items) {
-        fn(item);
+        action(item);
     }
 }
 
-// ============================================================================
-// String Helpers
-// ============================================================================
-
-/// Join a list of strings with a separator.
-export func join(items as list<string>, sep as string) -> string {
-    if (len(items) == 0) {
-        return "";
-    }
-    let result = items[0];
-    let i = 1;
+// Join a list of strings with a separator.
+export func join(items as list<any>, separator as string) -> string {
+    let result = "";
+    let i = 0;
     while (i < len(items)) {
-        result = result + sep + items[i];
+        if (i > 0) {
+            result = result + separator;
+        }
+        result = result + string(items[i]);
         i = i + 1;
     }
     return result;
 }
 
-/// Split a string into characters (as single-character strings).
-export func chars(s as string) -> list<string> {
-    let result as list<string> = [];
+// Split a string into a list of single characters.
+export func chars(s as string) -> list<any> {
+    let result as list<any> = [];
     let i = 0;
     while (i < len(s)) {
-        result.push(string(s[i]));
+        result.push(s[i]);
         i = i + 1;
     }
     return result;
