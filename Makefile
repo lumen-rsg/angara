@@ -276,7 +276,7 @@ build/modules/imgui.$(SO_EXT): build/obj/modules/imgui.o $(IMGUI_OBJS)
 build/modules/%.$(SO_EXT): build/obj/modules/%.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< -shared -o $@
+	@$(CC) $< -shared -Wl,-install_name,$(INSTALL_MOD_DIR)/$(@F) -o $@
 
 # --- Linkage Rules (Compiler) ---
 $(ANGC_OUT): $(ANGC_OBJS)
