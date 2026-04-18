@@ -41,6 +41,10 @@ bool TypeChecker::check_type_compatibility(
     // Rule 2: Anything is compatible with 'any'.
     if (expected->kind == TypeKind::ANY || actual->kind == TypeKind::ANY) return true;
 
+    // Rule 2b: A type parameter (T, U, etc.) accepts any type at the call site.
+    // With type erasure, type params are placeholders that accept all types.
+    if (expected->kind == TypeKind::TYPE_PARAM) return true;
+
     // Rule 3: A T or a `nil` is compatible with a T?
     if (expected->kind == TypeKind::OPTIONAL) {
         auto optional_type = std::dynamic_pointer_cast<OptionalType>(expected);
