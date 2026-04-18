@@ -6,6 +6,11 @@ namespace angara {
 
     std::shared_ptr<Stmt> Parser::dataDeclaration() {
         Token name = consume(TokenType::IDENTIFIER, "Expect data block name.");
+
+        // --- GENERIC SUPPORT ---
+        // Parse optional type parameters: data Box<T> { ... }
+        auto type_params = parseTypeParams();
+
         consume(TokenType::LEFT_BRACE, "Expect '{' before data block body.");
 
         std::vector<std::shared_ptr<VarDeclStmt>> fields;
@@ -36,7 +41,7 @@ namespace angara {
         }
 
         consume(TokenType::RIGHT_BRACE, "Expect '}' after data block body.");
-        return std::make_shared<DataStmt>(std::move(name), std::move(fields));
+        return std::make_shared<DataStmt>(std::move(name), std::move(fields), std::move(type_params));
     }
 
 }

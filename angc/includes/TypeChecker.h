@@ -163,6 +163,11 @@ namespace angara {
         void visit(std::shared_ptr<const BreakStmt> stmt) override;
         std::map<const Symbol*, std::shared_ptr<Type>> m_narrowed_types;
 
+        // --- GENERIC SUPPORT ---
+        // Tracks currently-in-scope type parameters (e.g., T in `data Box<T>`)
+        // Maps type parameter name to its TypeParameterType
+        std::map<std::string, std::shared_ptr<TypeParameterType>> m_active_type_params;
+
         std::shared_ptr<Symbol> resolve_and_narrow(const VarExpr &expr);
 
         std::any visit(const IsExpr &expr) override;

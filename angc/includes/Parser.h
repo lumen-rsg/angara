@@ -96,5 +96,10 @@ namespace angara {
         std::shared_ptr<Stmt> enumDeclaration();
 
         std::shared_ptr<Expr> parseMatchPattern();
+
+        // --- GENERIC SUPPORT ---
+        // Parses a type parameter list like <T, U, V> after a declaration name.
+        // Returns an empty vector if no '<' is found.
+        std::vector<Token> parseTypeParams();
     };
 }

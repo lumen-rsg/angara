@@ -6,6 +6,13 @@
 namespace angara {
 
     void TypeChecker::defineFunctionHeader(const FuncStmt& stmt) {
+        // --- GENERIC SUPPORT ---
+        // Register type parameters in scope (e.g., T in `func identity<T>(x as T) -> T`)
+        auto saved_type_params = m_active_type_params;
+        for (const auto& tp : stmt.type_params) {
+            m_active_type_params[tp.lexeme] = std::make_shared<TypeParameterType>(tp.lexeme);
+        }
+
         std::vector<std::shared_ptr<Type>> param_types;
 
         if (stmt.has_this) {
@@ -64,6 +71,9 @@ namespace angara {
                 m_module_type->exports[stmt.name.lexeme] = function_type;
             }
         }
+
+        // Restore type param scope
+        m_active_type_params = saved_type_params;
     }
 
     void TypeChecker::visit(std::shared_ptr<const FuncStmt> stmt) {
@@ -92,6 +102,13 @@ namespace angara {
         m_symbols.enterScope();
         m_function_return_types.push(func_type->return_type);
 
+        // --- GENERIC SUPPORT ---
+        // Register type parameters so T can be used inside the body
+        auto saved_type_params = m_active_type_params;
+        for (const auto& tp : stmt->type_params) {
+            m_active_type_params[tp.lexeme] = std::make_shared<TypeParameterType>(tp.lexeme);
+        }
+
         // 3. If it's a method, declare 'this'.
         if (stmt->has_this && m_current_class) {
             Token this_token(TokenType::THIS, "this", stmt->name.line, 0);
@@ -110,6 +127,7 @@ namespace angara {
 
 
         // 6. Restore the context.
+        m_active_type_params = saved_type_params;
         m_function_return_types.pop();
         exitScopeAndWarn();
     }

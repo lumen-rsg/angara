@@ -17,6 +17,19 @@ namespace angara {
         auto symbol = m_symbols.resolve(stmt.name.lexeme);
         auto data_type = std::dynamic_pointer_cast<DataType>(symbol->type);
 
+        // --- GENERIC SUPPORT ---
+        // Store the type parameter names on the DataType
+        for (const auto& tp : stmt.type_params) {
+            data_type->type_params.push_back(tp.lexeme);
+        }
+
+        // Register type parameters in scope so field types can reference them
+        // e.g., in `data Box<T> { let value as T; }`, T must resolve during field type resolution
+        auto saved_type_params = m_active_type_params; // save for restoration
+        for (const auto& tp : stmt.type_params) {
+            m_active_type_params[tp.lexeme] = std::make_shared<TypeParameterType>(tp.lexeme);
+        }
+
         if (stmt.is_exported) {
             m_module_type->exports[stmt.name.lexeme] = data_type;
         }
@@ -36,6 +49,8 @@ namespace angara {
                 data_type->fields[field_decl->name.lexeme] = {field_type, AccessLevel::PUBLIC, dummy_token, false};
             }
             // Crucially, we DO NOT set `data_type->constructor_type`.
+            // Restore type param scope
+            m_active_type_params = saved_type_params;
             return;
         }
 
@@ -76,6 +91,9 @@ namespace angara {
         // 3. Create and store the constructor's FunctionType.
         // The return type is the data type itself.
         data_type->constructor_type = std::make_shared<FunctionType>(ctor_params, data_type);
+
+        // Restore type param scope
+        m_active_type_params = saved_type_params;
     }
 
 }

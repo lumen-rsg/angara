@@ -1,9 +1,14 @@
 #include "Parser.h"
 namespace angara {
 
-    // Grammar: func IDENTIFIER "(" (IDENTIFIER "as" type ...)? ")" ...
+    // Grammar: func IDENTIFIER ("<" TYPE_PARAMS ">")? "(" (IDENTIFIER "as" type ...)? ")" ...
     std::shared_ptr<Stmt> Parser::function(const std::string& kind) {
         Token name = consume(TokenType::IDENTIFIER, "Expect " + kind + " name.");
+
+        // --- GENERIC SUPPORT ---
+        // Parse optional type parameters: func identity<T>(x as T) -> T { ... }
+        auto type_params = parseTypeParams();
+
         consume(TokenType::LEFT_PAREN, "Expect '(' after " + kind + " name.");
 
         // --- FIX: Methods implicitly have 'this' ---
@@ -55,6 +60,6 @@ namespace angara {
             throw error(peek(), "Expect '{' to start a function body or ';' for an interface declaration.");
         }
 
-        return std::make_shared<FuncStmt>(std::move(name), has_this, std::move(parameters), returnType, body);
+        return std::make_shared<FuncStmt>(std::move(name), has_this, std::move(parameters), returnType, body, std::move(type_params));
     }
 }

@@ -31,6 +31,8 @@ namespace angara {
         DATA,
         ENUM,
         C_PTR,
+        TYPE_PARAM, // A generic type parameter (e.g., T in data Box<T>)
+        GENERIC_INSTANCE, // A concrete instantiation of a generic type (e.g., Box<i64>)
         ERROR // A special type to prevent cascading error messages
     };
 
@@ -164,10 +166,15 @@ namespace angara {
         std::map<std::string, MemberInfo> fields;
         std::map<std::string, MemberInfo> methods;
 
+        // --- GENERIC SUPPORT ---
+        std::vector<std::string> type_params;
+
         explicit ClassType(std::string name)
                 : Type(TypeKind::CLASS), name(std::move(name)) {}
 
         [[nodiscard]] std::string toString() const override { return name; }
+
+        [[nodiscard]] bool is_generic() const { return !type_params.empty(); }
 
         [[nodiscard]] const MemberInfo* findProperty(const std::string& prop_name) const {
             // 1. Check the current class's fields.
@@ -304,11 +311,18 @@ namespace angara {
         std::shared_ptr<FunctionType> constructor_type;
         bool is_foreign = false;
 
+        // --- GENERIC SUPPORT ---
+        // Type parameter names for this generic data type (e.g., {"T"} for Box<T>)
+        std::vector<std::string> type_params;
+
         explicit DataType(std::string name)
             : Type(TypeKind::DATA), name(std::move(name)) {}
 
         // The string representation for a data type instance is its name.
         [[nodiscard]] std::string toString() const override { return name; }
+
+        // Check if this data type is generic (has type parameters)
+        [[nodiscard]] bool is_generic() const { return !type_params.empty(); }
     };
 
 
@@ -328,6 +342,61 @@ namespace angara {
     struct CPtrType : Type {
         CPtrType() : Type(TypeKind::C_PTR) {}
         std::string toString() const override { return "c_ptr"; }
+    };
+
+    // --- GENERIC TYPE SYSTEM ---
+
+    // Represents a declared type parameter (e.g., T in `data Box<T>`)
+    // This is a placeholder that gets substituted when the generic is instantiated.
+    struct TypeParameterType : Type {
+        const std::string name; // e.g., "T", "K", "V"
+
+        explicit TypeParameterType(std::string name)
+            : Type(TypeKind::TYPE_PARAM), name(std::move(name)) {}
+
+        [[nodiscard]] std::string toString() const override { return name; }
+    };
+
+    // Represents a concrete instantiation of a generic type (e.g., Box<i64>, Pair<string, i64>)
+    // Stores a reference to the base generic type and the substitution map.
+    struct GenericInstanceType : Type {
+        // The base generic type (e.g., DataType for Box, ClassType for a generic class)
+        std::shared_ptr<Type> base_type;
+        // Maps type parameter names to their concrete types (e.g., "T" -> i64)
+        std::map<std::string, std::shared_ptr<Type>> type_args;
+
+        GenericInstanceType(std::shared_ptr<Type> base,
+                           std::map<std::string, std::shared_ptr<Type>> args)
+            : Type(TypeKind::GENERIC_INSTANCE),
+              base_type(std::move(base)),
+              type_args(std::move(args)) {}
+
+        [[nodiscard]] std::string toString() const override {
+            std::stringstream ss;
+            // Get the base type name
+            ss << base_type->toString() << "<";
+            bool first = true;
+            for (const auto& [name, type] : type_args) {
+                if (!first) ss << ", ";
+                ss << type->toString();
+                first = false;
+            }
+            ss << ">";
+            return ss.str();
+        }
+
+        // Substitute a type parameter with its concrete type.
+        // If the type is a TypeParameterType, look it up in type_args.
+        // Otherwise return the type unchanged.
+        [[nodiscard]] std::shared_ptr<Type> substitute(const std::shared_ptr<Type>& type) const {
+            if (!type) return type;
+            if (type->kind == TypeKind::TYPE_PARAM) {
+                auto* tp = dynamic_cast<const TypeParameterType*>(type.get());
+                auto it = type_args.find(tp->name);
+                if (it != type_args.end()) return it->second;
+            }
+            return type;
+        }
     };
 
 } // namespace angara

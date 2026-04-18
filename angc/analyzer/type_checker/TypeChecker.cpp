@@ -374,6 +374,13 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
             return std::make_shared<ListType>(m_type_any);
         }
 
+        // --- GENERIC SUPPORT ---
+        // Check if this is a type parameter in scope (e.g., T in `data Box<T>`)
+        auto tp_it = m_active_type_params.find(name);
+        if (tp_it != m_active_type_params.end()) {
+            return tp_it->second;
+        }
+
         // If not a primitive, it must be a user-defined type. Look it up.
         auto symbol = m_symbols.resolve(name);
         if (symbol) {
@@ -402,9 +409,11 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         return m_type_error;
     }
 
-    // --- Case 3: A generic type, e.g., 'list<T>' ---
+    // --- Case 3: A generic type, e.g., 'list<T>' or 'Box<i64>' ---
     if (auto generic = std::dynamic_pointer_cast<const GenericType>(ast_type)) {
         const std::string& base_name = generic->name.lexeme;
+
+        // Built-in: list<T>
         if (base_name == "list") {
             if (generic->arguments.size() != 1) {
                 error(generic->name, "The 'list' type requires exactly one generic argument.");
@@ -414,6 +423,63 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
             if (element_type->kind == TypeKind::ERROR) return m_type_error;
             return std::make_shared<ListType>(element_type);
         }
+
+        // --- GENERIC SUPPORT: User-defined generic types ---
+        // Look up the base type (e.g., 'Box') in the symbol table
+        auto symbol = m_symbols.resolve(base_name);
+        if (symbol) {
+            auto& base_type = symbol->type;
+
+            // Check if the base type is a generic DataType
+            if (base_type->kind == TypeKind::DATA) {
+                auto data_type = std::dynamic_pointer_cast<DataType>(base_type);
+                if (data_type->is_generic()) {
+                    // Validate argument count matches parameter count
+                    if (generic->arguments.size() != data_type->type_params.size()) {
+                        error(generic->name, "Generic type '" + base_name + "' expects " +
+                              std::to_string(data_type->type_params.size()) +
+                              " type argument(s), but got " +
+                              std::to_string(generic->arguments.size()) + ".");
+                        return m_type_error;
+                    }
+
+                    // Resolve each argument type
+                    std::map<std::string, std::shared_ptr<Type>> type_args;
+                    for (size_t i = 0; i < generic->arguments.size(); ++i) {
+                        auto arg_type = resolveType(generic->arguments[i]);
+                        if (arg_type->kind == TypeKind::ERROR) return m_type_error;
+                        type_args[data_type->type_params[i]] = arg_type;
+                    }
+
+                    // Create a GenericInstanceType
+                    return std::make_shared<GenericInstanceType>(data_type, std::move(type_args));
+                }
+            }
+
+            // Check if the base type is a generic ClassType
+            if (base_type->kind == TypeKind::CLASS) {
+                auto class_type = std::dynamic_pointer_cast<ClassType>(base_type);
+                if (class_type->is_generic()) {
+                    if (generic->arguments.size() != class_type->type_params.size()) {
+                        error(generic->name, "Generic type '" + base_name + "' expects " +
+                              std::to_string(class_type->type_params.size()) +
+                              " type argument(s), but got " +
+                              std::to_string(generic->arguments.size()) + ".");
+                        return m_type_error;
+                    }
+
+                    std::map<std::string, std::shared_ptr<Type>> type_args;
+                    for (size_t i = 0; i < generic->arguments.size(); ++i) {
+                        auto arg_type = resolveType(generic->arguments[i]);
+                        if (arg_type->kind == TypeKind::ERROR) return m_type_error;
+                        type_args[class_type->type_params[i]] = arg_type;
+                    }
+
+                    return std::make_shared<GenericInstanceType>(class_type, std::move(type_args));
+                }
+            }
+        }
+
         error(generic->name, "Unknown generic type '" + base_name + "'.");
         return m_type_error;
     }

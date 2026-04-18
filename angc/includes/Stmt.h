@@ -243,15 +243,21 @@ namespace angara {
         // Stores the header name, e.g., "unistd.h"
         std::vector<Token> foreign_headers;
 
+        // --- GENERIC SUPPORT ---
+        // Type parameter names (e.g., {"T"} for `func identity<T>(x as T) -> T`)
+        const std::vector<Token> type_params;
+
         // TODO ignore `throws` for now and add it when exceptions are fully implemented.
 
         FuncStmt(Token name, bool has_this, std::vector<Parameter> params,
-         std::shared_ptr<ASTType> returnType, std::optional<std::vector<std::shared_ptr<Stmt>>> body)
+         std::shared_ptr<ASTType> returnType, std::optional<std::vector<std::shared_ptr<Stmt>>> body,
+         std::vector<Token> type_params = {})
         : name(std::move(name)),
           params(std::move(params)),
           returnType(std::move(returnType)),
           has_this(has_this),
-          body(std::move(body)) {}
+          body(std::move(body)),
+          type_params(std::move(type_params)) {}
 
         void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const FuncStmt>(self));
@@ -385,12 +391,17 @@ namespace angara {
         const Token name;
         // A data block only contains a list of field declarations.
         const std::vector<std::shared_ptr<VarDeclStmt>> fields;
+        // --- GENERIC SUPPORT ---
+        // Type parameter names (e.g., {"T", "U"} for `data Pair<T, U>`)
+        const std::vector<Token> type_params;
         bool is_exported = false;
         bool is_foreign = false;
 
-        DataStmt(Token name, std::vector<std::shared_ptr<VarDeclStmt>> fields)
+        DataStmt(Token name, std::vector<std::shared_ptr<VarDeclStmt>> fields,
+                 std::vector<Token> type_params = {})
             : name(std::move(name)),
-              fields(std::move(fields)) {}
+              fields(std::move(fields)),
+              type_params(std::move(type_params)) {}
 
         void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const DataStmt>(self));

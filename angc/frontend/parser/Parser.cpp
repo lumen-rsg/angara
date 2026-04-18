@@ -219,4 +219,57 @@ std::shared_ptr<ASTType> Parser::type() {
         }
     }
 
+    // --- GENERIC SUPPORT ---
+    // Parses a type parameter list like <T, U, V> after a declaration name.
+    // Returns an empty vector if no '<' is found or if it looks like a comparison.
+    //
+    // Disambiguation: In declaration context (after `data Name`, `func name`),
+    // we look ahead to check if '<' is followed by identifiers and ','/'>' —
+    // which means type parameters, not a comparison expression.
+    std::vector<Token> Parser::parseTypeParams() {
+        // Check if the next token is '<'
+        if (!check(TokenType::LESS)) {
+            return {};
+        }
+
+        // Lookahead: save position, try to parse as type params
+        int saved = m_current;
+
+        // Consume '<'
+        advance();
+
+        // If the next token is not an identifier, this is a comparison, not type params
+        if (!check(TokenType::IDENTIFIER)) {
+            m_current = saved;
+            return {};
+        }
+
+        std::vector<Token> params;
+
+        // Try to parse comma-separated identifiers until '>'
+        while (true) {
+            if (!check(TokenType::IDENTIFIER)) {
+                // Not a valid type param list — restore and return empty
+                m_current = saved;
+                return {};
+            }
+
+            params.push_back(advance());
+
+            if (check(TokenType::GREATER)) {
+                // Found closing '>' — this is a valid type param list
+                advance(); // consume '>'
+                return params;
+            }
+
+            if (!check(TokenType::COMMA)) {
+                // No comma and no '>' — not a type param list
+                m_current = saved;
+                return {};
+            }
+
+            advance(); // consume ','
+        }
+    }
+
 }
