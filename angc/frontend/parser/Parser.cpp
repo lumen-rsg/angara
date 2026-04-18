@@ -55,12 +55,11 @@ std::shared_ptr<ASTType> Parser::type() {
     }
     // Check for any kind of name-based type (e.g., `i64`, `list`, `User`)
     else if (match({
-    // Keep the existing tokens
     TokenType::IDENTIFIER, TokenType::NIL,
 
-    // Add all keywords that can represent a type
-    TokenType::TYPE_LIST, TokenType::TYPE_MAP, TokenType::TYPE_STRING,
-    TokenType::TYPE_INT, TokenType::TYPE_FLOAT, TokenType::TYPE_BOOL, TokenType::TYPE_RECORD
+    // Type keywords that can appear in type position
+    TokenType::TYPE_STRING,
+    TokenType::TYPE_INT, TokenType::TYPE_FLOAT, TokenType::TYPE_BOOL
 })) {
         Token type_name_token = previous();
 
