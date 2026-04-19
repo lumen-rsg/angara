@@ -14,6 +14,9 @@
 
 namespace angara {
 
+    // Forward declaration — Stmt is defined in Stmt.h but LambdaExpr needs it
+    struct Stmt;
+
     struct Binary;
     struct Grouping;
     struct Literal;
@@ -34,6 +37,7 @@ namespace angara {
     struct MatchExpr;
     struct SizeofExpr;
     struct RetypeExpr;
+    struct LambdaExpr;
 
     // The Visitor interface for expressions
     class ExprVisitor {
@@ -60,6 +64,7 @@ namespace angara {
         virtual std::any visit(const MatchExpr& expr) = 0;
         virtual std::any visit(const SizeofExpr& expr) = 0;
         virtual std::any visit(const RetypeExpr& expr) = 0;
+        virtual std::any visit(const LambdaExpr& expr) = 0;
 
     };
 
@@ -318,6 +323,31 @@ namespace angara {
             : keyword(std::move(keyword)),
               target_type(std::move(target)),
               expression(std::move(expr)) {}
+
+        std::any accept(ExprVisitor& visitor) const override {
+            return visitor.visit(*this);
+        }
+    };
+
+    // Represents a lambda (anonymous function) expression:
+    //   func(x as i64) -> i64 { return x * 2; }
+    struct LambdaExpr : Expr {
+        const Token keyword;                           // The 'func' token
+        const std::vector<std::shared_ptr<ASTType>> param_types;  // Parameter type annotations
+        const std::vector<Token> param_names;          // Parameter name tokens
+        const std::shared_ptr<ASTType> returnType;     // Optional return type annotation
+        const std::vector<std::shared_ptr<Stmt>> body; // Lambda body statements
+
+        LambdaExpr(Token keyword,
+                   std::vector<Token> param_names,
+                   std::vector<std::shared_ptr<ASTType>> param_types,
+                   std::shared_ptr<ASTType> returnType,
+                   std::vector<std::shared_ptr<Stmt>> body)
+            : keyword(std::move(keyword)),
+              param_types(std::move(param_types)),
+              param_names(std::move(param_names)),
+              returnType(std::move(returnType)),
+              body(std::move(body)) {}
 
         std::any accept(ExprVisitor& visitor) const override {
             return visitor.visit(*this);

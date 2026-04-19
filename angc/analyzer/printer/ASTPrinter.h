@@ -56,6 +56,7 @@ namespace angara {
         std::any visit(const MatchExpr& expr) override;
         std::any visit(const SizeofExpr& expr) override;
         std::any visit(const RetypeExpr& expr) override;
+        std::any visit(const LambdaExpr& expr) override;
 
         // --- Visitor Implementations (Statements) ---
         void visit(std::shared_ptr<const ExpressionStmt> stmt) override;

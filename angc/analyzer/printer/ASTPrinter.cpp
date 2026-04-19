@@ -442,4 +442,13 @@ namespace angara {
         printChild("block", stmt->block, true);
     }
 
+    std::any ASTPrinter::visit(const LambdaExpr& expr) {
+        printHeader("LambdaExpr");
+        for (size_t i = 0; i < expr.body.size(); ++i) {
+            bool isLast = (i == expr.body.size() - 1);
+            printChild("stmt", expr.body[i], isLast);
+        }
+        return {};
+    }
+
 }

@@ -101,5 +101,9 @@ namespace angara {
         // Parses a type parameter list like <T, U, V> after a declaration name.
         // Returns an empty vector if no '<' is found.
         std::vector<Token> parseTypeParams();
+
+        // --- LAMBDA SUPPORT ---
+        // Parses an anonymous function expression after the 'func' keyword was consumed.
+        std::shared_ptr<Expr> lambdaExpression(const Token& keyword);
     };
 }

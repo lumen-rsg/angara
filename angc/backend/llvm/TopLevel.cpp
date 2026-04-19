@@ -43,8 +43,12 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     std::vector<llvm::Type*> param_types(stmt.params.size(), objType);
     auto* fn_type = llvm::FunctionType::get(objType, param_types, false);
 
-    auto* fn = llvm::Function::Create(fn_type, llvm::Function::ExternalLinkage,
-                                       func_name, mod.get());
+    // Reuse existing declaration if one was forward-declared (e.g., from a closure wrapper)
+    auto* fn = mod->getFunction(func_name);
+    if (!fn) {
+        fn = llvm::Function::Create(fn_type, llvm::Function::ExternalLinkage,
+                                     func_name, mod.get());
+    }
 
     size_t idx = 0;
     for (auto& arg : fn->args()) {

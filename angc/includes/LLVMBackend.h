@@ -65,6 +65,8 @@ namespace angara {
         llvm::Value* cgIs(const IsExpr& e);
         llvm::Value* cgMatch(const MatchExpr& e);
         llvm::Value* cgRetype(const RetypeExpr& e);
+        llvm::Value* cgLambda(const LambdaExpr& e);
+        llvm::Value* cgClosureCall(llvm::Value* callee, const std::vector<llvm::Value*>& args);
         llvm::Value* callModuleFn(const std::string& mod, const std::string& fn,
                                    const std::vector<std::shared_ptr<Expr>>& args);
 
@@ -154,6 +156,9 @@ namespace angara {
 
         // Freestanding mode
         bool m_freestanding = false;
+
+        // Lambda counter for unique function names
+        int m_lambda_counter = 0;
 
         // Output paths
         std::string objPath;

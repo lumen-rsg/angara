@@ -56,6 +56,12 @@ namespace angara {
             }
         }
 
+        // Lambda expression: func(params) -> type { body }
+        if (match({TokenType::FUNC})) {
+            Token keyword = previous();
+            return lambdaExpression(keyword);
+        }
+
         if (match({TokenType::IDENTIFIER})) {
             return std::make_shared<VarExpr>(previous());
         }
@@ -114,6 +120,43 @@ namespace angara {
 
         // If none of the above matched, it's an error.
         throw error(peek(), "Expect expression.");
+    }
+
+    // Parses: (name as type, ...) -> ret_type { body }
+    // The 'func' keyword has already been consumed; `keyword` is that token.
+    std::shared_ptr<Expr> Parser::lambdaExpression(const Token& keyword) {
+        consume(TokenType::LEFT_PAREN, "Expect '(' after 'func' in lambda expression.");
+
+        std::vector<Token> param_names;
+        std::vector<std::shared_ptr<ASTType>> param_types;
+
+        if (!check(TokenType::RIGHT_PAREN)) {
+            do {
+                Token param_name = consume(TokenType::IDENTIFIER, "Expect parameter name.");
+                std::shared_ptr<ASTType> param_type = nullptr;
+                if (match({TokenType::AS})) {
+                    param_type = type();
+                }
+                param_names.push_back(std::move(param_name));
+                param_types.push_back(std::move(param_type));
+            } while (match({TokenType::COMMA}));
+        }
+
+        consume(TokenType::RIGHT_PAREN, "Expect ')' after lambda parameters.");
+
+        // Optional return type annotation: -> type
+        std::shared_ptr<ASTType> returnType = nullptr;
+        if (match({TokenType::MINUS_GREATER})) {
+            returnType = type();
+        }
+
+        // Body is mandatory for lambdas
+        consume(TokenType::LEFT_BRACE, "Expect '{' for lambda body.");
+        auto body = block();
+
+        return std::make_shared<LambdaExpr>(keyword, std::move(param_names),
+                                            std::move(param_types), returnType,
+                                            std::move(body));
     }
 
 }

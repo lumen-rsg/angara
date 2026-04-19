@@ -73,6 +73,7 @@ namespace angara {
         std::any visit(const MatchExpr& expr) override;
         std::any visit(const SizeofExpr& expr) override;
         std::any visit(const RetypeExpr& expr) override;
+        std::any visit(const LambdaExpr& expr) override;
 
         void visit(std::shared_ptr<const ContractStmt> stmt) override;
         void defineContractHeader(const ContractStmt &stmt);

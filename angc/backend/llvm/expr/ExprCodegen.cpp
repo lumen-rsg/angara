@@ -14,7 +14,75 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
     if (auto* p = dynamic_cast<const Binary*>(e.get())) return cgBinary(*p);
     if (auto* p = dynamic_cast<const Unary*>(e.get())) return cgUnary(*p);
     if (auto* p = dynamic_cast<const Grouping*>(e.get())) return cg(p->expression);
-    if (auto* p = dynamic_cast<const VarExpr*>(e.get())) return loadVar(p->name.lexeme);
+    if (auto* p = dynamic_cast<const VarExpr*>(e.get())) {
+        // First-class function reference: if VarExpr resolves to a function type,
+        // wrap the named function in a closure object.
+        auto type_it = m_type_checker.m_expression_types.find(e.get());
+        if (type_it != m_type_checker.m_expression_types.end() &&
+            type_it->second->kind == TypeKind::FUNCTION) {
+            auto func_type = std::dynamic_pointer_cast<FunctionType>(type_it->second);
+            // Check if this is already a closure variable (in namedVals)
+            if (namedVals.find(sanitize(p->name.lexeme)) != namedVals.end()) {
+                return loadVar(p->name.lexeme);
+            }
+            // It's a top-level function reference — generate a closure wrapper
+            std::string mangled = mangle(moduleName, p->name.lexeme);
+            int arity = (int)func_type->param_types.size();
+
+            // Generate a unique wrapper function that adapts the closure
+            // calling convention (i32, ptr) to the direct calling convention
+            std::string wrapper_name = "__ang_wrap_" + sanitize(p->name.lexeme) + "_" + std::to_string(m_lambda_counter++);
+
+            auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
+            auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
+            auto* wrapper_fn_type = llvm::FunctionType::get(objType, {i32_ty, ptr_ty}, false);
+            auto* wrapper_fn = llvm::Function::Create(wrapper_fn_type, llvm::Function::PrivateLinkage,
+                                                       wrapper_name, mod.get());
+
+            auto* saved_insert_block = builder->GetInsertBlock();
+            auto* entry = llvm::BasicBlock::Create(*ctx, "entry", wrapper_fn);
+            builder->SetInsertPoint(entry);
+
+            auto* args_ptr = wrapper_fn->arg_begin() + 1;
+
+            // Extract arguments from the args array and call the real function
+            std::vector<llvm::Value*> direct_args;
+            for (int i = 0; i < arity; i++) {
+                auto* elem_ptr = builder->CreateGEP(objType, args_ptr,
+                    {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
+                direct_args.push_back(builder->CreateLoad(objType, elem_ptr));
+            }
+
+            // Call the actual named function via callModuleFn
+            // We need to look it up directly
+            llvm::Function* target_fn = this->mod->getFunction(mangled);
+            if (!target_fn) target_fn = this->mod->getFunction("__ang_" + sanitize(p->name.lexeme));
+
+            if (target_fn) {
+                auto* result = builder->CreateCall(target_fn, direct_args);
+                builder->CreateRet(result);
+            } else {
+                // Forward declaration — insert it and call it
+                auto* direct_fn_type = llvm::FunctionType::get(objType,
+                    std::vector<llvm::Type*>(arity, objType), false);
+                auto* forward_fn = llvm::Function::Create(direct_fn_type, llvm::Function::ExternalLinkage,
+                                                           mangled, mod.get());
+                auto* result = builder->CreateCall(forward_fn, direct_args);
+                builder->CreateRet(result);
+            }
+
+            // Restore builder
+            if (saved_insert_block) builder->SetInsertPoint(saved_insert_block);
+
+            // Create a closure object wrapping the wrapper
+            return callRt(rt->getFuncClosureNew(), {
+                wrapper_fn,
+                llvm::ConstantInt::get(i32_ty, arity),
+                llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0)
+            });
+        }
+        return loadVar(p->name.lexeme);
+    }
     if (auto* p = dynamic_cast<const AssignExpr*>(e.get())) return cgAssign(*p);
     if (auto* p = dynamic_cast<const UpdateExpr*>(e.get())) return cgUpdate(*p);
     if (auto* p = dynamic_cast<const CallExpr*>(e.get())) return cgCall(*p);
@@ -30,6 +98,7 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
     if (auto* p = dynamic_cast<const MatchExpr*>(e.get())) return cgMatch(*p);
     if (auto* p = dynamic_cast<const SizeofExpr*>(e.get())) return makeI64((int64_t)16);
     if (auto* p = dynamic_cast<const RetypeExpr*>(e.get())) return cgRetype(*p);
+    if (auto* p = dynamic_cast<const LambdaExpr*>(e.get())) return cgLambda(*p);
     return makeNil();
 }
 
@@ -307,6 +376,18 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             if (!expr.arguments.empty()) return callRt(rt->getFuncToString(),{cg(expr.arguments[0])});
             return makeStr("");
         }
+        // Check if it's a local variable holding a closure (first-class function call)
+        if (namedVals.find(sanitize(fn)) != namedVals.end()) {
+            auto type_it = m_type_checker.m_expression_types.find(expr.callee.get());
+            if (type_it != m_type_checker.m_expression_types.end() &&
+                type_it->second->kind == TypeKind::FUNCTION) {
+                auto* callee = loadVar(fn);
+                std::vector<llvm::Value*> llvmArgs;
+                for (auto& a : expr.arguments) llvmArgs.push_back(cg(a));
+                return cgClosureCall(callee, llvmArgs);
+            }
+        }
+
         auto cit = constructorLookup.find(fn);
         if (cit != constructorLookup.end()) {
             llvm::Function* ctor = this->mod->getFunction(cit->second);
@@ -477,5 +558,113 @@ llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {
 }
 
 llvm::Value* LLVMBackend::cgRetype(const RetypeExpr& e) { return cg(e.expression); }
+
+// ============================================================================
+// Lambda (anonymous function) codegen
+// ============================================================================
+
+llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
+    // Generate a unique name for the lambda's LLVM function
+    std::string lambda_fn_name = "__ang_lambda_" + std::to_string(m_lambda_counter++);
+
+    // The lambda function follows the closure calling convention:
+    //   define AngaraObject @lambda_fn(i32 %argc, AngaraObject* %args)
+    auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
+    auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
+    auto* fn_type = llvm::FunctionType::get(objType, {i32_ty, ptr_ty}, false);
+    auto* lambda_fn = llvm::Function::Create(fn_type, llvm::Function::PrivateLinkage,
+                                              lambda_fn_name, mod.get());
+
+    // Save current builder state
+    auto* saved_insert_block = builder->GetInsertBlock();
+
+    // Generate the lambda body
+    auto* entry = llvm::BasicBlock::Create(*ctx, "entry", lambda_fn);
+    builder->SetInsertPoint(entry);
+
+    // Save and swap named values (the lambda has its own scope)
+    auto saved_values = std::move(namedVals);
+    auto saved_types = std::move(namedTypes);
+    namedVals.clear();
+    namedTypes.clear();
+
+    // Bind lambda parameters from the args array
+    // The closure calling convention: args[0] = first param, args[1] = second, etc.
+    auto* argc_arg = lambda_fn->arg_begin();
+    auto* args_arg = lambda_fn->arg_begin() + 1;
+
+    for (size_t i = 0; i < e.param_names.size(); ++i) {
+        std::string pname = sanitize(e.param_names[i].lexeme);
+        auto* alloca = allocLocal(lambda_fn, pname);
+
+        // Load args[i] from the args array
+        auto* elem_ptr = builder->CreateGEP(objType, args_arg,
+            {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
+        auto* val = builder->CreateLoad(objType, elem_ptr, pname);
+        builder->CreateStore(val, alloca);
+        namedVals[pname] = alloca;
+    }
+
+    // Generate the body statements
+    for (const auto& stmt : e.body) {
+        cgStmt(stmt);
+    }
+
+    // Ensure the lambda function has a terminator
+    if (!builder->GetInsertBlock()->getTerminator()) {
+        builder->CreateRet(makeNil());
+    }
+
+    // Restore named values
+    namedVals = std::move(saved_values);
+    namedTypes = std::move(saved_types);
+
+    // Restore builder to the caller's insertion point
+    if (saved_insert_block) {
+        builder->SetInsertPoint(saved_insert_block);
+    }
+
+    // Create a closure object wrapping this function
+    int arity = (int)e.param_names.size();
+    return callRt(rt->getFuncClosureNew(), {
+        lambda_fn,
+        llvm::ConstantInt::get(i32_ty, arity),
+        llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0) // not native
+    });
+}
+
+// ============================================================================
+// Closure call — calls an AngaraObject that is a closure
+// ============================================================================
+
+llvm::Value* LLVMBackend::cgClosureCall(llvm::Value* callee, const std::vector<llvm::Value*>& args) {
+    auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
+    int argc = (int)args.size();
+
+    // Allocate an array for the arguments
+    if (argc > 0) {
+        auto* arr_type = llvm::ArrayType::get(objType, argc);
+        auto* arr_alloca = builder->CreateAlloca(arr_type);
+
+        for (int i = 0; i < argc; i++) {
+            auto* elem_ptr = builder->CreateGEP(arr_type, arr_alloca,
+                {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
+                 llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
+            builder->CreateStore(args[i], elem_ptr);
+        }
+
+        return callRt(rt->getFuncCall(), {
+            callee,
+            llvm::ConstantInt::get(i32_ty, argc),
+            builder->CreateBitCast(arr_alloca, llvm::PointerType::get(*ctx, 0))
+        });
+    }
+
+    return callRt(rt->getFuncCall(), {
+        callee,
+        llvm::ConstantInt::get(i32_ty, 0),
+        llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0))
+    });
+}
 
 } // namespace angara

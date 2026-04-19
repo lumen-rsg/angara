@@ -1,0 +1,31 @@
+attach io;
+
+func main() -> i64 {
+    // Test 1: Basic lambda
+    let double = func(x as i64) -> i64 { return x * 2; };
+    io.println(1, string(double(21)));
+
+    // Test 2: Lambda with two params
+    let add = func(a as i64, b as i64) -> i64 { return a + b; };
+    io.println(1, string(add(3, 4)));
+
+    // Test 3: Lambda with no arguments
+    let fortytwo = func() -> i64 { return 42; };
+    io.println(1, string(fortytwo()));
+
+    // Test 4: Lambda with string param
+    let greet = func(name as string) {
+        io.println(1, "Hello, " + name + "!");
+    };
+    greet("Angara");
+
+    // Test 5: Named function used as first-class value
+    let op = multiply;
+    io.println(1, string(op(6, 7)));
+
+    return 0;
+}
+
+func multiply(x as i64, y as i64) -> i64 {
+    return x * y;
+}
