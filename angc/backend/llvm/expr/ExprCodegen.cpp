@@ -500,6 +500,21 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
 }
 
 llvm::Value* LLVMBackend::cgGet(const GetExpr& e) {
+    // Special case: enum variant access (e.g., Color.Red)
+    // Check if the object is a VarExpr whose type is an enum type
+    if (auto* var = dynamic_cast<const VarExpr*>(e.object.get())) {
+        auto type_it = m_type_checker.m_expression_types.find(e.object.get());
+        if (type_it != m_type_checker.m_expression_types.end() &&
+            type_it->second->kind == TypeKind::ENUM) {
+            auto enum_type = std::dynamic_pointer_cast<EnumType>(type_it->second);
+            std::string global_name = "Angara_enum_" + enum_type->name + "_" + e.name.lexeme;
+            auto* global = mod->getGlobalVariable(global_name, true);
+            if (global) {
+                return builder->CreateLoad(objType, global);
+            }
+        }
+    }
+
     auto* obj = cg(e.object);
     // Special case: .message property uses exception_get_message runtime function
     if (e.name.lexeme == "message") {
