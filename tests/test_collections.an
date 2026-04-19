@@ -52,7 +52,6 @@ export func main() -> i64 {
 
     // ============================================================
     // HIGHER-ORDER FUNCTIONS (LINQ with lambdas)
-    // Note: lambdas with `any` params need @unsafe for arithmetic/comparison
     // ============================================================
     io.println(1, "--- LINQ with Lambdas ---");
 
@@ -104,6 +103,133 @@ export func main() -> i64 {
     // ForEach — execute action for each element
     collections.ForEach([100, 200, 300],
         func(x as any) -> any { io.println(1, "ForEach item: " + string(x)); return nil; });
+
+    // ============================================================
+    // STRING-SPECIFIC OPERATIONS
+    // ============================================================
+    io.println(1, "--- String Operations ---");
+
+    let words = ["cherry", "apple", "banana", "date"];
+    io.println(1, "MinString: " + collections.MinString(words));
+    io.println(1, "MaxString: " + collections.MaxString(words));
+    io.println(1, "Longest: " + collections.Longest(words));
+    io.println(1, "Shortest: " + collections.Shortest(words));
+
+    // ============================================================
+    // BOOLEAN COLLECTION OPERATIONS
+    // ============================================================
+    io.println(1, "--- Boolean Operations ---");
+
+    let bools = [true, false, true, true];
+    io.println(1, "AnyTrue: " + string(collections.AnyTrue(bools)));
+    io.println(1, "AllTrue: " + string(collections.AllTrue(bools)));
+    io.println(1, "CountTrue: " + string(collections.CountTrue(bools)));
+
+    let allTrueList = [true, true, true];
+    io.println(1, "AllTrue (all): " + string(collections.AllTrue(allTrueList)));
+
+    let allFalseList = [false, false];
+    io.println(1, "AnyTrue (none): " + string(collections.AnyTrue(allFalseList)));
+
+    // ============================================================
+    // TYPE CONVERSION UTILITIES
+    // ============================================================
+    io.println(1, "--- Type Conversions ---");
+
+    let nums2str = collections.ToStrings([10, 20, 30]);
+    io.println(1, "ToStrings: " + collections.Join(nums2str, ", "));
+
+    let mappedStr = collections.MapStrings([1, 2, 3, 4],
+        func(x as any) -> any { @unsafe { return x * 10; } });
+    io.println(1, "MapStrings (x*10): " + collections.Join(mappedStr, ", "));
+
+    // ============================================================
+    // UTILITY FUNCTIONS
+    // ============================================================
+    io.println(1, "--- Utility Functions ---");
+
+    // Flatten
+    let nested = [[1, 2], [3, 4], [5]];
+    let flat = collections.Flatten(nested);
+    io.println(1, "Flatten: " + collections.Join(flat, ", "));
+
+    // Chunk
+    let chunked = collections.Chunk([1, 2, 3, 4, 5], 2);
+    io.println(1, "Chunk(2) count: " + string(collections.Count(chunked)));
+
+    // Zip
+    let keys = ["a", "b", "c"];
+    let vals = [1, 2, 3];
+    let zipped = collections.Zip(keys, vals);
+    io.println(1, "Zip count: " + string(collections.Count(zipped)));
+
+    // Partition
+    let parts = collections.Partition([1, 2, 3, 4, 5, 6],
+        func(x as any) -> any { @unsafe { return x % 2 == 0; } });
+    io.println(1, "Partition count: " + string(collections.Count(parts)));
+
+    // Indices
+    let idx = collections.Indices([10, 20, 30]);
+    io.println(1, "Indices: " + collections.Join(idx, ", "));
+
+    // Rotate
+    let rotated = collections.Rotate([1, 2, 3, 4, 5], 2);
+    io.println(1, "Rotate(2): " + collections.Join(rotated, ", "));
+    let rotatedLeft = collections.Rotate([1, 2, 3, 4, 5], -2);
+    io.println(1, "Rotate(-2): " + collections.Join(rotatedLeft, ", "));
+
+    // ============================================================
+    // NEW: CREATION & RANGE UTILITIES
+    // ============================================================
+    io.println(1, "--- Creation & Range ---");
+
+    let empty = collections.Empty();
+    io.println(1, "Empty count: " + string(collections.Count(empty)));
+
+    let repeated = collections.Repeat(7, 4);
+    io.println(1, "Repeat(7,4): " + collections.Join(repeated, ", "));
+
+    let ranged = collections.Range(0, 5);
+    io.println(1, "Range(0,5): " + collections.Join(ranged, ", "));
+
+    let stepped = collections.RangeStep(0, 10, 3);
+    io.println(1, "RangeStep(0,10,3): " + collections.Join(stepped, ", "));
+
+    // ============================================================
+    // NEW: INDEX OF / LAST INDEX OF
+    // ============================================================
+    io.println(1, "--- Index Operations ---");
+
+    let items = [10, 20, 30, 20, 50];
+    io.println(1, "IndexOf(20): " + string(collections.IndexOf(items, 20)));
+    io.println(1, "LastIndexOf(20): " + string(collections.LastIndexOf(items, 20)));
+    io.println(1, "IndexOf(99): " + string(collections.IndexOf(items, 99)));
+
+    // ============================================================
+    // NEW: ELEMENT AT / SLICE
+    // ============================================================
+    io.println(1, "--- ElementAt & Slice ---");
+
+    io.println(1, "ElementAt(2): " + string(collections.ElementAt(items, 2)));
+    io.println(1, "ElementAt(99): " + string(collections.ElementAt(items, 99)));
+
+    let sliced = collections.Slice(items, 1, 4);
+    io.println(1, "Slice(1,4): " + collections.Join(sliced, ", "));
+
+    // ============================================================
+    // NEW: STRING SPLIT
+    // ============================================================
+    io.println(1, "--- String Split ---");
+
+    let parts2 = collections.SplitBy("hello world foo", " ");
+    io.println(1, "SplitBy(' '): " + collections.Join(parts2, "|"));
+
+    // ============================================================
+    // NEW: SPLITAT
+    // ============================================================
+    io.println(1, "--- SplitAt ---");
+    let splitResult = collections.SplitAt([1, 2, 3, 4, 5], 3);
+    io.println(1, "SplitAt(3) returned");
 
     return 0;
 }

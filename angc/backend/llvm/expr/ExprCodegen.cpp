@@ -47,9 +47,11 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
 
             // Extract arguments from the args array and call the real function
             std::vector<llvm::Value*> direct_args;
+            auto* wrap_arr_type = llvm::ArrayType::get(objType, arity);
             for (int i = 0; i < arity; i++) {
-                auto* elem_ptr = builder->CreateGEP(objType, args_ptr,
-                    {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
+                auto* elem_ptr = builder->CreateGEP(wrap_arr_type, args_ptr,
+                    {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
+                     llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
                 direct_args.push_back(builder->CreateLoad(objType, elem_ptr));
             }
 
@@ -599,14 +601,16 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     // The closure calling convention: args[0] = first param, args[1] = second, etc.
     auto* argc_arg = lambda_fn->arg_begin();
     auto* args_arg = lambda_fn->arg_begin() + 1;
+    auto* lambda_arr_type = llvm::ArrayType::get(objType, e.param_names.size());
 
     for (size_t i = 0; i < e.param_names.size(); ++i) {
         std::string pname = sanitize(e.param_names[i].lexeme);
         auto* alloca = allocLocal(lambda_fn, pname);
 
         // Load args[i] from the args array
-        auto* elem_ptr = builder->CreateGEP(objType, args_arg,
-            {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
+        auto* elem_ptr = builder->CreateGEP(lambda_arr_type, args_arg,
+            {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
+             llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
         auto* val = builder->CreateLoad(objType, elem_ptr, pname);
         builder->CreateStore(val, alloca);
         namedVals[pname] = alloca;
