@@ -1,0 +1,12 @@
+// Test helper module - zero-arg and multi-arg functions
+export func hello() -> string {
+    return "from helper";
+}
+
+export func greet(name as string) -> string {
+    return "hi " + name;
+}
+
+export func add(a as i64, b as i64) -> i64 {
+    return a + b;
+}

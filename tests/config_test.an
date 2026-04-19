@@ -1,0 +1,55 @@
+// config_test.an — Angara config module test
+// Tests INI, TOML, and dotenv parsing
+//
+// Usage: angara tests/config_test.an
+
+attach config;
+attach io;
+
+func println(s as string) -> void {
+  io.write(1, s + "\n");
+}
+
+export func main() -> i64 {
+  println("--- Angara Config Module Test ---");
+
+  // --- INI ---
+  let ini_text = "[database]\nhost=localhost\nport=5432\nname=mydb\n[server]\nhost=0.0.0.0\nport=8080\n";
+  let ini = config.parse_ini(ini_text);
+  println("INI database.host: " + string(ini["database"]["host"]));
+  println("INI database.port: " + string(ini["database"]["port"]));
+  println("INI server.port: " + string(ini["server"]["port"]));
+
+  // Stringify back
+  let ini_out = config.stringify_ini(ini);
+  println("INI roundtrip length: " + string(ini_out.length()));
+
+  // --- TOML ---
+  let toml_text = "[owner]\nname = \"Alice\"\nage = 30\nactive = true\n\n[server]\nhost = \"127.0.0.1\"\nport = 9090\n";
+  let toml = config.parse_toml(toml_text);
+  println("TOML owner.name: " + string(toml["owner"]["name"]));
+  println("TOML owner.age: " + string(toml["owner"]["age"]));
+  println("TOML owner.active: " + string(toml["owner"]["active"]));
+  println("TOML server.port: " + string(toml["server"]["port"]));
+
+  // --- Dotenv ---
+  let env_text = "# Database config\nDB_HOST=localhost\nDB_PORT=5432\nDB_NAME=\"my database\"\nexport DB_USER=admin\n";
+  let env = config.parse_dotenv(env_text);
+  println("DOTENV DB_HOST: " + string(env["DB_HOST"]));
+  println("DOTENV DB_PORT: " + string(env["DB_PORT"]));
+  println("DOTENV DB_NAME: " + string(env["DB_NAME"]));
+  println("DOTENV DB_USER: " + string(env["DB_USER"]));
+
+  // Stringify dotenv
+  let env_out = config.stringify_dotenv(env);
+  println("DOTENV roundtrip length: " + string(env_out.length()));
+
+  // Verify roundtrip
+  let env2 = config.parse_dotenv(env_out);
+  if env2["DB_HOST"] == "localhost" {
+    println("\n--- All config tests passed! ---");
+    return 0;
+  }
+  println("\n--- Config tests FAILED ---");
+  return 1;
+}

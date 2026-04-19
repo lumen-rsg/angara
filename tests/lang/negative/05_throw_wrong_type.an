@@ -1,0 +1,7 @@
+// Negative Test 05: Throw non-Exception type - should produce compilation error
+// The type checker should reject throw with a string argument
+
+export func main() -> i64 {
+    throw "this is not an Exception";
+    return 0;
+}

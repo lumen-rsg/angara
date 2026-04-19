@@ -1,0 +1,37 @@
+// Test 12: Try/catch exception handling and throw
+attach io;
+
+func risky(x as i64) -> i64 {
+    if (x < 0) {
+        throw Exception("negative value");
+    }
+    return x * 2;
+}
+
+export func main() -> i64 {
+    // Normal case (no exception)
+    let a = risky(5);
+    io.println(1, string(a));               // 10
+
+    // Try/catch with thrown exception
+    try {
+        let b = risky(-1);
+        io.println(1, string(b));
+    } catch (e as Exception) {
+        io.println(1, "caught: " + e.message);  // caught: negative value
+    }
+
+    // Nested try/catch
+    try {
+        try {
+            throw Exception("inner");
+        } catch (e2 as Exception) {
+            io.println(1, "inner caught: " + e2.message);  // inner caught: inner
+        }
+    } catch (e3 as Exception) {
+        io.println(1, "outer caught (unexpected)");
+    }
+
+    io.println(1, "Exceptions passed");
+    return 0;
+}

@@ -1,0 +1,6 @@
+// Negative Test 04: Undeclared function - should produce compilation error
+
+export func main() -> i64 {
+    let x = nonexistent_function(42);
+    return 0;
+}

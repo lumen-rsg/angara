@@ -1,0 +1,10 @@
+// Negative Test 06: Wrong number of arguments - should produce compilation error
+
+func add(a as i64, b as i64) -> i64 {
+    return a + b;
+}
+
+export func main() -> i64 {
+    let x = add(1, 2, 3);
+    return 0;
+}

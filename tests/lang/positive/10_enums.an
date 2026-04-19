@@ -1,0 +1,34 @@
+// Test 10: Enums (simple enum without explicit values)
+attach io;
+
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+
+enum Direction {
+    North,
+    South,
+    East,
+    West
+}
+
+export func main() -> i64 {
+    // Basic enum value
+    let c = Color.Red;
+    io.println(1, "Got Color.Red");
+
+    // Use in conditional
+    let d = Direction.South;
+    if (d == Direction.South) {
+        io.println(1, "Going south");
+    } orif (d == Direction.North) {
+        io.println(1, "Going north");
+    } else {
+        io.println(1, "Going elsewhere");
+    }
+
+    io.println(1, "Enums passed");
+    return 0;
+}

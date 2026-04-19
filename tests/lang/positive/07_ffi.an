@@ -1,0 +1,16 @@
+// Test 07: Foreign function interface (FFI)
+attach io;
+
+foreign "stdlib.h";
+foreign func abs(val as i64) -> i64;
+
+export func main() -> i64 {
+    // Call C stdlib function
+    let v = abs(-42);
+    io.println(1, string(v));               // 42
+
+    let v2 = abs(10);
+    io.println(1, string(v2));              // 10
+
+    return 0;
+}

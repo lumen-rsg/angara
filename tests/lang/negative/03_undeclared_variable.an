@@ -1,0 +1,7 @@
+// Negative Test 03: Undeclared variable - should produce compilation error
+attach io;
+
+export func main() -> i64 {
+    io.println(1, string(undeclared_var));
+    return 0;
+}

@@ -1,0 +1,39 @@
+// Test 05: Lists and collections
+attach io;
+
+export func main() -> i64 {
+    // List creation
+    let l = [1, 2, 3, 4, 5];
+    io.println(1, string(len(l)));           // 5
+
+    // List indexing
+    io.println(1, string(l[0]));             // 1
+    io.println(1, string(l[4]));             // 5
+
+    // List mutation
+    l[0] = 100;
+    io.println(1, string(l[0]));             // 100
+
+    // List with strings
+    let names = ["Alice", "Bob", "Charlie"];
+    io.println(1, string(len(names)));       // 3
+    io.println(1, names[1]);                 // Bob
+
+    // Iterate list
+    let sum = 0;
+    for (item in l) {
+        sum = sum + item;
+    }
+    io.println(1, string(sum));              // 214 (100+2+3+4+5)
+
+    // Nested lists
+    let matrix = [[1, 2], [3, 4]];
+    io.println(1, string(matrix[0][0]));     // 1
+    io.println(1, string(matrix[1][1]));     // 4
+
+    // Empty list
+    let empty = [];
+    io.println(1, string(len(empty)));       // 0
+
+    return 0;
+}

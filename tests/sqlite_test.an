@@ -1,0 +1,93 @@
+// sqlite_test.an — Angara SQLite module test
+// Tests SQLite database operations: open, exec, prepare, bind, query
+// Usage: angara tests/sqlite_test.an
+
+attach sqlite;
+attach io;
+attach fs;
+
+func println(s as string) -> void {
+  io.write(1, s + "\n");
+}
+
+export func main() -> i64 {
+  println("--- Angara SQLite Module Test ---");
+
+  const DB_PATH = "/tmp/angara_sqlite_test.db";
+
+  // Clean up any previous test DB
+  if fs.exists(DB_PATH) {
+    fs.remove(DB_PATH);
+  }
+
+  // 1. Open database
+  let db = sqlite.open(DB_PATH);
+  if db == nil {
+    println("FAIL: Could not open database");
+    return 1;
+  }
+  println("Opened database: " + DB_PATH);
+
+  // 2. Execute simple statements
+  sqlite.exec(db, "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER)");
+  println("Created 'users' table");
+
+  sqlite.exec(db, "INSERT INTO users (name, age) VALUES ('Alice', 30)");
+  sqlite.exec(db, "INSERT INTO users (name, age) VALUES ('Bob', 25)");
+  sqlite.exec(db, "INSERT INTO users (name, age) VALUES ('Charlie', 35)");
+  println("Inserted 3 rows");
+
+  // 3. Query all rows
+  let rows = sqlite.query(db, "SELECT * FROM users");
+  println("Total rows: " + string(rows.length()));
+
+  let i = 0;
+  while i < rows.length() {
+    let row = rows[i];
+    println("  User: id=" + string(row["id"]) + " name=" + string(row["name"]) + " age=" + string(row["age"]));
+    i = i + 1;
+  }
+
+  // 4. Prepared statement with parameter binding
+  let stmt = sqlite.prepare(db, "SELECT * FROM users WHERE age > ?");
+  sqlite.bind_int(stmt, 1, 28);
+  let filtered = sqlite.query_stmt(stmt);
+  println("Users with age > 28: " + string(filtered.length()));
+  sqlite.finalize(stmt);
+
+  // 5. Insert with prepared statement
+  let insert_stmt = sqlite.prepare(db, "INSERT INTO users (name, age) VALUES (?, ?)");
+  sqlite.bind_text(insert_stmt, 1, "Diana");
+  sqlite.bind_int(insert_stmt, 2, 28);
+  sqlite.step(insert_stmt);
+  sqlite.finalize(insert_stmt);
+  println("Inserted Diana via prepared statement");
+
+  // 6. Verify count
+  let count_rows = sqlite.query(db, "SELECT COUNT(*) as cnt FROM users");
+  let total = count_rows[0]["cnt"];
+  println("Total users now: " + string(total));
+
+  // 7. Test transaction
+  sqlite.exec(db, "BEGIN TRANSACTION");
+  sqlite.exec(db, "INSERT INTO users (name, age) VALUES ('Eve', 22)");
+  sqlite.exec(db, "ROLLBACK");
+  let after_rollback = sqlite.query(db, "SELECT COUNT(*) as cnt FROM users");
+  println("After rollback count: " + string(after_rollback[0]["cnt"]));
+
+  // 8. Close database
+  sqlite.close(db);
+  println("Database closed.");
+
+  // Clean up
+  if fs.exists(DB_PATH) {
+    fs.remove(DB_PATH);
+  }
+
+  if total == 4 {
+    println("\n--- All SQLite tests passed! ---");
+    return 0;
+  }
+  println("\n--- SQLite tests FAILED ---");
+  return 1;
+}

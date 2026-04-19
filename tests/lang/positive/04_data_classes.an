@@ -1,0 +1,59 @@
+// Test 04: Data classes (value objects with automatic constructors)
+attach io;
+
+// Simple data class
+data Point {
+    let x as i64;
+    let y as i64;
+}
+
+// Data class with mixed types
+data Person {
+    let name as string;
+    let age as i64;
+}
+
+// Generic data class
+data Box<T> {
+    let value as T;
+}
+
+// Generic data class with multiple type parameters
+data Pair<K, V> {
+    let key as K;
+    let val as V;
+}
+
+func make_point(x as i64, y as i64) -> Point {
+    return Point(x, y);
+}
+
+export func main() -> i64 {
+    // Basic data class construction and field access
+    let p = Point(10, 20);
+    io.println(1, string(p.x));              // 10
+    io.println(1, string(p.y));              // 20
+    io.println(1, string(p.x + p.y));        // 30
+
+    // Data class with strings
+    let person = Person("Alice", 30);
+    io.println(1, person.name);              // Alice
+    io.println(1, string(person.age));       // 30
+
+    // Factory function returning data class
+    let p2 = make_point(5, 7);
+    io.println(1, string(p2.x));             // 5
+
+    // Generic data class instantiation
+    let int_box = Box(42);
+    io.println(1, string(int_box.value));    // 42
+    let str_box = Box("hello");
+    io.println(1, str_box.value);            // hello
+
+    // Pair with two type parameters
+    let entry = Pair("age", 30);
+    io.println(1, entry.key);                // age
+    io.println(1, string(entry.val));        // 30
+
+    return 0;
+}

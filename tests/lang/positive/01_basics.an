@@ -1,0 +1,49 @@
+// Test 01: Basic types, variables, and arithmetic expressions
+attach io;
+
+export func main() -> i64 {
+    // Integer arithmetic (+, -, *, /, %)
+    let a = 10;
+    let b = 3;
+    io.println(1, string(a + b));     // 13
+    io.println(1, string(a - b));     // 7
+    io.println(1, string(a * b));     // 30
+    io.println(1, string(a / b));     // 3
+    io.println(1, string(a % b));     // 1
+
+    // Floating point arithmetic
+    let f1 = 3.14;
+    let f2 = 2.0;
+    io.println(1, string(f1 + f2));   // 5.14
+
+    // String concatenation
+    let greeting = "hello" + " " + "world";
+    io.println(1, greeting);          // hello world
+
+    // Boolean operators (&&, ||, !)
+    let t = true;
+    let f = false;
+    io.println(1, string(t && f));    // false
+    io.println(1, string(t || f));    // true
+    io.println(1, string(!f));        // true
+
+    // Comparison operators (==, !=, <, >, <=, >=)
+    io.println(1, string(10 == 10));  // true
+    io.println(1, string(10 != 5));   // true
+    io.println(1, string(3 < 5));     // true
+    io.println(1, string(5 > 3));     // true
+    io.println(1, string(3 <= 3));    // true
+    io.println(1, string(5 >= 5));    // true
+
+    // Unary minus
+    let neg = -42;
+    io.println(1, string(neg));       // -42
+
+    // Type casts: i64(value), f64(value)
+    let casted_int = i64(3.7);
+    io.println(1, string(casted_int));  // 3
+    let casted_float = f64(42);
+    io.println(1, string(casted_float)); // 42.0
+
+    return 0;
+}

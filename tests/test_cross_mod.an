@@ -1,0 +1,16 @@
+attach io;
+attach test_helper;
+
+export func main() -> i64 {
+    // Test zero-arg function from another module
+    io.println(1, test_helper.hello());
+
+    // Test single-arg function from another module
+    io.println(1, test_helper.greet("Angara"));
+
+    // Test multi-arg function from another module (i64 return, print directly)
+    let sum as i64 = test_helper.add(3, 4);
+    io.println(1, string(sum));
+
+    return 0;
+}

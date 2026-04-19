@@ -1,0 +1,6 @@
+attach io;
+
+export func main() -> i64 {
+    io.println(1, "Hello from io!");
+    return 0;
+}

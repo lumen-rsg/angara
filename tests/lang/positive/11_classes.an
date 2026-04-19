@@ -1,0 +1,34 @@
+// Test 11: Classes with methods, constructor, and inheritance
+attach io;
+
+class Animal {
+  public:
+    let name as string;
+
+  public:
+    func init(this, name as string) -> nil {
+      this.name = name;
+    }
+
+    func speak(this) -> string {
+      return this.name + " speaks";
+    }
+}
+
+class Dog inherits Animal {
+  public:
+    func speak(this) -> string {
+      return this.name + " barks";
+    }
+}
+
+export func main() -> i64 {
+    let a = Animal("Cat");
+    io.println(1, a.speak());                // Cat speaks
+
+    let d = Dog("Rex");
+    io.println(1, d.speak());                // Rex barks
+
+    io.println(1, "Classes passed");
+    return 0;
+}

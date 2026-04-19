@@ -1,0 +1,9 @@
+// Negative Test 02: Return type mismatch - should produce compilation error
+
+func get_number() -> i64 {
+    return "not a number";
+}
+
+export func main() -> i64 {
+    return 0;
+}

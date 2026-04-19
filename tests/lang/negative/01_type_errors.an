@@ -1,0 +1,8 @@
+// Negative Test 01: Type errors - should produce compilation errors
+// This file intentionally contains type errors to verify the type checker
+
+// Error: assigning string to i64
+export func main() -> i64 {
+    let x as i64 = "hello";
+    return 0;
+}

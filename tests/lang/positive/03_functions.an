@@ -1,0 +1,62 @@
+// Test 03: Functions, lambdas, closures, and higher-order functions
+attach io;
+
+// Simple function with parameters
+func add(a as i64, b as i64) -> i64 {
+    return a + b;
+}
+
+// Function returning nil
+func greet(name as string) -> nil {
+    io.println(1, "hello " + name);
+}
+
+// Recursive function
+func fib(n as i64) -> i64 {
+    if (n <= 1) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+// Higher-order function: takes a function parameter
+func apply(f as function(i64) -> i64, x as i64) -> i64 {
+    return f(x);
+}
+
+// Generic function
+func identity<T>(x as T) -> T {
+    return x;
+}
+
+export func main() -> i64 {
+    // Basic function calls
+    io.println(1, string(add(3, 4)));       // 7
+    greet("world");                          // hello world
+
+    // Recursion
+    io.println(1, string(fib(10)));          // 55
+
+    // Lambda expression
+    let double = func(x as i64) -> i64 {
+        return x * 2;
+    };
+    io.println(1, string(double(21)));       // 42
+
+    // Higher-order: pass lambda to function
+    let result = apply(double, 10);
+    io.println(1, string(result));           // 20
+
+    // Generic function instantiation
+    let s = identity("hello");
+    io.println(1, s);                        // hello
+    let n = identity(42);
+    io.println(1, string(n));                // 42
+
+    // Closure capturing enclosing variable
+    let offset = 100;
+    let add_offset = func(x as i64) -> i64 {
+        return x + offset;
+    };
+    io.println(1, string(add_offset(5)));    // 105
+
+    return 0;
+}

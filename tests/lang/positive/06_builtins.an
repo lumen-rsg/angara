@@ -1,0 +1,36 @@
+// Test 06: Built-in functions (typeof, len, string, i64, f64)
+attach io;
+
+export func main() -> i64 {
+    // typeof() - runtime type inspection
+    io.println(1, typeof(42));               // i64
+    io.println(1, typeof("hello"));          // object (string is an object)
+    io.println(1, typeof(true));             // bool
+    io.println(1, typeof(3.14));             // f64
+
+    // len() - length of strings and lists
+    io.println(1, string(len("hello")));     // 5
+    io.println(1, string(len([1, 2, 3])));   // 3
+    io.println(1, string(len([])));          // 0
+
+    // string() - explicit string conversion
+    io.println(1, string(42));               // 42
+    io.println(1, string(true));             // true
+    io.println(1, string(3.14));             // 3.14
+
+    // Type casts: i64(value) and f64(value)
+    let casted_int = i64(3.7);
+    io.println(1, string(casted_int));       // 3
+    let casted_float = f64(42);
+    io.println(1, string(casted_float));     // 42.0
+
+    // nil and nil comparison
+    let nothing = nil;
+    io.println(1, string(nothing == nil));   // true
+
+    // String * number (repetition)
+    let repeated = "ab" * 3;
+    io.println(1, repeated);                 // ababab
+
+    return 0;
+}

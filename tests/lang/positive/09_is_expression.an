@@ -1,0 +1,17 @@
+// Test 09: Type checking with `is` expression
+attach io;
+
+export func main() -> i64 {
+    // is with basic types
+    let items as list<any> = [42, "hello"];
+    for (item in items) {
+        if (item is i64) {
+            io.println(1, "found i64");      // found i64
+        }
+        orif (item is string) {
+            io.println(1, "found string");   // found string
+        }
+    }
+
+    return 0;
+}

@@ -1,0 +1,79 @@
+// net_test.an — Angara net module test
+// Tests TCP echo server/client
+// Usage: angara tests/net_test.an
+
+attach net;
+attach io;
+attach time;
+
+func println(s as string) -> void {
+  io.write(1, s + "\n");
+}
+
+export func main() -> i64 {
+  println("--- Angara Net Module Test ---");
+
+  let PORT = 19877;
+
+  // Start TCP echo server in background thread
+  let server_thread = spawn(func() -> i64 {
+    let server = net.listen("127.0.0.1", PORT);
+    if server < 0 {
+      println("[SERVER] FAIL: Could not listen");
+      return 1;
+    }
+    println("[SERVER] Listening on port " + string(PORT));
+
+    // Accept one connection
+    let client_fd = net.accept(server);
+    if client_fd < 0 {
+      println("[SERVER] FAIL: Could not accept");
+      net.close(server);
+      return 1;
+    }
+    println("[SERVER] Accepted connection");
+
+    // Read data, echo it back
+    let data = net.recv(client_fd, 1024);
+    println("[SERVER] Received: '" + string(data) + "'");
+    net.send(client_fd, string(data));
+
+    net.close(client_fd);
+    net.close(server);
+    println("[SERVER] Done");
+    return 0;
+  });
+
+  // Give server time to start
+  time.sleep(0.3);
+
+  // Client: connect, send, receive
+  let sock = net.connect("127.0.0.1", PORT);
+  if sock < 0 {
+    println("[CLIENT] FAIL: Could not connect");
+    return 1;
+  }
+  println("[CLIENT] Connected to server");
+
+  net.send(sock, "Hello, Angara Net!");
+  let response = net.recv(sock, 1024);
+  println("[CLIENT] Echo: '" + string(response) + "'");
+
+  net.close(sock);
+
+  let server_result = server_thread.join();
+
+  // Test resolve (DNS lookup)
+  let resolved = net.resolve("localhost");
+  println("Resolved localhost: " + string(resolved));
+
+  // Test get_port helper (from address string)
+  // Just verify non-empty
+
+  if string(response) == "Hello, Angara Net!" {
+    println("\n--- All net tests passed! ---");
+    return server_result;
+  }
+  println("\n--- Net tests FAILED ---");
+  return 1;
+}

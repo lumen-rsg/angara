@@ -1,0 +1,73 @@
+// term_test.an — Angara term module test
+// Tests terminal utilities: size, clear, colors, cursor, input
+// Usage: angara tests/term_test.an
+
+attach term;
+attach io;
+
+func println(s as string) -> void {
+  io.write(1, s + "\n");
+}
+
+export func main() -> i64 {
+  println("--- Angara Term Module Test ---");
+
+  // 1. Get terminal size
+  let w = term.width();
+  let h = term.height();
+  println("Terminal size: " + string(w) + "x" + string(h));
+
+  if w > 0 && h > 0 {
+    println("Terminal size detected correctly.");
+  }
+
+  // 2. Check if stdout is a terminal
+  let is_tty = term.is_tty(1);
+  println("stdout is TTY: " + string(is_tty));
+
+  // 3. Color output
+  println("Colors: " + term.red("red") + " " + term.green("green") + " " + term.yellow("yellow") + " " + term.blue("blue") + " " + term.magenta("magenta") + " " + term.cyan("cyan"));
+
+  // 4. Styled output
+  println("Styles: " + term.bold("bold") + " " + term.dim("dim") + " " + term.underline("underline"));
+
+  // 5. Strip ANSI codes
+  let colored = term.red("hello");
+  let stripped = term.strip_ansi(colored);
+  println("Stripped ANSI from red text: '" + stripped + "' (should be 'hello')");
+
+  // 6. Test clear screen (just verify it doesn't crash)
+  term.clear_screen();
+  println("Clear screen executed.");
+
+  // 7. Test cursor operations
+  term.move_cursor(10, 5);
+  term.cursor_up(2);
+  term.cursor_down(2);
+  term.cursor_forward(3);
+  term.cursor_back(3);
+  // Move back to a sane position
+  term.move_cursor(1, 1);
+  println("Cursor operations executed.");
+
+  // 8. Show/hide cursor
+  term.hide_cursor();
+  term.show_cursor();
+  println("Cursor show/hide executed.");
+
+  // 9. Erase line
+  term.erase_line();
+  println("Erase line executed.");
+
+  // 10. RGB color
+  let rgb_text = term.rgb(255, 128, 0, "Orange text!");
+  println("RGB color: " + rgb_text);
+
+  // Verify strip works
+  if stripped == "hello" {
+    println("\n--- All term tests passed! ---");
+    return 0;
+  }
+  println("\n--- Term tests FAILED ---");
+  return 1;
+}

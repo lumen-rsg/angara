@@ -1,0 +1,28 @@
+// Test 08: Optional types and nil
+attach io;
+
+export func main() -> i64 {
+    // Optional with value
+    let val as i64? = 42;
+    if (val != nil) {
+        io.println(1, "has value");          // has value
+    } else {
+        io.println(1, "nil (BUG)");
+    }
+
+    // Optional with nil
+    let nothing as i64? = nil;
+    if (nothing == nil) {
+        io.println(1, "is nil");             // is nil
+    } else {
+        io.println(1, "not nil (BUG)");
+    }
+
+    // nil comparison
+    let s as string? = "hello";
+    io.println(1, string(s != nil));         // true
+    let sn as string? = nil;
+    io.println(1, string(sn == nil));        // true
+
+    return 0;
+}
