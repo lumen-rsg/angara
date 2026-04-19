@@ -158,7 +158,16 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             return phi;
         }
         case TokenType::MINUS: return makeI64(builder->CreateSub(getI64(l),getI64(r)));
-        case TokenType::STAR: return makeI64(builder->CreateMul(getI64(l),getI64(r)));
+        case TokenType::STAR: {
+            // Check if this is string * number repetition
+            {
+                auto lt = m_type_checker.m_expression_types.find(e.left.get());
+                if (lt != m_type_checker.m_expression_types.end() && lt->second->toString() == "string") {
+                    return callRt(rt->getFuncStringRepeat(), {l, r});
+                }
+            }
+            return makeI64(builder->CreateMul(getI64(l),getI64(r)));
+        }
         case TokenType::SLASH: {
             auto lt = m_type_checker.m_expression_types.find(e.left.get());
             auto rt2 = m_type_checker.m_expression_types.find(e.right.get());

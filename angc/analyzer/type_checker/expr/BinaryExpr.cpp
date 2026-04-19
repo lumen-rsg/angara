@@ -24,14 +24,12 @@ namespace angara {
         // 4. Check the types based on the operator.
         switch (expr.op.type) {
             case TokenType::MINUS:
-            case TokenType::STAR:
             case TokenType::SLASH:
             case TokenType::PERCENT:
             case TokenType::AMPERSAND:
             case TokenType::PIPE:
             case TokenType::CARET:
                 if (m_is_in_unsafe_context && (left_type->kind == TypeKind::ANY || right_type->kind == TypeKind::ANY)) {
-                    // In unsafe context, allow dynamic arithmetic on 'any' (runtime risk accepted).
                     result_type = m_type_any;
                 } else if (isNumeric(left_type) && isNumeric(right_type)) {
                     // Warn about division/modulo by literal zero
@@ -71,6 +69,22 @@ namespace angara {
                     }
                 } else {
                     error(expr.op, "Operands for this arithmetic operator must be numbers.");
+                }
+                break;
+
+            case TokenType::STAR:
+                if (m_is_in_unsafe_context && (left_type->kind == TypeKind::ANY || right_type->kind == TypeKind::ANY)) {
+                    result_type = m_type_any;
+                } else if (isNumeric(left_type) && isNumeric(right_type)) {
+                    if (isFloat(left_type) || isFloat(right_type)) {
+                        result_type = m_type_f64;
+                    } else {
+                        result_type = m_type_i64;
+                    }
+                } else if (left_type->toString() == "string" && isNumeric(right_type)) {
+                    result_type = m_type_string;
+                } else {
+                    error(expr.op, "'*' operator can only be used on two numbers or string * number.");
                 }
                 break;
 

@@ -64,6 +64,7 @@ public:
     // --- Runtime function accessors ---
     llvm::FunctionCallee getFuncStringFromC()     const { return m_fn_string_from_c; }
     llvm::FunctionCallee getFuncStringConcat()    const { return m_fn_string_concat; }
+    llvm::FunctionCallee getFuncStringRepeat()    const { return m_fn_string_repeat; }
     llvm::FunctionCallee getFuncToString()        const { return m_fn_to_string; }
     llvm::FunctionCallee getFuncListNew()         const { return m_fn_list_new; }
     llvm::FunctionCallee getFuncListNewWithElem() const { return m_fn_list_new_with_elements; }
@@ -158,6 +159,7 @@ private:
     // --- Runtime function callees ---
     llvm::FunctionCallee m_fn_string_from_c;
     llvm::FunctionCallee m_fn_string_concat;
+    llvm::FunctionCallee m_fn_string_repeat;
     llvm::FunctionCallee m_fn_to_string;
     llvm::FunctionCallee m_fn_list_new;
     llvm::FunctionCallee m_fn_list_new_with_elements;

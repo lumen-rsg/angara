@@ -54,6 +54,7 @@ void RuntimeBuilder::generateFreestandingStubs() {
     // String stubs
     stub_nil("__ang_string_from_c", FunctionType::get(obj_ty, {PointerType::get(m_ctx, 0)}, false), m_fn_string_from_c);
     stub_nil("__ang_string_concat", FunctionType::get(obj_ty, {obj_ty, obj_ty}, false), m_fn_string_concat);
+    stub_nil("__ang_string_repeat", FunctionType::get(obj_ty, {obj_ty, obj_ty}, false), m_fn_string_repeat);
     stub_nil("__ang_to_string", FunctionType::get(obj_ty, {obj_ty}, false), m_fn_to_string);
     // Record stubs
     stub_nil("__ang_record_new", FunctionType::get(obj_ty, {}, false), m_fn_record_new);
