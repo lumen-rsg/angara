@@ -37,19 +37,17 @@ namespace angara {
         }
         else if (callee_type->kind == TypeKind::CLASS) {
             auto class_type = std::dynamic_pointer_cast<ClassType>(callee_type);
-            auto init_it = class_type->methods.find("init");
+            // Use findProperty to also check superclass for inherited constructors
+            const auto* init_prop = class_type->findProperty("init");
 
-            if (init_it == class_type->methods.end()) {
-                // No 'init' method found. This class can only be constructed with zero arguments.
+            if (!init_prop) {
+                // No 'init' method found in this class or any superclass.
                 if (!arg_types.empty()) {
                     error(expr.paren, "Class '" + class_type->name + "' does not have a constructor that accepts arguments.");
-                    // We can add a note pointing to the class definition.
-                    // This requires getting the token from the ClassType, which is an enhancement for later.
-                    // For now, the error message is very clear. TODO
                 }
             } else {
-                // An 'init' method exists, use it to validate the call.
-                auto init_sig = std::dynamic_pointer_cast<FunctionType>(init_it->second.type);
+                // An 'init' method exists (possibly inherited), use it to validate the call.
+                auto init_sig = std::dynamic_pointer_cast<FunctionType>(init_prop->type);
                 check_function_call(expr, init_sig, arg_types);
             }
 

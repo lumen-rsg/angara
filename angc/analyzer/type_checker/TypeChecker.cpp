@@ -260,7 +260,7 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     // -- STAGE 2c: Define CLASS headers, which validates traits and contracts --
     for (const auto& stmt : statements) {
         if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
-            defineClassHeader(*class_stmt);
+                defineClassHeader(*class_stmt);
         }
     }
     if (m_hadError) return false;
@@ -299,10 +299,11 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     void TypeChecker::exitScopeAndWarn() {
         auto unused = m_symbols.exitScope();
         for (const auto& sym : unused) {
-            // Don't warn about unused imports, functions, or type-level symbols
+            // Don't warn about unused imports, functions, type-level symbols, or 'this'
             // Only warn about local variables (depth > 0 means not global)
             if (sym->depth > 0 && sym->type->kind != TypeKind::FUNCTION &&
-                sym->type->kind != TypeKind::MODULE) {
+                sym->type->kind != TypeKind::MODULE &&
+                sym->name != "this") {
                 warning(sym->declaration_token,
                     "Unused variable '" + sym->name + "'.", "W003");
             }

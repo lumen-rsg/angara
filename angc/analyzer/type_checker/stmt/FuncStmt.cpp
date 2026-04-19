@@ -125,7 +125,6 @@ namespace angara {
             bodyStmt->accept(*this, bodyStmt);
         }
 
-
         // 6. Restore the context.
         m_active_type_params = saved_type_params;
         m_function_return_types.pop();

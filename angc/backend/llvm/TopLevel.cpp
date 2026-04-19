@@ -98,11 +98,39 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
 
     // Find init method and determine constructor params
     std::shared_ptr<FuncStmt> init_method;
+    std::string init_class_name = class_name; // The class that defines init
+    size_t init_param_count = 0;
+
     for (const auto& member : stmt.members) {
         if (auto method = std::dynamic_pointer_cast<const MethodMember>(member)) {
             if (method->declaration->name.lexeme == "init") {
                 init_method = method->declaration;
+                init_param_count = init_method->params.size();
                 break;
+            }
+        }
+    }
+
+    // If no init found locally, check superclass chain via the type checker
+    if (!init_method) {
+        auto sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(class_name);
+        if (sym && sym->type->kind == TypeKind::CLASS) {
+            auto ct = std::dynamic_pointer_cast<ClassType>(sym->type);
+            const auto* init_prop = ct->findProperty("init");
+            if (init_prop) {
+                auto ft = std::dynamic_pointer_cast<FunctionType>(init_prop->type);
+                if (ft) {
+                    init_param_count = ft->param_types.size();
+                }
+                // Walk up to find which class defines init
+                auto current = ct;
+                while (current) {
+                    if (current->methods.count("init")) {
+                        init_class_name = current->name;
+                        break;
+                    }
+                    current = current->superclass;
+                }
             }
         }
     }
@@ -160,8 +188,8 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
     }
 
     // Constructor params = init method params (this is NOT in params, so no -1)
-    size_t ctor_param_count = init_method
-        ? init_method->params.size()
+    size_t ctor_param_count = (init_method || init_param_count > 0)
+        ? init_param_count
         : class_fields.size();
 
     // Constructor (generated after methods so it can call init)
@@ -180,9 +208,10 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
 
         llvm::Value* obj = callRt(rt->getFuncRecordNew(), {});
 
-        if (init_method) {
+        if (init_method || init_param_count > 0) {
             // Call init(this, args...) — first arg is 'this', rest are ctor params
-            std::string init_mangled = mangleMethod(class_name, "init");
+            // Use init_class_name to find the correct mangled init (may be in superclass)
+            std::string init_mangled = mangleMethod(init_class_name, "init");
             llvm::Function* init_fn = this->mod->getFunction(init_mangled);
             if (init_fn) {
                 std::vector<llvm::Value*> args;
