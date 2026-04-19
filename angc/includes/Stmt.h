@@ -29,6 +29,7 @@ namespace angara {
     struct TraitStmt;
     struct ContractStmt;
     struct BreakStmt;
+    struct ContinueStmt;
     struct DataStmt;
     struct EnumStmt;
     struct ForeignHeaderStmt;
@@ -55,6 +56,7 @@ namespace angara {
         virtual void visit(std::shared_ptr<const TraitStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const ContractStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const BreakStmt> stmt) = 0;
+        virtual void visit(std::shared_ptr<const ContinueStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const DataStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const EnumStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const ForeignHeaderStmt> stmt) = 0;
@@ -384,6 +386,16 @@ namespace angara {
 
         void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const BreakStmt>(self));
+        }
+    };
+
+    struct ContinueStmt final : Stmt {
+        const Token keyword; // The 'continue' token
+
+        explicit ContinueStmt(Token keyword) : keyword(std::move(keyword)) {}
+
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
+            visitor.visit(std::static_pointer_cast<const ContinueStmt>(self));
         }
     };
 

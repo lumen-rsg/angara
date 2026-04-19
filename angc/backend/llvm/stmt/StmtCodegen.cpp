@@ -15,6 +15,7 @@ void LLVMBackend::cgStmt(const std::shared_ptr<Stmt>& s) {
     else if (auto* p = dynamic_cast<const ForInStmt*>(s.get())) cgForIn(*p);
     else if (auto* p = dynamic_cast<const ReturnStmt*>(s.get())) cgReturn(*p);
     else if (auto* p = dynamic_cast<const BreakStmt*>(s.get())) { if (loopExit) builder->CreateBr(loopExit); }
+    else if (auto* p = dynamic_cast<const ContinueStmt*>(s.get())) { if (loopContinue) builder->CreateBr(loopContinue); }
     else if (auto* p = dynamic_cast<const ThrowStmt*>(s.get())) cgThrow(*p);
     else if (auto* p = dynamic_cast<const TryStmt*>(s.get())) cgTry(*p);
     else if (auto* p = dynamic_cast<const UnsafeBlockStmt*>(s.get())) {
@@ -78,7 +79,7 @@ void LLVMBackend::cgWhile(const WhileStmt& s) {
     auto* lp = llvm::BasicBlock::Create(*ctx,"wc",fn);
     auto* bd = llvm::BasicBlock::Create(*ctx,"wb",fn);
     auto* en = llvm::BasicBlock::Create(*ctx,"we",fn);
-    auto* sv = loopExit; loopExit = en; loopDepth++;
+    auto* sv = loopExit; auto* svc = loopContinue; loopExit = en; loopContinue = lp; loopDepth++;
     builder->CreateBr(lp);
     builder->SetInsertPoint(lp);
     builder->CreateCondBr(isTruthy(cg(s.condition)), bd, en);
@@ -86,7 +87,7 @@ void LLVMBackend::cgWhile(const WhileStmt& s) {
     cgStmt(s.body);
     if (!builder->GetInsertBlock()->getTerminator()) builder->CreateBr(lp);
     builder->SetInsertPoint(en);
-    loopExit = sv; loopDepth--;
+    loopExit = sv; loopContinue = svc; loopDepth--;
 }
 
 void LLVMBackend::cgFor(const ForStmt& s) {
@@ -97,7 +98,7 @@ void LLVMBackend::cgFor(const ForStmt& s) {
     auto* lp = llvm::BasicBlock::Create(*ctx,"fc",fn);
     auto* bd = llvm::BasicBlock::Create(*ctx,"fb",fn);
     auto* en = llvm::BasicBlock::Create(*ctx,"fe",fn);
-    auto* sv2 = loopExit; loopExit = en; loopDepth++;
+    auto* sv2 = loopExit; auto* svc = loopContinue; loopExit = en; loopContinue = lp; loopDepth++;
     builder->CreateBr(lp);
     builder->SetInsertPoint(lp);
     if (s.condition) builder->CreateCondBr(isTruthy(cg(s.condition)), bd, en);
@@ -109,7 +110,7 @@ void LLVMBackend::cgFor(const ForStmt& s) {
         builder->CreateBr(lp);
     }
     builder->SetInsertPoint(en);
-    loopExit = sv2; loopDepth--; namedVals = sv; namedTypes = stv;
+    loopExit = sv2; loopContinue = svc; loopDepth--; namedVals = sv; namedTypes = stv;
 }
 
 void LLVMBackend::cgForIn(const ForInStmt& s) {
@@ -124,7 +125,7 @@ void LLVMBackend::cgForIn(const ForInStmt& s) {
     auto* lp = llvm::BasicBlock::Create(*ctx,"fic",fn);
     auto* bd = llvm::BasicBlock::Create(*ctx,"fib",fn);
     auto* en = llvm::BasicBlock::Create(*ctx,"fie",fn);
-    auto* sv2 = loopExit; loopExit = en; loopDepth++;
+    auto* sv2 = loopExit; auto* svc = loopContinue; loopExit = en; loopContinue = lp; loopDepth++;
     auto* ia = allocLocal(fn,"__fi");
     builder->CreateStore(llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),0), ia);
     builder->CreateBr(lp);
@@ -139,7 +140,7 @@ void LLVMBackend::cgForIn(const ForInStmt& s) {
         builder->CreateBr(lp);
     }
     builder->SetInsertPoint(en);
-    loopExit = sv2; loopDepth--; namedVals = sv; namedTypes = stv;
+    loopExit = sv2; loopContinue = svc; loopDepth--; namedVals = sv; namedTypes = stv;
 }
 
 void LLVMBackend::cgReturn(const ReturnStmt& s) {

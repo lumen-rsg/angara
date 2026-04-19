@@ -423,6 +423,10 @@ namespace angara {
         printHeader("BreakStmt");
     }
 
+    void ASTPrinter::visit(std::shared_ptr<const ContinueStmt> stmt) {
+        printHeader("ContinueStmt");
+    }
+
     void ASTPrinter::visit(std::shared_ptr<const DataStmt> stmt) {
         printHeader("DataStmt", stmt->name.lexeme);
         printChildren("fields", stmt->fields, true);

@@ -76,6 +76,7 @@ namespace angara {
         void visit(std::shared_ptr<const TraitStmt> stmt) override;
         void visit(std::shared_ptr<const ContractStmt> stmt) override;
         void visit(std::shared_ptr<const BreakStmt> stmt) override;
+        void visit(std::shared_ptr<const ContinueStmt> stmt) override;
         void visit(std::shared_ptr<const DataStmt> stmt) override;
         void visit(std::shared_ptr<const EnumStmt> stmt) override;
         void visit(std::shared_ptr<const ForeignHeaderStmt> stmt) override;

@@ -42,6 +42,7 @@ namespace angara {
             {"private",  TokenType::PRIVATE},
             {"public",   TokenType::PUBLIC},
             {"break",    TokenType::BREAK},
+            {"continue", TokenType::CONTINUE},
             {"is",       TokenType::IS},
             {"data",     TokenType::DATA},
             {"enum",     TokenType::ENUM},

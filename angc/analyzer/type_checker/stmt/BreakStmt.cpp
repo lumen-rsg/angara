@@ -10,4 +10,10 @@ namespace angara {
         }
     }
 
+    void TypeChecker::visit(std::shared_ptr<const ContinueStmt> stmt) {
+        if (m_loop_depth == 0) {
+            error(stmt->keyword, "Cannot use 'continue' outside of a loop.");
+        }
+    }
+
 }

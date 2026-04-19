@@ -140,6 +140,7 @@ namespace angara {
         std::string moduleName;
         int loopDepth = 0;
         llvm::BasicBlock* loopExit = nullptr;
+        llvm::BasicBlock* loopContinue = nullptr;
 
         // Named values in current scope
         std::map<std::string, llvm::AllocaInst*> namedVals;

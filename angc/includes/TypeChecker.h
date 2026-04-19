@@ -162,6 +162,7 @@ namespace angara {
         static bool isTruthy(const std::shared_ptr<Type> &type);
 
         void visit(std::shared_ptr<const BreakStmt> stmt) override;
+        void visit(std::shared_ptr<const ContinueStmt> stmt) override;
         std::map<const Symbol*, std::shared_ptr<Type>> m_narrowed_types;
 
         // --- GENERIC SUPPORT ---

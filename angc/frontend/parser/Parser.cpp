@@ -110,6 +110,7 @@ std::shared_ptr<ASTType> Parser::type() {
         if (match({TokenType::SEMICOLON})) return std::make_shared<EmptyStmt>();
         if (match({TokenType::TRY})) return tryStatement();
         if (match({TokenType::BREAK})) return breakStatement();
+        if (match({TokenType::CONTINUE})) return continueStatement();
         // --- NEW: Check for an annotation block ---
         if (match({TokenType::AT_SIGN})) {
             Token at_token = previous();
