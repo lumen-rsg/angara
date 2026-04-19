@@ -1,22 +1,58 @@
+attach io;
 attach collections;
 
+// Angara Collections Test — C#-styled API
 export func main() -> i64 {
-    let nums as list<any> = [1, 2, 3, 4, 5];
-    let empty as list<any> = [];
-    let words as list<any> = ["hello", "world"];
+    // === CREATION ===
+    let r = collections.Range(1, 5);
+    io.println(1, "Range(1,5) count: " + string(collections.Count(r)));
+    io.println(1, "Range(1,5) first: " + string(collections.First(r)));
+    io.println(1, "Range(1,5) last: " + string(collections.Last(r)));
 
-    // Test basic operations that don't need arithmetic on any
-    let rev = collections.reverse(nums);
-    let emp1 = collections.is_empty(empty);
-    let emp2 = collections.is_empty(nums);
-    let f = collections.first(nums);
-    let l = collections.last(nums);
-    let first3 = collections.take(nums, 3);
-    let skipped = collections.skip(nums, 2);
-    let extra as list<any> = [6, 7];
-    let combined = collections.concat(nums, extra);
-    let joined = collections.join(words, "-");
+    // === TRANSFORMS (non-mutating) ===
+    let nums = [10, 20, 30, 40, 50];
+    let rev = collections.Reverse(nums);
+    io.println(1, "Reverse first: " + string(collections.First(rev)));
+    io.println(1, "Reverse last: " + string(collections.Last(rev)));
 
-    // Return 0 = success
+    let t = collections.Take(nums, 3);
+    io.println(1, "Take(3) count: " + string(collections.Count(t)));
+    io.println(1, "Take(3) first: " + string(collections.First(t)));
+
+    let s = collections.Skip(nums, 2);
+    io.println(1, "Skip(2) count: " + string(collections.Count(s)));
+    io.println(1, "Skip(2) first: " + string(collections.First(s)));
+
+    let dupes = [1, 1, 2, 2, 3, 3, 3];
+    let d = collections.Distinct(dupes);
+    io.println(1, "Distinct count: " + string(collections.Count(d)));
+
+    let c = collections.Concat([1, 2], [3, 4]);
+    io.println(1, "Concat count: " + string(collections.Count(c)));
+
+    // === QUERY ===
+    io.println(1, "Contains 30: " + string(collections.Contains(nums, 30)));
+    io.println(1, "Contains 99: " + string(collections.Contains(nums, 99)));
+
+    let joined = collections.Join(nums, ", ");
+    io.println(1, "Join: " + joined);
+
+    // === SET OPERATIONS ===
+    let a = [1, 2, 3, 4];
+    let b = [3, 4, 5, 6];
+    let ex = collections.Except(a, b);
+    io.println(1, "Except count: " + string(collections.Count(ex)));
+
+    let inter = collections.Intersect(a, b);
+    io.println(1, "Intersect count: " + string(collections.Count(inter)));
+
+    let uni = collections.Union(a, b);
+    io.println(1, "Union count: " + string(collections.Count(uni)));
+
+    // === PREDICATES ===
+    io.println(1, "IsEmpty([1,2]): " + string(collections.IsEmpty([1, 2])));
+    io.println(1, "Any([1,2]): " + string(collections.Any([1, 2])));
+    io.println(1, "SequenceEqual: " + string(collections.SequenceEqual([1, 2], [1, 2])));
+
     return 0;
 }

@@ -1,118 +1,139 @@
 //
 // Angara Standard Collections Library
 //
-// Collection operations for list<any>.
-// Uses Angara's dynamic runtime internally.
+// C#-styled collection operations inspired by System.Linq & System.Collections.Generic.
+// All functions work on the built-in list<any> type.
+//
+// Convention:
+//   - Functions that return new lists do NOT mutate the input (readonly-safe).
+//   - Mutation (Add/Remove) should be done directly via .push() on local list variables.
+//
+// NOTE: Higher-order functions (Select, Where, Aggregate, etc.) are not included
+// because the current Angara compiler does not support calling function-type values
+// across module boundaries. They will be added when first-class functions are fully supported.
 //
 
-// --- Transformers ---
+// ============================================================
+// CREATION  (C# Enumerable equivalents)
+// ============================================================
 
-// Apply a function to every element, returning a new list.
-export func map(transform as function(any) -> any, items as list<any>) -> list<any> {
+/// Create an empty list.
+export func Empty() -> list<any> {
+    return [];
+}
+
+/// Create a list from given elements.
+export func Of(a as any, b as any, c as any, d as any, e as any,
+               f as any, g as any, h as any) -> list<any> {
     let result as list<any> = [];
-    for (item in items) {
-        result.push(transform(item));
+    if (true) { result.push(a); }
+    if (true) { result.push(b); }
+    if (true) { result.push(c); }
+    if (true) { result.push(d); }
+    if (true) { result.push(e); }
+    if (true) { result.push(f); }
+    if (true) { result.push(g); }
+    if (true) { result.push(h); }
+    return result;
+}
+
+/// Generate a range of integers (C# Enumerable.Range).
+export func Range(start as i64, count as i64) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < count) {
+        result.push(start + i);
+        i = i + 1;
     }
     return result;
 }
 
-// Keep only elements that satisfy a predicate.
-export func filter(predicate as function(any) -> bool, items as list<any>) -> list<any> {
+/// Repeat a value n times (C# Enumerable.Repeat).
+export func Repeat(value as any, count as i64) -> list<any> {
     let result as list<any> = [];
-    for (item in items) {
-        if (predicate(item)) {
-            result.push(item);
-        }
+    let i = 0;
+    while (i < count) {
+        result.push(value);
+        i = i + 1;
     }
     return result;
 }
 
-// Reduce a list to a single value.
-export func reduce(items as list<any>, initial as any, accumulator as function(any, any) -> any) -> any {
-    let acc = initial;
-    for (item in items) {
-        acc = accumulator(acc, item);
-    }
-    return acc;
-}
+// ============================================================
+// QUERY OPERATORS  (C# Enumerable — non-mutating)
+// ============================================================
 
-// --- Search ---
-
-// Find the first element matching a predicate, or nil.
-export func find(predicate as function(any) -> bool, items as list<any>) -> any {
-    for (item in items) {
-        if (predicate(item)) {
-            return item;
-        }
+/// Return the first element, or nil if empty (C# Enumerable.First).
+export func First(items as list<any>) -> any {
+    if (len(items) > 0) {
+        return items[0];
     }
     return nil;
 }
 
-// True if any element satisfies the predicate.
-export func any(items as list<any>, predicate as function(any) -> bool) -> bool {
-    for (item in items) {
-        if (predicate(item)) {
+/// Return the last element, or nil if empty (C# Enumerable.Last).
+export func Last(items as list<any>) -> any {
+    if (len(items) > 0) {
+        return items[len(items) - 1];
+    }
+    return nil;
+}
+
+/// Get element at index, or nil if out of range (C# Enumerable.ElementAtOrDefault).
+export func ElementAt(items as list<any>, index as i64) -> any {
+    if (index >= 0 && index < len(items)) {
+        return items[index];
+    }
+    return nil;
+}
+
+/// Check if the list contains a value (C# Enumerable.Contains).
+export func Contains(items as list<any>, value as any) -> bool {
+    let i = 0;
+    while (i < len(items)) {
+        if (items[i] == value) {
             return true;
         }
+        i = i + 1;
     }
     return false;
 }
 
-// True if all elements satisfy the predicate.
-export func all(items as list<any>, predicate as function(any) -> bool) -> bool {
-    for (item in items) {
-        if (!predicate(item)) {
-            return false;
+/// Find first index of value, or -1 (C# List.IndexOf).
+export func IndexOf(items as list<any>, value as any) -> i64 {
+    let i = 0;
+    while (i < len(items)) {
+        if (items[i] == value) {
+            return i;
         }
+        i = i + 1;
     }
-    return true;
+    return -1;
 }
 
-// True if the list contains the given value.
-export func contains(items as list<any>, value as any) -> bool {
-    for (item in items) {
-        if (item == value) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// Count elements satisfying a predicate.
-export func count(predicate as function(any) -> bool, items as list<any>) -> i64 {
-    let c = 0;
-    for (item in items) {
-        if (predicate(item)) {
-            c = c + 1;
-        }
-    }
-    return c;
-}
-
-// --- Ordering & Slicing ---
-
-// Return a new list in reverse order.
-export func reverse(items as list<any>) -> list<any> {
-    let result as list<any> = [];
+/// Find last index of value, or -1 (C# List.LastIndexOf).
+export func LastIndexOf(items as list<any>, value as any) -> i64 {
     let i = len(items) - 1;
     while (i >= 0) {
-        result.push(items[i]);
+        if (items[i] == value) {
+            return i;
+        }
         i = i - 1;
     }
-    return result;
+    return -1;
 }
 
-// Concatenate two lists.
-export func concat(a as list<any>, b as list<any>) -> list<any> {
-    let result = a;
-    for (item in b) {
-        result.push(item);
-    }
-    return result;
+/// Get the total number of elements (C# List<T>.Count / Enumerable.Count).
+export func Count(items as list<any>) -> i64 {
+    return len(items);
 }
 
-// Take the first n elements.
-export func take(items as list<any>, n as i64) -> list<any> {
+// ============================================================
+// TRANSFORMS  (non-mutating — return new lists)
+// ============================================================
+
+/// Return a specified number of elements from the start (C# Enumerable.Take).
+export func Take(items as list<any>, n as i64) -> list<any> {
     let result as list<any> = [];
     let i = 0;
     while (i < n && i < len(items)) {
@@ -122,8 +143,8 @@ export func take(items as list<any>, n as i64) -> list<any> {
     return result;
 }
 
-// Skip the first n elements.
-export func skip(items as list<any>, n as i64) -> list<any> {
+/// Bypass a specified number of elements, return the rest (C# Enumerable.Skip).
+export func Skip(items as list<any>, n as i64) -> list<any> {
     let result as list<any> = [];
     let i = n;
     while (i < len(items)) {
@@ -133,40 +154,110 @@ export func skip(items as list<any>, n as i64) -> list<any> {
     return result;
 }
 
-// --- Accessors ---
-
-// First element, or nil.
-export func first(items as list<any>) -> any {
-    if (len(items) > 0) {
-        return items[0];
+/// Take elements while they satisfy a start..end range (C# Enumerable.Take + Skip combo).
+/// Equivalent to Python slicing: items[start..end]
+export func Slice(items as list<any>, start as i64, end as i64) -> list<any> {
+    let result as list<any> = [];
+    let i = start;
+    while (i < end && i < len(items)) {
+        result.push(items[i]);
+        i = i + 1;
     }
-    return nil;
+    return result;
 }
 
-// Last element, or nil.
-export func last(items as list<any>) -> any {
-    if (len(items) > 0) {
-        return items[len(items) - 1];
+/// Reverse the order of elements (C# Enumerable.Reverse).
+export func Reverse(items as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = len(items) - 1;
+    while (i >= 0) {
+        result.push(items[i]);
+        i = i - 1;
     }
-    return nil;
+    return result;
 }
 
-// True if the list is empty.
-export func is_empty(items as list<any>) -> bool {
-    return len(items) == 0;
-}
-
-// --- Utilities ---
-
-// Apply a function to each element (side-effects only).
-export func for_each(items as list<any>, action as function(any) -> nil) {
-    for (item in items) {
-        action(item);
+/// Concatenate two lists (C# Enumerable.Concat).
+export func Concat(a as list<any>, b as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(a)) {
+        result.push(a[i]);
+        i = i + 1;
     }
+    i = 0;
+    while (i < len(b)) {
+        result.push(b[i]);
+        i = i + 1;
+    }
+    return result;
 }
 
-// Join a list of strings with a separator.
-export func join(items as list<any>, separator as string) -> string {
+/// Return distinct/unique elements (C# Enumerable.Distinct).
+export func Distinct(items as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(items)) {
+        let item = items[i];
+        let found = false;
+        let j = 0;
+        while (j < len(result)) {
+            if (result[j] == item) {
+                found = true;
+            }
+            j = j + 1;
+        }
+        if (!found) {
+            result.push(item);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+// ============================================================
+// SET OPERATIONS  (C# Enumerable set methods)
+// ============================================================
+
+/// Return elements in 'a' but not in 'b' (C# Enumerable.Except).
+export func Except(a as list<any>, b as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(a)) {
+        let item = a[i];
+        if (!Contains(b, item)) {
+            result.push(item);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Return elements common to both lists (C# Enumerable.Intersect).
+export func Intersect(a as list<any>, b as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(a)) {
+        let item = a[i];
+        if (Contains(b, item) && !Contains(result, item)) {
+            result.push(item);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Return distinct elements from both lists (C# Enumerable.Union).
+export func Union(a as list<any>, b as list<any>) -> list<any> {
+    return Distinct(Concat(a, b));
+}
+
+// ============================================================
+// STRING / CONVERSION UTILITIES
+// ============================================================
+
+/// Join elements into a string with a separator (C# String.Join).
+export func Join(items as list<any>, separator as string) -> string {
     let result = "";
     let i = 0;
     while (i < len(items)) {
@@ -179,13 +270,31 @@ export func join(items as list<any>, separator as string) -> string {
     return result;
 }
 
-// Split a string into a list of single characters.
-export func chars(s as string) -> list<any> {
-    let result as list<any> = [];
+// ============================================================
+// COMPARISON / PREDICATE (no function params needed)
+// ============================================================
+
+/// Check if two lists have the same elements in order (C# Enumerable.SequenceEqual).
+export func SequenceEqual(a as list<any>, b as list<any>) -> bool {
+    if (len(a) != len(b)) {
+        return false;
+    }
     let i = 0;
-    while (i < len(s)) {
-        result.push(s[i]);
+    while (i < len(a)) {
+        if (a[i] != b[i]) {
+            return false;
+        }
         i = i + 1;
     }
-    return result;
+    return true;
+}
+
+/// Check if the list is empty.
+export func IsEmpty(items as list<any>) -> bool {
+    return len(items) == 0;
+}
+
+/// Check if the list is not empty.
+export func Any(items as list<any>) -> bool {
+    return len(items) > 0;
 }

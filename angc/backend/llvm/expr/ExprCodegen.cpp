@@ -203,6 +203,30 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                     }
                 }
             }
+            // Check if modName is a local variable (list/record) rather than a module
+            if (namedVals.find(sanitize(modName)) != namedVals.end()) {
+                auto* varObj = loadVar(modName);
+                // Built-in list methods
+                if (fnName == "push" || fnName == "add") {
+                    if (!expr.arguments.empty())
+                        return callRt(rt->getFuncListPush(), {varObj, cg(expr.arguments[0])});
+                    return makeNil();
+                }
+                if (fnName == "get" || fnName == "at") {
+                    if (!expr.arguments.empty())
+                        return callRt(rt->getFuncListGet(), {varObj, cg(expr.arguments[0])});
+                    return makeNil();
+                }
+                if (fnName == "set") {
+                    if (expr.arguments.size() >= 2)
+                        return callRt(rt->getFuncListSet(), {varObj, cg(expr.arguments[0]), cg(expr.arguments[1])});
+                    return makeNil();
+                }
+                if (fnName == "length" || fnName == "len" || fnName == "size" || fnName == "count") {
+                    return callRt(rt->getFuncLen(), {varObj});
+                }
+                // Not a recognized built-in — fall through to module function lookup
+            }
             if (modName=="io") {
                 if (fnName=="println"||fnName=="print") {
                     if (expr.arguments.size() >= 2) {
@@ -304,7 +328,16 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
     std::string mangled = mangle(mod, fn);
     llvm::Function* f = this->mod->getFunction(mangled);
     if (!f) f = this->mod->getFunction("__ang_"+sanitize(fn));
-    if (!f) return makeNil();
+
+    // If not found, create a forward declaration for the cross-module function
+    // All Angara functions return %AngaraObject and take %AngaraObject params
+    if (!f) {
+        // Try the mangled name first, then the sanitized name
+        std::string declName = mangled;
+        auto* fnTy = llvm::FunctionType::get(objType,
+            std::vector<llvm::Type*>(args.size(), objType), false);
+        f = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage, declName, this->mod.get());
+    }
 
     auto ft = f->getFunctionType();
     bool direct_call = true;
