@@ -85,6 +85,7 @@ public:
     llvm::FunctionCallee getFuncClosureNew()      const { return m_fn_closure_new; }
     llvm::FunctionCallee getFuncCall()            const { return m_fn_call; }
     llvm::FunctionCallee getFuncExceptionNew()    const { return m_fn_exception_new; }
+    llvm::FunctionCallee getFuncExceptionGetMessage() const { return m_fn_exception_get_message; }
     llvm::FunctionCallee getFuncThrow()           const { return m_fn_throw; }
     llvm::FunctionCallee getFuncTryBegin()        const { return m_fn_try_begin; }
     llvm::FunctionCallee getFuncTryEnd()          const { return m_fn_try_end; }
@@ -178,6 +179,7 @@ private:
     llvm::FunctionCallee m_fn_closure_new;
     llvm::FunctionCallee m_fn_call;
     llvm::FunctionCallee m_fn_exception_new;
+    llvm::FunctionCallee m_fn_exception_get_message;
     llvm::FunctionCallee m_fn_throw;
     llvm::FunctionCallee m_fn_try_begin;
     llvm::FunctionCallee m_fn_try_end;

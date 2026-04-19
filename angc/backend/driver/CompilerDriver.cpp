@@ -423,18 +423,30 @@ namespace angara {
         if (errorHandler.hadError()) { errorHandler.printSummary(); m_had_error = true; return nullptr; }
 
         TypeChecker typeChecker(*this, errorHandler, module_name);
+        try {
         if (!typeChecker.check(statements)) { errorHandler.printSummary(); m_had_error = true; return nullptr; }
+        } catch (const std::exception& e) {
+            std::cerr << "\nEXCEPTION in TypeChecker: " << e.what() << "\n";
+            m_had_error = true;
+            return nullptr;
+        }
 
         auto mod = typeChecker.getModuleType();
         m_angara_module_names.push_back(module_name);
 
         // --- LLVM Backend ---
-        LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding);
-        if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
+        try {
+            LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding);
+            if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
+                m_had_error = true;
+                return nullptr;
+            }
+            m_generated_object_files.insert(llvmBackend.get_object_file_path());
+        } catch (const std::exception& e) {
+            std::cerr << "\nEXCEPTION in LLVM backend: " << e.what() << "\n";
             m_had_error = true;
             return nullptr;
         }
-        m_generated_object_files.insert(llvmBackend.get_object_file_path());
         m_modules_compiled++;
         print_progress("Done!");
         std::cout << "\r\033[K" << std::flush;

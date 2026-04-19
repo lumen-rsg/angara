@@ -156,12 +156,35 @@ void LLVMBackend::cgTry(const TryStmt& s) {
     auto* tryBB = llvm::BasicBlock::Create(*ctx,"try_body",fn);
     auto* catchBB = llvm::BasicBlock::Create(*ctx,"catch",fn);
     auto* afterAll = llvm::BasicBlock::Create(*ctx,"after_try",fn);
+
+    // Exception frame: { [512 x i8] jmp_buf, i8* prev }
+    // Must match the layout used in __ang_throw and __ang_try_end
     auto* frameType = llvm::StructType::create(*ctx,
-        {llvm::ArrayType::get(llvm::Type::getInt8Ty(*ctx),200),
+        {llvm::ArrayType::get(llvm::Type::getInt8Ty(*ctx),512),
          llvm::PointerType::get(*ctx, 0)}, "EF");
     auto* frame = builder->CreateAlloca(frameType);
-    auto* sr = callRt(rt->getFuncTryBegin(),
-        {builder->CreateBitCast(frame, llvm::PointerType::get(*ctx, 0))});
+
+    // Inline: push frame onto exception chain (frame->prev = chain_head, chain_head = frame)
+    auto* frame_raw = builder->CreateBitCast(frame, llvm::PointerType::get(*ctx, 0));
+    auto* prev_addr = builder->CreateStructGEP(frameType, frame, 1);
+    auto* old_chain = builder->CreateLoad(llvm::PointerType::get(*ctx, 0),
+        rt->getExceptionChain(), "old_chain");
+    builder->CreateStore(old_chain, prev_addr);
+    builder->CreateStore(frame_raw, rt->getExceptionChain());
+
+    // Inline: setjmp(frame->jmp_buf) — MUST be in this function's frame for longjmp to work
+    auto* jmp_buf_ptr = builder->CreateStructGEP(frameType, frame, 0);
+    auto* i8_ptr_ty = llvm::PointerType::get(*ctx, 0);
+    auto* setjmp_fn = fn->getParent()->getFunction("setjmp");
+    auto* sr = builder->CreateCall(
+        llvm::FunctionType::get(llvm::Type::getInt32Ty(*ctx), {i8_ptr_ty}, false),
+        setjmp_fn,
+        {builder->CreateBitCast(jmp_buf_ptr, i8_ptr_ty)}, "setjmp_result");
+    // Mark setjmp as returns_twice so LLVM doesn't optimize away the second return path
+    if (auto* ci = llvm::dyn_cast<llvm::CallInst>(sr)) {
+        ci->addFnAttr(llvm::Attribute::ReturnsTwice);
+    }
+
     builder->CreateCondBr(
         builder->CreateICmpEQ(sr, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx),0)),
         tryBB, catchBB);
@@ -178,9 +201,9 @@ void LLVMBackend::cgTry(const TryStmt& s) {
         auto* exc = builder->CreateLoad(objType, rt->getCurrentException(), "exc");
         auto sv = namedVals;
         auto st = namedTypes;
-        auto* ea = allocLocal(fn,"__exc");
+        auto* ea = allocLocal(fn, s.catchName.lexeme);
         builder->CreateStore(exc, ea);
-        namedVals["__exception"] = ea;
+        namedVals[s.catchName.lexeme] = ea;
         cgStmt(s.catchBlock);
         namedVals = sv;
         namedTypes = st;

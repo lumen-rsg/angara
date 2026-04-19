@@ -423,6 +423,14 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             }
         }
 
+        // Built-in Exception constructor: use runtime's exception_new
+        if (fn == "Exception") {
+            std::vector<llvm::Value*> args;
+            for (auto& a : expr.arguments) args.push_back(cg(a));
+            if (args.empty()) args.push_back(makeNil());
+            return callRt(rt->getFuncExceptionNew(), args);
+        }
+
         auto cit = constructorLookup.find(fn);
         if (cit != constructorLookup.end()) {
             llvm::Function* ctor = this->mod->getFunction(cit->second);
@@ -493,6 +501,10 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
 
 llvm::Value* LLVMBackend::cgGet(const GetExpr& e) {
     auto* obj = cg(e.object);
+    // Special case: .message property uses exception_get_message runtime function
+    if (e.name.lexeme == "message") {
+        return callRt(rt->getFuncExceptionGetMessage(), {obj});
+    }
     return callRt(rt->getFuncRecordGet(), {obj, builder->CreateGlobalString(e.name.lexeme)});
 }
 

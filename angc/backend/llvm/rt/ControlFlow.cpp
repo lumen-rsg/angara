@@ -213,6 +213,27 @@ void RuntimeBuilder::generateExceptionOps() {
         b.CreateRet(pack_obj(b, exc_ptr));
     }
 
+    // --- exception_get_message(AngaraObject exception) -> AngaraObject ---
+    {
+        auto* fn_ty = FunctionType::get(obj_ty, {obj_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_exception_get_message", fn_ty);
+        m_fn_exception_get_message = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+        auto* exc = fn->arg_begin();
+
+        // Extract pointer from object payload
+        auto* payload = b.CreateExtractValue(exc, {1});
+        auto* exc_ptr = b.CreateIntToPtr(payload, PointerType::get(m_ctx, 0));
+
+        // AngaraException: { ObjHeader, AngaraObject message }
+        // Load message from field index 1
+        auto* msg = b.CreateLoad(obj_ty,
+            b.CreateStructGEP(m_exception_type, exc_ptr, 1), "msg");
+        b.CreateRet(msg);
+    }
+
     // --- throw(AngaraObject exception) — calls longjmp ---
     {
         auto* fn_ty = FunctionType::get(Type::getVoidTy(m_ctx), {obj_ty}, false);
@@ -235,11 +256,11 @@ void RuntimeBuilder::generateExceptionOps() {
         b.CreateCondBr(is_null, abort_bb, unwind_bb);
 
         IRBuilder<> ba(abort_bb);
-        // Print error and exit
-        auto* msg = ba.CreateGlobalString("Unhandled exception\n");
-        auto* fprintf_fn = m_module.getFunction("fprintf");
-        // stderr is typically at a fixed address, but we can't easily get it.
-        // Use printf instead
+        // Print bold red fatal error message and exit
+        auto* msg = ba.CreateGlobalString(
+            "\033[1m\033[31m-> FATAL\033[0m\n"
+            "\033[1m\033[31m   Unhandled exception was thrown but wasn't caught by any exception handlers. "
+            "Terminating. (No active try / catch blocks found)\033[0m\n");
         ba.CreateCall(m_module.getFunction("printf"), {msg});
         ba.CreateCall(m_module.getFunction("exit"), {ConstantInt::get(i32_ty, 1)});
         ba.CreateUnreachable();
@@ -249,9 +270,10 @@ void RuntimeBuilder::generateExceptionOps() {
         // chain points to ExceptionFrame which is { jmp_buf, prev* }
         // We need to read prev and update chain, then longjmp
         // ExceptionFrame layout: first field is jmp_buf buffer, second is prev pointer
-        // jmp_buf is opaque — we treat it as [200 x i8] (typical size)
+        // jmp_buf size varies by platform (192 on macOS ARM64, 200 on Linux x86_64, etc.)
+        // Use 512 bytes to safely cover all known platforms
         auto* frame_type = StructType::create(m_ctx, {
-            ArrayType::get(i8_ty, 200),   // jmp_buf
+            ArrayType::get(i8_ty, 512),   // jmp_buf (generously sized)
             i8_ptr                        // prev
         }, "ExceptionFrame");
 
@@ -280,7 +302,7 @@ void RuntimeBuilder::generateExceptionOps() {
 
         // Push frame onto chain: frame->prev = chain_head, chain_head = frame
         auto* frame_type = StructType::create(m_ctx, {
-            ArrayType::get(i8_ty, 200),
+            ArrayType::get(i8_ty, 512),
             i8_ptr
         }, "ExceptionFrame");
 
@@ -307,7 +329,7 @@ void RuntimeBuilder::generateExceptionOps() {
         IRBuilder<> b(entry);
 
         auto* frame_type = StructType::create(m_ctx, {
-            ArrayType::get(i8_ty, 200),
+            ArrayType::get(i8_ty, 512),
             i8_ptr
         }, "ExceptionFrame");
 

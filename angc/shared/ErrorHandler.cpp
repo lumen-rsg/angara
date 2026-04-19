@@ -40,7 +40,7 @@ namespace angara {
 
             // Print the pointer line with carets
             std::string pointer;
-            pointer += "   | " + std::string(token.column - 1, ' ');
+            pointer += "   | " + std::string(token.column > 0 ? token.column - 1 : 0, ' ');
             pointer += std::string(token.lexeme.length() > 0 ? token.lexeme.length() : 1, '^');
             std::cerr << CLR_BOLD << CLR_RED << pointer << CLR_RESET << std::endl;
         }
@@ -69,7 +69,7 @@ namespace angara {
 
             // Use tildes for warnings (vs carets for errors)
             std::string pointer;
-            pointer += "   | " + std::string(token.column - 1, ' ');
+            pointer += "   | " + std::string(token.column > 0 ? token.column - 1 : 0, ' ');
             pointer += std::string(token.lexeme.length() > 0 ? token.lexeme.length() : 1, '~');
             std::cerr << CLR_BOLD << CLR_YELLOW << pointer << CLR_RESET << std::endl;
         }
