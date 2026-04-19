@@ -30,7 +30,10 @@ namespace angara {
             case TokenType::AMPERSAND:
             case TokenType::PIPE:
             case TokenType::CARET:
-                if (isNumeric(left_type) && isNumeric(right_type)) {
+                if (m_is_in_unsafe_context && (left_type->kind == TypeKind::ANY || right_type->kind == TypeKind::ANY)) {
+                    // In unsafe context, allow dynamic arithmetic on 'any' (runtime risk accepted).
+                    result_type = m_type_any;
+                } else if (isNumeric(left_type) && isNumeric(right_type)) {
                     // Warn about division/modulo by literal zero
                     if ((expr.op.type == TokenType::SLASH || expr.op.type == TokenType::PERCENT)) {
                         if (auto rhs_literal = std::dynamic_pointer_cast<const Literal>(expr.right)) {
@@ -72,7 +75,9 @@ namespace angara {
                 break;
 
             case TokenType::PLUS:
-                if (isNumeric(left_type) && isNumeric(right_type)) {
+                if (m_is_in_unsafe_context && (left_type->kind == TypeKind::ANY || right_type->kind == TypeKind::ANY)) {
+                    result_type = m_type_any;
+                } else if (isNumeric(left_type) && isNumeric(right_type)) {
                     if (isFloat(left_type) || isFloat(right_type)) {
                         result_type = m_type_f64;
                     } else {
@@ -89,7 +94,9 @@ namespace angara {
             case TokenType::GREATER_EQUAL:
             case TokenType::LESS:
             case TokenType::LESS_EQUAL:
-                if (isNumeric(left_type) && isNumeric(right_type)) {
+                if (m_is_in_unsafe_context && (left_type->kind == TypeKind::ANY || right_type->kind == TypeKind::ANY)) {
+                    result_type = m_type_bool;
+                } else if (isNumeric(left_type) && isNumeric(right_type)) {
                     result_type = m_type_bool;
                 } else {
                     error(expr.op, "Operands for comparison must be numbers.");

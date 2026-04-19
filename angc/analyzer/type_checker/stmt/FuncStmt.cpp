@@ -85,6 +85,10 @@ namespace angara {
             return;
         }
 
+        // Reset error flag for this function so errors from previous functions
+        // don't cascade and cause spurious failures in this one.
+        m_hadError = false;
+
         // 1. Fetch the full FunctionType from the symbol table (created in Pass 1).
         auto symbol = m_symbols.resolve(stmt->name.lexeme);
         // Note: for methods, the name is not in the global scope. We need to look it up

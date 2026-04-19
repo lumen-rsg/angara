@@ -81,6 +81,10 @@ namespace angara {
                     types_match = true;
                 }
             }
+            // In @unsafe context, allow assigning 'any' to any target type.
+            if (m_is_in_unsafe_context && rhs_type->kind == TypeKind::ANY) {
+                types_match = true;
+            }
 
             if (!types_match) {
                 error(expr.op, "Type mismatch. Cannot assign a value of type '" +

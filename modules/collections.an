@@ -7,10 +7,8 @@
 // Convention:
 //   - Functions that return new lists do NOT mutate the input (readonly-safe).
 //   - Mutation (Add/Remove) should be done directly via .push() on local list variables.
-//
-// NOTE: Higher-order functions (Select, Where, Aggregate, etc.) are not included
-// because the current Angara compiler does not support calling function-type values
-// across module boundaries. They will be added when first-class functions are fully supported.
+//   - Higher-order functions accept closures (lambdas or named function refs) as `any`.
+//     Since calling `any` is a dynamic operation, those functions use @unsafe blocks.
 //
 
 // ============================================================
@@ -20,21 +18,6 @@
 /// Create an empty list.
 export func Empty() -> list<any> {
     return [];
-}
-
-/// Create a list from given elements.
-export func Of(a as any, b as any, c as any, d as any, e as any,
-               f as any, g as any, h as any) -> list<any> {
-    let result as list<any> = [];
-    if (true) { result.push(a); }
-    if (true) { result.push(b); }
-    if (true) { result.push(c); }
-    if (true) { result.push(d); }
-    if (true) { result.push(e); }
-    if (true) { result.push(f); }
-    if (true) { result.push(g); }
-    if (true) { result.push(h); }
-    return result;
 }
 
 /// Generate a range of integers (C# Enumerable.Range).
@@ -154,8 +137,7 @@ export func Skip(items as list<any>, n as i64) -> list<any> {
     return result;
 }
 
-/// Take elements while they satisfy a start..end range (C# Enumerable.Take + Skip combo).
-/// Equivalent to Python slicing: items[start..end]
+/// Take elements from start..end (Python-style slicing).
 export func Slice(items as list<any>, start as i64, end as i64) -> list<any> {
     let result as list<any> = [];
     let i = start;
@@ -213,6 +195,230 @@ export func Distinct(items as list<any>) -> list<any> {
         i = i + 1;
     }
     return result;
+}
+
+// ============================================================
+// HIGHER-ORDER FUNCTIONS  (C# LINQ-style with lambdas)
+// Functions that call `any`-typed closures require @unsafe blocks.
+// ============================================================
+
+/// Map each element through a transform function (C# Enumerable.Select).
+export func Select(items as list<any>, transform as any) -> list<any> {
+    @unsafe {
+        let result as list<any> = [];
+        let i = 0;
+        while (i < len(items)) {
+            result.push(transform(items[i]));
+            i = i + 1;
+        }
+        return result;
+    }
+    return [];
+}
+
+/// Filter elements that satisfy a predicate (C# Enumerable.Where).
+export func Where(items as list<any>, predicate as any) -> list<any> {
+    @unsafe {
+        let result as list<any> = [];
+        let i = 0;
+        while (i < len(items)) {
+            if (predicate(items[i])) {
+                result.push(items[i]);
+            }
+            i = i + 1;
+        }
+        return result;
+    }
+    return [];
+}
+
+/// Execute an action for each element (C# List.ForEach).
+export func ForEach(items as list<any>, action as any) -> any {
+    @unsafe {
+        let i = 0;
+        while (i < len(items)) {
+            action(items[i]);
+            i = i + 1;
+        }
+    }
+    return nil;
+}
+
+/// Reduce with an initial seed value (C# Enumerable.Aggregate).
+export func Aggregate(items as list<any>, seed as any, accumulator as any) -> any {
+    @unsafe {
+        let result = seed;
+        let i = 0;
+        while (i < len(items)) {
+            result = accumulator(result, items[i]);
+            i = i + 1;
+        }
+        return result;
+    }
+    return nil;
+}
+
+/// Check if any element satisfies the predicate (C# Enumerable.Any with predicate).
+export func AnyMatch(items as list<any>, predicate as any) -> bool {
+    @unsafe {
+        let i = 0;
+        while (i < len(items)) {
+            if (predicate(items[i])) {
+                return true;
+            }
+            i = i + 1;
+        }
+    }
+    return false;
+}
+
+/// Check if all elements satisfy the predicate (C# Enumerable.All).
+export func All(items as list<any>, predicate as any) -> bool {
+    @unsafe {
+        let i = 0;
+        while (i < len(items)) {
+            let ok = predicate(items[i]);
+            if (ok) {
+                // element passes
+            } else {
+                return false;
+            }
+            i = i + 1;
+        }
+    }
+    return true;
+}
+
+/// Count elements that satisfy a predicate (C# Enumerable.Count with predicate).
+export func CountMatch(items as list<any>, predicate as any) -> i64 {
+    @unsafe {
+        let count = 0;
+        let i = 0;
+        while (i < len(items)) {
+            if (predicate(items[i])) {
+                count = count + 1;
+            }
+            i = i + 1;
+        }
+        return count;
+    }
+    return 0;
+}
+
+/// Find first element matching predicate, or nil (C# Enumerable.FirstOrDefault).
+export func FirstMatch(items as list<any>, predicate as any) -> any {
+    @unsafe {
+        let i = 0;
+        while (i < len(items)) {
+            if (predicate(items[i])) {
+                return items[i];
+            }
+            i = i + 1;
+        }
+    }
+    return nil;
+}
+
+/// Find last element matching predicate, or nil (C# Enumerable.LastOrDefault).
+export func LastMatch(items as list<any>, predicate as any) -> any {
+    @unsafe {
+        let i = len(items) - 1;
+        while (i >= 0) {
+            if (predicate(items[i])) {
+                return items[i];
+            }
+            i = i - 1;
+        }
+    }
+    return nil;
+}
+
+/// Sort elements using a comparator (C# OrderBy simplified).
+/// comparator(a, b) returns true if a should come before b.
+export func SortBy(items as list<any>, comparator as any) -> list<any> {
+    // Copy the list
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(items)) {
+        result.push(items[i]);
+        i = i + 1;
+    }
+    // Bubble sort using the comparator (dynamic call — needs @unsafe)
+    @unsafe {
+        let n = len(result);
+        let outer = 0;
+        while (outer < n - 1) {
+            let inner = 0;
+            while (inner < n - outer - 1) {
+                if (comparator(result[inner + 1], result[inner])) {
+                    let tmp = result[inner];
+                    result[inner] = result[inner + 1];
+                    result[inner + 1] = tmp;
+                }
+                inner = inner + 1;
+            }
+            outer = outer + 1;
+        }
+    }
+    return result;
+}
+
+// ============================================================
+// NUMERIC AGGREGATES
+// ============================================================
+
+/// Sum all numeric elements.
+export func Sum(items as list<any>) -> i64 {
+    @unsafe {
+        let total = 0;
+        let i = 0;
+        while (i < len(items)) {
+            total = total + items[i];
+            i = i + 1;
+        }
+        return total;
+    }
+    return 0;
+}
+
+/// Find minimum numeric element, or 0 if empty.
+export func Min(items as list<any>) -> i64 {
+    if (len(items) == 0) { return 0; }
+    @unsafe {
+        let m = items[0];
+        let i = 1;
+        while (i < len(items)) {
+            if (items[i] < m) {
+                m = items[i];
+            }
+            i = i + 1;
+        }
+        return m;
+    }
+    return 0;
+}
+
+/// Find maximum numeric element, or 0 if empty.
+export func Max(items as list<any>) -> i64 {
+    if (len(items) == 0) { return 0; }
+    @unsafe {
+        let m = items[0];
+        let i = 1;
+        while (i < len(items)) {
+            if (items[i] > m) {
+                m = items[i];
+            }
+            i = i + 1;
+        }
+        return m;
+    }
+    return 0;
+}
+
+/// Compute average of numeric elements, or 0 if empty.
+export func Average(items as list<any>) -> i64 {
+    if (len(items) == 0) { return 0; }
+    return Sum(items) / len(items);
 }
 
 // ============================================================

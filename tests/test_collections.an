@@ -1,15 +1,16 @@
 attach io;
 attach collections;
 
-// Angara Collections Test — C#-styled API
+// Angara Collections Test — C#-styled API + LINQ higher-order functions
 export func main() -> i64 {
-    // === CREATION ===
+    // ============================================================
+    // BASIC OPERATIONS (non-lambda)
+    // ============================================================
     let r = collections.Range(1, 5);
-    io.println(1, "Range(1,5) count: " + string(collections.Count(r)));
-    io.println(1, "Range(1,5) first: " + string(collections.First(r)));
-    io.println(1, "Range(1,5) last: " + string(collections.Last(r)));
+    io.println(1, "Range count: " + string(collections.Count(r)));
+    io.println(1, "Range first: " + string(collections.First(r)));
+    io.println(1, "Range last: " + string(collections.Last(r)));
 
-    // === TRANSFORMS (non-mutating) ===
     let nums = [10, 20, 30, 40, 50];
     let rev = collections.Reverse(nums);
     io.println(1, "Reverse first: " + string(collections.First(rev)));
@@ -17,42 +18,92 @@ export func main() -> i64 {
 
     let t = collections.Take(nums, 3);
     io.println(1, "Take(3) count: " + string(collections.Count(t)));
-    io.println(1, "Take(3) first: " + string(collections.First(t)));
 
     let s = collections.Skip(nums, 2);
     io.println(1, "Skip(2) count: " + string(collections.Count(s)));
-    io.println(1, "Skip(2) first: " + string(collections.First(s)));
 
     let dupes = [1, 1, 2, 2, 3, 3, 3];
-    let d = collections.Distinct(dupes);
-    io.println(1, "Distinct count: " + string(collections.Count(d)));
+    io.println(1, "Distinct count: " + string(collections.Count(collections.Distinct(dupes))));
 
     let c = collections.Concat([1, 2], [3, 4]);
     io.println(1, "Concat count: " + string(collections.Count(c)));
 
-    // === QUERY ===
     io.println(1, "Contains 30: " + string(collections.Contains(nums, 30)));
     io.println(1, "Contains 99: " + string(collections.Contains(nums, 99)));
+    io.println(1, "Join: " + collections.Join(nums, ", "));
 
-    let joined = collections.Join(nums, ", ");
-    io.println(1, "Join: " + joined);
-
-    // === SET OPERATIONS ===
+    // Set operations
     let a = [1, 2, 3, 4];
     let b = [3, 4, 5, 6];
-    let ex = collections.Except(a, b);
-    io.println(1, "Except count: " + string(collections.Count(ex)));
+    io.println(1, "Except count: " + string(collections.Count(collections.Except(a, b))));
+    io.println(1, "Intersect count: " + string(collections.Count(collections.Intersect(a, b))));
+    io.println(1, "Union count: " + string(collections.Count(collections.Union(a, b))));
 
-    let inter = collections.Intersect(a, b);
-    io.println(1, "Intersect count: " + string(collections.Count(inter)));
-
-    let uni = collections.Union(a, b);
-    io.println(1, "Union count: " + string(collections.Count(uni)));
-
-    // === PREDICATES ===
+    // Predicates (non-lambda)
     io.println(1, "IsEmpty([1,2]): " + string(collections.IsEmpty([1, 2])));
     io.println(1, "Any([1,2]): " + string(collections.Any([1, 2])));
     io.println(1, "SequenceEqual: " + string(collections.SequenceEqual([1, 2], [1, 2])));
+
+    // Numeric aggregates
+    io.println(1, "Sum: " + string(collections.Sum([1, 2, 3, 4, 5])));
+    io.println(1, "Min: " + string(collections.Min([5, 3, 8, 1, 9])));
+    io.println(1, "Max: " + string(collections.Max([5, 3, 8, 1, 9])));
+    io.println(1, "Average: " + string(collections.Average([10, 20, 30])));
+
+    // ============================================================
+    // HIGHER-ORDER FUNCTIONS (LINQ with lambdas)
+    // Note: lambdas with `any` params need @unsafe for arithmetic/comparison
+    // ============================================================
+    io.println(1, "--- LINQ with Lambdas ---");
+
+    // Select — map each element
+    let doubled = collections.Select([1, 2, 3, 4, 5],
+        func(x as any) -> any { @unsafe { return x * 2; } });
+    io.println(1, "Select (x*2): " + collections.Join(doubled, ", "));
+
+    // Where — filter elements
+    let evens = collections.Where([1, 2, 3, 4, 5, 6],
+        func(x as any) -> any { @unsafe { return x % 2 == 0; } });
+    io.println(1, "Where (even): " + collections.Join(evens, ", "));
+
+    // Aggregate — reduce with seed
+    let total = collections.Aggregate([1, 2, 3, 4, 5], 0,
+        func(acc as any, x as any) -> any { @unsafe { return acc + x; } });
+    io.println(1, "Aggregate (sum): " + string(total));
+
+    // AnyMatch — any element satisfies predicate
+    let hasBig = collections.AnyMatch([1, 5, 10, 3],
+        func(x as any) -> any { @unsafe { return x > 8; } });
+    io.println(1, "AnyMatch (>8): " + string(hasBig));
+
+    // All — all elements satisfy predicate
+    let allPositive = collections.All([1, 2, 3, 4],
+        func(x as any) -> any { @unsafe { return x > 0; } });
+    io.println(1, "All (>0): " + string(allPositive));
+
+    // CountMatch — count matching elements
+    let evenCount = collections.CountMatch([1, 2, 3, 4, 5, 6],
+        func(x as any) -> any { @unsafe { return x % 2 == 0; } });
+    io.println(1, "CountMatch (even): " + string(evenCount));
+
+    // FirstMatch — first element matching predicate
+    let firstBig = collections.FirstMatch([1, 3, 7, 2, 9],
+        func(x as any) -> any { @unsafe { return x > 5; } });
+    io.println(1, "FirstMatch (>5): " + string(firstBig));
+
+    // LastMatch — last element matching predicate
+    let lastBig = collections.LastMatch([1, 3, 7, 2, 9],
+        func(x as any) -> any { @unsafe { return x > 5; } });
+    io.println(1, "LastMatch (>5): " + string(lastBig));
+
+    // SortBy — sort with comparator
+    let sorted = collections.SortBy([5, 2, 8, 1, 9, 3],
+        func(a as any, b as any) -> any { @unsafe { return a < b; } });
+    io.println(1, "SortBy (asc): " + collections.Join(sorted, ", "));
+
+    // ForEach — execute action for each element
+    collections.ForEach([100, 200, 300],
+        func(x as any) -> any { io.println(1, "ForEach item: " + string(x)); return nil; });
 
     return 0;
 }

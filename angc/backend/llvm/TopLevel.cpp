@@ -73,8 +73,10 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     }
 
     if (stmt.body) {
-        for (const auto& s : *stmt.body)
+        for (const auto& s : *stmt.body) {
+            if (builder->GetInsertBlock()->getTerminator()) break;
             cgStmt(s);
+        }
     }
 
     if (!builder->GetInsertBlock()->getTerminator())
@@ -143,8 +145,10 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
             }
 
             if (method_stmt->body) {
-                for (const auto& s : *method_stmt->body)
+                for (const auto& s : *method_stmt->body) {
+                    if (builder->GetInsertBlock()->getTerminator()) break;
                     cgStmt(s);
+                }
             }
 
             if (!builder->GetInsertBlock()->getTerminator())

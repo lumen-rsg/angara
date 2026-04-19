@@ -17,7 +17,14 @@ void LLVMBackend::cgStmt(const std::shared_ptr<Stmt>& s) {
     else if (auto* p = dynamic_cast<const BreakStmt*>(s.get())) { if (loopExit) builder->CreateBr(loopExit); }
     else if (auto* p = dynamic_cast<const ThrowStmt*>(s.get())) cgThrow(*p);
     else if (auto* p = dynamic_cast<const TryStmt*>(s.get())) cgTry(*p);
-    else if (auto* p = dynamic_cast<const UnsafeBlockStmt*>(s.get())) { if (p->block) for (auto& st : p->block->statements) cgStmt(st); }
+    else if (auto* p = dynamic_cast<const UnsafeBlockStmt*>(s.get())) {
+        if (p->block) {
+            for (auto& st : p->block->statements) {
+                if (builder->GetInsertBlock()->getTerminator()) break;
+                cgStmt(st);
+            }
+        }
+    }
 }
 
 void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
@@ -43,7 +50,10 @@ void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
 void LLVMBackend::cgBlock(const BlockStmt& s) {
     auto sv = namedVals;
     auto st = namedTypes;
-    for (auto& stmt : s.statements) cgStmt(stmt);
+    for (auto& stmt : s.statements) {
+        if (builder->GetInsertBlock()->getTerminator()) break;
+        cgStmt(stmt);
+    }
     namedVals = sv;
     namedTypes = st;
 }

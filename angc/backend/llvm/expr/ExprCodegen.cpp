@@ -379,8 +379,15 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         // Check if it's a local variable holding a closure (first-class function call)
         if (namedVals.find(sanitize(fn)) != namedVals.end()) {
             auto type_it = m_type_checker.m_expression_types.find(expr.callee.get());
-            if (type_it != m_type_checker.m_expression_types.end() &&
-                type_it->second->kind == TypeKind::FUNCTION) {
+            bool is_callable = false;
+            if (type_it != m_type_checker.m_expression_types.end()) {
+                auto kind = type_it->second->kind;
+                // Explicit function type, or 'any' (which may be a closure passed as param)
+                if (kind == TypeKind::FUNCTION || kind == TypeKind::ANY) {
+                    is_callable = true;
+                }
+            }
+            if (is_callable) {
                 auto* callee = loadVar(fn);
                 std::vector<llvm::Value*> llvmArgs;
                 for (auto& a : expr.arguments) llvmArgs.push_back(cg(a));
