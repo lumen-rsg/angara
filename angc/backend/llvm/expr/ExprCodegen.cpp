@@ -125,22 +125,36 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             auto* bothI64 = builder->CreateAnd(
                 builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_I64)),
                 builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_I64)));
+            auto* bothF64 = builder->CreateAnd(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
             auto* fn = builder->GetInsertBlock()->getParent();
             auto* iaddBB = llvm::BasicBlock::Create(*ctx,"iadd",fn);
+            auto* faddBB = llvm::BasicBlock::Create(*ctx,"fadd",fn);
             auto* saddBB = llvm::BasicBlock::Create(*ctx,"sadd",fn);
             auto* maddBB = llvm::BasicBlock::Create(*ctx,"madd",fn);
-            builder->CreateCondBr(bothI64, iaddBB, saddBB);
+            builder->CreateCondBr(bothI64, iaddBB, faddBB);
             builder->SetInsertPoint(iaddBB);
             auto* ia = makeI64(builder->CreateAdd(getI64(l),getI64(r)));
             iaddBB = builder->GetInsertBlock();
+            builder->CreateBr(maddBB);
+            builder->SetInsertPoint(faddBB);
+            auto* isF64 = builder->CreateAnd(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* faddCont = llvm::BasicBlock::Create(*ctx,"fadd_cont",fn);
+            builder->CreateCondBr(isF64, faddCont, saddBB);
+            builder->SetInsertPoint(faddCont);
+            auto* fa = makeF64(builder->CreateFAdd(getF64(l),getF64(r)));
+            faddCont = builder->GetInsertBlock();
             builder->CreateBr(maddBB);
             builder->SetInsertPoint(saddBB);
             auto* sa = callRt(rt->getFuncStringConcat(),{l,r});
             saddBB = builder->GetInsertBlock();
             builder->CreateBr(maddBB);
             builder->SetInsertPoint(maddBB);
-            auto* phi = builder->CreatePHI(objType,2);
-            phi->addIncoming(ia,iaddBB); phi->addIncoming(sa,saddBB);
+            auto* phi = builder->CreatePHI(objType,3);
+            phi->addIncoming(ia,iaddBB); phi->addIncoming(fa,faddCont); phi->addIncoming(sa,saddBB);
             return phi;
         }
         case TokenType::MINUS: return makeI64(builder->CreateSub(getI64(l),getI64(r)));
@@ -377,6 +391,18 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         if (fn=="string") {
             if (!expr.arguments.empty()) return callRt(rt->getFuncToString(),{cg(expr.arguments[0])});
             return makeStr("");
+        }
+        if (fn=="i64" || fn=="int") {
+            if (!expr.arguments.empty()) return callRt(rt->getFuncToI64(),{cg(expr.arguments[0])});
+            return makeI64((int64_t)0);
+        }
+        if (fn=="f64" || fn=="float") {
+            if (!expr.arguments.empty()) return callRt(rt->getFuncToF64(),{cg(expr.arguments[0])});
+            return makeF64(0.0);
+        }
+        if (fn=="bool") {
+            if (!expr.arguments.empty()) return callRt(rt->getFuncToBool(),{cg(expr.arguments[0])});
+            return makeBool(false);
         }
         // Check if it's a local variable holding a closure (first-class function call)
         if (namedVals.find(sanitize(fn)) != namedVals.end()) {
