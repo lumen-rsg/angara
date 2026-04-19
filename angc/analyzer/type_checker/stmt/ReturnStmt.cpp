@@ -43,7 +43,7 @@ bool TypeChecker::check_type_compatibility(
 
     // Rule 2b: A type parameter (T, U, etc.) accepts any type at the call site.
     // With type erasure, type params are placeholders that accept all types.
-    if (expected->kind == TypeKind::TYPE_PARAM) return true;
+    if (expected->kind == TypeKind::TYPE_PARAM || actual->kind == TypeKind::TYPE_PARAM) return true;
 
     // Rule 3: A T or a `nil` is compatible with a T?
     if (expected->kind == TypeKind::OPTIONAL) {

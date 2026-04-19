@@ -649,6 +649,23 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     // Save current builder state
     auto* saved_insert_block = builder->GetInsertBlock();
 
+    // Capture parent scope variables: store their current values into globals
+    // so the lambda function (which is a separate LLVM function) can access them.
+    std::map<std::string, llvm::GlobalVariable*> capture_globals;
+    for (const auto& [name, alloca] : namedVals) {
+        std::string gname = "__ang_cap_" + lambda_fn_name + "_" + name;
+        auto* global = mod->getGlobalVariable(gname);
+        if (!global) {
+            global = new llvm::GlobalVariable(
+                *mod, objType, false, llvm::GlobalValue::PrivateLinkage,
+                llvm::ConstantAggregateZero::get(objType), gname);
+        }
+        // Store the current value of the variable into the global
+        auto* val = builder->CreateLoad(objType, alloca, name);
+        builder->CreateStore(val, global);
+        capture_globals[name] = global;
+    }
+
     // Generate the lambda body
     auto* entry = llvm::BasicBlock::Create(*ctx, "entry", lambda_fn);
     builder->SetInsertPoint(entry);
@@ -658,6 +675,15 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     auto saved_types = std::move(namedTypes);
     namedVals.clear();
     namedTypes.clear();
+
+    // Restore captured variables from globals into local allocas
+    for (const auto& [name, global] : capture_globals) {
+        std::string sname = sanitize(name);
+        auto* alloca = allocLocal(lambda_fn, sname);
+        auto* val = builder->CreateLoad(objType, global, sname);
+        builder->CreateStore(val, alloca);
+        namedVals[sname] = alloca;
+    }
 
     // Bind lambda parameters from the args array
     // The closure calling convention: args[0] = first param, args[1] = second, etc.
