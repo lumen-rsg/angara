@@ -14,9 +14,9 @@
 #include <limits.h>
 #include <sys/utsname.h>
 #include <sys/types.h>
-#include <sys/sysctl.h>
 
 #ifdef __APPLE__
+#include <sys/sysctl.h>
 #include <mach/mach.h>
 #include <libproc.h>
 #elif defined(__linux__)

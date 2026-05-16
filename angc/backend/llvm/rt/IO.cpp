@@ -1,6 +1,10 @@
 // Angara LLVM Backend — Runtime: IO + Miscellaneous
 #include "RuntimeBuilder.h"
 
+#ifdef __linux__
+#include <cstdio>  // for stdout/stderr/stdin macros
+#endif
+
 using namespace llvm;
 
 namespace angara {
@@ -106,9 +110,28 @@ void RuntimeBuilder::generateIOOps() {
         return b.CreateLoad(i8_ptr, chars_ptr, "cstr");
     };
 
-    // Helper: get FILE* from stream_id (1=stdout, 2=stderr)
-    // We use a simple approach: call fprintf with the right FILE*
-    // For simplicity, we inline the stdout/stderr selection
+    // --- Platform-specific stream access ---
+    // macOS: __stdoutp/__stderrp/__stdinp are FILE** — load to get FILE*
+    // Linux: _IO_2_1_stdout_/_IO_2_1_stderr_/_IO_2_1_stdin_ are FILE structs — their address IS FILE*
+#ifdef __APPLE__
+    auto* stdout_g = m_module.getOrInsertGlobal("__stdoutp", PointerType::get(m_ctx, 0));
+    auto* stderr_g = m_module.getOrInsertGlobal("__stderrp", PointerType::get(m_ctx, 0));
+    auto* stdin_g = m_module.getOrInsertGlobal("__stdinp", PointerType::get(m_ctx, 0));
+#else
+    auto* stdout_g = m_module.getOrInsertGlobal("_IO_2_1_stdout_", i8_ty);
+    auto* stderr_g = m_module.getOrInsertGlobal("_IO_2_1_stderr_", i8_ty);
+    auto* stdin_g = m_module.getOrInsertGlobal("_IO_2_1_stdin_", i8_ty);
+#endif
+
+    // Resolve a stream global to FILE* (Value*)
+    auto resolve_stream = [&](IRBuilder<>& b, Constant* gvar, const char* name) -> Value* {
+#ifdef __APPLE__
+        return b.CreateLoad(PointerType::get(m_ctx, 0), gvar, name);
+#else
+        (void)b; (void)name;
+        return gvar;
+#endif
+    };
 
     // --- io_print(AngaraObject stream_id, AngaraObject value) ---
     // Converts to string and prints without newline to the given stream
@@ -133,13 +156,9 @@ void RuntimeBuilder::generateIOOps() {
         auto* stream_id = b.CreateBitCast(stream_payload, i64_ty, "stream_id");
         auto* is_stderr = b.CreateICmpEQ(stream_id, ConstantInt::get(i64_ty, 2));
 
-        auto* stdout_var = m_module.getOrInsertGlobal("__stdoutp",
-            PointerType::get(m_ctx, 0));
-        auto* stderr_var = m_module.getOrInsertGlobal("__stderrp",
-            PointerType::get(m_ctx, 0));
         auto* file_ptr = b.CreateSelect(is_stderr,
-            b.CreateLoad(PointerType::get(m_ctx, 0), stderr_var, "stderr"),
-            b.CreateLoad(PointerType::get(m_ctx, 0), stdout_var, "stdout"));
+            resolve_stream(b, stderr_g, "stderr"),
+            resolve_stream(b, stdout_g, "stdout"));
 
         auto* fprintf_fn = m_module.getFunction("fprintf");
         auto* fmt = b.CreateGlobalString("%s");
@@ -170,13 +189,9 @@ void RuntimeBuilder::generateIOOps() {
         auto* stream_id = b.CreateBitCast(stream_payload, i64_ty, "stream_id");
         auto* is_stderr = b.CreateICmpEQ(stream_id, ConstantInt::get(i64_ty, 2));
 
-        auto* stdout_var = m_module.getOrInsertGlobal("__stdoutp",
-            PointerType::get(m_ctx, 0));
-        auto* stderr_var = m_module.getOrInsertGlobal("__stderrp",
-            PointerType::get(m_ctx, 0));
         auto* file_ptr = b.CreateSelect(is_stderr,
-            b.CreateLoad(PointerType::get(m_ctx, 0), stderr_var, "stderr"),
-            b.CreateLoad(PointerType::get(m_ctx, 0), stdout_var, "stdout"));
+            resolve_stream(b, stderr_g, "stderr"),
+            resolve_stream(b, stdout_g, "stdout"));
 
         auto* fprintf_fn = m_module.getFunction("fprintf");
         auto* fmt = b.CreateGlobalString("%s\n");
@@ -205,20 +220,12 @@ void RuntimeBuilder::generateIOOps() {
         auto* str_obj = b.CreateCall(to_str_fn, {content_arg}, "str");
         auto* cstr = get_cstr(b, str_obj);
 
-        // fprintf(stream, "%s", cstr)
-        // We use stdout/stderr based on stream_id
+        // Select stdout or stderr based on stream_id
         auto* is_stderr = b.CreateICmpEQ(stream_id, ConstantInt::get(i64_ty, 2));
 
-        // Declare stderr and stdout as external globals
-        auto* stdout_var = m_module.getOrInsertGlobal("__stdoutp",
-            PointerType::get(m_ctx, 0));
-        auto* stderr_var = m_module.getOrInsertGlobal("__stderrp",
-            PointerType::get(m_ctx, 0));
-
-        // macOS uses __stdoutp/__stderrp. We'll also declare the standard ones.
         auto* file_ptr = b.CreateSelect(is_stderr,
-            b.CreateLoad(PointerType::get(m_ctx, 0), stderr_var, "stderr"),
-            b.CreateLoad(PointerType::get(m_ctx, 0), stdout_var, "stdout"));
+            resolve_stream(b, stderr_g, "stderr"),
+            resolve_stream(b, stdout_g, "stdout"));
 
         auto* fprintf_fn = m_module.getFunction("fprintf");
         auto* fmt = b.CreateGlobalString("%s");
@@ -245,14 +252,9 @@ void RuntimeBuilder::generateIOOps() {
         auto* stream_id = b.CreateBitCast(stream_payload, i64_ty, "stream_id");
         auto* is_stderr = b.CreateICmpEQ(stream_id, ConstantInt::get(i64_ty, 2));
 
-        auto* stdout_var = m_module.getOrInsertGlobal("__stdoutp",
-            PointerType::get(m_ctx, 0));
-        auto* stderr_var = m_module.getOrInsertGlobal("__stderrp",
-            PointerType::get(m_ctx, 0));
-
         auto* file_ptr = b.CreateSelect(is_stderr,
-            b.CreateLoad(PointerType::get(m_ctx, 0), stderr_var),
-            b.CreateLoad(PointerType::get(m_ctx, 0), stdout_var));
+            resolve_stream(b, stderr_g, "stderr"),
+            resolve_stream(b, stdout_g, "stdout"));
 
         b.CreateCall(fflush_fn, {file_ptr});
         b.CreateRetVoid();
@@ -284,10 +286,8 @@ void RuntimeBuilder::generateIOOps() {
         auto* buf_size = b.CreateAlloca(i64_ty);
         b.CreateStore(ConstantInt::get(i64_ty, 0), buf_size);
 
-        // Get stdin — on macOS, use __stdinp
-        auto* stdin_var = m_module.getOrInsertGlobal("__stdinp",
-            PointerType::get(m_ctx, 0));
-        auto* stdin_ptr = b.CreateLoad(PointerType::get(m_ctx, 0), stdin_var, "stdin");
+        // Get stdin
+        auto* stdin_ptr = resolve_stream(b, stdin_g, "stdin");
 
         // ssize_t line_size = getline(&line_buf, &buf_size, stdin)
         auto* line_size = b.CreateCall(getline_fn,
@@ -369,8 +369,7 @@ void RuntimeBuilder::generateIOOps() {
             {i8_ptr, i64_ty, i64_ty, PointerType::get(m_ctx, 0)}, false);
         auto fread_fn = m_module.getOrInsertFunction("fread", fread_ty);
 
-        auto* stdin_var = m_module.getOrInsertGlobal("__stdinp",
-            PointerType::get(m_ctx, 0));
+        auto* stdin_ptr = resolve_stream(b, stdin_g, "stdin");
 
         b.CreateBr(loop_bb);
 
@@ -383,7 +382,6 @@ void RuntimeBuilder::generateIOOps() {
         auto* remaining = bl.CreateSub(cap, total);
         // bytes_read = fread(buf + total, 1, remaining, stdin)
         auto* write_ptr = bl.CreateGEP(i8_ty, buf, {total});
-        auto* stdin_ptr = bl.CreateLoad(PointerType::get(m_ctx, 0), stdin_var, "stdin");
         auto* bytes_read = bl.CreateCall(fread_fn,
             {write_ptr, ConstantInt::get(i64_ty, 1), remaining, stdin_ptr}, "bytes_read");
 
