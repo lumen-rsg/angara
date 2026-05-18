@@ -30,6 +30,11 @@ endif
 
 # --- LLVM Configuration ---
 LLVM_CONFIG := $(shell ls /usr/bin/llvm-config-* 2>/dev/null | sort -t- -k3 -V | tail -1 || which llvm-config 2>/dev/null)
+ifeq ($(UNAME_S),Darwin)
+    ifeq ($(LLVM_CONFIG),)
+        LLVM_CONFIG := $(shell ls $(BREW_DIR)/opt/llvm/bin/llvm-config 2>/dev/null)
+    endif
+endif
 LLVM_CXXFLAGS := $(filter-out -fno-exceptions -fno-rtti -std=%,$(shell $(LLVM_CONFIG) --cxxflags 2>/dev/null))
 LLVM_LDFLAGS  := $(shell $(LLVM_CONFIG) --ldflags 2>/dev/null)
 LLVM_LIBS     := $(shell $(LLVM_CONFIG) --libs core native 2>/dev/null)

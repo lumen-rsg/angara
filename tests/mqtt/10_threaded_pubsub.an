@@ -1,0 +1,114 @@
+// 10_threaded_pubsub.an — Test concurrent publisher + subscriber in separate threads
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+// Shared state
+let received as list<any> = [];
+let mtx = Mutex();
+let done_flag as bool = false;
+
+func subscriber_task() -> i64 {
+  let conn as Connection = make_conn("thread_sub");
+  if (!wait_connected(conn, 3.0)) {
+    io.println(2, "[SUB] Connect failed");
+    return 1;
+  }
+  conn.subscribe("angara/test/threaded", 1);
+  io.println(1, "[SUB] Subscribed, waiting for messages...");
+
+  let sub_received as i64 = 0;
+  while (true) {
+    mtx.lock();
+    let should_stop = done_flag;
+    mtx.unlock();
+
+    if (should_stop && sub_received >= 5) {
+      break;
+    }
+
+    let msg = conn.next_message(500);
+    if (msg != nil) {
+      @unsafe {
+        mtx.lock();
+        received.push(msg["payload"]);
+        mtx.unlock();
+        sub_received = sub_received + 1;
+      }
+    }
+  }
+
+  io.println(1, "[SUB] Received " + string(sub_received) + " messages");
+  conn.disconnect();
+  return 0;
+}
+
+export func main() -> i64 {
+  io.println(1, "=== Test 10: Threaded Pub/Sub ===");
+
+  // Spawn subscriber thread
+  let sub_thread = spawn(subscriber_task);
+  time.sleep(0.5);
+
+  // Publisher in main thread
+  let pub as Connection = make_conn("thread_pub");
+  if (!wait_connected(pub, 3.0)) {
+    io.println(2, "[FAIL] Publisher connect failed");
+    mtx.lock();
+    done_flag = true;
+    mtx.unlock();
+    sub_thread.join();
+    return 1;
+  }
+
+  io.println(1, "[PUB] Publishing 5 messages...");
+  let i as i64 = 0;
+  while (i < 5) {
+    pub.publish("angara/test/threaded", "threaded_" + string(i), 1);
+    time.sleep(0.1);
+    i = i + 1;
+  }
+  pub.disconnect();
+
+  // Wait for subscriber to collect all messages
+  time.sleep(1.5);
+  mtx.lock();
+  done_flag = true;
+  mtx.unlock();
+
+  let thread_result = sub_thread.join();
+  io.println(1, "[MAIN] Subscriber thread exited with code " + string(thread_result));
+
+  // Verify results
+  mtx.lock();
+  let count = received.length();
+  mtx.unlock();
+
+  io.println(1, "[MAIN] Total received: " + string(count) + " / 5");
+
+  if (count < 4) {
+    io.println(2, "[FAIL] Only " + string(count) + "/5 messages received");
+    return 1;
+  }
+
+  io.println(1, "[PASS] Received " + string(count) + " threaded messages");
+  io.println(1, "");
+  io.println(1, "=== Threaded pub/sub test PASSED ===");
+  return 0;
+}

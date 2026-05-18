@@ -118,7 +118,7 @@ void LLVMBackend::cgForIn(const ForInStmt& s) {
     auto sv = namedVals;
     auto stv = namedTypes;
     auto* iter = cg(s.collection);
-    auto* len = callRt(rt->getFuncLen(),{iter});
+    auto* len = callRtByName("__ang_len",{iter});
     auto* cnt = getI64(len);
     auto* ac = allocLocal(fn, s.name.lexeme);
     namedVals[s.name.lexeme] = ac;
@@ -133,7 +133,7 @@ void LLVMBackend::cgForIn(const ForInStmt& s) {
     auto* i = builder->CreateLoad(llvm::Type::getInt64Ty(*ctx), ia, "i");
     builder->CreateCondBr(builder->CreateICmpSLT(i, cnt), bd, en);
     builder->SetInsertPoint(bd);
-    builder->CreateStore(callRt(rt->getFuncListGet(),{iter, makeI64(i)}), ac);
+    builder->CreateStore(callRtByName("__ang_list_get",{iter, makeI64(i)}), ac);
     cgStmt(s.body);
     if (!builder->GetInsertBlock()->getTerminator()) {
         builder->CreateStore(builder->CreateAdd(i, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),1)), ia);
@@ -148,7 +148,7 @@ void LLVMBackend::cgReturn(const ReturnStmt& s) {
 }
 
 void LLVMBackend::cgThrow(const ThrowStmt& s) {
-    callRt(rt->getFuncThrow(), {callRt(rt->getFuncExceptionNew(), {cg(s.expression)})});
+    callRtByName("__ang_throw", {callRtByName("__ang_exception_new", {cg(s.expression)})});
 }
 
 void LLVMBackend::cgTry(const TryStmt& s) {
@@ -192,7 +192,7 @@ void LLVMBackend::cgTry(const TryStmt& s) {
     builder->SetInsertPoint(tryBB);
     cgStmt(s.tryBlock);
     if (!builder->GetInsertBlock()->getTerminator()) {
-        callRt(rt->getFuncTryEnd(),{});
+        callRtByName("__ang_try_end",{});
         builder->CreateBr(afterAll);
     }
 

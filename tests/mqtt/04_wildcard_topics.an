@@ -1,0 +1,118 @@
+// 04_wildcard_topics.an — Test MQTT wildcard topic subscriptions (# and +)
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+export func main() -> i64 {
+  io.println(1, "=== Test 04: Wildcard Topics ===");
+  let failures as i64 = 0;
+
+  // --- Test A: Multi-level wildcard (#) ---
+  io.println(1, "[A] Multi-level wildcard: sensors/#");
+
+  let sub_hash as Connection = make_conn("wildcard_hash");
+  let pub as Connection = make_conn("wildcard_pub");
+
+  if (!wait_connected(sub_hash, 3.0) || !wait_connected(pub, 3.0)) {
+    io.println(2, "[FAIL] Connection failed");
+    return 1;
+  }
+
+  sub_hash.subscribe("sensors/#", 1);
+  time.sleep(0.3);
+
+  // Publish to nested topics
+  pub.publish("sensors/living_room/temperature", "temp:22", 1);
+  pub.publish("sensors/bedroom/humidity", "hum:55", 1);
+  pub.publish("sensors/outdoor", "outside:15", 1);
+
+  let received as i64 = 0;
+  let drain as i64 = 0;
+  while (drain < 5) {
+    let msg = sub_hash.next_message(2000);
+    if (msg != nil) {
+      received = received + 1;
+      @unsafe {
+        io.println(1, "  Received: " + msg["topic"] + " = " + msg["payload"]);
+      }
+    }
+    drain = drain + 1;
+    if (msg == nil) { drain = 5; }
+  }
+
+  if (received < 3) {
+    io.println(2, "[FAIL] A: Expected 3 messages, got " + string(received));
+    failures = failures + 1;
+  } else {
+    io.println(1, "[PASS] A: Received all " + string(received) + " messages via sensors/#");
+  }
+
+  sub_hash.disconnect();
+  time.sleep(0.2);
+
+  // --- Test B: Single-level wildcard (+) ---
+  io.println(1, "[B] Single-level wildcard: sensors/+/temperature");
+
+  let sub_plus as Connection = make_conn("wildcard_plus");
+  if (!wait_connected(sub_plus, 3.0)) {
+    io.println(2, "[FAIL] + subscriber connect failed");
+    return 1;
+  }
+
+  sub_plus.subscribe("sensors/+/temperature", 1);
+  time.sleep(0.3);
+
+  // This should match
+  pub.publish("sensors/kitchen/temperature", "kitchen:24", 1);
+  // This should NOT match (humidity, not temperature)
+  pub.publish("sensors/kitchen/humidity", "kitchen_hum:60", 1);
+
+  let msg_temp = sub_plus.next_message(2000);
+  @unsafe {
+    if (msg_temp == nil || msg_temp["payload"] != "kitchen:24") {
+      io.println(2, "[FAIL] B: Did not receive temperature message via +/temperature");
+      failures = failures + 1;
+    } else {
+      io.println(1, "[PASS] B: Received temperature via sensors/+/temperature");
+    }
+  }
+
+  // Verify humidity was NOT delivered to this subscription
+  let msg_hum = sub_plus.next_message(1000);
+  if (msg_hum != nil) {
+    @unsafe {
+      io.println(2, "[FAIL] B: Received unexpected message on +/temperature: " + msg_hum["topic"]);
+    }
+    failures = failures + 1;
+  } else {
+    io.println(1, "[PASS] B: Correctly filtered out sensors/kitchen/humidity");
+  }
+
+  sub_plus.disconnect();
+  pub.disconnect();
+
+  io.println(1, "");
+  if (failures == 0) {
+    io.println(1, "=== All wildcard tests PASSED ===");
+    return 0;
+  } else {
+    io.println(2, "=== " + string(failures) + " wildcard tests FAILED ===");
+    return 1;
+  }
+}

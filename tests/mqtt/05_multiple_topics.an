@@ -1,0 +1,100 @@
+// 05_multiple_topics.an — Test subscribing to multiple distinct topics on one connection
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+export func main() -> i64 {
+  io.println(1, "=== Test 05: Multiple Topics ===");
+
+  let sub as Connection = make_conn("multi_topic_sub");
+  let pub as Connection = make_conn("multi_topic_pub");
+
+  if (!wait_connected(sub, 3.0) || !wait_connected(pub, 3.0)) {
+    io.println(2, "[FAIL] Connection failed");
+    return 1;
+  }
+
+  // Subscribe to 3 distinct topics
+  sub.subscribe("angara/test/topicA", 1);
+  sub.subscribe("angara/test/topicB", 1);
+  sub.subscribe("angara/test/topicC", 1);
+  time.sleep(0.5);
+
+  // Publish to each topic
+  pub.publish("angara/test/topicA", "payload_A", 1);
+  pub.publish("angara/test/topicB", "payload_B", 1);
+  pub.publish("angara/test/topicC", "payload_C", 1);
+
+  // Collect messages
+  let got_a as bool = false;
+  let got_b as bool = false;
+  let got_c as bool = false;
+  let attempts as i64 = 0;
+
+  while (attempts < 10) {
+    let msg = sub.next_message(2000);
+    if (msg == nil) {
+      attempts = 10; // break
+    } else {
+      @unsafe {
+        let topic = msg["topic"];
+        let payload = msg["payload"];
+        io.println(1, "  Received: " + topic + " = " + payload);
+
+        if (topic == "angara/test/topicA" && payload == "payload_A") { got_a = true; }
+        if (topic == "angara/test/topicB" && payload == "payload_B") { got_b = true; }
+        if (topic == "angara/test/topicC" && payload == "payload_C") { got_c = true; }
+      }
+    }
+    attempts = attempts + 1;
+  }
+
+  let failures as i64 = 0;
+
+  if (!got_a) {
+    io.println(2, "[FAIL] Did not receive topicA message");
+    failures = failures + 1;
+  } else {
+    io.println(1, "[PASS] Received topicA");
+  }
+  if (!got_b) {
+    io.println(2, "[FAIL] Did not receive topicB message");
+    failures = failures + 1;
+  } else {
+    io.println(1, "[PASS] Received topicB");
+  }
+  if (!got_c) {
+    io.println(2, "[FAIL] Did not receive topicC message");
+    failures = failures + 1;
+  } else {
+    io.println(1, "[PASS] Received topicC");
+  }
+
+  sub.disconnect();
+  pub.disconnect();
+
+  io.println(1, "");
+  if (failures == 0) {
+    io.println(1, "=== All multiple topic tests PASSED ===");
+    return 0;
+  } else {
+    io.println(2, "=== " + string(failures) + " multiple topic tests FAILED ===");
+    return 1;
+  }
+}

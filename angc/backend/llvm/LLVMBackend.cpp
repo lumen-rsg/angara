@@ -150,7 +150,7 @@ llvm::Value* LLVMBackend::makeF64(llvm::Value* v) {
     return r;
 }
 llvm::Value* LLVMBackend::makeStr(const std::string& s) {
-    return callRt(rt->getFuncStringFromC(), {builder->CreateGlobalString(s)});
+    return callRtByName("__ang_string_from_c", {builder->CreateGlobalString(s)});
 }
 
 // ============================================================================
@@ -174,7 +174,15 @@ llvm::Value* LLVMBackend::isTruthy(llvm::Value* o) {
 // Runtime call helper
 // ============================================================================
 
-llvm::Value* LLVMBackend::callRt(llvm::FunctionCallee c, const std::vector<llvm::Value*>& a) { return builder->CreateCall(c, a); }
+llvm::Value* LLVMBackend::callRt(llvm::FunctionCallee c, const std::vector<llvm::Value*>& a) {
+    return builder->CreateCall(c, a);
+}
+
+llvm::Value* LLVMBackend::callRtByName(const std::string& name, const std::vector<llvm::Value*>& a) {
+    auto* fn = mod->getFunction(name);
+    if (fn) return builder->CreateCall(fn, a);
+    return makeNil();
+}
 
 // ============================================================================
 // Variable management
@@ -188,11 +196,13 @@ llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string&
 llvm::Value* LLVMBackend::loadVar(const std::string& n) {
     if (auto it=namedVals.find(n); it!=namedVals.end()) return builder->CreateLoad(objType, it->second, n);
     if (auto it=globals.find(n); it!=globals.end()) return builder->CreateLoad(objType, it->second, n);
+    if (auto it=globals.find("g_"+n); it!=globals.end()) return builder->CreateLoad(objType, it->second, n);
     return makeNil();
 }
 void LLVMBackend::storeVar(const std::string& n, llvm::Value* v) {
     if (auto it=namedVals.find(n); it!=namedVals.end()) { builder->CreateStore(v,it->second); return; }
     if (auto it=globals.find(n); it!=globals.end()) { builder->CreateStore(v,it->second); return; }
+    if (auto it=globals.find("g_"+n); it!=globals.end()) { builder->CreateStore(v,it->second); return; }
 }
 
 // ============================================================================

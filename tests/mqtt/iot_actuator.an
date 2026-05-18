@@ -1,0 +1,166 @@
+// iot_actuator.an — IoT: thermostat actuator responding to commands
+//
+// Controller sends commands -> Actuator subscribes and acknowledges ->
+// Status monitor verifies acknowledgments.
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+let status_results as list<any> = [];
+let status_mtx = Mutex();
+
+// Status monitor: subscribes to thermostat status acknowledgments
+func status_monitor() -> i64 {
+  let conn as Connection = make_conn("status_monitor");
+  if (!wait_connected(conn, 3.0)) {
+    return 1;
+  }
+  conn.subscribe("home/thermostat/status", 1);
+
+  let start as f64 = time.now();
+  while ((time.now() - start) < 10.0) {
+    let msg = conn.next_message(2000);
+    if (msg != nil) {
+      @unsafe {
+        status_mtx.lock();
+        status_results.push(msg["payload"]);
+        status_mtx.unlock();
+        io.println(1, "[STATUS] Received: " + msg["payload"]);
+      }
+    }
+    status_mtx.lock();
+    let count = status_results.length();
+    status_mtx.unlock();
+    if (count >= 3) {
+      break;
+    }
+  }
+
+  conn.disconnect();
+  return 0;
+}
+
+// Actuator: subscribes to commands and echoes acknowledgments
+func actuator_task() -> i64 {
+  let conn as Connection = make_conn("thermostat_actuator");
+  if (!wait_connected(conn, 3.0)) {
+    return 1;
+  }
+  conn.subscribe("home/thermostat/command", 1);
+  io.println(1, "[ACTUATOR] Listening for commands...");
+
+  let handled as i64 = 0;
+  let start as f64 = time.now();
+  while (handled < 3 && (time.now() - start) < 10.0) {
+    let msg = conn.next_message(2000);
+    if (msg != nil) {
+      @unsafe {
+        let cmd = msg["payload"];
+        io.println(1, "[ACTUATOR] Command received: " + cmd);
+        // Echo back as status acknowledgment
+        conn.publish("home/thermostat/status", "ack:" + cmd, 1);
+        io.println(1, "[ACTUATOR] Status sent: ack:" + cmd);
+        handled = handled + 1;
+      }
+    }
+  }
+
+  conn.disconnect();
+  return 0;
+}
+
+export func main() -> i64 {
+  io.println(1, "=== IoT Simulation: Thermostat Actuator ===");
+
+  // Start actuator and status monitor threads
+  let actuator_thread = spawn(actuator_task);
+  let monitor_thread = spawn(status_monitor);
+  time.sleep(0.5);
+
+  // Controller: send commands
+  let controller as Connection = make_conn("hvac_controller");
+  if (!wait_connected(controller, 3.0)) {
+    io.println(2, "[FAIL] Controller connect failed");
+    actuator_thread.join();
+    monitor_thread.join();
+    return 1;
+  }
+
+  let commands as list<string> = ["set:22", "set:20", "set:24"];
+  let i as i64 = 0;
+  while (i < 3) {
+    controller.publish("home/thermostat/command", commands[i], 1);
+    io.println(1, "[CONTROLLER] Sent: " + commands[i]);
+    time.sleep(0.5);
+    i = i + 1;
+  }
+  controller.disconnect();
+
+  // Wait for threads
+  actuator_thread.join();
+  monitor_thread.join();
+
+  // Verify all 3 acknowledgments received
+  status_mtx.lock();
+  let count = status_results.length();
+  status_mtx.unlock();
+
+  io.println(1, "");
+  io.println(1, "Status acknowledgments received: " + string(count) + " / 3");
+
+  if (count < 3) {
+    io.println(2, "[FAIL] Not all acknowledgments received");
+    return 1;
+  }
+
+  // Verify contents
+  let ok as bool = true;
+  let j as i64 = 0;
+  while (j < 3) {
+    status_mtx.lock();
+    let expected = "ack:" + commands[j];
+    let found as bool = false;
+
+    let k as i64 = 0;
+    while (k < status_results.length()) {
+      if (status_results[k] == expected) {
+        found = true;
+        k = status_results.length(); // break
+      }
+      k = k + 1;
+    }
+    status_mtx.unlock();
+
+    if (!found) {
+      io.println(2, "[FAIL] Missing acknowledgment for: " + commands[j]);
+      ok = false;
+    } else {
+      io.println(1, "[PASS] Acknowledgment found for: " + commands[j]);
+    }
+    j = j + 1;
+  }
+
+  if (!ok) {
+    return 1;
+  }
+
+  io.println(1, "");
+  io.println(1, "=== IoT Actuator Test PASSED ===");
+  return 0;
+}

@@ -147,6 +147,11 @@ std::any TypeChecker::visit(const GetExpr& expr) {
               std::vector<std::shared_ptr<Type>>{},
               unwrapped_object_type // Returns list<T>
           );
+        } else if (property_name == "length" || property_name == "len" || property_name == "size" || property_name == "count") {
+            property_type = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{},
+                m_type_i64
+            );
         }
         else {
             error(expr.name, "Type 'list' has no property named '" + property_name + "'.");

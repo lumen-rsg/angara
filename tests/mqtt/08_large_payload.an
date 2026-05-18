@@ -1,0 +1,77 @@
+// 08_large_payload.an — Test large MQTT message payloads
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+func test_size(size as i64) -> bool {
+  let topic = "angara/test/large_" + string(size);
+  // Build payload using string repetition
+  let payload = "X" * size;
+
+  let sub as Connection = make_conn("large_sub_" + string(size));
+  let pub as Connection = make_conn("large_pub_" + string(size));
+
+  if (!wait_connected(sub, 3.0) || !wait_connected(pub, 3.0)) {
+    io.println(2, "  [FAIL] Connection failed for size " + string(size));
+    return false;
+  }
+
+  sub.subscribe(topic, 1);
+  time.sleep(0.3);
+
+  pub.publish(topic, payload, 1);
+
+  let msg = sub.next_message(5000);
+  sub.disconnect();
+  pub.disconnect();
+
+  if (msg != nil) {
+    @unsafe {
+      let received_len = len(msg["payload"]);
+      if (received_len != size) {
+        io.println(2, "  [FAIL] Size " + string(size) + ": got " + string(received_len) + " bytes");
+        return false;
+      }
+
+      io.println(1, "  [PASS] Size " + string(size) + ": payload intact (" + string(received_len) + " bytes)");
+      return true;
+    }
+  } else {
+    io.println(2, "  [FAIL] No message for size " + string(size));
+    return false;
+  }
+}
+
+export func main() -> i64 {
+  io.println(1, "=== Test 08: Large Payloads ===");
+  let failures as i64 = 0;
+
+  if (!test_size(256)   ) { failures = failures + 1; }
+  if (!test_size(4096)  ) { failures = failures + 1; }
+  if (!test_size(16384) ) { failures = failures + 1; }
+
+  io.println(1, "");
+  if (failures == 0) {
+    io.println(1, "=== All large payload tests PASSED ===");
+    return 0;
+  } else {
+    io.println(2, "=== " + string(failures) + " large payload tests FAILED ===");
+    return 1;
+  }
+}

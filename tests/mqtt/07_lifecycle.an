@@ -1,0 +1,96 @@
+// 07_lifecycle.an — Test connection lifecycle: connect/disconnect/reconnect
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+export func main() -> i64 {
+  io.println(1, "=== Test 07: Connection Lifecycle ===");
+  let failures as i64 = 0;
+
+  // Test A: Fresh connection transitions to connected
+  io.println(1, "[A] Fresh connection...");
+  let conn1 as Connection = connect(BROKER_URL, {
+    "clientId": "life_1",
+    "cleanSession": true
+  });
+  if (!wait_connected(conn1, 3.0)) {
+    io.println(2, "[FAIL] A: Fresh connection failed");
+    failures = failures + 1;
+  } else {
+    io.println(1, "[PASS] A: Fresh connection succeeded");
+  }
+
+  // Test B: After disconnect, is_connected returns false
+  io.println(1, "[B] Disconnect...");
+  conn1.disconnect();
+  time.sleep(0.3);
+  if (conn1.is_connected()) {
+    io.println(2, "[FAIL] B: Still connected after disconnect()");
+    failures = failures + 1;
+  } else {
+    io.println(1, "[PASS] B: is_connected() = false after disconnect");
+  }
+
+  // Test C: New connection after previous disconnect
+  io.println(1, "[C] Reconnect with new connection...");
+  let conn2 as Connection = connect(BROKER_URL, {
+    "clientId": "life_2",
+    "cleanSession": true
+  });
+  if (!wait_connected(conn2, 3.0)) {
+    io.println(2, "[FAIL] C: Reconnection failed");
+    failures = failures + 1;
+  } else {
+    io.println(1, "[PASS] C: Reconnection succeeded");
+  }
+  conn2.disconnect();
+  time.sleep(0.3);
+
+  // Test D: Multiple connect/disconnect cycles
+  io.println(1, "[D] Multiple cycles (3x)...");
+  let cycle as i64 = 0;
+  let cycle_ok as bool = true;
+  while (cycle < 3) {
+    let cid = "life_cycle_" + string(cycle);
+    let c as Connection = connect(BROKER_URL, {
+      "clientId": cid,
+      "cleanSession": true
+    });
+    if (!wait_connected(c, 3.0)) {
+      io.println(2, "[FAIL] D: Cycle " + string(cycle) + " connect failed");
+      cycle_ok = false;
+      cycle = 3; // break
+    } else {
+      c.disconnect();
+      time.sleep(0.2);
+    }
+    cycle = cycle + 1;
+  }
+
+  if (cycle_ok) {
+    io.println(1, "[PASS] D: All 3 cycles succeeded");
+  } else {
+    failures = failures + 1;
+  }
+
+  io.println(1, "");
+  if (failures == 0) {
+    io.println(1, "=== All lifecycle tests PASSED ===");
+    return 0;
+  } else {
+    io.println(2, "=== " + string(failures) + " lifecycle tests FAILED ===");
+    return 1;
+  }
+}

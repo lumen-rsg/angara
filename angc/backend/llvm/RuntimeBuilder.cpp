@@ -40,6 +40,7 @@ void RuntimeBuilder::generateRuntime() {
     generateThreadOps();
     generateMiscOps();
     generateIOOps();
+    generateModuleAPIVTable();
 }
 
 // ============================================================================
@@ -113,6 +114,13 @@ void RuntimeBuilder::generateTypes() {
         m_angara_obj_type
     }, "AngaraBoundMethod");
 
+    m_native_instance_type = StructType::create(m_ctx, {
+        m_obj_header_type,
+        PointerType::get(m_ctx, 0),  // data
+        PointerType::get(m_ctx, 0),  // finalize
+        PointerType::get(m_ctx, 0),  // name
+    }, "AngaraNativeInstance");
+
     m_thread_type = StructType::create(m_ctx, {
         m_obj_header_type,
         PointerType::get(m_ctx, 0),
@@ -169,6 +177,14 @@ void RuntimeBuilder::declareCLibFunctions() {
          PointerType::get(m_ctx, 0), PointerType::get(m_ctx, 0)}, false));
     m_module.getOrInsertFunction("pthread_join", FunctionType::get(i32_ty,
         {PointerType::get(m_ctx, 0), PointerType::get(m_ctx, 0)}, false));
+    m_module.getOrInsertFunction("pthread_mutex_init", FunctionType::get(i32_ty,
+        {PointerType::get(m_ctx, 0), PointerType::get(m_ctx, 0)}, false));
+    m_module.getOrInsertFunction("pthread_mutex_destroy", FunctionType::get(i32_ty,
+        {PointerType::get(m_ctx, 0)}, false));
+    m_module.getOrInsertFunction("pthread_mutex_lock", FunctionType::get(i32_ty,
+        {PointerType::get(m_ctx, 0)}, false));
+    m_module.getOrInsertFunction("pthread_mutex_unlock", FunctionType::get(i32_ty,
+        {PointerType::get(m_ctx, 0)}, false));
     m_module.getOrInsertFunction("memset", FunctionType::get(i8_ptr, {i8_ptr, i32_ty, i64_ty}, false));
 
     if (m_freestanding) {

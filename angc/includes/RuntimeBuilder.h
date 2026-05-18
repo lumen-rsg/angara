@@ -110,6 +110,10 @@ public:
     llvm::GlobalVariable* getExceptionChain()  const { return m_g_exception_chain; }
     llvm::GlobalVariable* getCurrentException() const { return m_g_current_exception; }
 
+    // --- Module API vtable ---
+    llvm::GlobalVariable* getAPIVtable() const { return m_api_vtable; }
+    llvm::StructType* getNativeInstanceType() const { return m_native_instance_type; }
+
 private:
     // --- Type generation ---
     void generateTypes();
@@ -131,6 +135,7 @@ private:
     void generateMiscOps();
     void generateIOOps();
     void generateFreestandingStubs();
+    void generateModuleAPIVTable();
 
     // --- Helper: create a runtime function ---
     llvm::Function* createRuntimeFunc(
@@ -155,6 +160,7 @@ private:
     llvm::StructType* m_thread_type = nullptr;
     llvm::StructType* m_mutex_type = nullptr;
     llvm::StructType* m_bound_method_type = nullptr;
+    llvm::StructType* m_native_instance_type = nullptr;
 
     // --- Runtime function callees ---
     llvm::FunctionCallee m_fn_string_from_c;
@@ -204,6 +210,9 @@ private:
     // --- Exception globals ---
     llvm::GlobalVariable* m_g_exception_chain = nullptr;
     llvm::GlobalVariable* m_g_current_exception = nullptr;
+
+    // --- Module API vtable (for native module runtime init) ---
+    llvm::GlobalVariable* m_api_vtable = nullptr;
 
     // --- Freestanding mode ---
     bool m_freestanding = false;

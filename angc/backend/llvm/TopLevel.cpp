@@ -206,7 +206,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
         auto saved_values = std::move(namedVals);
         namedVals.clear();
 
-        llvm::Value* obj = callRt(rt->getFuncRecordNew(), {});
+        llvm::Value* obj = callRtByName("__ang_record_new", {});
 
         if (init_method || init_param_count > 0) {
             // Call init(this, args...) — first arg is 'this', rest are ctor params
@@ -227,7 +227,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
             for (auto& arg : fn->args()) {
                 if (i < class_fields.size()) {
                     auto* key_ptr = builder->CreateGlobalString(class_fields[i]->name.lexeme);
-                    callRt(rt->getFuncRecordSet(), {obj, key_ptr, &arg});
+                    callRtByName("__ang_record_set", {obj, key_ptr, &arg});
                 }
                 i++;
             }
@@ -254,12 +254,12 @@ void LLVMBackend::codegenDataDecl(const DataStmt& stmt) {
     auto saved_values = std::move(namedVals);
     namedVals.clear();
 
-    llvm::Value* obj = callRt(rt->getFuncRecordNew(), {});
+    llvm::Value* obj = callRtByName("__ang_record_new", {});
 
     size_t i = 0;
     for (auto& arg : fn->args()) {
         auto* key_ptr = builder->CreateGlobalString(stmt.fields[i]->name.lexeme);
-        callRt(rt->getFuncRecordSet(), {obj, key_ptr, &arg});
+        callRtByName("__ang_record_set", {obj, key_ptr, &arg});
         i++;
     }
 
@@ -389,7 +389,7 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
             builder->CreateRet(makeF64(builder->CreateFPExt(cResult, llvm::Type::getDoubleTy(*ctx))));
         } else if (retTypeName == "string") {
             // C string → Angara string via runtime
-            builder->CreateRet(callRt(rt->getFuncStringFromC(), {cResult}));
+            builder->CreateRet(callRtByName("__ang_string_from_c", {cResult}));
         } else {
             builder->CreateRet(makeI64(cResult));
         }
@@ -428,6 +428,37 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
     namedVals.clear();
     namedTypes.clear();
 
+    // Initialize native modules at runtime (pass AngaraAPI vtable so ang_api != NULL)
+    if (!m_freestanding) {
+        auto* vtable = rt->getAPIVtable();
+        if (vtable) {
+            auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
+            auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
+            // AngaraFuncDef* Angara_<mod>_Init(int* def_count, const AngaraAPI* api)
+            auto* init_fn_type = llvm::FunctionType::get(ptr_ty,
+                {llvm::PointerType::get(i32_ty, 0), ptr_ty}, false);
+
+            for (const auto& stmt : statements) {
+                auto attach = std::dynamic_pointer_cast<const AttachStmt>(stmt);
+                if (!attach) continue;
+                auto res_it = m_type_checker.m_module_resolutions.find(attach.get());
+                if (res_it == m_type_checker.m_module_resolutions.end()) continue;
+                auto& mod_type = res_it->second;
+                if (!mod_type || !mod_type->is_native) continue;
+
+                std::string init_name = "Angara_" + mod_type->name + "_Init";
+                auto* init_fn = mod->getFunction(init_name);
+                if (!init_fn) {
+                    init_fn = llvm::Function::Create(init_fn_type, llvm::Function::ExternalLinkage,
+                                                      init_name, mod.get());
+                }
+                auto* def_count_alloca = builder->CreateAlloca(i32_ty);
+                builder->CreateStore(llvm::ConstantInt::get(i32_ty, 0), def_count_alloca);
+                builder->CreateCall(init_fn, {def_count_alloca, vtable});
+            }
+        }
+    }
+
     for (const auto& stmt : statements) {
         if (std::dynamic_pointer_cast<const FuncStmt>(stmt)) continue;
         if (std::dynamic_pointer_cast<const ClassStmt>(stmt)) continue;
@@ -463,7 +494,7 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
     if (!m_freestanding) {
     for (const auto& [name, alloca] : namedVals) {
         llvm::Value* val = builder->CreateLoad(objType, alloca);
-        callRt(rt->getFuncDecref(), {val});
+        callRtByName("__ang_decref", {val});
     }
     }
 
@@ -492,8 +523,6 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
         auto& mod_type = res_it->second;
         if (!mod_type || !mod_type->is_native) continue;
         const std::string& mod_name = mod_type->name;
-
-        // Declare exported functions and create wrappers
         for (auto& [export_name, export_type] : mod_type->exports) {
             auto func_type = std::dynamic_pointer_cast<FunctionType>(export_type);
             if (!func_type) {
@@ -510,14 +539,17 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
                         llvm::Function::Create(nmt, llvm::Function::ExternalLinkage, nmn, mod.get());
 
                         std::string mwn = mangleMethod(class_type->name, method_name);
-                        std::vector<llvm::Type*> mwp(mpc, objType);
+                        // +1 for self (the native instance), which the call site always passes as arg[0]
+                        int total_args = mpc + 1;
+                        std::vector<llvm::Type*> mwp(total_args, objType);
                         auto* mwt = llvm::FunctionType::get(objType, mwp, false);
                         auto* mw = llvm::Function::Create(mwt, llvm::Function::ExternalLinkage, mwn, mod.get());
                         auto* me = llvm::BasicBlock::Create(*ctx, "entry", mw);
                         auto* ms = builder->GetInsertBlock();
                         builder->SetInsertPoint(me);
-                        if (mpc > 0) {
-                            auto* mat = llvm::ArrayType::get(objType, mpc);
+                        {
+                            // Build args array: [self, user_param_0, user_param_1, ...]
+                            auto* mat = llvm::ArrayType::get(objType, total_args);
                             auto* ma = builder->CreateAlloca(mat);
                             int mi = 0;
                             for (auto& marg : mw->args()) {
@@ -528,14 +560,8 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
                             }
                             auto* nmf = mod->getFunction(nmn);
                             auto* mr = builder->CreateCall(nmf, {
-                                llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), mpc),
+                                llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), total_args),
                                 builder->CreateBitCast(ma, llvm::PointerType::get(*ctx, 0))});
-                            builder->CreateRet(mr);
-                        } else {
-                            auto* nmf = mod->getFunction(nmn);
-                            auto* mr = builder->CreateCall(nmf, {
-                                llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0),
-                                llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0))});
                             builder->CreateRet(mr);
                         }
                         if (ms) builder->SetInsertPoint(ms);
@@ -572,12 +598,18 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
                     builder->CreateStore(&arg, ep);
                 }
                 auto* nf = mod->getFunction(native_name);
+                if (!nf) {
+                    continue;
+                }
                 auto* cr = builder->CreateCall(nf, {
                     llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), param_count),
                     builder->CreateBitCast(aa, llvm::PointerType::get(*ctx, 0))});
                 builder->CreateRet(cr);
             } else {
                 auto* nf = mod->getFunction(native_name);
+                if (!nf) {
+                    continue;
+                }
                 auto* cr = builder->CreateCall(nf, {
                     llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0),
                     llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0))});

@@ -1,0 +1,83 @@
+// 02_pubsub_qos.an — Test publish/subscribe at QoS 0, 1, 2
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+func test_qos(qos as i64) -> bool {
+  let topic = "angara/test/qos" + string(qos);
+  let payload = "qos_" + string(qos) + "_" + string(time.now());
+
+  let sub as Connection = make_conn("qos_sub_" + string(qos));
+  if (!wait_connected(sub, 3.0)) {
+    io.println(2, "  [FAIL] Subscriber connect failed for QoS " + string(qos));
+    return false;
+  }
+
+  sub.subscribe(topic, qos);
+  time.sleep(0.3);
+
+  let pub as Connection = make_conn("qos_pub_" + string(qos));
+  if (!wait_connected(pub, 3.0)) {
+    io.println(2, "  [FAIL] Publisher connect failed for QoS " + string(qos));
+    sub.disconnect();
+    return false;
+  }
+
+  pub.publish(topic, payload, qos);
+
+  let msg = sub.next_message(3000);
+  sub.unsubscribe(topic);
+  sub.disconnect();
+  pub.disconnect();
+
+  if (msg != nil) {
+    @unsafe {
+      if (msg["payload"] != payload) {
+        io.println(2, "  [FAIL] Payload mismatch for QoS " + string(qos));
+        io.println(2, "         Expected: " + payload);
+        io.println(2, "         Got:      " + msg["payload"]);
+        return false;
+      }
+
+      io.println(1, "  [PASS] QoS " + string(qos) + " — payload matches");
+      return true;
+    }
+  } else {
+    io.println(2, "  [FAIL] No message received for QoS " + string(qos));
+    return false;
+  }
+}
+
+export func main() -> i64 {
+  io.println(1, "=== Test 02: Pub/Sub QoS Levels ===");
+  let failures as i64 = 0;
+
+  if (!test_qos(0)) { failures = failures + 1; }
+  if (!test_qos(1)) { failures = failures + 1; }
+  if (!test_qos(2)) { failures = failures + 1; }
+
+  io.println(1, "");
+  if (failures == 0) {
+    io.println(1, "=== All QoS tests PASSED ===");
+    return 0;
+  } else {
+    io.println(2, "=== " + string(failures) + " QoS tests FAILED ===");
+    return 1;
+  }
+}

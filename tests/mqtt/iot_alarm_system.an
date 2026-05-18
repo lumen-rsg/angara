@@ -1,0 +1,165 @@
+// iot_alarm_system.an — IoT: threshold-based alarm system
+//
+// Smoke detector publishes levels -> Alarm controller monitors ->
+// When level > 50, triggers alarm -> Siren actuator verifies.
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+const SMOKE_THRESHOLD as i64 = 50;
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+let alarm_triggered as list<any> = [];
+let alarm_mtx = Mutex();
+let alarm_done as bool = false;
+
+// Siren actuator: listens for alarm state changes
+func siren_task() -> i64 {
+  let conn as Connection = make_conn("siren_actuator");
+  if (!wait_connected(conn, 3.0)) {
+    return 1;
+  }
+  conn.subscribe("home/alarm/state", 1);
+  io.println(1, "[SIREN] Armed and listening...");
+
+  let start as f64 = time.now();
+  while ((time.now() - start) < 10.0) {
+    alarm_mtx.lock();
+    let stop = alarm_done;
+    alarm_mtx.unlock();
+    if (stop && alarm_triggered.length() > 0) {
+      break;
+    }
+
+    let msg = conn.next_message(1000);
+    if (msg != nil) {
+      @unsafe {
+        alarm_mtx.lock();
+        alarm_triggered.push(msg["payload"]);
+        alarm_mtx.unlock();
+        io.println(1, "[SIREN] ALARM ACTIVATED: " + msg["payload"]);
+      }
+    }
+  }
+
+  conn.disconnect();
+  return 0;
+}
+
+// Alarm controller: monitors smoke level and triggers alarm
+func alarm_controller_task() -> i64 {
+  let conn as Connection = make_conn("alarm_controller");
+  if (!wait_connected(conn, 3.0)) {
+    return 1;
+  }
+  conn.subscribe("home/smoke_detector/level", 1);
+  io.println(1, "[ALARM] Monitoring smoke levels...");
+
+  let checks as i64 = 0;
+  let start as f64 = time.now();
+  while (checks < 5 && (time.now() - start) < 10.0) {
+    let msg = conn.next_message(2000);
+    if (msg != nil) {
+      @unsafe {
+        let level_str = msg["payload"];
+        let level = i64(level_str);
+        io.println(1, "[ALARM] Smoke level: " + string(level));
+
+        if (level > SMOKE_THRESHOLD) {
+          conn.publish("home/alarm/state", "triggered:smoke_level_" + string(level), 2);
+          io.println(1, "[ALARM] THRESHOLD EXCEEDED! Level " + string(level) + " > " + string(SMOKE_THRESHOLD));
+        } else {
+          io.println(1, "[ALARM] Level normal (" + string(level) + " <= " + string(SMOKE_THRESHOLD) + ")");
+        }
+        checks = checks + 1;
+      }
+    }
+  }
+
+  conn.disconnect();
+  time.sleep(0.5);
+  alarm_mtx.lock();
+  alarm_done = true;
+  alarm_mtx.unlock();
+  return 0;
+}
+
+export func main() -> i64 {
+  io.println(1, "=== IoT Simulation: Alarm System ===");
+  io.println(1, "");
+
+  // Start siren and alarm controller threads
+  let siren_thread = spawn(siren_task);
+  time.sleep(0.2);
+  let alarm_thread = spawn(alarm_controller_task);
+  time.sleep(0.5);
+
+  // Smoke detector: publish levels
+  // Level 20 (safe) -> no alarm
+  // Level 35 (safe) -> no alarm
+  // Level 75 (DANGER!) -> alarm triggered
+  let smoke_levels as list<i64> = [20, 35, 75];
+  let detector as Connection = make_conn("smoke_detector");
+  if (!wait_connected(detector, 3.0)) {
+    io.println(2, "[FAIL] Detector connect failed");
+    alarm_thread.join();
+    siren_thread.join();
+    return 1;
+  }
+
+  let i as i64 = 0;
+  while (i < 3) {
+    detector.publish("home/smoke_detector/level", string(smoke_levels[i]), 1);
+    let status as string = "safe";
+    if (smoke_levels[i] > SMOKE_THRESHOLD) {
+      status = "DANGER";
+    }
+    io.println(1, "[SMOKE] Published level " + string(smoke_levels[i]) + " (" + status + ")");
+    time.sleep(0.5);
+    i = i + 1;
+  }
+  detector.disconnect();
+
+  // Wait for threads
+  alarm_thread.join();
+  siren_thread.join();
+
+  // Verify alarm was triggered
+  alarm_mtx.lock();
+  let trigger_count = alarm_triggered.length();
+  alarm_mtx.unlock();
+
+  io.println(1, "");
+  io.println(1, "Alarm triggers: " + string(trigger_count));
+
+  if (trigger_count < 1) {
+    io.println(2, "[FAIL] Alarm was never triggered");
+    return 1;
+  }
+
+  // Verify the trigger contains "smoke_level_75"
+  alarm_mtx.lock();
+  let trigger_msg as string = string(alarm_triggered[0]);
+  alarm_mtx.unlock();
+
+  io.println(1, "[PASS] Alarm triggered: " + trigger_msg);
+  io.println(1, "[PASS] Levels 20 and 35 did NOT trigger alarm (below threshold " + string(SMOKE_THRESHOLD) + ")");
+  io.println(1, "[PASS] Level 75 DID trigger alarm (above threshold " + string(SMOKE_THRESHOLD) + ")");
+  io.println(1, "");
+  io.println(1, "=== IoT Alarm System Test PASSED ===");
+  return 0;
+}

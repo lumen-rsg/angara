@@ -145,6 +145,7 @@ static void finalize_connection(void* data) {
     MqttConnectionData* c = (MqttConnectionData*)data;
     if (c->mosq) {
         mosquitto_disconnect(c->mosq);
+        mosquitto_loop_stop(c->mosq, false);
         mosquitto_destroy(c->mosq);
     }
     queue_free_all(&c->incoming, mqtt_msg_free);
@@ -328,8 +329,13 @@ AngaraObject Angara_mqtt_connect(int arg_count, AngaraObject* args) {
     mosquitto_disconnect_callback_set(conn->mosq, on_disconnect);
     mosquitto_message_callback_set(conn->mosq, on_message);
 
-    // Start network loop in background (non-blocking)
-    int rc = mosquitto_connect_async(conn->mosq, info.host, info.port, keepalive);
+    // Mark as connected immediately (synchronous connect will block until connected)
+    conn->is_connected = true;
+
+    // Connect synchronously, then start background loop for callbacks.
+    // Using synchronous connect avoids MOSQ_ERR_NO_CONN issues with connect_async
+    // when reconnecting after a prior disconnect in the same process.
+    int rc = mosquitto_connect(conn->mosq, info.host, info.port, keepalive);
     if (rc != MOSQ_ERR_SUCCESS) {
         char buf[256];
         snprintf(buf, sizeof(buf), "mqtt.connect: failed to connect to %s:%d — %s",
@@ -346,6 +352,7 @@ AngaraObject Angara_mqtt_connect(int arg_count, AngaraObject* args) {
     if (rc != MOSQ_ERR_SUCCESS) {
         char buf[256];
         snprintf(buf, sizeof(buf), "mqtt.connect: failed to start network loop — %s", mosquitto_strerror(rc));
+        mosquitto_disconnect(conn->mosq);
         mosquitto_destroy(conn->mosq);
         pthread_mutex_destroy(&conn->state_mutex);
         queue_free_all(&conn->incoming, mqtt_msg_free);
@@ -476,6 +483,7 @@ AngaraObject Angara_Connection_disconnect(int arg_count, AngaraObject* args) {
     MqttConnectionData* conn = (MqttConnectionData*)ang_api->native_instance_data(args[0]);
     if (!conn || !conn->mosq) return ang_nil();
     mosquitto_disconnect(conn->mosq);
+    mosquitto_loop_stop(conn->mosq, false);
     return ang_nil();
 }
 
@@ -494,7 +502,7 @@ static const AngaraMethodDef CONNECTION_METHODS[] = {
     {"publish",      (AngaraMethodFn)Angara_Connection_publish,      "ssi?->n"},
     {"subscribe",    (AngaraMethodFn)Angara_Connection_subscribe,    "si?->n"},
     {"unsubscribe",  (AngaraMethodFn)Angara_Connection_unsubscribe,  "s->n"},
-    {"next_message", (AngaraMethodFn)Angara_Connection_next_message, "i?->{}?"},
+    {"next_message", (AngaraMethodFn)Angara_Connection_next_message, "i?->a"},
     {"is_connected", (AngaraMethodFn)Angara_Connection_is_connected, "->b"},
     {"disconnect",   (AngaraMethodFn)Angara_Connection_disconnect,   "->n"},
     {"client_id",    (AngaraMethodFn)Angara_Connection_client_id,    "->s"},

@@ -1,0 +1,128 @@
+// 01_connection_options.an — Test MQTT connection with various options
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  let conn as Connection = connect(BROKER_URL, {
+    "clientId": cid,
+    "cleanSession": true
+  });
+  return conn;
+}
+
+export func main() -> i64 {
+  io.println(1, "=== Test 01: Connection Options ===");
+  let failures as i64 = 0;
+
+  // Test A: Default connection (no options)
+  io.println(1, "[A] Default connection...");
+  let conn1 as Connection = connect(BROKER_URL);
+  if (!wait_connected(conn1, 3.0)) {
+    io.println(2, "[FAIL] A: Default connection failed");
+    failures = failures + 1;
+  } else {
+    let cid = conn1.client_id();
+    if (len(cid) == 0) {
+      io.println(2, "[FAIL] A: Client ID is empty");
+      failures = failures + 1;
+    } else {
+      io.println(1, "[PASS] A: Connected, client_id=" + cid);
+    }
+  }
+  conn1.disconnect();
+  time.sleep(0.2);
+
+  // Test B: Custom client ID
+  io.println(1, "[B] Custom client ID...");
+  let conn2 as Connection = connect(BROKER_URL, {
+    "clientId": "test_custom_42",
+    "cleanSession": true
+  });
+  if (!wait_connected(conn2, 3.0)) {
+    io.println(2, "[FAIL] B: Custom ID connection failed");
+    failures = failures + 1;
+  } else {
+    if (conn2.client_id() != "test_custom_42") {
+      io.println(2, "[FAIL] B: Client ID mismatch: " + conn2.client_id());
+      failures = failures + 1;
+    } else {
+      io.println(1, "[PASS] B: Custom client_id matches");
+    }
+  }
+  conn2.disconnect();
+  time.sleep(0.2);
+
+  // Test C: cleanSession=false
+  io.println(1, "[C] cleanSession=false...");
+  let conn3 as Connection = connect(BROKER_URL, {
+    "clientId": "test_persistent_99",
+    "cleanSession": false
+  });
+  if (!wait_connected(conn3, 3.0)) {
+    io.println(2, "[FAIL] C: Persistent session connection failed");
+    failures = failures + 1;
+  } else {
+    io.println(1, "[PASS] C: Persistent session connected");
+  }
+  conn3.disconnect();
+  time.sleep(0.2);
+
+  // Test D: Short keepalive
+  io.println(1, "[D] Short keepalive (5s)...");
+  let conn4 as Connection = connect(BROKER_URL, {
+    "clientId": "test_keepalive",
+    "keepalive": 5,
+    "cleanSession": true
+  });
+  if (!wait_connected(conn4, 3.0)) {
+    io.println(2, "[FAIL] D: Short keepalive connection failed");
+    failures = failures + 1;
+  } else {
+    time.sleep(1.0);
+    if (!conn4.is_connected()) {
+      io.println(2, "[FAIL] D: Disconnected after 1s with keepalive=5");
+      failures = failures + 1;
+    } else {
+      io.println(1, "[PASS] D: Still connected after 1s with keepalive=5");
+    }
+  }
+  conn4.disconnect();
+  time.sleep(0.2);
+
+  // Test E: URL with explicit port
+  io.println(1, "[E] URL with port...");
+  let conn5 as Connection = connect("mqtt://localhost:11883", {
+    "clientId": "test_url_port",
+    "cleanSession": true
+  });
+  if (!wait_connected(conn5, 3.0)) {
+    io.println(2, "[FAIL] E: URL with port connection failed");
+    failures = failures + 1;
+  } else {
+    io.println(1, "[PASS] E: URL with port connected");
+  }
+  conn5.disconnect();
+
+  // Summary
+  io.println(1, "");
+  if (failures == 0) {
+    io.println(1, "=== All connection tests PASSED ===");
+    return 0;
+  } else {
+    io.println(2, "=== " + string(failures) + " connection tests FAILED ===");
+    return 1;
+  }
+}

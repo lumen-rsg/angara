@@ -77,7 +77,7 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
             if (saved_insert_block) builder->SetInsertPoint(saved_insert_block);
 
             // Create a closure object wrapping the wrapper
-            return callRt(rt->getFuncClosureNew(), {
+            return callRtByName("__ang_closure_new", {
                 wrapper_fn,
                 llvm::ConstantInt::get(i32_ty, arity),
                 llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0)
@@ -149,7 +149,7 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             faddCont = builder->GetInsertBlock();
             builder->CreateBr(maddBB);
             builder->SetInsertPoint(saddBB);
-            auto* sa = callRt(rt->getFuncStringConcat(),{l,r});
+            auto* sa = callRtByName("__ang_string_concat",{l,r});
             saddBB = builder->GetInsertBlock();
             builder->CreateBr(maddBB);
             builder->SetInsertPoint(maddBB);
@@ -157,77 +157,267 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             phi->addIncoming(ia,iaddBB); phi->addIncoming(fa,faddCont); phi->addIncoming(sa,saddBB);
             return phi;
         }
-        case TokenType::MINUS: return makeI64(builder->CreateSub(getI64(l),getI64(r)));
+        case TokenType::MINUS: {
+            auto* lTag = getTag(l);
+            auto* rTag = getTag(r);
+            auto* bothF64 = builder->CreateAnd(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* fn = builder->GetInsertBlock()->getParent();
+            auto* fsubBB = llvm::BasicBlock::Create(*ctx,"fsub",fn);
+            auto* isubBB = llvm::BasicBlock::Create(*ctx,"isub",fn);
+            auto* msubBB = llvm::BasicBlock::Create(*ctx,"msub",fn);
+            builder->CreateCondBr(bothF64, fsubBB, isubBB);
+            builder->SetInsertPoint(fsubBB);
+            auto* fa = makeF64(builder->CreateFSub(getF64(l),getF64(r)));
+            fsubBB = builder->GetInsertBlock();
+            builder->CreateBr(msubBB);
+            builder->SetInsertPoint(isubBB);
+            auto* ia = makeI64(builder->CreateSub(getI64(l),getI64(r)));
+            isubBB = builder->GetInsertBlock();
+            builder->CreateBr(msubBB);
+            builder->SetInsertPoint(msubBB);
+            auto* phi = builder->CreatePHI(objType,2);
+            phi->addIncoming(fa,fsubBB); phi->addIncoming(ia,isubBB);
+            return phi;
+        }
         case TokenType::STAR: {
             // Check if this is string * number repetition
             {
                 auto lt = m_type_checker.m_expression_types.find(e.left.get());
                 if (lt != m_type_checker.m_expression_types.end() && lt->second->toString() == "string") {
-                    return callRt(rt->getFuncStringRepeat(), {l, r});
+                    return callRtByName("__ang_string_repeat", {l, r});
                 }
             }
-            return makeI64(builder->CreateMul(getI64(l),getI64(r)));
+            auto* lTag = getTag(l);
+            auto* rTag = getTag(r);
+            auto* bothF64 = builder->CreateAnd(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* fn = builder->GetInsertBlock()->getParent();
+            auto* fmulBB = llvm::BasicBlock::Create(*ctx,"fmul",fn);
+            auto* imulBB = llvm::BasicBlock::Create(*ctx,"imul",fn);
+            auto* mmulBB = llvm::BasicBlock::Create(*ctx,"mmul",fn);
+            builder->CreateCondBr(bothF64, fmulBB, imulBB);
+            builder->SetInsertPoint(fmulBB);
+            auto* fa = makeF64(builder->CreateFMul(getF64(l),getF64(r)));
+            fmulBB = builder->GetInsertBlock();
+            builder->CreateBr(mmulBB);
+            builder->SetInsertPoint(imulBB);
+            auto* ia = makeI64(builder->CreateMul(getI64(l),getI64(r)));
+            imulBB = builder->GetInsertBlock();
+            builder->CreateBr(mmulBB);
+            builder->SetInsertPoint(mmulBB);
+            auto* phi = builder->CreatePHI(objType,2);
+            phi->addIncoming(fa,fmulBB); phi->addIncoming(ia,imulBB);
+            return phi;
         }
         case TokenType::SLASH: {
+            auto* lTag = getTag(l);
+            auto* rTag = getTag(r);
+            auto* bothF64 = builder->CreateAnd(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* fn = builder->GetInsertBlock()->getParent();
+            auto* fdivBB = llvm::BasicBlock::Create(*ctx,"fdiv",fn);
+            auto* idivBB = llvm::BasicBlock::Create(*ctx,"idiv",fn);
+            auto* mdivBB = llvm::BasicBlock::Create(*ctx,"mdiv",fn);
+            builder->CreateCondBr(bothF64, fdivBB, idivBB);
+            builder->SetInsertPoint(fdivBB);
+            auto* fa = makeF64(builder->CreateFDiv(getF64(l),getF64(r)));
+            fdivBB = builder->GetInsertBlock();
+            builder->CreateBr(mdivBB);
+            builder->SetInsertPoint(idivBB);
             auto lt = m_type_checker.m_expression_types.find(e.left.get());
             auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
             bool unsigned_div = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
                                 (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
-            return makeI64(unsigned_div ? builder->CreateUDiv(getI64(l),getI64(r))
-                                        : builder->CreateSDiv(getI64(l),getI64(r)));
+            auto* ia = makeI64(unsigned_div ? builder->CreateUDiv(getI64(l),getI64(r))
+                                            : builder->CreateSDiv(getI64(l),getI64(r)));
+            idivBB = builder->GetInsertBlock();
+            builder->CreateBr(mdivBB);
+            builder->SetInsertPoint(mdivBB);
+            auto* phi = builder->CreatePHI(objType,2);
+            phi->addIncoming(fa,fdivBB); phi->addIncoming(ia,idivBB);
+            return phi;
         }
         case TokenType::PERCENT: {
+            auto* lTag = getTag(l);
+            auto* rTag = getTag(r);
+            auto* bothF64 = builder->CreateAnd(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* fn = builder->GetInsertBlock()->getParent();
+            auto* fmodBB = llvm::BasicBlock::Create(*ctx,"fmod",fn);
+            auto* imodBB = llvm::BasicBlock::Create(*ctx,"imod",fn);
+            auto* mmodBB = llvm::BasicBlock::Create(*ctx,"mmod",fn);
+            builder->CreateCondBr(bothF64, fmodBB, imodBB);
+            builder->SetInsertPoint(fmodBB);
+            auto* fa = makeF64(builder->CreateFRem(getF64(l),getF64(r)));
+            fmodBB = builder->GetInsertBlock();
+            builder->CreateBr(mmodBB);
+            builder->SetInsertPoint(imodBB);
             auto lt = m_type_checker.m_expression_types.find(e.left.get());
             auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
             bool unsigned_mod = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
                                 (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
-            return makeI64(unsigned_mod ? builder->CreateURem(getI64(l),getI64(r))
-                                        : builder->CreateSRem(getI64(l),getI64(r)));
+            auto* ia = makeI64(unsigned_mod ? builder->CreateURem(getI64(l),getI64(r))
+                                            : builder->CreateSRem(getI64(l),getI64(r)));
+            imodBB = builder->GetInsertBlock();
+            builder->CreateBr(mmodBB);
+            builder->SetInsertPoint(mmodBB);
+            auto* phi = builder->CreatePHI(objType,2);
+            phi->addIncoming(fa,fmodBB); phi->addIncoming(ia,imodBB);
+            return phi;
         }
         case TokenType::AMPERSAND: return makeI64(builder->CreateAnd(getI64(l),getI64(r)));
         case TokenType::PIPE:      return makeI64(builder->CreateOr(getI64(l),getI64(r)));
         case TokenType::CARET:     return makeI64(builder->CreateXor(getI64(l),getI64(r)));
         case TokenType::LESS: {
+            auto* lTag = getTag(l);
+            auto* rTag = getTag(r);
+            auto* bothF64 = builder->CreateAnd(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* fn = builder->GetInsertBlock()->getParent();
+            auto* fcmpBB = llvm::BasicBlock::Create(*ctx,"flt",fn);
+            auto* icmpBB = llvm::BasicBlock::Create(*ctx,"ilt",fn);
+            auto* mcmpBB = llvm::BasicBlock::Create(*ctx,"mlt",fn);
+            builder->CreateCondBr(bothF64, fcmpBB, icmpBB);
+            builder->SetInsertPoint(fcmpBB);
+            auto* fb = makeBool(builder->CreateFCmpOLT(getF64(l),getF64(r)));
+            fcmpBB = builder->GetInsertBlock();
+            builder->CreateBr(mcmpBB);
+            builder->SetInsertPoint(icmpBB);
             auto lt = m_type_checker.m_expression_types.find(e.left.get());
             auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
             bool unsigned_cmp = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
                                 (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
-            return makeBool(unsigned_cmp ? builder->CreateICmpULT(getI64(l),getI64(r))
-                                        : builder->CreateICmpSLT(getI64(l),getI64(r)));
+            auto* ib = makeBool(unsigned_cmp ? builder->CreateICmpULT(getI64(l),getI64(r))
+                                             : builder->CreateICmpSLT(getI64(l),getI64(r)));
+            icmpBB = builder->GetInsertBlock();
+            builder->CreateBr(mcmpBB);
+            builder->SetInsertPoint(mcmpBB);
+            auto* phi = builder->CreatePHI(objType,2);
+            phi->addIncoming(fb,fcmpBB); phi->addIncoming(ib,icmpBB);
+            return phi;
         }
         case TokenType::LESS_EQUAL: {
+            auto* lTag = getTag(l);
+            auto* rTag = getTag(r);
+            auto* bothF64 = builder->CreateAnd(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* fn = builder->GetInsertBlock()->getParent();
+            auto* fcmpBB = llvm::BasicBlock::Create(*ctx,"fle",fn);
+            auto* icmpBB = llvm::BasicBlock::Create(*ctx,"ile",fn);
+            auto* mcmpBB = llvm::BasicBlock::Create(*ctx,"mle",fn);
+            builder->CreateCondBr(bothF64, fcmpBB, icmpBB);
+            builder->SetInsertPoint(fcmpBB);
+            auto* fb = makeBool(builder->CreateFCmpOLE(getF64(l),getF64(r)));
+            fcmpBB = builder->GetInsertBlock();
+            builder->CreateBr(mcmpBB);
+            builder->SetInsertPoint(icmpBB);
             auto lt = m_type_checker.m_expression_types.find(e.left.get());
             auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
             bool unsigned_cmp = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
                                 (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
-            return makeBool(unsigned_cmp ? builder->CreateICmpULE(getI64(l),getI64(r))
-                                        : builder->CreateICmpSLE(getI64(l),getI64(r)));
+            auto* ib = makeBool(unsigned_cmp ? builder->CreateICmpULE(getI64(l),getI64(r))
+                                             : builder->CreateICmpSLE(getI64(l),getI64(r)));
+            icmpBB = builder->GetInsertBlock();
+            builder->CreateBr(mcmpBB);
+            builder->SetInsertPoint(mcmpBB);
+            auto* phi = builder->CreatePHI(objType,2);
+            phi->addIncoming(fb,fcmpBB); phi->addIncoming(ib,icmpBB);
+            return phi;
         }
         case TokenType::GREATER: {
+            auto* lTag = getTag(l);
+            auto* rTag = getTag(r);
+            auto* bothF64 = builder->CreateAnd(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* fn = builder->GetInsertBlock()->getParent();
+            auto* fcmpBB = llvm::BasicBlock::Create(*ctx,"fgt",fn);
+            auto* icmpBB = llvm::BasicBlock::Create(*ctx,"igt",fn);
+            auto* mcmpBB = llvm::BasicBlock::Create(*ctx,"mgt",fn);
+            builder->CreateCondBr(bothF64, fcmpBB, icmpBB);
+            builder->SetInsertPoint(fcmpBB);
+            auto* fb = makeBool(builder->CreateFCmpOGT(getF64(l),getF64(r)));
+            fcmpBB = builder->GetInsertBlock();
+            builder->CreateBr(mcmpBB);
+            builder->SetInsertPoint(icmpBB);
             auto lt = m_type_checker.m_expression_types.find(e.left.get());
             auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
             bool unsigned_cmp = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
                                 (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
-            return makeBool(unsigned_cmp ? builder->CreateICmpUGT(getI64(l),getI64(r))
-                                        : builder->CreateICmpSGT(getI64(l),getI64(r)));
+            auto* ib = makeBool(unsigned_cmp ? builder->CreateICmpUGT(getI64(l),getI64(r))
+                                             : builder->CreateICmpSGT(getI64(l),getI64(r)));
+            icmpBB = builder->GetInsertBlock();
+            builder->CreateBr(mcmpBB);
+            builder->SetInsertPoint(mcmpBB);
+            auto* phi = builder->CreatePHI(objType,2);
+            phi->addIncoming(fb,fcmpBB); phi->addIncoming(ib,icmpBB);
+            return phi;
         }
         case TokenType::GREATER_EQUAL: {
+            auto* lTag = getTag(l);
+            auto* rTag = getTag(r);
+            auto* bothF64 = builder->CreateAnd(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* fn = builder->GetInsertBlock()->getParent();
+            auto* fcmpBB = llvm::BasicBlock::Create(*ctx,"fge",fn);
+            auto* icmpBB = llvm::BasicBlock::Create(*ctx,"ige",fn);
+            auto* mcmpBB = llvm::BasicBlock::Create(*ctx,"mge",fn);
+            builder->CreateCondBr(bothF64, fcmpBB, icmpBB);
+            builder->SetInsertPoint(fcmpBB);
+            auto* fb = makeBool(builder->CreateFCmpOGE(getF64(l),getF64(r)));
+            fcmpBB = builder->GetInsertBlock();
+            builder->CreateBr(mcmpBB);
+            builder->SetInsertPoint(icmpBB);
             auto lt = m_type_checker.m_expression_types.find(e.left.get());
             auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
             bool unsigned_cmp = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
                                 (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
-            return makeBool(unsigned_cmp ? builder->CreateICmpUGE(getI64(l),getI64(r))
-                                        : builder->CreateICmpSGE(getI64(l),getI64(r)));
+            auto* ib = makeBool(unsigned_cmp ? builder->CreateICmpUGE(getI64(l),getI64(r))
+                                             : builder->CreateICmpSGE(getI64(l),getI64(r)));
+            icmpBB = builder->GetInsertBlock();
+            builder->CreateBr(mcmpBB);
+            builder->SetInsertPoint(mcmpBB);
+            auto* phi = builder->CreatePHI(objType,2);
+            phi->addIncoming(fb,fcmpBB); phi->addIncoming(ib,icmpBB);
+            return phi;
         }
-        case TokenType::EQUAL_EQUAL: return callRt(rt->getFuncEquals(),{l,r});
-        case TokenType::BANG_EQUAL: { auto* eq=callRt(rt->getFuncEquals(),{l,r}); return makeBool(builder->CreateNot(getBool(eq))); }
+        case TokenType::EQUAL_EQUAL: return callRtByName("__ang_equals",{l,r});
+        case TokenType::BANG_EQUAL: { auto* eq=callRtByName("__ang_equals",{l,r}); return makeBool(builder->CreateNot(getBool(eq))); }
         default: return makeNil();
     }
 }
 
 llvm::Value* LLVMBackend::cgUnary(const Unary& e) {
     auto* o=cg(e.right); if(!o) return makeNil();
-    if (e.op.type==TokenType::MINUS) return makeI64(builder->CreateNeg(getI64(o)));
+    if (e.op.type==TokenType::MINUS) {
+        auto* tag = getTag(o);
+        auto* isF64 = builder->CreateICmpEQ(tag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64));
+        auto* fn = builder->GetInsertBlock()->getParent();
+        auto* fnegBB = llvm::BasicBlock::Create(*ctx,"fneg",fn);
+        auto* inegBB = llvm::BasicBlock::Create(*ctx,"ineg",fn);
+        auto* mnegBB = llvm::BasicBlock::Create(*ctx,"mneg",fn);
+        builder->CreateCondBr(isF64, fnegBB, inegBB);
+        builder->SetInsertPoint(fnegBB);
+        auto* fv = makeF64(builder->CreateFNeg(getF64(o)));
+        fnegBB = builder->GetInsertBlock();
+        builder->CreateBr(mnegBB);
+        builder->SetInsertPoint(inegBB);
+        auto* iv = makeI64(builder->CreateNeg(getI64(o)));
+        inegBB = builder->GetInsertBlock();
+        builder->CreateBr(mnegBB);
+        builder->SetInsertPoint(mnegBB);
+        auto* phi = builder->CreatePHI(objType,2);
+        phi->addIncoming(fv,fnegBB); phi->addIncoming(iv,inegBB);
+        return phi;
+    }
     if (e.op.type==TokenType::TILDE) return makeI64(builder->CreateNot(getI64(o)));
     if (e.op.type==TokenType::BANG) return makeBool(builder->CreateNot(isTruthy(o)));
     return o;
@@ -246,18 +436,18 @@ llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
     }
     if (auto* get = dynamic_cast<const GetExpr*>(e.target.get())) {
         auto* obj = cg(get->object);
-        callRt(rt->getFuncRecordSet(), {obj, builder->CreateGlobalString(get->name.lexeme), v});
+        callRtByName("__ang_record_set", {obj, builder->CreateGlobalString(get->name.lexeme), v});
         return v;
     }
     if (auto* sub = dynamic_cast<const SubscriptExpr*>(e.target.get())) {
         auto* obj = cg(sub->object);
         if (auto* lit = dynamic_cast<const Literal*>(sub->index.get())) {
             if (lit->token.type == TokenType::STRING) {
-                callRt(rt->getFuncRecordSet(), {obj, builder->CreateGlobalString(lit->token.lexeme), v});
+                callRtByName("__ang_record_set", {obj, builder->CreateGlobalString(lit->token.lexeme), v});
                 return v;
             }
         }
-        callRt(rt->getFuncListSet(), {obj, cg(sub->index), v});
+        callRtByName("__ang_list_set", {obj, cg(sub->index), v});
         return v;
     }
     return v;
@@ -297,52 +487,68 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                     }
                 }
             }
-            // Check if modName is a local variable (list/record) rather than a module
-            if (namedVals.find(sanitize(modName)) != namedVals.end()) {
+            // Check if modName is a local/global variable (list/record/mutex/thread) rather than a module
+            std::string gkey = "g_" + sanitize(modName);
+            bool is_var = namedVals.find(sanitize(modName)) != namedVals.end() ||
+                          globals.find(gkey) != globals.end();
+            if (is_var) {
                 auto* varObj = loadVar(modName);
                 // Built-in list methods
                 if (fnName == "push" || fnName == "add") {
                     if (!expr.arguments.empty())
-                        return callRt(rt->getFuncListPush(), {varObj, cg(expr.arguments[0])});
+                        return callRtByName("__ang_list_push", {varObj, cg(expr.arguments[0])});
                     return makeNil();
                 }
                 if (fnName == "get" || fnName == "at") {
                     if (!expr.arguments.empty())
-                        return callRt(rt->getFuncListGet(), {varObj, cg(expr.arguments[0])});
+                        return callRtByName("__ang_list_get", {varObj, cg(expr.arguments[0])});
                     return makeNil();
                 }
                 if (fnName == "set") {
                     if (expr.arguments.size() >= 2)
-                        return callRt(rt->getFuncListSet(), {varObj, cg(expr.arguments[0]), cg(expr.arguments[1])});
+                        return callRtByName("__ang_list_set", {varObj, cg(expr.arguments[0]), cg(expr.arguments[1])});
                     return makeNil();
                 }
                 if (fnName == "length" || fnName == "len" || fnName == "size" || fnName == "count") {
-                    return callRt(rt->getFuncLen(), {varObj});
+                    return callRtByName("__ang_len", {varObj});
+                }
+                // Built-in mutex methods
+                if (fnName == "lock") {
+                    callRtByName("__ang_mutex_lock", {varObj});
+                    return makeNil();
+                }
+                if (fnName == "unlock") {
+                    callRtByName("__ang_mutex_unlock", {varObj});
+                    return makeNil();
+                }
+                // Built-in thread methods
+                if (fnName == "join") {
+                    return callRtByName("__ang_thread_join", {varObj});
                 }
                 // Not a recognized built-in — fall through to module function lookup
             }
             if (modName=="io") {
                 if (fnName=="println"||fnName=="print") {
                     if (expr.arguments.size() >= 2) {
-                        if (fnName=="println") callRt(rt->getFuncIOPrintln(), {cg(expr.arguments[0]), cg(expr.arguments[1])});
-                        else callRt(rt->getFuncIOPrint(), {cg(expr.arguments[0]), cg(expr.arguments[1])});
+                        if (fnName=="println") callRtByName("__ang_io_println", {cg(expr.arguments[0]), cg(expr.arguments[1])});
+                        else callRtByName("__ang_io_print", {cg(expr.arguments[0]), cg(expr.arguments[1])});
                     } else if (!expr.arguments.empty()) {
-                        if (fnName=="println") callRt(rt->getFuncIOPrintln(), {cg(expr.arguments[0])});
-                        else callRt(rt->getFuncIOPrint(), {cg(expr.arguments[0])});
+                        if (fnName=="println") callRtByName("__ang_io_println", {cg(expr.arguments[0])});
+                        else callRtByName("__ang_io_print", {cg(expr.arguments[0])});
                     }
                     return makeNil();
                 }
                 if (fnName=="write") {
                     if (expr.arguments.size() >= 2)
-                        callRt(rt->getFuncIOWrite(), {cg(expr.arguments[0]), cg(expr.arguments[1])});
+                        callRtByName("__ang_io_write", {cg(expr.arguments[0]), cg(expr.arguments[1])});
                     return makeNil();
                 }
                 if (fnName=="flush") {
-                    if (!expr.arguments.empty()) callRt(rt->getFuncIOFlush(), {cg(expr.arguments[0])});
+                    if (!expr.arguments.empty()) callRtByName("__ang_io_flush", {cg(expr.arguments[0])});
                     return makeNil();
                 }
-                if (fnName=="read_line") return callRt(rt->getFuncIOReadLine(), {});
-                if (fnName=="read_all") return callRt(rt->getFuncIOReadAll(), {});
+                if (fnName=="read_line") return callRtByName("__ang_io_read_line", {});
+                if (fnName=="read_all") return callRtByName("__ang_io_read_all", {});
             }
             return callModuleFn(modName, fnName, expr.arguments);
         }
@@ -398,19 +604,19 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         }
 
         if (fn=="string") {
-            if (!expr.arguments.empty()) return callRt(rt->getFuncToString(),{cg(expr.arguments[0])});
+            if (!expr.arguments.empty()) return callRtByName("__ang_to_string", {cg(expr.arguments[0])});
             return makeStr("");
         }
         if (fn=="i64" || fn=="int") {
-            if (!expr.arguments.empty()) return callRt(rt->getFuncToI64(),{cg(expr.arguments[0])});
+            if (!expr.arguments.empty()) return callRtByName("__ang_to_i64",{cg(expr.arguments[0])});
             return makeI64((int64_t)0);
         }
         if (fn=="f64" || fn=="float") {
-            if (!expr.arguments.empty()) return callRt(rt->getFuncToF64(),{cg(expr.arguments[0])});
+            if (!expr.arguments.empty()) return callRtByName("__ang_to_f64",{cg(expr.arguments[0])});
             return makeF64(0.0);
         }
         if (fn=="bool") {
-            if (!expr.arguments.empty()) return callRt(rt->getFuncToBool(),{cg(expr.arguments[0])});
+            if (!expr.arguments.empty()) return callRtByName("__ang_to_bool",{cg(expr.arguments[0])});
             return makeBool(false);
         }
         // Check if it's a local variable holding a closure (first-class function call)
@@ -437,7 +643,25 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             std::vector<llvm::Value*> args;
             for (auto& a : expr.arguments) args.push_back(cg(a));
             if (args.empty()) args.push_back(makeNil());
-            return callRt(rt->getFuncExceptionNew(), args);
+            return callRtByName("__ang_exception_new", args);
+        }
+
+        // Built-in Mutex constructor
+        if (fn == "Mutex") {
+            return callRtByName("__ang_mutex_new", {});
+        }
+
+        // Built-in spawn: spawns a function in a new thread
+        if (fn == "spawn") {
+            if (!expr.arguments.empty()) {
+                auto* closure = cg(expr.arguments[0]);
+                return callRtByName("__ang_spawn_thread", {
+                    closure,
+                    llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0),
+                    llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0))
+                });
+            }
+            return makeNil();
         }
 
         auto cit = constructorLookup.find(fn);
@@ -474,13 +698,12 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
 
     auto ft = f->getFunctionType();
     bool direct_call = true;
-    if (ft->getNumParams() < 1) direct_call = false;
-    else {
-        if (ft->getNumParams() == 2 &&
-            ft->getParamType(0)->isIntegerTy(32) &&
-            ft->getParamType(1)->isPointerTy()) {
-            direct_call = false;
-        }
+    // Only use the closure calling convention (i32 argc, ptr args) for functions
+    // that explicitly have that signature — NOT for 0-param functions.
+    if (ft->getNumParams() == 2 &&
+        ft->getParamType(0)->isIntegerTy(32) &&
+        ft->getParamType(1)->isPointerTy()) {
+        direct_call = false;
     }
 
     if (direct_call) {
@@ -527,14 +750,14 @@ llvm::Value* LLVMBackend::cgGet(const GetExpr& e) {
     auto* obj = cg(e.object);
     // Special case: .message property uses exception_get_message runtime function
     if (e.name.lexeme == "message") {
-        return callRt(rt->getFuncExceptionGetMessage(), {obj});
+        return callRtByName("__ang_exception_get_message", {obj});
     }
-    return callRt(rt->getFuncRecordGet(), {obj, builder->CreateGlobalString(e.name.lexeme)});
+    return callRtByName("__ang_record_get", {obj, builder->CreateGlobalString(e.name.lexeme)});
 }
 
 llvm::Value* LLVMBackend::cgList(const ListExpr& e) {
-    auto* l = callRt(rt->getFuncListNew(),{});
-    for (auto& el : e.elements) callRt(rt->getFuncListPush(),{l, cg(el)});
+    auto* l = callRtByName("__ang_list_new",{});
+    for (auto& el : e.elements) callRtByName("__ang_list_push",{l, cg(el)});
     return l;
 }
 
@@ -574,16 +797,16 @@ llvm::Value* LLVMBackend::cgSubscript(const SubscriptExpr& e) {
     auto* obj = cg(e.object);
     if (auto* lit = dynamic_cast<const Literal*>(e.index.get())) {
         if (lit->token.type == TokenType::STRING) {
-            return callRt(rt->getFuncRecordGet(), {obj, builder->CreateGlobalString(lit->token.lexeme)});
+            return callRtByName("__ang_record_get", {obj, builder->CreateGlobalString(lit->token.lexeme)});
         }
     }
-    return callRt(rt->getFuncListGet(), {obj, cg(e.index)});
+    return callRtByName("__ang_list_get", {obj, cg(e.index)});
 }
 
 llvm::Value* LLVMBackend::cgRecord(const RecordExpr& e) {
-    auto* r = callRt(rt->getFuncRecordNew(),{});
+    auto* r = callRtByName("__ang_record_new",{});
     for (size_t i=0; i<e.keys.size(); i++)
-        callRt(rt->getFuncRecordSet(), {r, builder->CreateGlobalString(e.keys[i].lexeme), cg(e.values[i])});
+        callRtByName("__ang_record_set", {r, builder->CreateGlobalString(e.keys[i].lexeme), cg(e.values[i])});
     return r;
 }
 
@@ -612,7 +835,7 @@ llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {
     auto* mg = llvm::BasicBlock::Create(*ctx,"me",fn);
     std::vector<std::pair<llvm::BasicBlock*,llvm::Value*>> inc;
     for (auto& c : e.cases) {
-        auto* eq = callRt(rt->getFuncEquals(), {subj, cg(c.pattern)});
+        auto* eq = callRtByName("__ang_equals", {subj, cg(c.pattern)});
         auto* bb = llvm::BasicBlock::Create(*ctx,"mb",fn);
         auto* nb = llvm::BasicBlock::Create(*ctx,"mn",fn);
         builder->CreateCondBr(getBool(eq), bb, nb);
@@ -725,7 +948,7 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
 
     // Create a closure object wrapping this function
     int arity = (int)e.param_names.size();
-    return callRt(rt->getFuncClosureNew(), {
+    return callRtByName("__ang_closure_new", {
         lambda_fn,
         llvm::ConstantInt::get(i32_ty, arity),
         llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0) // not native
@@ -752,14 +975,14 @@ llvm::Value* LLVMBackend::cgClosureCall(llvm::Value* callee, const std::vector<l
             builder->CreateStore(args[i], elem_ptr);
         }
 
-        return callRt(rt->getFuncCall(), {
+        return callRtByName("__ang_call", {
             callee,
             llvm::ConstantInt::get(i32_ty, argc),
             builder->CreateBitCast(arr_alloca, llvm::PointerType::get(*ctx, 0))
         });
     }
 
-    return callRt(rt->getFuncCall(), {
+    return callRtByName("__ang_call", {
         callee,
         llvm::ConstantInt::get(i32_ty, 0),
         llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0))

@@ -1,0 +1,110 @@
+// iot_temperature_sensor.an — IoT: simulated temperature/humidity sensor
+//
+// Simulates a sensor device publishing readings, and a monitor
+// subscribing via wildcard to collect all data.
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+attach random;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+// Monitor: subscribes to all living_room sensor data
+let monitor_received as i64 = 0;
+let monitor_mtx = Mutex();
+
+func monitor_task() -> i64 {
+  let conn as Connection = make_conn("sensor_monitor");
+  if (!wait_connected(conn, 3.0)) {
+    io.println(2, "[MONITOR] Connect failed");
+    return 1;
+  }
+
+  conn.subscribe("home/living_room/#", 1);
+  io.println(1, "[MONITOR] Subscribed to home/living_room/#");
+
+  let timeout as f64 = 15.0;
+  let start as f64 = time.now();
+
+  while ((time.now() - start) < timeout) {
+    let msg = conn.next_message(2000);
+    if (msg != nil) {
+      monitor_mtx.lock();
+      monitor_received = monitor_received + 1;
+      monitor_mtx.unlock();
+      @unsafe {
+        io.println(1, "[MONITOR] " + msg["topic"] + " = " + msg["payload"]);
+      }
+    }
+  }
+
+  conn.disconnect();
+  return 0;
+}
+
+export func main() -> i64 {
+  io.println(1, "=== IoT Simulation: Temperature/Humidity Sensor ===");
+
+  // Start monitor subscriber in background thread
+  let mon_thread = spawn(monitor_task);
+  time.sleep(0.5);
+
+  // Sensor: publish 5 reading cycles
+  let sensor as Connection = make_conn("sensor_living_room");
+  if (!wait_connected(sensor, 3.0)) {
+    io.println(2, "[SENSOR] Connect failed");
+    mon_thread.join();
+    return 1;
+  }
+
+  io.println(1, "[SENSOR] Publishing 5 reading cycles...");
+  let cycle as i64 = 0;
+  while (cycle < 5) {
+    let temp = random.int_range(18, 28);
+    let humidity = random.int_range(30, 70);
+
+    sensor.publish("home/living_room/temperature", string(temp), 1);
+    sensor.publish("home/living_room/humidity", string(humidity), 1);
+
+    io.println(1, "[SENSOR] Cycle " + string(cycle + 1) + ": temp=" + string(temp) + "C  humidity=" + string(humidity) + "%");
+    time.sleep(0.4);
+    cycle = cycle + 1;
+  }
+
+  sensor.disconnect();
+  io.println(1, "[SENSOR] Done publishing");
+
+  // Wait for monitor to finish collecting
+  let mon_result = mon_thread.join();
+
+  monitor_mtx.lock();
+  let total = monitor_received;
+  monitor_mtx.unlock();
+
+  io.println(1, "");
+  io.println(1, "Monitor received " + string(total) + " messages (expected 10: 5 temp + 5 humidity)");
+
+  if (total < 8) {
+    io.println(2, "[FAIL] Too few messages received: " + string(total));
+    return 1;
+  }
+
+  io.println(1, "[PASS] Sensor simulation completed successfully");
+  io.println(1, "");
+  io.println(1, "=== IoT Temperature Sensor Test PASSED ===");
+  return 0;
+}

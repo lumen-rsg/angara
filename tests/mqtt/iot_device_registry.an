@@ -1,0 +1,153 @@
+// iot_device_registry.an — IoT: device discovery/registry with JSON payloads
+//
+// Devices publish their state -> Registry collects via wildcard ->
+// Query verifies all devices are registered.
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+attach json;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+let registry_devices as list<any> = [];
+let registry_mtx = Mutex();
+
+// Registry: subscribes to all device status updates
+func registry_task() -> i64 {
+  let conn as Connection = make_conn("device_registry");
+  if (!wait_connected(conn, 3.0)) {
+    return 1;
+  }
+  conn.subscribe("registry/+/status", 1);
+  io.println(1, "[REGISTRY] Listening for device announcements...");
+
+  let start as f64 = time.now();
+  while ((time.now() - start) < 10.0) {
+    let msg = conn.next_message(2000);
+    if (msg != nil) {
+      @unsafe {
+        registry_mtx.lock();
+        registry_devices.push(msg["payload"]);
+        registry_mtx.unlock();
+        io.println(1, "[REGISTRY] Device registered: " + msg["payload"]);
+      }
+    }
+    registry_mtx.lock();
+    let count = registry_devices.length();
+    registry_mtx.unlock();
+    if (count >= 3) {
+      break;
+    }
+  }
+
+  conn.disconnect();
+  return 0;
+}
+
+export func main() -> i64 {
+  io.println(1, "=== IoT Simulation: Device Registry ===");
+
+  // Start registry in background
+  let registry_thread = spawn(registry_task);
+  time.sleep(0.5);
+
+  // 3 devices publish their state
+  let device_ids as list<string> = ["sensor_temp_01", "sensor_hum_02", "actuator_valve_03"];
+  let device_types as list<string> = ["temperature", "humidity", "valve"];
+  let device_values as list<string> = ["22", "55", "open"];
+
+  let i as i64 = 0;
+  while (i < 3) {
+    let conn as Connection = make_conn(device_ids[i]);
+    if (wait_connected(conn, 3.0)) {
+      let device_info = {
+        "device_id": device_ids[i],
+        "type": device_types[i],
+        "online": true,
+        "value": device_values[i]
+      };
+
+      let payload = json.stringify(device_info);
+      conn.publish("registry/" + device_ids[i] + "/status", payload, 1);
+      io.println(1, "[DEVICE] " + device_ids[i] + " published status");
+    } else {
+      io.println(2, "[DEVICE] " + device_ids[i] + " connect failed");
+    }
+    conn.disconnect();
+    time.sleep(0.2);
+    i = i + 1;
+  }
+
+  // Wait for registry to collect
+  registry_thread.join();
+
+  // Verify all 3 devices registered
+  registry_mtx.lock();
+  let count = registry_devices.length();
+  io.println(1, "");
+  io.println(1, "Devices registered: " + string(count) + " / 3");
+
+  if (count < 3) {
+    registry_mtx.unlock();
+    io.println(2, "[FAIL] Not all devices registered");
+    return 1;
+  }
+
+  // Verify each device ID is present in the registry
+  let all_found as bool = true;
+  let j as i64 = 0;
+  while (j < 3) {
+    let target_id = device_ids[j];
+    let found as bool = false;
+    let k as i64 = 0;
+    while (k < registry_devices.length()) {
+      let entry = registry_devices[k];
+      // Check if the device_id appears in the JSON payload string
+      if (len(entry) > 0) {
+        // Parse the JSON to check device_id
+        let parsed = json.parse(entry);
+        if (parsed != nil) {
+          @unsafe {
+            let did = parsed["device_id"];
+            if (did == target_id) {
+              found = true;
+              k = registry_devices.length(); // break
+            }
+          }
+        }
+      }
+      k = k + 1;
+    }
+
+    if (found) {
+      io.println(1, "[PASS] Found: " + target_id);
+    } else {
+      io.println(2, "[FAIL] Missing: " + target_id);
+      all_found = false;
+    }
+    j = j + 1;
+  }
+  registry_mtx.unlock();
+
+  if (!all_found) {
+    return 1;
+  }
+
+  io.println(1, "");
+  io.println(1, "=== IoT Device Registry Test PASSED ===");
+  return 0;
+}

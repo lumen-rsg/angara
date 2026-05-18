@@ -1,0 +1,79 @@
+// 06_unsubscribe.an — Test subscribe, verify, unsubscribe, verify silence
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+export func main() -> i64 {
+  io.println(1, "=== Test 06: Unsubscribe ===");
+
+  let topic = "angara/test/unsub";
+  let sub as Connection = make_conn("unsub_sub");
+  let pub as Connection = make_conn("unsub_pub");
+
+  if (!wait_connected(sub, 3.0) || !wait_connected(pub, 3.0)) {
+    io.println(2, "[FAIL] Connection failed");
+    return 1;
+  }
+
+  // Phase 1: Subscribe and verify reception
+  sub.subscribe(topic, 1);
+  time.sleep(0.3);
+
+  pub.publish(topic, "before_unsub", 1);
+  let msg1 = sub.next_message(3000);
+
+  if (msg1 != nil) {
+    @unsafe {
+      if (msg1["payload"] != "before_unsub") {
+        io.println(2, "[FAIL] Payload mismatch before unsubscribe");
+        return 1;
+      }
+      io.println(1, "[PASS] Phase 1: Received message while subscribed");
+    }
+  } else {
+    io.println(2, "[FAIL] Did not receive message before unsubscribe");
+    return 1;
+  }
+
+  // Phase 2: Unsubscribe and verify silence
+  sub.unsubscribe(topic);
+  time.sleep(0.3);
+
+  pub.publish(topic, "after_unsub", 1);
+  time.sleep(0.5);
+
+  let msg2 = sub.next_message(1500);
+  if (msg2 != nil) {
+    @unsafe {
+      io.println(2, "[FAIL] Received message after unsubscribe: " + msg2["payload"]);
+    }
+    sub.disconnect();
+    pub.disconnect();
+    return 1;
+  }
+
+  io.println(1, "[PASS] Phase 2: No message received after unsubscribe");
+
+  sub.disconnect();
+  pub.disconnect();
+
+  io.println(1, "");
+  io.println(1, "=== All unsubscribe tests PASSED ===");
+  return 0;
+}

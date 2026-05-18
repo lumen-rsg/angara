@@ -25,6 +25,7 @@ void RuntimeBuilder::generateMemoryManagement() {
         auto* is_exception_bb = BasicBlock::Create(m_ctx, "is_exception", fn);
         auto* is_closure_bb = BasicBlock::Create(m_ctx, "is_closure", fn);
         auto* is_bound_bb = BasicBlock::Create(m_ctx, "is_bound", fn);
+        auto* is_native_bb = BasicBlock::Create(m_ctx, "is_native", fn);
         auto* default_bb = BasicBlock::Create(m_ctx, "default_free", fn);
 
         IRBuilder<> b(entry);
@@ -34,13 +35,14 @@ void RuntimeBuilder::generateMemoryManagement() {
         auto* obj_type_addr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
         auto* obj_type = b.CreateLoad(i32_ty, obj_type_addr, "obj_type");
 
-        auto* switch_inst = b.CreateSwitch(obj_type, default_bb, 6);
+        auto* switch_inst = b.CreateSwitch(obj_type, default_bb, 7);
         switch_inst->addCase(ConstantInt::get(i32_ty, OBJ_STRING), is_string_bb);
         switch_inst->addCase(ConstantInt::get(i32_ty, OBJ_LIST), is_list_bb);
         switch_inst->addCase(ConstantInt::get(i32_ty, OBJ_RECORD), is_record_bb);
         switch_inst->addCase(ConstantInt::get(i32_ty, OBJ_EXCEPTION), is_exception_bb);
         switch_inst->addCase(ConstantInt::get(i32_ty, OBJ_CLOSURE), is_closure_bb);
         switch_inst->addCase(ConstantInt::get(i32_ty, OBJ_BOUND_METHOD), is_bound_bb);
+        switch_inst->addCase(ConstantInt::get(i32_ty, OBJ_NATIVE_INSTANCE), is_native_bb);
 
         // --- String free: free(chars), free(string) ---
         {
@@ -174,6 +176,43 @@ void RuntimeBuilder::generateMemoryManagement() {
             auto* free_fn = m_module.getFunction("free");
             bb.CreateCall(free_fn, {obj_ptr});
             bb.CreateRetVoid();
+        }
+
+        // --- NativeInstance free: call finalize(data) if non-null, free(name), free(struct) ---
+        {
+            IRBuilder<> bn(is_native_bb);
+            auto* ni_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
+
+            // Load finalize fn ptr (field 2)
+            auto* finalize_ptr = bn.CreateStructGEP(m_native_instance_type, ni_ptr, 2);
+            auto* finalize_fn = bn.CreateLoad(PointerType::get(m_ctx, 0), finalize_ptr, "finalize");
+
+            // Load data ptr (field 1)
+            auto* data_ptr = bn.CreateStructGEP(m_native_instance_type, ni_ptr, 1);
+            auto* data = bn.CreateLoad(PointerType::get(m_ctx, 0), data_ptr, "data");
+
+            // Conditionally call finalize(data) if finalize != null
+            auto* has_finalize = bn.CreateICmpNE(finalize_fn,
+                ConstantPointerNull::get(PointerType::get(m_ctx, 0)));
+            auto* call_fin_bb = BasicBlock::Create(m_ctx, "call_fin", fn);
+            auto* after_fin_bb = BasicBlock::Create(m_ctx, "after_fin", fn);
+            bn.CreateCondBr(has_finalize, call_fin_bb, after_fin_bb);
+
+            IRBuilder<> bf(call_fin_bb);
+            auto* fin_ty = FunctionType::get(Type::getVoidTy(m_ctx), {PointerType::get(m_ctx, 0)}, false);
+            bf.CreateCall(fin_ty, finalize_fn, {data});
+            bf.CreateBr(after_fin_bb);
+
+            IRBuilder<> ba(after_fin_bb);
+            // Free name string (field 3, from strdup)
+            auto* name_ptr = ba.CreateStructGEP(m_native_instance_type, ni_ptr, 3);
+            auto* name = ba.CreateLoad(PointerType::get(m_ctx, 0), name_ptr, "name");
+            auto* free_fn2 = m_module.getFunction("free");
+            ba.CreateCall(free_fn2, {name});
+            // Free struct
+            auto* free_fn3 = m_module.getFunction("free");
+            ba.CreateCall(free_fn3, {obj_ptr});
+            ba.CreateRetVoid();
         }
 
         // --- Default free: just free the pointer ---

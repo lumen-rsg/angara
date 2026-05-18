@@ -349,62 +349,215 @@ void RuntimeBuilder::generateThreadOps() {
     auto* obj_ty = m_angara_obj_type;
     auto* i32_ty = Type::getInt32Ty(m_ctx);
     auto* i64_ty = Type::getInt64Ty(m_ctx);
+    auto* i8_ty = Type::getInt8Ty(m_ctx);
+    auto* void_ty = Type::getVoidTy(m_ctx);
+    auto* ptr_ty = PointerType::get(m_ctx, 0);
 
-    // Stubs that return nil
-    auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, i32_ty, PointerType::get(m_ctx, 0)}, false);
-    auto* fn = createRuntimeFunc("__ang_spawn_thread", fn_ty);
-    m_fn_thread_spawn = FunctionCallee(fn);
+    auto* malloc_fn = m_module.getFunction("malloc");
+    auto* free_fn = m_module.getFunction("free");
+    auto* pthread_create_fn = m_module.getFunction("pthread_create");
+    auto* pthread_join_fn = m_module.getFunction("pthread_join");
+    auto* pthread_mutex_init_fn = m_module.getFunction("pthread_mutex_init");
+    auto* pthread_mutex_lock_fn = m_module.getFunction("pthread_mutex_lock");
+    auto* pthread_mutex_unlock_fn = m_module.getFunction("pthread_mutex_unlock");
+
+    // Helper: pack a heap pointer into AngaraObject with TAG_OBJ
+    auto pack_obj = [&](IRBuilder<>& b, Value* raw_ptr) -> Value* {
+        auto* ptr_i8 = b.CreateBitCast(raw_ptr, ptr_ty);
+        auto* ptr_i64 = b.CreatePtrToInt(ptr_i8, i64_ty);
+        Value* result = UndefValue::get(obj_ty);
+        result = b.CreateInsertValue(result, ConstantInt::get(i32_ty, TAG_OBJ), {0});
+        result = b.CreateInsertValue(result, ptr_i64, {1});
+        return result;
+    };
+
+    // Helper: make nil
+    auto make_nil = [&](IRBuilder<>& b) -> Value* {
+        Value* nil_val = UndefValue::get(obj_ty);
+        nil_val = b.CreateInsertValue(nil_val, ConstantInt::get(i32_ty, TAG_NIL), {0});
+        nil_val = b.CreateInsertValue(nil_val, ConstantInt::get(i64_ty, 0), {1});
+        return nil_val;
+    };
+
+    // ========================================================================
+    // Thread trampoline: called by pthread_create, calls the closure, stores result
+    //   define void* @__ang_thread_trampoline(ptr %arg) {
+    //     %thread_struct = arg  -- points to AngaraThread
+    //     %closure = load from thread_struct field 2 (result slot reused temporarily)
+    //     %result = call __ang_call(%closure, 0, null)
+    //     store %result into thread_struct field 2
+    //     ret null
+    //   }
+    // ========================================================================
     {
+        auto* fn_ty = FunctionType::get(ptr_ty, {ptr_ty}, false);
+        auto* trampoline = createRuntimeFunc("__ang_thread_trampoline", fn_ty);
+        auto* entry = BasicBlock::Create(m_ctx, "entry", trampoline);
+        IRBuilder<> b(entry);
+        auto* arg = trampoline->arg_begin();
+        // The arg points to the AngaraThread struct
+        // Field layout: 0=ObjHeader, 1=pthread_t, 2=AngaraObject (closure, then result)
+        auto* closure = b.CreateLoad(obj_ty, b.CreateStructGEP(m_thread_type, arg, 2), "closure");
+        auto* call_fn = m_module.getFunction("__ang_call");
+        auto* result = b.CreateCall(call_fn, {
+            closure,
+            ConstantInt::get(i32_ty, 0),
+            ConstantPointerNull::get(ptr_ty)
+        });
+        // Store result back into field 2
+        b.CreateStore(result, b.CreateStructGEP(m_thread_type, arg, 2));
+        b.CreateRet(ConstantPointerNull::get(ptr_ty));
+    }
+
+    // ========================================================================
+    // __ang_spawn_thread(AngaraObject closure, i32 argc, ptr args) -> AngaraObject
+    // Allocates AngaraThread, stores closure, calls pthread_create, returns thread obj
+    // ========================================================================
+    {
+        auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, i32_ty, ptr_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_spawn_thread", fn_ty);
+        m_fn_thread_spawn = FunctionCallee(fn);
+
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<> b(entry);
-        Value* nil_val = UndefValue::get(obj_ty);
-        nil_val = b.CreateInsertValue(nil_val, ConstantInt::get(i32_ty, TAG_NIL), {0});
-        nil_val = b.CreateInsertValue(nil_val,
-            ConstantInt::get(i64_ty, 0), {1});
-        b.CreateRet(nil_val);
+        auto* closure = fn->arg_begin();
+
+        // Allocate AngaraThread struct
+        auto* size = ConstantInt::get(i64_ty, 32); // header(16) + ptr(8) + obj(16) = 40, padded to 32 w/ alignment
+        size = ConstantInt::get(i64_ty, 40);
+        auto* mem = b.CreateCall(malloc_fn, {size}, "mem");
+        auto* thread_ptr = b.CreateBitCast(mem, ptr_ty, "thread_ptr");
+
+        // Set header: obj_type = OBJ_THREAD, ref_count = 1
+        auto* header = b.CreateStructGEP(m_thread_type, thread_ptr, 0);
+        auto* type_addr = b.CreateStructGEP(m_obj_header_type, header, 0);
+        b.CreateStore(ConstantInt::get(i32_ty, OBJ_THREAD), type_addr);
+        auto* rc_addr = b.CreateStructGEP(m_obj_header_type, header, 1);
+        b.CreateStore(ConstantInt::get(i64_ty, 1), rc_addr);
+
+        // pthread_t slot (field 1) = null initially
+        auto* pthread_slot = b.CreateStructGEP(m_thread_type, thread_ptr, 1);
+        b.CreateStore(ConstantPointerNull::get(ptr_ty), pthread_slot);
+
+        // Store closure in field 2 (will be overwritten with result after thread runs)
+        auto* result_slot = b.CreateStructGEP(m_thread_type, thread_ptr, 2);
+        b.CreateStore(closure, result_slot);
+
+        // pthread_create(&thread_ptr->pthread, null, __ang_thread_trampoline, thread_ptr)
+        auto* trampoline = m_module.getFunction("__ang_thread_trampoline");
+        b.CreateCall(pthread_create_fn, {
+            pthread_slot,  // pthread_t* (output)
+            ConstantPointerNull::get(ptr_ty),  // attr
+            trampoline,    // start_routine
+            thread_ptr     // arg
+        });
+
+        b.CreateRet(pack_obj(b, thread_ptr));
     }
 
-    auto* fn_ty2 = FunctionType::get(obj_ty, {obj_ty}, false);
-    auto* fn2 = createRuntimeFunc("__ang_thread_join", fn_ty2);
-    m_fn_thread_join = FunctionCallee(fn2);
+    // ========================================================================
+    // __ang_thread_join(AngaraObject thread) -> AngaraObject
+    // Joins the pthread, returns the stored result from field 2
+    // ========================================================================
     {
-        auto* entry = BasicBlock::Create(m_ctx, "entry", fn2);
+        auto* fn_ty = FunctionType::get(obj_ty, {obj_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_thread_join", fn_ty);
+        m_fn_thread_join = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<> b(entry);
-        Value* nil_val = UndefValue::get(obj_ty);
-        nil_val = b.CreateInsertValue(nil_val, ConstantInt::get(i32_ty, TAG_NIL), {0});
-        nil_val = b.CreateInsertValue(nil_val,
-            ConstantInt::get(i64_ty, 0), {1});
-        b.CreateRet(nil_val);
+        auto* thread_obj = fn->arg_begin();
+
+        // Extract the heap pointer
+        auto* payload = b.CreateExtractValue(thread_obj, {1});
+        auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
+        auto* thread_ptr = b.CreateIntToPtr(ptr_i64, ptr_ty);
+
+        // Get pthread_t from field 1
+        auto* pthread_val = b.CreateLoad(ptr_ty,
+            b.CreateStructGEP(m_thread_type, thread_ptr, 1), "pthread");
+
+        // pthread_join(pthread, null)
+        b.CreateCall(pthread_join_fn, {pthread_val, ConstantPointerNull::get(ptr_ty)});
+
+        // Load result from field 2
+        auto* result = b.CreateLoad(obj_ty,
+            b.CreateStructGEP(m_thread_type, thread_ptr, 2), "result");
+        b.CreateRet(result);
     }
 
-    auto* fn_ty3 = FunctionType::get(obj_ty, {}, false);
-    auto* fn3 = createRuntimeFunc("__ang_mutex_new", fn_ty3);
-    m_fn_mutex_new = FunctionCallee(fn3);
+    // ========================================================================
+    // __ang_mutex_new() -> AngaraObject
+    // Allocates AngaraMutex, calls pthread_mutex_init, returns wrapped obj
+    // ========================================================================
     {
-        auto* entry = BasicBlock::Create(m_ctx, "entry", fn3);
+        auto* fn_ty = FunctionType::get(obj_ty, {}, false);
+        auto* fn = createRuntimeFunc("__ang_mutex_new", fn_ty);
+        m_fn_mutex_new = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<> b(entry);
-        Value* nil_val = UndefValue::get(obj_ty);
-        nil_val = b.CreateInsertValue(nil_val, ConstantInt::get(i32_ty, TAG_NIL), {0});
-        nil_val = b.CreateInsertValue(nil_val,
-            ConstantInt::get(i64_ty, 0), {1});
-        b.CreateRet(nil_val);
+
+        // Allocate AngaraMutex struct
+        auto* size = ConstantInt::get(i64_ty, 80); // header(16) + mutex_bytes(64) = 80
+        auto* mem = b.CreateCall(malloc_fn, {size}, "mem");
+        auto* mutex_ptr = b.CreateBitCast(mem, ptr_ty, "mutex_ptr");
+
+        // Set header: obj_type = OBJ_MUTEX, ref_count = 1
+        auto* header = b.CreateStructGEP(m_mutex_type, mutex_ptr, 0);
+        auto* type_addr = b.CreateStructGEP(m_obj_header_type, header, 0);
+        b.CreateStore(ConstantInt::get(i32_ty, OBJ_MUTEX), type_addr);
+        auto* rc_addr = b.CreateStructGEP(m_obj_header_type, header, 1);
+        b.CreateStore(ConstantInt::get(i64_ty, 1), rc_addr);
+
+        // Get pointer to the mutex bytes (field 1)
+        auto* mutex_bytes = b.CreateStructGEP(m_mutex_type, mutex_ptr, 1);
+
+        // pthread_mutex_init(mutex_bytes, null)
+        b.CreateCall(pthread_mutex_init_fn, {mutex_bytes, ConstantPointerNull::get(ptr_ty)});
+
+        b.CreateRet(pack_obj(b, mutex_ptr));
     }
 
-    auto* void_ty = Type::getVoidTy(m_ctx);
-    auto* fn_ty4 = FunctionType::get(void_ty, {obj_ty}, false);
-    auto* fn4 = createRuntimeFunc("__ang_mutex_lock", fn_ty4);
-    m_fn_mutex_lock = FunctionCallee(fn4);
+    // ========================================================================
+    // __ang_mutex_lock(AngaraObject mutex) -> void
+    // ========================================================================
     {
-        auto* entry = BasicBlock::Create(m_ctx, "entry", fn4);
+        auto* fn_ty = FunctionType::get(void_ty, {obj_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_mutex_lock", fn_ty);
+        m_fn_mutex_lock = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<> b(entry);
+        auto* mutex_obj = fn->arg_begin();
+
+        auto* payload = b.CreateExtractValue(mutex_obj, {1});
+        auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
+        auto* mutex_ptr = b.CreateIntToPtr(ptr_i64, ptr_ty);
+        auto* mutex_bytes = b.CreateStructGEP(m_mutex_type, mutex_ptr, 1);
+
+        b.CreateCall(pthread_mutex_lock_fn, {mutex_bytes});
         b.CreateRetVoid();
     }
 
-    auto* fn5 = createRuntimeFunc("__ang_mutex_unlock", fn_ty4);
-    m_fn_mutex_unlock = FunctionCallee(fn5);
+    // ========================================================================
+    // __ang_mutex_unlock(AngaraObject mutex) -> void
+    // ========================================================================
     {
-        auto* entry = BasicBlock::Create(m_ctx, "entry", fn5);
+        auto* fn_ty = FunctionType::get(void_ty, {obj_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_mutex_unlock", fn_ty);
+        m_fn_mutex_unlock = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<> b(entry);
+        auto* mutex_obj = fn->arg_begin();
+
+        auto* payload = b.CreateExtractValue(mutex_obj, {1});
+        auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
+        auto* mutex_ptr = b.CreateIntToPtr(ptr_i64, ptr_ty);
+        auto* mutex_bytes = b.CreateStructGEP(m_mutex_type, mutex_ptr, 1);
+
+        b.CreateCall(pthread_mutex_unlock_fn, {mutex_bytes});
         b.CreateRetVoid();
     }
 }

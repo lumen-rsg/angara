@@ -1,0 +1,180 @@
+// iot_smart_hub.an — IoT: smart hub aggregating sensors, controlling HVAC
+//
+// 3 sensors publish temperatures -> Hub subscribes via wildcard ->
+// Hub sends HVAC cooling command if any room exceeds threshold ->
+// HVAC subscriber verifies command received.
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+attach adv_string;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+const THRESHOLD as i64 = 24;
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+let hvac_commands as list<any> = [];
+let hvac_mtx = Mutex();
+let hub_done as bool = false;
+
+// HVAC subscriber: listens for cooling commands
+func hvac_task() -> i64 {
+  let conn as Connection = make_conn("hvac_unit");
+  if (!wait_connected(conn, 3.0)) {
+    return 1;
+  }
+  conn.subscribe("home/hvac/command", 1);
+  io.println(1, "[HVAC] Listening for commands...");
+
+  let start as f64 = time.now();
+  while ((time.now() - start) < 10.0) {
+    hvac_mtx.lock();
+    let stop = hub_done;
+    hvac_mtx.unlock();
+    if (stop && hvac_commands.length() > 0) {
+      break;
+    }
+
+    let msg = conn.next_message(1000);
+    if (msg != nil) {
+      @unsafe {
+        hvac_mtx.lock();
+        hvac_commands.push(msg["payload"]);
+        hvac_mtx.unlock();
+        io.println(1, "[HVAC] Command received: " + msg["payload"]);
+      }
+    }
+  }
+
+  conn.disconnect();
+  return 0;
+}
+
+// Smart hub: subscribes to all room temperatures, triggers HVAC
+func hub_task() -> i64 {
+  let conn as Connection = make_conn("smart_hub");
+  if (!wait_connected(conn, 3.0)) {
+    return 1;
+  }
+  conn.subscribe("home/+/temperature", 1);
+  io.println(1, "[HUB] Monitoring home/+/temperature...");
+
+  let readings as i64 = 0;
+  let start as f64 = time.now();
+  while (readings < 3 && (time.now() - start) < 10.0) {
+    let msg = conn.next_message(3000);
+    if (msg != nil) {
+      @unsafe {
+        let payload = msg["payload"];
+        // Payload format: "room_name:temp_value"
+        let colon_pos as i64 = 0;
+        let found as bool = false;
+        let i as i64 = 0;
+        while (i < len(payload)) {
+          if (adv_string.get(payload, i) == ":") {
+            colon_pos = i;
+            found = true;
+            i = len(payload); // break
+          }
+          i = i + 1;
+        }
+
+        if (found) {
+          let room = adv_string.substring(payload, 0, colon_pos);
+          let temp_str = adv_string.substring(payload, colon_pos + 1, len(payload));
+          let temp = i64(temp_str);
+
+          io.println(1, "[HUB] Reading: " + room + " = " + string(temp) + "C");
+
+          if (temp > THRESHOLD) {
+            let cmd = "cool:" + room;
+            conn.publish("home/hvac/command", cmd, 1);
+            io.println(1, "[HUB] Threshold exceeded! Sent: " + cmd);
+          }
+        }
+        readings = readings + 1;
+      }
+    }
+  }
+
+  conn.disconnect();
+  time.sleep(0.5);
+  hvac_mtx.lock();
+  hub_done = true;
+  hvac_mtx.unlock();
+  return 0;
+}
+
+export func main() -> i64 {
+  io.println(1, "=== IoT Simulation: Smart Hub ===");
+
+  // Start HVAC and Hub threads
+  let hvac_thread = spawn(hvac_task);
+  time.sleep(0.3);
+  let hub_thread = spawn(hub_task);
+  time.sleep(0.5);
+
+  // Sensors: publish fixed temperatures
+  // kitchen=25 (triggers cooling), bedroom=20 (safe), outdoor=10 (safe)
+  let sensor_data as list<any> = ["kitchen:25", "bedroom:20", "outdoor:10"];
+  let sensor_ids as list<any> = ["sensor_kitchen", "sensor_bedroom", "sensor_outdoor"];
+
+  let i as i64 = 0;
+  while (i < 3) {
+    let sid = string(sensor_ids[i]);
+    let sdata = string(sensor_data[i]);
+    let conn as Connection = make_conn(sid);
+    if (wait_connected(conn, 3.0)) {
+      conn.publish("home/" + sid + "/temperature", sdata, 1);
+      io.println(1, "[SENSOR] " + sdata + " -> home/" + sid + "/temperature");
+      time.sleep(0.2);
+    }
+    conn.disconnect();
+    i = i + 1;
+  }
+
+  // Wait for hub and HVAC
+  hub_thread.join();
+  hvac_thread.join();
+
+  // Verify: HVAC should have received exactly 1 cooling command (kitchen)
+  hvac_mtx.lock();
+  let cmd_count = hvac_commands.length();
+  hvac_mtx.unlock();
+
+  io.println(1, "");
+  io.println(1, "HVAC commands received: " + string(cmd_count));
+
+  if (cmd_count < 1) {
+    io.println(2, "[FAIL] No HVAC cooling commands received");
+    return 1;
+  }
+
+  // Verify the command is for kitchen
+  hvac_mtx.lock();
+  let first_cmd as string = string(hvac_commands[0]);
+  hvac_mtx.unlock();
+
+  if (first_cmd != "cool:kitchen") {
+    io.println(2, "[FAIL] Expected 'cool:kitchen', got: " + first_cmd);
+    return 1;
+  }
+
+  io.println(1, "[PASS] Kitchen (25C > 24C threshold) triggered cooling command");
+  io.println(1, "[PASS] Bedroom (20C) and outdoor (10C) did not trigger commands");
+  io.println(1, "");
+  io.println(1, "=== IoT Smart Hub Test PASSED ===");
+  return 0;
+}

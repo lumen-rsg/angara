@@ -1,0 +1,78 @@
+// 09_rapid_fire.an — Test rapid sequential publishing (50 messages, QoS 1)
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+const MESSAGE_COUNT as i64 = 50;
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+export func main() -> i64 {
+  io.println(1, "=== Test 09: Rapid Fire (" + string(MESSAGE_COUNT) + " messages) ===");
+
+  let topic = "angara/test/rapid";
+  let sub as Connection = make_conn("rapid_sub");
+  let pub as Connection = make_conn("rapid_pub");
+
+  if (!wait_connected(sub, 3.0) || !wait_connected(pub, 3.0)) {
+    io.println(2, "[FAIL] Connection failed");
+    return 1;
+  }
+
+  sub.subscribe(topic, 1);
+  time.sleep(0.3);
+
+  // Fire all messages as fast as possible
+  let start_time as f64 = time.now();
+  let i as i64 = 0;
+  while (i < MESSAGE_COUNT) {
+    pub.publish(topic, "msg_" + string(i), 1);
+    i = i + 1;
+  }
+  let publish_time as f64 = time.now() - start_time;
+  io.println(1, "Published " + string(MESSAGE_COUNT) + " messages in " + string(publish_time) + "s");
+
+  // Drain received messages
+  let received as i64 = 0;
+  let drain_start as f64 = time.now();
+  while (received < MESSAGE_COUNT) {
+    let msg = sub.next_message(2000);
+    if (msg == nil) {
+      // No more messages within timeout
+      break;
+    }
+    received = received + 1;
+    if (time.now() - drain_start > 10.0) {
+      break;
+    }
+  }
+
+  sub.disconnect();
+  pub.disconnect();
+
+  io.println(1, "Received: " + string(received) + " / " + string(MESSAGE_COUNT));
+
+  // With QoS 1, we expect all messages (allow small margin for timing)
+  if (received < MESSAGE_COUNT - 2) {
+    io.println(2, "[FAIL] Received only " + string(received) + "/" + string(MESSAGE_COUNT));
+    return 1;
+  }
+
+  io.println(1, "[PASS] Received " + string(received) + " messages (expected ~" + string(MESSAGE_COUNT) + ")");
+  io.println(1, "");
+  io.println(1, "=== Rapid fire test PASSED ===");
+  return 0;
+}

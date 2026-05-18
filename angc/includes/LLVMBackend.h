@@ -114,6 +114,7 @@ namespace angara {
 
         // --- Runtime call helper ---
         llvm::Value* callRt(llvm::FunctionCallee callee, const std::vector<llvm::Value*>& args);
+        llvm::Value* callRtByName(const std::string& name, const std::vector<llvm::Value*>& args);
 
         // --- Variable management ---
         llvm::AllocaInst* allocLocal(llvm::Function* fn, const std::string& name);

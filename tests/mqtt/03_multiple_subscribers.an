@@ -1,0 +1,113 @@
+// 03_multiple_subscribers.an — Test multiple subscribers on same topic
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+export func main() -> i64 {
+  io.println(1, "=== Test 03: Multiple Subscribers ===");
+
+  let topic = "angara/test/multi_sub";
+  let payload = "broadcast_" + string(time.now());
+
+  // Create 3 subscribers
+  let sub1 as Connection = make_conn("multi_sub_1");
+  let sub2 as Connection = make_conn("multi_sub_2");
+  let sub3 as Connection = make_conn("multi_sub_3");
+
+  if (!wait_connected(sub1, 3.0) || !wait_connected(sub2, 3.0) || !wait_connected(sub3, 3.0)) {
+    io.println(2, "[FAIL] Could not connect all subscribers");
+    return 1;
+  }
+
+  sub1.subscribe(topic, 1);
+  sub2.subscribe(topic, 1);
+  sub3.subscribe(topic, 1);
+  time.sleep(0.5);
+
+  // Publish one message
+  let pub as Connection = make_conn("multi_pub");
+  if (!wait_connected(pub, 3.0)) {
+    io.println(2, "[FAIL] Publisher connect failed");
+    return 1;
+  }
+  pub.publish(topic, payload, 1);
+
+  // Each subscriber should receive the message
+  let msg1 = sub1.next_message(3000);
+  let msg2 = sub2.next_message(3000);
+  let msg3 = sub3.next_message(3000);
+
+  let failures as i64 = 0;
+
+  if (msg1 != nil) {
+    @unsafe {
+      if (msg1["payload"] != payload) {
+        io.println(2, "[FAIL] Subscriber 1 payload mismatch");
+        failures = failures + 1;
+      } else {
+        io.println(1, "[PASS] Subscriber 1 received: " + msg1["payload"]);
+      }
+    }
+  } else {
+    io.println(2, "[FAIL] Subscriber 1 did not receive message");
+    failures = failures + 1;
+  }
+
+  if (msg2 != nil) {
+    @unsafe {
+      if (msg2["payload"] != payload) {
+        io.println(2, "[FAIL] Subscriber 2 payload mismatch");
+        failures = failures + 1;
+      } else {
+        io.println(1, "[PASS] Subscriber 2 received: " + msg2["payload"]);
+      }
+    }
+  } else {
+    io.println(2, "[FAIL] Subscriber 2 did not receive message");
+    failures = failures + 1;
+  }
+
+  if (msg3 != nil) {
+    @unsafe {
+      if (msg3["payload"] != payload) {
+        io.println(2, "[FAIL] Subscriber 3 payload mismatch");
+        failures = failures + 1;
+      } else {
+        io.println(1, "[PASS] Subscriber 3 received: " + msg3["payload"]);
+      }
+    }
+  } else {
+    io.println(2, "[FAIL] Subscriber 3 did not receive message");
+    failures = failures + 1;
+  }
+
+  sub1.disconnect();
+  sub2.disconnect();
+  sub3.disconnect();
+  pub.disconnect();
+
+  io.println(1, "");
+  if (failures == 0) {
+    io.println(1, "=== All multiple subscriber tests PASSED ===");
+    return 0;
+  } else {
+    io.println(2, "=== " + string(failures) + " subscriber tests FAILED ===");
+    return 1;
+  }
+}
