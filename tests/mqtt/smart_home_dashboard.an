@@ -1,0 +1,458 @@
+// smart_home_dashboard.an — Smart Home IoT Terminal Dashboard
+//
+// Subscribes to home/# MQTT topics and renders a live ASCII dashboard
+// with sparkline charts, color-coded values, and progress bars.
+//
+// Run alongside smart_home_sim.an for live data.
+
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+attach json;
+attach term;
+attach color;
+attach adv_string;
+attach math;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+const CARD_W as i64 = 21;
+const CARD_INNER as i64 = 19;
+const SPARK_W as i64 = 10;
+const UTIL_W as i64 = 17;
+const UTIL_INNER as i64 = 15;
+const UTIL_SPARK as i64 = 13;
+const COL_L as i64 = 1;
+const COL_R as i64 = 25;
+const UC1 as i64 = 1;
+const UC2 as i64 = 20;
+const UC3 as i64 = 39;
+
+// ─── Global sensor state ───────────────────────────────────────
+
+let g_living_temp as f64 = 0.0;
+let g_living_hum as f64 = 0.0;
+let g_living_temp_hist as list<any> = [];
+let g_living_hum_hist as list<any> = [];
+
+let g_kitchen_temp as f64 = 0.0;
+let g_kitchen_hum as f64 = 0.0;
+let g_kitchen_temp_hist as list<any> = [];
+let g_kitchen_hum_hist as list<any> = [];
+
+let g_bedroom_temp as f64 = 0.0;
+let g_bedroom_hum as f64 = 0.0;
+let g_bedroom_temp_hist as list<any> = [];
+let g_bedroom_hum_hist as list<any> = [];
+
+let g_bathroom_temp as f64 = 0.0;
+let g_bathroom_hum as f64 = 0.0;
+let g_bathroom_temp_hist as list<any> = [];
+let g_bathroom_hum_hist as list<any> = [];
+
+let g_outdoor_temp as f64 = 0.0;
+let g_outdoor_hum as f64 = 0.0;
+let g_outdoor_wind as f64 = 0.0;
+let g_outdoor_temp_hist as list<any> = [];
+
+let g_energy as f64 = 0.0;
+let g_energy_hist as list<any> = [];
+
+let g_water as f64 = 0.0;
+let g_water_hist as list<any> = [];
+
+let g_co2 as f64 = 0.0;
+let g_co2_hist as list<any> = [];
+
+let g_msg_count as i64 = 0;
+let g_running as bool = true;
+let g_mtx = Mutex();
+
+// ─── Helpers ───────────────────────────────────────────────────
+
+func format_f64_1(v as f64) -> string {
+  let r = f64(math.round(v * 10.0));
+  let rounded = r / 10.0;
+  let s = string(rounded);
+  let dot_pos as i64 = adv_string.index_of(s, ".");
+  if (dot_pos < 0) {
+    return s + ".0";
+  }
+  let after_dot as i64 = 0;
+  let pos as i64 = dot_pos + 1;
+  while (pos < len(s)) {
+    after_dot = after_dot + 1;
+    pos = pos + 1;
+  }
+  if (after_dot > 1) {
+    return adv_string.substring(s, 0, dot_pos + 2);
+  }
+  if (after_dot == 0) {
+    return s + "0";
+  }
+  return s;
+}
+
+func sparkline_char(val as f64, mn as f64, mx as f64) -> string {
+  let chars as list<any> = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+  if (mx <= mn) { return "▁"; }
+  let norm = (val - mn) / (mx - mn);
+  let idx as i64 = i64(norm * 8.0);
+  if (idx < 0) { idx = 0; }
+  if (idx > 7) { idx = 7; }
+  @unsafe {
+    return string(chars[idx]);
+  }
+}
+
+func render_sparkline(hist as list<any>, mn as f64, mx as f64, width as i64) -> string {
+  let hist_len = hist.length();
+  let start as i64 = 0;
+  if (hist_len > width) {
+    start = hist_len - width;
+  }
+  let s as string = "";
+  let i as i64 = start;
+  while (i < hist_len) {
+    @unsafe {
+      s = s + sparkline_char(f64(hist[i]), mn, mx);
+    }
+    i = i + 1;
+  }
+  while (len(s) < width) {
+    s = " " + s;
+  }
+  return s;
+}
+
+func temp_color(temp as f64) -> string {
+  if (temp < 15.0) { return color.blue(); }
+  if (temp < 20.0) { return color.bright_blue(); }
+  if (temp < 25.0) { return color.green(); }
+  if (temp < 28.0) { return color.yellow(); }
+  return color.red();
+}
+
+func hum_color(hum as f64) -> string {
+  if (hum < 30.0) { return color.yellow(); }
+  if (hum < 60.0) { return color.green(); }
+  return color.bright_blue();
+}
+
+func make_bar(val as f64, max_val as f64, width as i64) -> string {
+  if (max_val <= 0.0) { return "[" + adv_string.repeat("░", width) + "]"; }
+  let pct = val / max_val;
+  if (pct < 0.0) { pct = 0.0; }
+  if (pct > 1.0) { pct = 1.0; }
+  let filled as i64 = i64(pct * f64(width));
+  if (filled > width) { filled = width; }
+  let empty = width - filled;
+  return "[" + adv_string.repeat("█", filled) + adv_string.repeat("░", empty) + "]";
+}
+
+// ─── MQTT connection helpers ───────────────────────────────────
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+// ─── Drawing functions ─────────────────────────────────────────
+
+func draw_at(row as i64, col as i64, text as string) -> nil {
+  term.cursor_move(row, col);
+  io.println(1, text);
+}
+
+func color_val(text as string, clr as string) -> string {
+  return clr + text + color.reset();
+}
+
+func draw_room_card(row as i64, col as i64, name as string,
+                    temp as f64, hum as f64,
+                    temp_hist as list<any>, hum_hist as list<any>) -> nil {
+  // Top border
+  let name_pad = CARD_INNER - 4 - len(name);
+  if (name_pad < 1) { name_pad = 1; }
+  draw_at(row, col, "┌─ " + name + " " + adv_string.repeat("─", name_pad) + "┐");
+
+  // Temp line: │T: 22.3 C ▂▃▃▄▅▆▇█▇▆│
+  let t_str = adv_string.pad_start(format_f64_1(temp), 5, " ");
+  let t_col = color_val(t_str, temp_color(temp));
+  let t_spark = render_sparkline(temp_hist, 15.0, 30.0, SPARK_W);
+  draw_at(row + 1, col, "│T:" + t_col + "C " + t_spark + "│");
+
+  // Humidity line
+  let h_str = adv_string.pad_start(format_f64_1(hum), 5, " ");
+  let h_col = color_val(h_str, hum_color(hum));
+  let h_spark = render_sparkline(hum_hist, 30.0, 95.0, SPARK_W);
+  draw_at(row + 2, col, "│H:" + h_col + "% " + h_spark + "│");
+
+  // Bottom border
+  draw_at(row + 3, col, "└" + adv_string.repeat("─", CARD_INNER) + "┘");
+}
+
+func draw_outdoor_panel(row as i64, temp as f64, hum as f64, wind as f64,
+                        hist as list<any>) -> nil {
+  let full_w = CARD_W + 3 + CARD_W;
+  let inner = full_w - 2;
+
+  // Top border
+  draw_at(row, 1, "┌──── OUTDOOR WEATHER" + adv_string.repeat("─", inner - 20) + "┐");
+
+  // Values line
+  let t_s = adv_string.pad_start(format_f64_1(temp), 5, " ");
+  let h_s = adv_string.pad_start(format_f64_1(hum), 5, " ");
+  let w_s = adv_string.pad_start(format_f64_1(wind), 5, " ");
+  let vals = "│ T:" + color_val(t_s, temp_color(temp)) + "C    H:"
+             + color_val(h_s, hum_color(hum)) + "%    Wind:"
+             + w_s + "km/h │";
+  draw_at(row + 1, 1, vals);
+
+  // Sparkline
+  let spark = render_sparkline(hist, -5.0, 38.0, inner);
+  draw_at(row + 2, 1, "│" + spark + "│");
+
+  // Bottom border
+  draw_at(row + 3, 1, "└" + adv_string.repeat("─", inner) + "┘");
+}
+
+func draw_utility_card(row as i64, col as i64, label as string,
+                       val as f64, unit as string, max_val as f64,
+                       hist as list<any>, bar_width as i64,
+                       spark_mn as f64, spark_mx as f64) -> nil {
+  // Top border
+  let lbl = " " + label + " ";
+  let lbl_len = len(lbl);
+  let dash_pad = UTIL_INNER - lbl_len;
+  if (dash_pad < 2) { dash_pad = 2; }
+  let dash_left as i64 = dash_pad / 2;
+  let dash_right = dash_pad - dash_left;
+  draw_at(row, col, "┌" + adv_string.repeat("─", dash_left) + lbl + adv_string.repeat("─", dash_right) + "┐");
+
+  // Value line
+  let val_str = format_f64_1(val) + " " + unit;
+  let val_padded = adv_string.pad_start(val_str, UTIL_INNER - 2, " ");
+  draw_at(row + 1, col, "│ " + val_padded + " │");
+
+  // Progress bar
+  let bar = make_bar(val, max_val, bar_width);
+  let bar_padded = adv_string.pad_start(bar, UTIL_INNER - 2, " ");
+  draw_at(row + 2, col, "│ " + bar_padded + " │");
+
+  // Sparkline
+  let spark = render_sparkline(hist, spark_mn, spark_mx, UTIL_SPARK);
+  draw_at(row + 3, col, "│ " + spark + " │");
+
+  // Bottom border
+  draw_at(row + 4, col, "└" + adv_string.repeat("─", UTIL_INNER) + "┘");
+}
+
+// ─── MQTT subscriber thread ────────────────────────────────────
+
+func mqtt_subscriber() -> i64 {
+  let conn as Connection = make_conn("dashboard_sub");
+  if (!wait_connected(conn, 5.0)) {
+    io.println(2, "[DASHBOARD] Failed to connect to broker");
+    return 1;
+  }
+  conn.subscribe("home/#", 1);
+
+  while (g_running) {
+    let msg = conn.next_message(500);
+    if (msg != nil) {
+      @unsafe {
+        let topic = string(msg["topic"]);
+        let payload = string(msg["payload"]);
+        let parsed = json.parse(payload);
+
+        g_mtx.lock();
+
+        if (topic == "home/living_room/temperature") {
+          let v = f64(parsed["value"]);
+          g_living_temp = v;
+          g_living_temp_hist.push(v);
+        }
+        if (topic == "home/living_room/humidity") {
+          let v = f64(parsed["value"]);
+          g_living_hum = v;
+          g_living_hum_hist.push(v);
+        }
+        if (topic == "home/kitchen/temperature") {
+          let v = f64(parsed["value"]);
+          g_kitchen_temp = v;
+          g_kitchen_temp_hist.push(v);
+        }
+        if (topic == "home/kitchen/humidity") {
+          let v = f64(parsed["value"]);
+          g_kitchen_hum = v;
+          g_kitchen_hum_hist.push(v);
+        }
+        if (topic == "home/bedroom/temperature") {
+          let v = f64(parsed["value"]);
+          g_bedroom_temp = v;
+          g_bedroom_temp_hist.push(v);
+        }
+        if (topic == "home/bedroom/humidity") {
+          let v = f64(parsed["value"]);
+          g_bedroom_hum = v;
+          g_bedroom_hum_hist.push(v);
+        }
+        if (topic == "home/bathroom/temperature") {
+          let v = f64(parsed["value"]);
+          g_bathroom_temp = v;
+          g_bathroom_temp_hist.push(v);
+        }
+        if (topic == "home/bathroom/humidity") {
+          let v = f64(parsed["value"]);
+          g_bathroom_hum = v;
+          g_bathroom_hum_hist.push(v);
+        }
+        if (topic == "home/outdoor/weather") {
+          g_outdoor_temp = f64(parsed["temperature"]);
+          g_outdoor_hum = f64(parsed["humidity"]);
+          g_outdoor_wind = f64(parsed["wind_speed"]);
+          g_outdoor_temp_hist.push(g_outdoor_temp);
+        }
+        if (topic == "home/energy/power") {
+          let v = f64(parsed["value"]);
+          g_energy = v;
+          g_energy_hist.push(v);
+        }
+        if (topic == "home/water/flow") {
+          let v = f64(parsed["value"]);
+          g_water = v;
+          g_water_hist.push(v);
+        }
+        if (topic == "home/air_quality/co2") {
+          let v = f64(parsed["value"]);
+          g_co2 = v;
+          g_co2_hist.push(v);
+        }
+
+        g_msg_count = g_msg_count + 1;
+        g_mtx.unlock();
+      }
+    }
+  }
+
+  conn.disconnect();
+  return 0;
+}
+
+// ─── Key listener thread ───────────────────────────────────────
+
+func key_listener() -> i64 {
+  while (g_running) {
+    let key = term.read_key();
+    if (key == "q" || key == "Q" || key == "escape") {
+      g_mtx.lock();
+      g_running = false;
+      g_mtx.unlock();
+    }
+  }
+  return 0;
+}
+
+// ─── Main ──────────────────────────────────────────────────────
+
+export func main() -> i64 {
+  io.println(1, "=== Angara Smart Home Dashboard ===");
+  io.println(1, "Connecting to " + BROKER_URL + "...");
+
+  let conn as Connection = make_conn("dashboard_main");
+  if (!wait_connected(conn, 5.0)) {
+    io.println(2, "[FAIL] Could not connect to broker");
+    return 1;
+  }
+  conn.subscribe("home/#", 1);
+  io.println(1, "Subscribed. Starting dashboard...");
+  time.sleep(1.0);
+
+  term.hide_cursor();
+  term.clear();
+
+  let sub_thread = spawn(mqtt_subscriber);
+  let key_thread = spawn(key_listener);
+
+  // Render loop
+  while (g_running) {
+    // Copy state under mutex
+    g_mtx.lock();
+    let lt = g_living_temp;   let lh = g_living_hum;
+    let kt = g_kitchen_temp;  let kh = g_kitchen_hum;
+    let bt = g_bedroom_temp;  let bh = g_bedroom_hum;
+    let rt = g_bathroom_temp; let rh = g_bathroom_hum;
+    let ot = g_outdoor_temp;  let oh = g_outdoor_hum; let ow = g_outdoor_wind;
+    let en = g_energy;  let wa = g_water; let co = g_co2;
+    let msgs = g_msg_count;
+
+    let lt_h as list<any> = g_living_temp_hist;
+    let lh_h as list<any> = g_living_hum_hist;
+    let kt_h as list<any> = g_kitchen_temp_hist;
+    let kh_h as list<any> = g_kitchen_hum_hist;
+    let bt_h as list<any> = g_bedroom_temp_hist;
+    let bh_h as list<any> = g_bedroom_hum_hist;
+    let rt_h as list<any> = g_bathroom_temp_hist;
+    let rh_h as list<any> = g_bathroom_hum_hist;
+    let ot_h as list<any> = g_outdoor_temp_hist;
+    let en_h as list<any> = g_energy_hist;
+    let wa_h as list<any> = g_water_hist;
+    let co_h as list<any> = g_co2_hist;
+    g_mtx.unlock();
+
+    // Clear and draw
+    term.clear();
+
+    // Row 1: Header
+    let hdr = color.bold() + color.bright_cyan() + " ══════════ ANGARA SMART HOME ══════════ " + color.reset();
+    draw_at(1, 1, hdr);
+
+    // Row 3-6: Living Room + Kitchen
+    draw_room_card(3, COL_L, "Living Room", lt, lh, lt_h, lh_h);
+    draw_room_card(3, COL_R, "Kitchen",     kt, kh, kt_h, kh_h);
+
+    // Row 8-11: Bedroom + Bathroom
+    draw_room_card(8, COL_L, "Bedroom",  bt, bh, bt_h, bh_h);
+    draw_room_card(8, COL_R, "Bathroom", rt, rh, rt_h, rh_h);
+
+    // Row 13-16: Outdoor Weather
+    draw_outdoor_panel(13, ot, oh, ow, ot_h);
+
+    // Row 18-22: Utility meters
+    draw_utility_card(18, UC1, "ENERGY",  en, "W",     3500.0, en_h, 9,  500.0, 3500.0);
+    draw_utility_card(18, UC2, "WATER",   wa, "L/min", 15.0,   wa_h, 9,  0.0,   15.0);
+    draw_utility_card(18, UC3, "AIR CO2", co, "ppm",   1200.0, co_h, 9,  350.0, 1200.0);
+
+    // Row 24: Footer
+    let avg_temp = (lt + kt + bt + rt) / 4.0;
+    let footer = color.dim() + "Msgs:" + adv_string.pad_start(string(msgs), 4, " ")
+               + " │ Avg:" + adv_string.pad_start(format_f64_1(avg_temp), 5, " ") + "C"
+               + " │ Power:" + adv_string.pad_start(format_f64_1(en), 6, " ") + "W"
+               + " │ Press q to quit" + color.reset();
+    draw_at(24, 1, footer);
+
+    time.sleep(0.3);
+  }
+
+  // Cleanup
+  term.show_cursor();
+  term.clear();
+  io.println(1, "Dashboard stopped.");
+
+  g_mtx.lock();
+  g_running = false;
+  g_mtx.unlock();
+  time.sleep(0.3);
+
+  conn.disconnect();
+  return 0;
+}

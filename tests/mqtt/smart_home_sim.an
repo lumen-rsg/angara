@@ -1,0 +1,231 @@
+// smart_home_sim.an — Smart Home IoT Sensor Simulator
+//
+// Simulates 12 sensors across a smart home, publishing JSON payloads
+// to MQTT topics every 1-3 seconds with realistic drift and occasional spikes.
+//
+// Sensors:
+//   4 rooms (Living, Kitchen, Bedroom, Bathroom) — temp + humidity each
+//   Outdoor — temperature, humidity, wind speed (composite)
+//   Energy meter — power (W)
+//   Water flow — liters/min
+//   Air quality — CO2 ppm
+
+attach connect, Connection from mqtt;
+attach io;
+attach time;
+attach random;
+attach json;
+attach math;
+attach adv_string;
+
+const BROKER_URL as string = "mqtt://localhost:11883";
+const SPIKE_CHANCE as f64 = 0.05;
+
+// Per-sensor configuration arrays (read-only)
+let g_topics as list<any> = [];
+let g_sensor_names as list<any> = [];
+let g_min_val as list<any> = [];
+let g_max_val as list<any> = [];
+let g_drift as list<any> = [];
+let g_units as list<any> = [];
+let g_intervals as list<any> = [];
+
+// Individual base values for drift tracking
+let g_bv0 as f64 = 22.0;
+let g_bv1 as f64 = 50.0;
+let g_bv2 as f64 = 24.0;
+let g_bv3 as f64 = 55.0;
+let g_bv4 as f64 = 20.0;
+let g_bv5 as f64 = 45.0;
+let g_bv6 as f64 = 23.0;
+let g_bv7 as f64 = 65.0;
+let g_bv8 as f64 = 0.0;
+let g_bv9 as f64 = 1800.0;
+let g_bv10 as f64 = 4.0;
+let g_bv11 as f64 = 500.0;
+
+func wait_connected(conn as Connection, max_wait as f64) -> bool {
+  let attempts as i64 = 0;
+  let max_attempts as i64 = i64(max_wait * 20.0);
+  while (!conn.is_connected() && attempts < max_attempts) {
+    time.sleep(0.05);
+    attempts = attempts + 1;
+  }
+  return conn.is_connected();
+}
+
+func make_conn(cid as string) -> Connection {
+  return connect(BROKER_URL, { "clientId": cid, "cleanSession": true });
+}
+
+func add_sensor(topic as string, name as string, min_v as f64, max_v as f64, drft as f64, unit as string, interval as f64) -> nil {
+  g_topics.push(topic);
+  g_sensor_names.push(name);
+  g_min_val.push(min_v);
+  g_max_val.push(max_v);
+  g_drift.push(drft);
+  g_units.push(unit);
+  g_intervals.push(interval);
+}
+
+func init_sensors() -> nil {
+  add_sensor("home/living_room/temperature", "living_temp",     18.0, 28.0, 0.3, "C",     2.0);
+  add_sensor("home/living_room/humidity",    "living_hum",      40.0, 60.0, 1.0, "%",     2.0);
+  add_sensor("home/kitchen/temperature",     "kitchen_temp",    20.0, 32.0, 0.4, "C",     1.5);
+  add_sensor("home/kitchen/humidity",        "kitchen_hum",     35.0, 75.0, 1.5, "%",     1.5);
+  add_sensor("home/bedroom/temperature",     "bedroom_temp",    16.0, 25.0, 0.2, "C",     2.5);
+  add_sensor("home/bedroom/humidity",        "bedroom_hum",     30.0, 55.0, 0.8, "%",     2.5);
+  add_sensor("home/bathroom/temperature",    "bathroom_temp",   20.0, 28.0, 0.3, "C",     2.0);
+  add_sensor("home/bathroom/humidity",       "bathroom_hum",    50.0, 90.0, 2.0, "%",     2.0);
+  add_sensor("home/outdoor/weather",         "outdoor_weather",   0.0,  0.0, 0.0, "",      3.0);
+  add_sensor("home/energy/power",            "energy_meter",   500.0, 3500.0, 50.0, "W",  1.0);
+  add_sensor("home/water/flow",              "water_flow",       0.0,  15.0, 0.5, "L/min", 1.5);
+  add_sensor("home/air_quality/co2",         "air_co2",       350.0, 1200.0, 15.0, "ppm",  2.0);
+}
+
+func update_base(idx as i64, val as f64) -> nil {
+  if (idx == 0)  { g_bv0  = val; }
+  if (idx == 1)  { g_bv1  = val; }
+  if (idx == 2)  { g_bv2  = val; }
+  if (idx == 3)  { g_bv3  = val; }
+  if (idx == 4)  { g_bv4  = val; }
+  if (idx == 5)  { g_bv5  = val; }
+  if (idx == 6)  { g_bv6  = val; }
+  if (idx == 7)  { g_bv7  = val; }
+  if (idx == 8)  { g_bv8  = val; }
+  if (idx == 9)  { g_bv9  = val; }
+  if (idx == 10) { g_bv10 = val; }
+  if (idx == 11) { g_bv11 = val; }
+}
+
+func get_base(idx as i64) -> f64 {
+  if (idx == 0)  { return g_bv0; }
+  if (idx == 1)  { return g_bv1; }
+  if (idx == 2)  { return g_bv2; }
+  if (idx == 3)  { return g_bv3; }
+  if (idx == 4)  { return g_bv4; }
+  if (idx == 5)  { return g_bv5; }
+  if (idx == 6)  { return g_bv6; }
+  if (idx == 7)  { return g_bv7; }
+  if (idx == 8)  { return g_bv8; }
+  if (idx == 9)  { return g_bv9; }
+  if (idx == 10) { return g_bv10; }
+  if (idx == 11) { return g_bv11; }
+  return 0.0;
+}
+
+func generate_value(idx as i64) -> f64 {
+  @unsafe {
+    let base = get_base(idx);
+    let mn = f64(g_min_val[idx]);
+    let mx = f64(g_max_val[idx]);
+    let dr = f64(g_drift[idx]);
+
+    let delta = (random.float() * 2.0 - 1.0) * dr;
+
+    if (random.float() < SPIKE_CHANCE) {
+      delta = delta * 3.0;
+    }
+
+    let new_val = f64(math.clamp(base + delta, mn, mx));
+    update_base(idx, new_val);
+    return new_val;
+  }
+}
+
+func format_f64_1(v as f64) -> string {
+  let r = f64(math.round(v * 10.0));
+  let rounded = r / 10.0;
+  let s = string(rounded);
+  let dot_pos as i64 = adv_string.index_of(s, ".");
+  if (dot_pos < 0) {
+    return s + ".0";
+  }
+  let after_dot as i64 = 0;
+  let pos as i64 = dot_pos + 1;
+  while (pos < len(s)) {
+    after_dot = after_dot + 1;
+    pos = pos + 1;
+  }
+  if (after_dot > 1) {
+    return adv_string.substring(s, 0, dot_pos + 2);
+  }
+  if (after_dot == 0) {
+    return s + "0";
+  }
+  return s;
+}
+
+func publish_sensor(conn as Connection, idx as i64) -> nil {
+  @unsafe {
+    let topic = string(g_topics[idx]);
+    let name = string(g_sensor_names[idx]);
+
+    if (idx == 8) {
+      let otemp = f64(math.clamp(g_bv8 + (random.float() * 2.0 - 1.0) * 0.5, -5.0, 38.0));
+      let ohum = f64(math.clamp(55.0 + (random.float() * 2.0 - 1.0) * 3.0, 20.0, 95.0));
+      let owind = f64(math.clamp(8.0 + (random.float() * 2.0 - 1.0) * 4.0 + random.float() * 2.0, 0.0, 35.0));
+      update_base(8, otemp);
+
+      let payload = json.stringify({
+        "sensor": "outdoor_weather",
+        "temperature": otemp,
+        "humidity": ohum,
+        "wind_speed": owind,
+        "ts": time.now()
+      });
+      conn.publish(topic, payload, 1);
+      io.println(1, "[SENSOR] outdoor: " + format_f64_1(otemp) + "C " + format_f64_1(ohum) + "% wind=" + format_f64_1(owind) + "km/h");
+      return nil;
+    }
+
+    let val = generate_value(idx);
+    @unsafe {
+      let unit = string(g_units[idx]);
+      let payload = json.stringify({
+        "sensor": name,
+        "value": val,
+        "unit": unit,
+        "ts": time.now()
+      });
+      conn.publish(topic, payload, 1);
+      io.println(1, "[SENSOR] " + name + ": " + format_f64_1(val) + " " + unit + " -> " + topic);
+    }
+  }
+}
+
+export func main() -> i64 {
+  io.println(1, "=== Smart Home Sensor Simulator ===");
+  io.println(1, "");
+
+  init_sensors();
+  io.println(1, "Initialized " + string(g_topics.length()) + " sensors");
+
+  let conn as Connection = make_conn("smart_home_sim");
+  if (!wait_connected(conn, 5.0)) {
+    io.println(2, "[FAIL] Could not connect to broker");
+    return 1;
+  }
+  io.println(1, "Connected to " + BROKER_URL);
+  io.println(1, "");
+
+  let cycle as i64 = 0;
+  while (conn.is_connected()) {
+    cycle = cycle + 1;
+    io.println(1, "--- Cycle " + string(cycle) + " ---");
+
+    let i as i64 = 0;
+    while (i < g_topics.length()) {
+      publish_sensor(conn, i);
+      time.sleep(0.05);
+      i = i + 1;
+    }
+
+    io.println(1, "");
+    let sleep_time = 1.0 + f64(random.float()) * 2.0;
+    time.sleep(sleep_time);
+  }
+
+  conn.disconnect();
+  return 0;
+}

@@ -163,7 +163,7 @@ find_binary() {
 if [ -n "$SINGLE_TEST" ]; then
     TEST_FILES=("$SCRIPT_DIR/${SINGLE_TEST}.an")
 else
-    mapfile -t TEST_FILES < <(find "$SCRIPT_DIR" -maxdepth 1 -name '*.an' | sort)
+    mapfile -t TEST_FILES < <(find "$SCRIPT_DIR" -maxdepth 1 -name '*.an' ! -name 'smart_home*' | sort)
 fi
 
 # --- Run Tests ---
