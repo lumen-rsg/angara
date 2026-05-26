@@ -372,6 +372,13 @@ namespace angara {
         auto mod = typeChecker.getModuleType();
         m_angara_module_names.push_back(module_name);
 
+        if (m_check_only) {
+            m_modules_compiled++;
+            print_progress("Done!");
+            std::cout << "\r\033[K" << std::flush;
+            return mod;
+        }
+
         try {
             LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding);
             if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
