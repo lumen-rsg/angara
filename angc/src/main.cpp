@@ -150,12 +150,12 @@ static void print_help() {
     std::cout << "  angc check <file.an>        Lex, parse, and typecheck (no codegen)\n";
     std::cout << "  angc <file.an>              Compile a single source file\n";
     std::cout << "\n" << CLR_BOLD << "Commands:" << CLR_RESET << "\n";
-    std::cout << CLR_BOLD << CLR_CYAN   << "  [RN] " << CLR_RESET << "run       Build and execute the project\n";
-    std::cout << CLR_BOLD << CLR_CYAN   << "  [CK] " << CLR_RESET << "check     Lex, parse, and typecheck (no codegen)\n";
-    std::cout << CLR_BOLD << CLR_CYAN   << "  [CL] " << CLR_RESET << "clean     Remove .angara/build directory\n";
-    std::cout << CLR_BOLD << CLR_CYAN   << "  [PB] " << CLR_RESET << "publish   Build and copy artifacts to a publish folder\n";
-    std::cout << CLR_BOLD << CLR_CYAN   << "  [IN] " << CLR_RESET << "init      Create a new project interactively\n";
-    std::cout << CLR_BOLD << CLR_CYAN   << "  [LM] " << CLR_RESET << "modules   List installed native modules\n";
+    std::cout << "  run       Build and execute the project\n";
+    std::cout << "  check     Lex, parse, and typecheck (no codegen)\n";
+    std::cout << "  clean     Remove .angara/build directory\n";
+    std::cout << "  publish   Build and copy artifacts to a publish folder\n";
+    std::cout << "  init      Create a new project interactively\n";
+    std::cout << "  modules   List installed native modules\n";
     std::cout << "\n" << CLR_BOLD << "Options:" << CLR_RESET << "\n";
     std::cout << "  -v, --version               Show version information\n";
     std::cout << "  -h, --help                  Show this help message\n";
