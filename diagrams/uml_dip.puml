@@ -1,0 +1,174 @@
+@startuml uml_dip
+skinparam backgroundColor #FEFEFE
+skinparam componentStyle uml2
+skinparam nodesep 50
+skinparam ranksep 60
+
+title Диаграмма инверсии зависимостей (DIP)\nКомпилятор Angara
+
+' ============================================================================
+' Абстракции (верхний уровень)
+' ============================================================================
+package "Абстракции (интерфейсы)" #E8F5E9 {
+
+    interface "«interface»\nExprVisitor" as ExprVisitor {
+        + visit(expr: Literal)
+        + visit(expr: Binary)
+        + visit(expr: CallExpr)
+        + visit(expr: VarExpr)
+        + ...
+    }
+
+    interface "«interface»\nStmtVisitor" as StmtVisitor {
+        + visit(stmt: VarDeclStmt)
+        + visit(stmt: IfStmt)
+        + visit(stmt: FuncStmt)
+        + visit(stmt: ClassStmt)
+        + ...
+    }
+
+    abstract class "«abstract»\nErrorHandler" as IErrorHandler {
+        + error(msg: string, line: int, col: int)
+        + warning(msg: string, line: int, col: int)
+    }
+
+    abstract class "«abstract»\nType" as IType {
+        + kind: TypeKind
+        + toString(): string
+    }
+
+    note right of IType
+        Абстракция типа.
+        Все 14 конкретных типов
+        наследуются от Type.
+    end note
+}
+
+' ============================================================================
+' Модули верхнего уровня (High-level)
+' ============================================================================
+package "Модули верхнего уровня" #E3F2FD {
+
+    class "CompilerDriver" as Driver <<High-level>> {
+        + compile(config, path): bool
+        + resolveModule(path): ModuleType
+        - m_module_cache: map
+        - m_target_triple: string
+    }
+
+    class "TypeChecker" as TC <<High-level>> {
+        + check(stmts): void
+        + getExprType(expr): Type
+        - m_expression_types: map
+        - m_variable_types: map
+    }
+
+    class "BuildSystem" as BS <<High-level>> {
+        + build(config): bool
+        + link(objects): void
+    }
+}
+
+' ============================================================================
+' Модули нижнего уровня (Low-level)
+' ============================================================================
+package "Модули нижнего уровня" #FFF3E0 {
+
+    class "LLVMBackend" as BE <<Low-level>> {
+        + generate(stmts): Module
+        + cg(expr): Value*
+        + cgStmt(stmt): void
+    }
+
+    class "RuntimeBuilder" as RT <<Low-level>> {
+        + generateRuntime(): void
+        + getFuncIncref(): Function*
+        + getFuncDecref(): Function*
+    }
+
+    class "Lexer" as Lex <<Low-level>> {
+        + scan(source): vector<Token>
+        - errorHandler: ErrorHandler&
+    }
+
+    class "Parser" as Pars <<Low-level>> {
+        + parse(tokens): vector<Stmt>
+        - errorHandler: ErrorHandler&
+    }
+
+    class "ErrorHandler\n(ConcreteErrorHandler)" as ErrImpl <<Low-level>> {
+        + error(msg, line, col)
+        + warning(msg, line, col)
+        + hadError: bool
+    }
+}
+
+' ============================================================================
+' Конкретные реализации
+' ============================================================================
+package "Конкретные типы" #FCE4EC {
+
+    class "PrimitiveType" as PrimType {
+        + toString(): string
+    }
+
+    class "ListType" as ListTyp {
+        + toString(): string
+    }
+
+    class "ClassType" as ClassTyp {
+        + toString(): string
+    }
+
+    class "FunctionType" as FuncTyp {
+        + toString(): string
+    }
+}
+
+' ============================================================================
+' Зависимости (инверсия)
+' ============================================================================
+
+' High-level → Abstractions (зависят от абстракций)
+TC ..|> ExprVisitor : «implements»
+TC ..|> StmtVisitor : «implements»
+TC --> IType : «uses»\nshared_ptr<Type>
+
+Driver --> IErrorHandler : «uses»\nErrorHandler&
+Driver --> IType : «uses»\nModuleType
+
+' Low-level → Abstractions (реализуют абстракции)
+ErrImpl --|> IErrorHandler : «extends»
+PrimType --|> IType : «extends»
+ListTyp --|> IType : «extends»
+ClassTyp --|> IType : «extends»
+FuncTyp --|> IType : «extends»
+
+' Injection: ErrorHandler передаётся по ссылке
+Lex --> IErrorHandler : «injected»\nErrorHandler&
+Pars --> IErrorHandler : «injected»\nErrorHandler&
+TC --> IErrorHandler : «injected»\nErrorHandler&
+BE --> IErrorHandler : «injected»\nErrorHandler&
+
+' BE depends on TC abstraction (results), not implementation
+BE ..> TC : «depends on\nabstraction»\nTypeChecker&
+
+' RuntimeBuilder depends on LLVM abstractions
+RT ..> BE : «injected»\nLLVMContext&\nModule&\nIRBuilder<>&
+
+' ============================================================================
+' Легенда
+' ============================================================================
+legend right
+    |= Цвет |= Значение |
+    |<back:#E8F5E9>Зелёный</back>| Абстракции (интерфейсы) |
+    |<back:#E3F2FD>Синий</back>| Модули верхнего уровня |
+    |<back:#FFF3E0>Оранжевый</back>| Модули нижнего уровня |
+    |<back:#FCE4EC>Розовый</back>| Конкретные реализации |
+    == Принцип DIP ==
+    Модули верхнего уровня зависят от **абстракций**,
+    а не от конкретных реализаций.
+    Модули нижнего уровня **реализуют** абстракции.
+endlegend
+
+@enduml

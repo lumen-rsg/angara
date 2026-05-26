@@ -1,51 +1,41 @@
 #include "Parser.h"
 namespace angara {
 
-    // Grammar: func IDENTIFIER ("<" TYPE_PARAMS ">")? "(" (IDENTIFIER "as" type ...)? ")" ...
     std::shared_ptr<Stmt> Parser::function(const std::string& kind) {
-        Token name = consume(TokenType::IDENTIFIER, "Expect " + kind + " name.");
-
-        // --- GENERIC SUPPORT ---
-        // Parse optional type parameters: func identity<T>(x as T) -> T { ... }
+        Token name = consume(TokenType::IDENTIFIER, "Expected " + kind + " name.");
         auto type_params = parseTypeParams();
 
-        consume(TokenType::LEFT_PAREN, "Expect '(' after " + kind + " name.");
-
-        // --- FIX: Methods implicitly have 'this' ---
+        consume(TokenType::LEFT_PAREN, "Expected '(' after " + kind + " name.");
         bool has_this = (kind == "method");
-        // -------------------------------------------
 
         std::vector<Parameter> parameters;
 
         if (!check(TokenType::RIGHT_PAREN)) {
-            // Check if the user explicit typed 'this' (optional now)
             if (match({TokenType::THIS})) {
-                has_this = true; // explicit confirmation
+                has_this = true;
                 if (!check(TokenType::RIGHT_PAREN)) {
-                    consume(TokenType::COMMA, "Expect ',' after 'this' parameter.");
+                    consume(TokenType::COMMA, "Expected ',' after 'this' parameter.");
                 }
             }
 
-            // Parse regular parameters
             if (!check(TokenType::RIGHT_PAREN)) {
                 do {
-                    Token param_name = consume(TokenType::IDENTIFIER, "Expect parameter name.");
-                    consume(TokenType::AS, "Expect 'as' after parameter name.");
+                    Token param_name = consume(TokenType::IDENTIFIER, "Expected parameter name.");
+                    consume(TokenType::AS, "Expected 'as' followed by a type after parameter name.");
                     std::shared_ptr<ASTType> param_type = type();
                     bool is_variadic = match({TokenType::DOT_DOT_DOT});
 
-                    parameters.push_back({param_name, param_type, is_variadic}); // Ensure your struct has is_variadic
+                    parameters.push_back({param_name, param_type, is_variadic});
 
                     if (is_variadic && !check(TokenType::RIGHT_PAREN)) {
-                        throw error(peek(), "A variadic parameter '...' must be the last parameter.");
+                        throw error(peek(), "Variadic parameter '...' must be the last parameter — no further parameters are allowed after it.");
                     }
                 } while (match({TokenType::COMMA}));
             }
         }
 
-        consume(TokenType::RIGHT_PAREN, "Expect ')' after parameters.");
+        consume(TokenType::RIGHT_PAREN, "Expected ')' after parameter list.");
 
-        // ... (Rest of the function remains the same) ...
         std::shared_ptr<ASTType> returnType = nullptr;
         if (match({TokenType::MINUS_GREATER})) {
             returnType = type();
@@ -55,9 +45,8 @@ namespace angara {
         if (match({TokenType::LEFT_BRACE})) {
             body = block();
         } else if (match({TokenType::SEMICOLON})) {
-            // No body
         } else {
-            throw error(peek(), "Expect '{' to start a function body or ';' for an interface declaration.");
+            throw error(peek(), "Expected '{' for the " + kind + " body, or ';' for a declaration without a body.");
         }
 
         return std::make_shared<FuncStmt>(std::move(name), has_this, std::move(parameters), returnType, body, std::move(type_params));

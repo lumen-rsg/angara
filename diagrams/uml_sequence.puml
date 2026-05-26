@@ -1,0 +1,104 @@
+@startuml sequence_compile
+skinparam maxMessageSize 150
+skinparam sequenceMessageAlign center
+
+title Диаграмма последовательностей: Процесс компиляции файла Angara
+
+actor "Разработчик" as dev
+participant "BuildSystem" as bs
+participant "CompilerDriver" as cd
+participant "ConfigParser" as cp
+participant "Lexer" as lex
+participant "Parser" as par
+participant "TypeChecker" as tc
+participant "SymbolTable" as st
+participant "LLVMBackend" as be
+participant "RuntimeBuilder" as rt
+participant "LLVM Core" as llvm
+participant "Линкер (ld)" as ld
+
+dev -> bs: angara build project.an
+activate bs
+
+bs -> cp: parseConfig("project.an")
+activate cp
+cp --> bs: ProjectConfig
+deactivate cp
+
+bs -> cd: compile(config, root_file)
+activate cd
+
+cd -> cd: read_file(root_file)
+cd -> lex: Lexer(source, filename, errorHandler)
+activate lex
+
+lex -> lex: scanTokens()
+lex --> cd: vector<Token>
+deactivate lex
+
+cd -> par: Parser(tokens, errorHandler)
+activate par
+
+par -> par: parse()
+par --> cd: vector<Stmt> (AST)
+deactivate par
+
+cd -> tc: TypeChecker(driver, errorHandler, module_name)
+activate tc
+
+tc -> st: enterScope()
+tc -> tc: check(statements)
+tc -> tc: visit(stmt) [для каждого Stmt]
+tc -> tc: visit(expr) [для каждого Expr]
+tc -> st: resolve(name) / declare(name, type)
+st --> tc: Symbol
+tc -> tc: resolveType(ASTType)
+tc --> cd: true/false (success)
+deactivate tc
+
+cd -> be: LLVMBackend(typeChecker, errorHandler, target)
+activate be
+
+be -> rt: RuntimeBuilder(ctx, module, builder)
+activate rt
+
+rt -> rt: generateRuntime()
+rt -> rt: generateTypes()
+rt -> rt: generateMemoryManagement()
+rt -> rt: generateStringOps()
+rt -> rt: generateListOps()
+rt -> rt: generateExceptionOps()
+rt -> rt: generateIOOps()
+rt --> be: runtime готов
+deactivate rt
+
+be -> be: generate(statements, moduleType, moduleNames)
+be -> be: codegenTopLevelDecls()
+be -> be: cg(stmt) [dynamic_cast dispatch]
+be -> be: cg(expr) [для каждого выражения]
+be -> be: codegenMainFunction()
+be -> llvm: module->print() → .ll file
+be -> llvm: TargetMachine->addPasses() → .o file
+llvm --> be: object_file_path
+be --> cd: success + objPath
+deactivate be
+
+cd -> cd: m_generated_object_files.insert(objPath)
+
+cd -> cd: resolveModule() [для каждого attach]
+cd -> cd: compileAngaraSource() [рекурсивно для импортов]
+
+cd --> bs: success + object_files
+deactivate cd
+
+bs -> bs: link_artifacts(config, object_files, native_libs)
+
+bs -> ld: cc obj1.o obj2.o ... -o executable -lcurl -lmosquitto ...
+activate ld
+ld --> bs: executable
+deactivate ld
+
+bs --> dev: Build Completed Successfully
+deactivate bs
+
+@enduml

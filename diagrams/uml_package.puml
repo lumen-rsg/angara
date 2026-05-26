@@ -1,0 +1,158 @@
+@startuml uml_package
+top to bottom direction
+skinparam packageStyle rectangle
+skinparam monochrome false
+skinparam nodesep 30
+skinparam ranksep 40
+
+title Диаграмма пакетов: Структура компилятора Angara (angc/)
+
+package "angc/" #FFFFFF {
+    package "frontend/" #DDDDFF {
+        package "lexer/" {
+            [Lexer] as lexer
+            [Token] as token
+        }
+        package "parser/" {
+            [Parser] as parser
+            package "expr/" {
+                [assignmentExpression]
+                [binaryExpression]
+                [callExpression]
+                [comparisonExpression]
+                [equalityExpression]
+                [factorExpression]
+                [logicalExpression]
+                [matchExpression]
+                [primaryExpression]
+                [termExpression]
+                [ternaryExpression]
+                [unaryExpression]
+            }
+            package "stmt/" {
+                [attachStatement]
+                [blockStatement]
+                [breakStatement]
+                [forStatement]
+                [functionStatement]
+                [ifStatement]
+                [returnStatement]
+                [throwStatement]
+                [tryStatement]
+                [varDeclStatement]
+                [whileStatement]
+            }
+            package "declaration/" {
+                [classDeclaration]
+                [contractDeclaration]
+                [dataDeclaration]
+                [enumDeclaration]
+                [traitDeclaration]
+                [dispatcher]
+            }
+        }
+    }
+
+    package "analyzer/" #DDFFDD {
+        package "table/" {
+            [SymbolTable] as symtab
+        }
+        package "type_checker/" {
+            [TypeChecker] as tc
+            package "expr/" as tc_expr {
+                [AssignExpr]
+                [BinaryExpr]
+                [CallExpr]
+                [GetExpr]
+                [LiteralExpr]
+                [IsExpr]
+                [LambdaExpr]
+                [MatchExpr]
+                [RecordExpr]
+                [VarExpr]
+                "... (17 файлов)"
+            }
+            package "stmt/" as tc_stmt {
+                [BlockStmt]
+                [ClassStmt]
+                [DataStmt]
+                [EnumStmt]
+                [ForStmt]
+                [FuncStmt]
+                [IfStmt]
+                [TryStmt]
+                [VarDeclStmt]
+                "... (17 файлов)"
+            }
+        }
+        package "printer/" {
+            [ASTPrinter]
+        }
+    }
+
+    package "backend/" #FFDDDD {
+        package "llvm/" {
+            [LLVMBackend] as be
+            [RuntimeBuilder] as rt
+            [TopLevel]
+            package "expr/" {
+                [ExprCodegen]
+            }
+            package "stmt/" {
+                [StmtCodegen]
+            }
+            package "rt/" {
+                [Collections]
+                [ControlFlow]
+                [Conversions]
+                [Freestanding]
+                [IO]
+                [Memory]
+                [Strings]
+            }
+        }
+        package "driver/" {
+            [CompilerDriver] as driver
+        }
+        package "build_system/" {
+            [BuildSystem] as buildsys
+            [ConfigParser]
+            [ProjectInitializer]
+        }
+    }
+
+    package "includes/" #EEEEEE {
+        [Expr.h] as expr_h
+        [Stmt.h] as stmt_h
+        [Token.h] as token_h
+        [Type.h] as type_h
+        [Lexer.h] as lexer_h
+        [Parser.h] as parser_h
+        [TypeChecker.h] as tc_h
+        [SymbolTable.h] as st_h
+        [LLVMBackend.h] as be_h
+        [RuntimeBuilder.h] as rt_h
+        [CompilerDriver.h] as cd_h
+        [ErrorHandler.h] as eh_h
+        [BuildSystem.h] as bs_h
+        [AngaraABI.h] as abi_h
+        "... (20+ заголовков)"
+    }
+
+    package "shared/" #FFFFDD {
+        [ErrorHandler] as err
+        [StringUtils]
+    }
+
+    package "src/" #FFEEDD {
+        [main.cpp]
+        [EasterEgg.cpp]
+    }
+}
+
+parser ..> expr_h : использует типы
+tc ..> type_h : использует типы
+be ..> be_h : использует типы
+driver ..> cd_h : использует типы
+
+@enduml

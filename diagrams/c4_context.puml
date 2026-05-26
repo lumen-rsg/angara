@@ -1,0 +1,25 @@
+@startuml c4_context
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+System(compiler, "Компилятор Angara (angc)", "Трансляция исходного кода Angara в нативный машинный код через LLVM IR")
+System(stdlib, "Стандартная библиотека", "Модули на C (MQTT, HTTP, JSON, SQLite, WebSocket и др.)")
+
+Person(dev, "Разработчик IoT", "Пишет код на Angara для встраиваемых систем и IoT-устройств")
+Person_Ext(enduser, "Конечный пользователь", "Пользователь IoT-устройства")
+
+System_Ext(llvm, "LLVM Infrastructure", "Оптимизация и генерация машинного кода для 40+ архитектур")
+System_Ext(clibs, "C-библиотеки", "Нативные библиотеки (libc, libcurl, libmosquitto, sqlite3 и др.)")
+System_Ext(linker, "Системный линкер (ld)", "Связывание объектных файлов в исполняемый модуль")
+System_Ext(target, "Целевое устройство", "Микроконтроллер, SBC, bare-metal (ARM, RISC-V, x86-64, WASM)")
+
+Rel(dev, compiler, "Компилирует исходный код (*.an)")
+Rel(compiler, llvm, "Генерирует LLVM IR")
+Rel(compiler, stdlib, "Подключает нативные модули")
+Rel(compiler, linker, "Передаёт объектные файлы (.o)")
+Rel(linker, clibs, "Компонует с нативными библиотеками")
+Rel(linker, target, "Генерирует исполняемый файл")
+Rel(stdlib, clibs, "Использует API C-библиотек")
+Rel(enduser, target, "Взаимодействует с устройством")
+
+SHOW_LEGEND()
+@enduml

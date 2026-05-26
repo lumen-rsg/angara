@@ -1,0 +1,35 @@
+@startuml c4_container
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+System_Boundary(compiler, "Компилятор Angara (angc)") {
+    Container(frontend, "Фронтенд", "C++", "Лексический и синтаксический анализ\n(Lexer → Parser → AST)")
+    Container(analyzer, "Семантический анализатор", "C++", "Проверка типов, разрешение символов\n(TypeChecker + SymbolTable)")
+    Container(backend, "LLVM-бэкенд", "C++", "Генерация LLVM IR из типизированного AST\n(LLVMBackend + RuntimeBuilder)")
+    Container(driver, "Компиляторный драйвер", "C++", "Оркестрация конвейера компиляции\n(CompilerDriver)")
+    Container(buildsys, "Система сборки", "C++", "Обработка конфигурации проекта,\nвызов компилятора и линкера\n(BuildSystem + ConfigParser)")
+}
+
+System_Boundary(stdlib, "Стандартная библиотека") {
+    Container(modules_c, "C-модули", "C", "Нативные модули (http, mqtt, json,\nsqlite, websocket, fs, io, net и др.)")
+    Container(modules_an, "Angara-модули", "Angara", "Модули верхнего уровня\n(collections, imgui, arduino)")
+}
+
+System_Ext(llvm, "LLVM", "Генерация и оптимизация\nмашинного кода")
+System_Ext(linker, "Системный линкер (ld)", "Связывание объектных файлов")
+System_Ext(clibs, "C-библиотеки", "libc, libcurl, libmosquitto, sqlite3\nlibwebsockets, libarchive и др.")
+
+Rel(dev, buildsys, "angara build project.an", "Разработчик IoT")
+Rel(buildsys, driver, "Передаёт конфигурацию проекта")
+Rel(driver, frontend, "Исходный код (*.an)")
+Rel(driver, analyzer, "AST + токены")
+Rel(driver, backend, "Типизированное AST")
+Rel(frontend, analyzer, "AST")
+Rel(analyzer, backend, "Типизированное AST + SymbolTable")
+Rel(backend, llvm, "LLVM IR модуль")
+Rel(llvm, linker, "Объектные файлы (.o)")
+Rel(linker, clibs, "Компонует с нативными библиотеками")
+Rel(driver, modules_c, "Разрешает import/attach")
+Rel(driver, modules_an, "Компилирует Angara-модули")
+
+SHOW_LEGEND()
+@enduml

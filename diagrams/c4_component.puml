@@ -1,0 +1,40 @@
+@startuml c4_component
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+Container(compiler, "Компилятор Angara (angc)", "C++", "Трансляция Angara → LLVM IR → нативный код")
+
+Component(lexer, "Lexer", "C++", "Лексический анализатор\nРазбивает исходный код на токены")
+Component(parser, "Parser", "C++", "Синтаксический анализатор\nСтроит AST по грамматике языка")
+Component(tc, "TypeChecker", "C++", "Проверка типов, разрешение символов,\nвалидация семантики (Visitor pattern)")
+Component(symtab, "SymbolTable", "C++", "Таблица символов\nУправление областями видимости")
+Component(llvm_be, "LLVMBackend", "C++", "Генерация LLVM IR из AST\n(dynamic_cast dispatch)")
+Component(rt_builder, "RuntimeBuilder", "C++", "Генерация runtime как LLVM IR\n(ARC, строки, списки, исключения)")
+Component(driver, "CompilerDriver", "C++", "Оркестрация: Lexer→Parser→TC→Backend\nРазрешение модулей, кэширование")
+Component(buildsys, "BuildSystem", "C++", "Сборка проекта, компиляция модулей,\nлинковка, кросс-компиляция")
+Component(config, "ConfigParser", "C++", "Парсинг конфигурационных файлов\nпроекта (project.an)")
+Component(errhdl, "ErrorHandler", "C++", "Централизованная обработка ошибок\nи предупреждений компиляции")
+
+Component_Ext(llvm_core, "LLVM Core", "C++ API", "LLVMContext, Module, IRBuilder,\nOptimization Passes, TargetMachine")
+Component_Ext(ast_types, "AST / Типы", "C++", "Expr, Stmt, Type, Token,\nASTType — структуры данных")
+
+Rel(lexer, errhdl, "Сообщает об ошибках")
+Rel(lexer, ast_types, "Создаёт Token")
+Rel(parser, lexer, "Получает поток токенов")
+Rel(parser, ast_types, "Создаёт Expr, Stmt узлы")
+Rel(parser, errhdl, "Сообщает об ошибках")
+Rel(tc, parser, "Получает AST")
+Rel(tc, symtab, "Разрешает символы")
+Rel(tc, errhdl, "Сообщает об ошибках типов")
+Rel(llvm_be, tc, "Получает типизированный AST\nи SymbolTable")
+Rel(llvm_be, rt_builder, "Вызывает генерацию runtime")
+Rel(llvm_be, llvm_core, "Генерирует LLVM IR")
+Rel(rt_builder, llvm_core, "Генерирует runtime LLVM IR")
+Rel(driver, lexer, "Инициализирует")
+Rel(driver, parser, "Инициализирует")
+Rel(driver, tc, "Инициализирует")
+Rel(driver, llvm_be, "Инициализирует")
+Rel(buildsys, driver, "Вызывает compile()")
+Rel(buildsys, config, "Читает конфигурацию")
+
+SHOW_LEGEND()
+@enduml

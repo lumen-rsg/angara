@@ -1,0 +1,192 @@
+@startuml uml_class_diagram
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+
+title Иерархия классов компилятора Angara
+
+package "AST — Выражения (Expr)" #DDDDFF {
+    abstract class Expr {
+        +accept(visitor: ExprVisitor): any
+    }
+    class Literal
+    class Binary {
+        +left: Expr
+        +op: Token
+        +right: Expr
+    }
+    class Unary {
+        +op: Token
+        +right: Expr
+    }
+    class VarExpr {
+        +name: Token
+    }
+    class AssignExpr {
+        +target: Expr
+        +op: Token
+        +value: Expr
+    }
+    class CallExpr {
+        +callee: Expr
+        +paren: Token
+        +arguments: Expr[]
+    }
+    class GetExpr {
+        +object: Expr
+        +name: Token
+    }
+    class ListExpr {
+        +elements: Expr[]
+    }
+    class IsExpr
+    class MatchExpr
+    class LambdaExpr
+    class SubscriptExpr
+    class RecordExpr
+    class TernaryExpr
+    class ThisExpr
+    class SuperExpr
+    class Grouping
+
+    Expr <|-- Literal
+    Expr <|-- Binary
+    Expr <|-- Unary
+    Expr <|-- VarExpr
+    Expr <|-- AssignExpr
+    Expr <|-- CallExpr
+    Expr <|-- GetExpr
+    Expr <|-- ListExpr
+    Expr <|-- IsExpr
+    Expr <|-- MatchExpr
+    Expr <|-- LambdaExpr
+    Expr <|-- SubscriptExpr
+    Expr <|-- RecordExpr
+    Expr <|-- TernaryExpr
+    Expr <|-- ThisExpr
+    Expr <|-- SuperExpr
+    Expr <|-- Grouping
+}
+
+package "AST — Инструкции (Stmt)" #DDFFDD {
+    abstract class Stmt {
+        +accept(visitor: StmtVisitor): void
+    }
+    class VarDeclStmt
+    class FuncStmt
+    class ClassStmt
+    class DataStmt
+    class EnumStmt
+    class BlockStmt
+    class IfStmt
+    class WhileStmt
+    class ForStmt
+    class ForInStmt
+    class ReturnStmt
+    class TryStmt
+    class ThrowStmt
+    class AttachStmt
+    class TraitStmt
+    class ContractStmt
+    class ExpressionStmt
+
+    Stmt <|-- VarDeclStmt
+    Stmt <|-- FuncStmt
+    Stmt <|-- ClassStmt
+    Stmt <|-- DataStmt
+    Stmt <|-- EnumStmt
+    Stmt <|-- BlockStmt
+    Stmt <|-- IfStmt
+    Stmt <|-- WhileStmt
+    Stmt <|-- ForStmt
+    Stmt <|-- ForInStmt
+    Stmt <|-- ReturnStmt
+    Stmt <|-- TryStmt
+    Stmt <|-- ThrowStmt
+    Stmt <|-- AttachStmt
+    Stmt <|-- TraitStmt
+    Stmt <|-- ContractStmt
+    Stmt <|-- ExpressionStmt
+}
+
+package "Паттерн Visitor" #FFFFDD {
+    interface ExprVisitor {
+        +visit(expr: Literal): any
+        +visit(expr: Binary): any
+        +visit(expr: VarExpr): any
+        +visit(expr: CallExpr): any
+    }
+    interface StmtVisitor {
+        +visit(stmt: VarDeclStmt): void
+        +visit(stmt: FuncStmt): void
+        +visit(stmt: ClassStmt): void
+    }
+}
+
+package "Система типов (Type)" #FFDDDD {
+    abstract class Type {
+        +kind: TypeKind
+        +toString(): string
+    }
+    class PrimitiveType
+    class ListType
+    class RecordType
+    class FunctionType
+    class ClassType {
+        +name: string
+        +superclass: ClassType
+    }
+    class InstanceType
+    class DataType {
+        +name: string
+        +type_params: string[]
+    }
+    class EnumType
+    class OptionalType
+    class TraitType
+    class ContractType
+    class GenericInstanceType
+    class TypeParameterType
+
+    Type <|-- PrimitiveType
+    Type <|-- ListType
+    Type <|-- RecordType
+    Type <|-- FunctionType
+    Type <|-- ClassType
+    Type <|-- InstanceType
+    Type <|-- DataType
+    Type <|-- EnumType
+    Type <|-- OptionalType
+    Type <|-- TraitType
+    Type <|-- ContractType
+    Type <|-- GenericInstanceType
+    Type <|-- TypeParameterType
+}
+
+package "Основные компоненты" #FFEEDD {
+    class CompilerDriver {
+        +compile(project, root_file): bool
+    }
+    class TypeChecker {
+        +check(statements): bool
+    }
+    class LLVMBackend {
+        +generate(stmts): bool
+    }
+    class RuntimeBuilder {
+        +generateRuntime(): void
+    }
+    class SymbolTable {
+        +enterScope(): void
+        +exitScope(): Symbol[]
+        +resolve(name): Symbol
+    }
+}
+
+ExprVisitor <|.. TypeChecker
+StmtVisitor <|.. TypeChecker
+CompilerDriver --> TypeChecker
+CompilerDriver --> LLVMBackend
+TypeChecker --> SymbolTable
+LLVMBackend --> RuntimeBuilder
+
+@enduml

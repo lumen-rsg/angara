@@ -7,8 +7,6 @@ namespace angara {
     // factor → unary ( ( "/" | "*" | "%" ) unary )*
     std::shared_ptr<Expr> Parser::factor() {
         std::shared_ptr<Expr> expr = unary();
-
-        // Add TokenType::PERCENT to this list.
         while (match({TokenType::SLASH, TokenType::STAR, TokenType::PERCENT})) {
             Token op = previous();
             std::shared_ptr<Expr> right = unary();

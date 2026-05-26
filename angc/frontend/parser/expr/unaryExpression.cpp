@@ -9,7 +9,6 @@ namespace angara {
         if (match({TokenType::BANG, TokenType::MINUS, TokenType::TILDE, TokenType::PLUS_PLUS, TokenType::MINUS_MINUS})) {
             Token op = previous();
             std::shared_ptr<Expr> right = unary();
-            // Check if it's an update operator
             if (op.type == TokenType::PLUS_PLUS || op.type == TokenType::MINUS_MINUS) {
                 return std::make_shared<UpdateExpr>(std::move(right), std::move(op), true /* isPrefix */);
             }

@@ -29,7 +29,6 @@ PASS=0
 FAIL=0
 BUGS=()
 
-# Strip ANSI codes for grepping
 strip_ansi() { sed 's/\x1b\[[0-9;]*m//g'; }
 
 echo ""
@@ -45,28 +44,23 @@ if [ ! -f "$ANGC" ]; then
     exit 1
 fi
 
-# ─── Helper ──────────────────────────────────────────────────
-# Find the compiled binary (compiler may output to CWD, not -o path)
+
 find_binary() {
     local test_name="$1"
     local tmp_path="$2"
-    # Check tmp path first
     if [ -f "$tmp_path" ]; then
         echo "$tmp_path"
         return
     fi
-    # Check CWD (project root)
     local cwd_path="$PROJECT_DIR/$test_name"
     if [ -f "$cwd_path" ]; then
         mv "$cwd_path" "$tmp_path"
         echo "$tmp_path"
         return
     fi
-    # Check CWD without prefix
     echo ""
 }
 
-# ─── POSITIVE TESTS ──────────────────────────────────────────
 printf "${BOLD}${CYAN}── Positive Tests (should compile & run correctly) ──${RESET}\n\n"
 
 for test_file in "$SCRIPT_DIR/positive/"*.an; do
@@ -76,11 +70,9 @@ for test_file in "$SCRIPT_DIR/positive/"*.an; do
 
     printf "  ${BOLD}${test_name}${RESET}: "
 
-    # Compile
     compile_output=$("$ANGC" "$test_file" -o "$binary" 2>&1) && compile_rc=$? || compile_rc=$?
 
     if [ $compile_rc -ne 0 ]; then
-        # Determine failure type
         if echo "$compile_output" | strip_ansi | grep -qi "linker\|Undefined symbol"; then
             printf "${RED}LINKER ERROR${RESET}\n"
             BUGS+=("BUG [$test_name]: Linker error - missing runtime symbols")
@@ -91,13 +83,11 @@ for test_file in "$SCRIPT_DIR/positive/"*.an; do
             printf "${RED}COMPILE ERROR${RESET}\n"
             BUGS+=("BUG [$test_name]: Unexpected compile error")
         fi
-        # Show the error details
         echo "$compile_output" | strip_ansi | grep -i "error" | head -3 | sed 's/^/         /'
         FAIL=$((FAIL + 1))
         continue
     fi
 
-    # Find binary
     actual_binary="$(find_binary "$test_name" "$binary")"
     if [ -z "$actual_binary" ]; then
         printf "${RED}NO BINARY${RESET} (compiled but binary not found)\n"
@@ -106,7 +96,6 @@ for test_file in "$SCRIPT_DIR/positive/"*.an; do
         continue
     fi
 
-    # Run
     run_output=$("$actual_binary" 2>&1) && run_rc=$? || run_rc=$?
 
     if [ $run_rc -ne 0 ]; then
@@ -128,7 +117,6 @@ for test_file in "$SCRIPT_DIR/positive/"*.an; do
     PASS=$((PASS + 1))
 done
 
-# ─── NEGATIVE TESTS ──────────────────────────────────────────
 printf "\n${BOLD}${CYAN}── Negative Tests (should produce compilation errors) ──${RESET}\n\n"
 
 for test_file in "$SCRIPT_DIR/negative/"*.an; do
@@ -147,7 +135,6 @@ for test_file in "$SCRIPT_DIR/negative/"*.an; do
         continue
     fi
 
-    # Check it's an actual error message, not a crash
     if echo "$compile_output" | grep -q "SIGABRT\|SIGSEGV\|exception\|terminating"; then
         printf "${RED}CRASH${RESET} (crashed instead of reporting error)\n"
         BUGS+=("BUG [$test_name]: Compiler crash instead of error message")
@@ -162,7 +149,6 @@ for test_file in "$SCRIPT_DIR/negative/"*.an; do
     fi
 done
 
-# ─── BUG REPORT ──────────────────────────────────────────────
 if [ ${#BUGS[@]} -gt 0 ]; then
     printf "\n${BOLD}${YELLOW}── Bug Report ──${RESET}\n\n"
     i=1
@@ -172,7 +158,6 @@ if [ ${#BUGS[@]} -gt 0 ]; then
     done
 fi
 
-# ─── SUMMARY ─────────────────────────────────────────────────
 TOTAL=$((PASS + FAIL))
 printf "\n${CYAN}════════════════════════════════════════════════════════${RESET}\n"
 printf "  ${BOLD}Results: ${GREEN}${PASS} passed${RESET}"

@@ -15,14 +15,8 @@
 
 #include "arduino_core.h"
 
-// ─── Angara-generated function declarations ────────────────────────
-// These are produced by angc's foreign function codegen.
-// Each Angara function becomes: __ang_main_<name>(AngaraObject, ...) -> AngaraObject
-
 extern AngaraObject __ang_main_setup(void);
 extern AngaraObject __ang_main_loop(void);
-
-// ─── Arduino entry points ─────────────────────────────────────────
 
 void setup(void) {
     // Call Angara's setup function

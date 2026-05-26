@@ -1,0 +1,57 @@
+@startuml lexer_state_machine
+skinparam monochrome false
+
+title Диаграмма конечного автомата: Лексический анализатор (Lexer)
+
+[*] --> Start
+
+state Start {
+    [*] --> ScanChar
+    ScanChar --> IsAlpha : буква / _
+    ScanChar --> IsDigit : цифра
+    ScanChar --> IsQuote : " или """
+    ScanChar --> IsOperator : + - * / = < > ! & | % ^ ~ . :
+    ScanChar --> IsWhitespace : пробел / таб / newline
+    ScanChar --> IsSlash : /
+    ScanChar --> IsEOF : конец файла
+
+    IsAlpha --> Identifier : accumulate()
+    Identifier --> ScanChar : не буква/цифра → addToken(KEYWORD/IDENT)
+
+    IsDigit --> Number : accumulate()
+    Number --> ScanChar : не цифра/точка → addToken(NUMBER)
+    Number --> FloatPart : точка
+    FloatPart --> ScanChar : не цифра → addToken(NUMBER)
+
+    IsQuote --> String : открывающая кавычка
+    String --> ScanChar : закрывающая кавычка → addToken(STRING)
+    String --> EscapeSequence : обратный слеш
+
+    IsOperator --> Operator1 : одиночный символ
+    Operator1 --> ScanChar : нет продолжения → addToken(OP)
+    Operator1 --> Operator2 : возможен +=, ==, !=, <=, >=, &&, ||, ++, --, ::
+    Operator2 --> ScanChar : addToken(COMPOUND_OP)
+
+    IsSlash --> LineComment : /
+    IsSlash --> BlockComment : *
+    IsSlash --> ScanChar : addToken(SLASH)
+
+    LineComment --> ScanChar : newline → пропустить
+    BlockComment --> ScanChar : */ → пропустить
+
+    IsWhitespace --> ScanChar : пропустить (newline → line++)
+    IsEOF --> [*] : addToken(EOF)
+
+    EscapeSequence --> String : обработать \\n \\t \\\\ \\"
+}
+
+state "Token Stream" as TokenStream {
+    [*] --> Collect
+    Collect --> Collect : addToken(type, literal)
+    Collect --> [*] : EOF
+}
+
+ScanChar --> TokenStream : каждый распознанный токен
+TokenStream --> [*] : return vector<Token>
+
+@enduml

@@ -1,54 +1,35 @@
-//
-// Created by cv2 on 9/19/25.
-//
-
 #include "Parser.h"
 namespace angara {
 
     std::shared_ptr<Stmt> Parser::ifStatement() {
-        Token keyword = previous(); // The 'if' token
-        consume(TokenType::LEFT_PAREN, "Expect '(' after 'if'.");
+        Token keyword = previous();
+        consume(TokenType::LEFT_PAREN, "Expected '(' after 'if'.");
 
         std::shared_ptr<Expr> condition = nullptr;
         std::shared_ptr<VarDeclStmt> declaration = nullptr;
 
         if (match({TokenType::LET})) {
-            // This is an `if let` binding
-            Token name = consume(TokenType::IDENTIFIER, "Expect variable name after 'let' in 'if' condition.");
+            Token name = consume(TokenType::IDENTIFIER, "Expected variable name after 'let' in 'if' condition.");
 
             std::shared_ptr<ASTType> typeAnnotation = nullptr;
             if (match({TokenType::AS})) {
                 typeAnnotation = type();
             }
 
-            consume(TokenType::EQUAL, "Expect '=' to provide an initializer for 'if let'.");
+            consume(TokenType::EQUAL, "Expected '=' with an initializer for 'if let' variable.");
             std::shared_ptr<Expr> initializer = expression();
 
-            // Create the VarDeclStmt. It's implicitly a 'const' binding.
             declaration = std::make_shared<VarDeclStmt>(name, typeAnnotation, initializer, true);
         } else {
-            // This is a regular `if` statement with a boolean condition.
             condition = expression();
         }
 
-        consume(TokenType::RIGHT_PAREN, "Expect ')' after if condition.");
-
-        // --- CHANGED: Allow single statements without braces ---
-        // Previously:
-        // consume(TokenType::LEFT_BRACE, "Expect '{' before if body.");
-        // std::shared_ptr<Stmt> thenBranch = std::make_shared<BlockStmt>(block());
-
+        consume(TokenType::RIGHT_PAREN, "Expected ')' after 'if' condition.");
         std::shared_ptr<Stmt> thenBranch = statement();
-
         std::shared_ptr<Stmt> elseBranch = nullptr;
         if (match({TokenType::ORIF})) {
             elseBranch = ifStatement();
         } else if (match({TokenType::ELSE})) {
-            // --- CHANGED: Allow single statements for else ---
-            // Previously:
-            // consume(TokenType::LEFT_BRACE, "Expect '{' before else body.");
-            // elseBranch = std::make_shared<BlockStmt>(block());
-
             elseBranch = statement();
         }
 

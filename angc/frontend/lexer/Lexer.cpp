@@ -1,14 +1,9 @@
-//
-// Created by cv2 on 8/27/25.
-//
-
 #include "Lexer.h"
 #include <sstream>
 #include <utility>
 
 namespace angara {
 
-// Initialize the static keywords map (unordered_map for O(1) lookup)
     const std::unordered_map<std::string, TokenType> Lexer::keywords = {
             {"let",      TokenType::LET},
             {"const",    TokenType::CONST},
@@ -64,7 +59,6 @@ namespace angara {
             scanToken();
         }
 
-        // Pass filename to EOF token too
         m_tokens.emplace_back(TokenType::EOF_TOKEN, "", m_line, 1, m_filename);
         return m_tokens;
     }
@@ -96,7 +90,7 @@ namespace angara {
     }
 
     char Lexer::advance() {
-        m_column++; // Increment column on every character consumption
+        m_column++;
         return m_source[m_current++];
     }
 
@@ -106,7 +100,6 @@ namespace angara {
         m_tokens.emplace_back(type, std::move(text), m_line, token_col, m_filename);
     }
 
-    // Updated addToken (With literal)
     void Lexer::addToken(TokenType type, const std::string &literal) {
         int token_col = m_column - (m_current - m_start);
         m_tokens.emplace_back(type, literal, m_line, token_col, m_filename);
@@ -136,25 +129,22 @@ namespace angara {
         return m_source[m_current + offset];
     }
 
-    // ---------------------------------------------------------------------------
-    // Block comments: /* ... */ with nesting support
-    // ---------------------------------------------------------------------------
     void Lexer::blockComment() {
-        int depth = 1; // We've already consumed the opening /*
+        int depth = 1;
 
         while (depth > 0 && !isAtEnd()) {
             if (peek() == '/' && peekNext() == '*') {
-                advance(); // consume /
-                advance(); // consume *
+                advance();
+                advance();
                 depth++;
             } else if (peek() == '*' && peekNext() == '/') {
-                advance(); // consume *
-                advance(); // consume /
+                advance();
+                advance();
                 depth--;
             } else {
                 if (peek() == '\n') {
                     m_line++;
-                    m_column = 0; // Reset column on newline
+                    m_column = 0;
                 }
                 advance();
             }
@@ -168,9 +158,6 @@ namespace angara {
         }
     }
 
-    // ---------------------------------------------------------------------------
-    // String literals
-    // ---------------------------------------------------------------------------
     void Lexer::string() {
         std::stringstream value;
 
@@ -206,7 +193,6 @@ namespace angara {
                     case 'v':  value << '\v'; break;
                     case 'a':  value << '\a'; break;
 
-                    // Octal escapes (e.g., \177)
                     case '0': case '1': case '2': case '3':
                     case '4': case '5': case '6': case '7': {
                         std::string octal_str;
@@ -223,7 +209,6 @@ namespace angara {
                         break;
                     }
 
-                    // Hexadecimal escapes (e.g., \x1b)
                     case 'x': {
                         std::string hex_str;
                         for (int i = 0; i < 2; ++i) {
@@ -277,7 +262,7 @@ namespace angara {
             return;
         }
 
-        advance(); // Consume the closing ".
+        advance();
 
         addToken(TokenType::STRING, value.str());
     }
@@ -299,29 +284,19 @@ namespace angara {
             return;
         }
 
-        // Consume the closing triple-quote """
         advance();
         advance();
         advance();
 
-        // The value is the content between the delimiters.
         std::string value = m_source.substr(m_start + 3, m_current - m_start - 6);
         addToken(TokenType::STRING, value);
     }
 
-    // ---------------------------------------------------------------------------
-    // Number literals: decimal, hex (0xFF), binary (0b1010), with separators (_)
-    // ---------------------------------------------------------------------------
     void Lexer::number() {
-        // Check for hex (0x) or binary (0b) prefix
-        // Note: the first digit was already consumed by advance() in scanToken(),
-        // so we check m_source[m_start] instead of peek()
         if (m_source[m_start] == '0') {
             char next = peek();
             if (next == 'x' || next == 'X') {
-                // Hex literal: 0xFF, 0xDEAD_beef
-                // '0' was already consumed by scanToken(), only consume 'x'
-                advance(); // consume 'x'
+                advance();
 
                 if (!isHexDigit(peek())) {
                     m_errorHandler.report(
@@ -333,7 +308,7 @@ namespace angara {
 
                 while (isHexDigit(peek()) || peek() == '_') {
                     if (peek() == '_') {
-                        advance(); // skip separator
+                        advance();
                         if (!isHexDigit(peek())) {
                             m_errorHandler.report(
                                 Token(TokenType::NUMBER_INT, "_", m_line, m_column - 1, m_filename),
@@ -351,9 +326,7 @@ namespace angara {
             }
 
             if (next == 'b' || next == 'B') {
-                // Binary literal: 0b1010, 0b1100_0011
-                // '0' was already consumed by scanToken(), only consume 'b'
-                advance(); // consume 'b'
+                advance();
 
                 if (!isBinaryDigit(peek())) {
                     m_errorHandler.report(
@@ -365,7 +338,7 @@ namespace angara {
 
                 while (isBinaryDigit(peek()) || peek() == '_') {
                     if (peek() == '_') {
-                        advance(); // skip separator
+                        advance();
                         if (!isBinaryDigit(peek())) {
                             m_errorHandler.report(
                                 Token(TokenType::NUMBER_INT, "_", m_line, m_column - 1, m_filename),
@@ -383,10 +356,9 @@ namespace angara {
             }
         }
 
-        // Decimal literal (with optional numeric separators)
         while (isDigit(peek()) || peek() == '_') {
             if (peek() == '_') {
-                advance(); // skip separator
+                advance();
                 if (!isDigit(peek())) {
                     m_errorHandler.report(
                         Token(TokenType::NUMBER_INT, "_", m_line, m_column - 1, m_filename),
@@ -399,12 +371,11 @@ namespace angara {
             advance();
         }
 
-        // Look for a fractional part.
         if (peek() == '.' && isDigit(peekNext())) {
-            advance(); // Consume the "."
+            advance();
             while (isDigit(peek()) || peek() == '_') {
                 if (peek() == '_') {
-                    advance(); // skip separator
+                    advance();
                     if (!isDigit(peek())) {
                         m_errorHandler.report(
                             Token(TokenType::NUMBER_FLOAT, "_", m_line, m_column - 1, m_filename),
@@ -422,9 +393,6 @@ namespace angara {
         }
     }
 
-    // ---------------------------------------------------------------------------
-    // Identifiers and keywords
-    // ---------------------------------------------------------------------------
     void Lexer::identifier() {
         while (isAlphaNumeric(peek())) advance();
 
@@ -438,14 +406,10 @@ namespace angara {
         }
     }
 
-    // ---------------------------------------------------------------------------
-    // Main scanner dispatch
-    // ---------------------------------------------------------------------------
     void Lexer::scanToken() {
         char c = advance();
         switch (c) {
 
-            // Single-character tokens
             case '(':
                 addToken(TokenType::LEFT_PAREN);
                 break;
@@ -494,7 +458,6 @@ namespace angara {
                 addToken(TokenType::AT_SIGN);
                 break;
 
-                // One or two character tokens
             case '!':
                 addToken(match('=') ? TokenType::BANG_EQUAL : TokenType::BANG);
                 break;
@@ -540,26 +503,22 @@ namespace angara {
                 }
                 break;
 
-                // Comments and division
             case '/':
                 if (match('=')) {
                     addToken(TokenType::SLASH_EQUAL);
                 } else if (match('/')) {
-                    // Line comment: consume until end of line
                     while (peek() != '\n' && !isAtEnd()) advance();
                 } else if (match('*')) {
-                    // Block comment: /* ... */ with nesting
                     blockComment();
                 } else {
                     addToken(TokenType::SLASH);
                 }
                 break;
 
-                // String literals
             case '"':
                 if (peek() == '"' && peekNext() == '"') {
-                    advance(); // consume the second "
-                    advance(); // consume the third "
+                    advance();
+                    advance();
                     multilineString();
                 } else {
                     string();

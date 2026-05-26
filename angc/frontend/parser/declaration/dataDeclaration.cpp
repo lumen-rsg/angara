@@ -1,46 +1,34 @@
-//
-// Created by cv2 on 9/19/25.
-//
 #include "Parser.h"
 namespace angara {
 
     std::shared_ptr<Stmt> Parser::dataDeclaration() {
-        Token name = consume(TokenType::IDENTIFIER, "Expect data block name.");
-
-        // --- GENERIC SUPPORT ---
-        // Parse optional type parameters: data Box<T> { ... }
+        Token name = consume(TokenType::IDENTIFIER, "Expected name after 'data'.");
         auto type_params = parseTypeParams();
 
-        consume(TokenType::LEFT_BRACE, "Expect '{' before data block body.");
+        consume(TokenType::LEFT_BRACE, "Expected '{' before data body.");
 
         std::vector<std::shared_ptr<VarDeclStmt>> fields;
         while (!check(TokenType::RIGHT_BRACE) && !isAtEnd()) {
             if (match({TokenType::LET}) || match({TokenType::CONST})) {
                 bool is_const = (previous().type == TokenType::CONST);
-
-                // --- Manually parse the field, do not use varDeclaration ---
-                Token field_name = consume(TokenType::IDENTIFIER, "Expect field name in data block.");
-
-                // Rule 1: A data field MUST have an explicit type.
-                consume(TokenType::AS, "Expect 'as' to specify a type for a data block field.");
+                Token field_name = consume(TokenType::IDENTIFIER, "Expected field name in data block.");
+                consume(TokenType::AS, "Expected 'as' followed by a type for data field.");
                 std::shared_ptr<ASTType> type_ann = type();
 
-                // Rule 2: A data field CANNOT have a default initializer.
                 if (match({TokenType::EQUAL})) {
-                    throw error(previous(), "A 'data' block field cannot have a default initializer. Values are provided via the constructor.");
+                    throw error(previous(), "Data fields cannot have default initializers — values are provided through the auto-generated constructor.");
                 }
 
-                consume(TokenType::SEMICOLON, "Expect ';' after data block field declaration.");
+                consume(TokenType::SEMICOLON, "Expected ';' after data field declaration.");
 
-                // Create the VarDeclStmt with a null initializer.
                 fields.push_back(std::make_shared<VarDeclStmt>(field_name, type_ann, nullptr, is_const));
 
             } else {
-                throw error(peek(), "A 'data' block body can only contain 'let' or 'const' field declarations.");
+                throw error(peek(), "Expected a field declaration ('let' or 'const') in data block body.");
             }
         }
 
-        consume(TokenType::RIGHT_BRACE, "Expect '}' after data block body.");
+        consume(TokenType::RIGHT_BRACE, "Expected '}' after data body.");
         return std::make_shared<DataStmt>(std::move(name), std::move(fields), std::move(type_params));
     }
 

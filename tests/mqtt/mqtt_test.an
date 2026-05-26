@@ -83,11 +83,12 @@ func run_subscriber() -> nil {
   while (received < 5 && (time.now() - start_time) < 10.0) {
     let msg = conn.next_message(1000);
     if (msg != nil) {
+      @unsafe{
       io.println(1, "[SUBSCRIBER] Received: topic='" + msg["topic"] +
                      "' payload='" + msg["payload"] +
                      "' qos=" + string(msg["qos"]));
       received = received + 1;
-    }
+    } }
   }
 
   io.println(1, "[SUBSCRIBER] Received " + string(received) + " messages.");
@@ -124,10 +125,11 @@ func run_combined_test() -> bool {
   // Check message
   let msg = conn.next_message(2000);
   if (msg != nil) {
+    @unsafe{
     io.println(1, "[TEST] Echo received: '" + msg["payload"] + "'");
     conn.disconnect();
     return true;
-  }
+  } }
 
   io.println(2, "[TEST] No echo received.");
   conn.disconnect();

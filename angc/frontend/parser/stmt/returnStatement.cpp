@@ -1,7 +1,3 @@
-//
-// Created by cv2 on 9/19/25.
-//
-
 #include "Parser.h"
 namespace angara {
 
@@ -11,7 +7,7 @@ namespace angara {
         if (!check(TokenType::SEMICOLON)) {
             value = expression();
         }
-        consume(TokenType::SEMICOLON, "Expect ';' after return value.");
+        consume(TokenType::SEMICOLON, "Expected ';' after 'return' value.");
         return std::make_shared<ReturnStmt>(std::move(keyword), std::move(value));
     }
 

@@ -1,0 +1,177 @@
+@startuml uml_deployment
+skinparam backgroundColor #FEFEFE
+skinparam componentStyle uml2
+skinparam nodesep 60
+skinparam ranksep 80
+
+title Диаграмма развёртывания компилятора Angara\nТехнологический стек и целевые платформы
+
+' ============================================================================
+' Рабочая станция разработчика
+' ============================================================================
+node "Рабочая станция разработчика\n(macOS / Linux)" as devworkstation {
+    artifact "angc\n(исполняемый файл)" as angc_bin <<Executable>>
+    
+    component "Clang / Clang++\n(C/C++ Toolchain)" as clang <<C++23>>
+    component "LLVM\n(Core + Native)" as llvm <<LLVM 18+>>
+    component "GNU Make" as make <<Build System>>
+    
+    component "Frontend\n(Lexer + Parser)" as frontend <<angc>>
+    component "Analyzer\n(TypeChecker + SymbolTable)" as analyzer <<angc>>
+    component "Backend\n(LLVMBackend + RuntimeBuilder)" as backend <<angc>>
+    component "CompilerDriver" as driver <<angc>>
+}
+
+' ============================================================================
+' Файловая система — исходные коды
+' ============================================================================
+node "Исходные коды проекта\n(Репозиторий Git)" as source_repo {
+    artifact "*.an\n(Исходный код Angara)" as an_source <<Source>>
+    artifact "Makefile\n(Конфигурация сборки)" as makefile <<Config>>
+    artifact "angc/**/*.cpp + .h\n(Исходники компилятора)" as compiler_src <<Source>>
+}
+
+' ============================================================================
+' Стандартная библиотека — модули
+' ============================================================================
+node "Файловая система\n/opt/angara/modules/" as modules_fs {
+    package "C-модули (30+)" as c_modules {
+        component "http\n(libcurl)" as mod_http
+        component "mqtt\n(libmosquitto)" as mod_mqtt
+        component "websocket\n(libwebsockets)" as mod_ws
+        component "amqp\n(librabbitmq)" as mod_amqp
+        component "sqlite\n(sqlite3)" as mod_sqlite
+        component "json\n(nlohmann/json)" as mod_json
+        component "archive\n(libarchive + zlib)" as mod_archive
+        component "jwt\n(JSON Bridge)" as mod_jwt
+    }
+    
+    package "C++ модули" as cpp_modules {
+        component "imgui\n(Dear ImGui + GLFW3 + OpenGL)" as mod_imgui
+    }
+    
+    package "Angara-модули" as an_modules {
+        component "collections.an" as mod_collections
+        component "imgui.an\n(биндинги)" as mod_imgui_an
+        component "arduino.an\n(встроенные)" as mod_arduino
+    }
+}
+
+' ============================================================================
+' Системные библиотеки
+' ============================================================================
+node "Системные библиотеки\n(pkg-config)" as sys_libs {
+    component "libc\n(POSIX API)" as libc
+    component "libcurl\n(HTTP/HTTPS)" as libcurl
+    component "libwebsockets\n(WebSocket)" as liblws
+    component "openssl\n(TLS)" as libssl
+    component "libmosquitto\n(MQTT)" as libmosquitto
+    component "librabbitmq\n(AMQP)" as librabbitmq
+    component "sqlite3\n(SQL)" as libsqlite
+    component "libarchive\n(Archives)" as libarchive
+    component "zlib\n(Compression)" as zlib
+    component "GLFW3\n(Window)" as libglfw
+    component "OpenGL\n(Graphics)" as libgl
+}
+
+' ============================================================================
+' Целевые платформы
+' ============================================================================
+node "Целевая платформа:\nBare-metal (ARM / RISC-V)\nFreestanding" as target_baremetal {
+    artifact "firmware.bin\n(Прошивка)" as firmware <<Binary>>
+    component "Runtime (stubs)\n(no OS)" as rt_stub
+    component "Boot Loader\n(start.S)" as boot
+}
+
+node "Целевая платформа:\nВстраиваемый Linux (ARM)\nRaspberry Pi / Jetson" as target_embedded {
+    artifact "app\n(Исполняемый файл)" as app_embedded <<Executable>>
+    component "Runtime (hosted)\n(ARC, Strings, Lists)" as rt_hosted_emb
+    component "Модули:\nMQTT, HTTP, GPIO" as modules_emb
+}
+
+node "Целевая платформа:\nDesktop (macOS / Linux x86-64)" as target_desktop {
+    artifact "app\n(Исполняемый файл)" as app_desktop <<Executable>>
+    component "Runtime (hosted)\n(Full runtime)" as rt_hosted_desk
+    component "Модули:\nAll 30+ modules" as modules_desk
+    component "GUI\n(ImGui + OpenGL)" as gui_desk
+}
+
+node "Целевая платформа:\nWebAssembly\n(Браузер)" as target_wasm {
+    artifact "app.wasm\n(WebAssembly module)" as app_wasm <<WASM>>
+    component "Runtime (hosted)\n(JavaScript bridge)" as rt_wasm
+    component "Canvas API\n(Graphics)" as canvas
+}
+
+' ============================================================================
+' Связи — сборка компилятора
+' ============================================================================
+compiler_src --> clang : "компиляция\nC++23"
+makefile --> make : "управление\nсборкой"
+clang --> angc_bin : "линковка с\nLLVM"
+llvm <-- clang : "llvm-config\n--cxxflags --libs"
+driver --> frontend : "инициализация"
+driver --> analyzer : "типизация"
+driver --> backend : "кодогенерация"
+
+' ============================================================================
+' Связи — компиляция программ
+' ============================================================================
+an_source --> angc_bin : "angara build\nproject.an"
+angc_bin --> llvm : "LLVM IR\nгенерация"
+
+' ============================================================================
+' Связи — модули
+' ============================================================================
+angc_bin --> modules_fs : "attach\n(подключение)"
+c_modules --> sys_libs : "линковка\n-pkg-config"
+cpp_modules --> sys_libs : "линковка\nGLFW + OpenGL"
+
+mod_http --> libcurl
+mod_ws --> liblws
+mod_ws --> libssl
+mod_mqtt --> libmosquitto
+mod_amqp --> librabbitmq
+mod_sqlite --> libsqlite
+mod_archive --> libarchive
+mod_archive --> zlib
+mod_imgui --> libglfw
+mod_imgui --> libgl
+
+' ============================================================================
+' Связи — целевые платформы
+' ============================================================================
+llvm --> target_baremetal : "target triple:\naarch64-none-elf\n-freestanding"
+llvm --> target_embedded : "target triple:\naarch64-linux-gnu"
+llvm --> target_desktop : "target triple:\nx86_64-apple-darwin\n(native)"
+llvm --> target_wasm : "target triple:\nwasm32-unknown-unknown"
+
+angc_bin --> rt_stub : "RuntimeBuilder\n(stubs)"
+angc_bin --> rt_hosted_emb : "RuntimeBuilder\n(hosted)"
+angc_bin --> rt_hosted_desk : "RuntimeBuilder\n(hosted)"
+angc_bin --> rt_wasm : "RuntimeBuilder\n(hosted)"
+
+modules_fs --> target_embedded : "линковка\nselective"
+modules_fs --> target_desktop : "линковка\nall modules"
+
+boot --> firmware : "linker.ld\n(Memory Map)"
+
+' ============================================================================
+' Легенда
+' ============================================================================
+legend right
+    |= Обозначение |= Описание |
+    |<back:#E3F2FD>Голубой</back>| Рабочая станция разработчика |
+    |<back:#FFF3E0>Оранжевый</back>| Файловая система / исходники |
+    |<back:#E8F5E9>Зелёный</back>| Системные библиотеки |
+    |<back:#FCE4EC>Розовый</back>| Целевые платформы |
+    == Технологический стек ==
+    **Языки:** C++23, C (C17), Angara
+    **Инструменты:** Clang, LLVM 18+, GNU Make
+    **Библиотеки:** libcurl, libwebsockets, openssl,
+    libmosquitto, librabbitmq, sqlite3,
+    libarchive, zlib, GLFW3, Dear ImGui
+    **Целевые платформы:** ARM bare-metal,
+    ARM Linux, x86-64 Desktop, WebAssembly
+endlegend
+
+@enduml

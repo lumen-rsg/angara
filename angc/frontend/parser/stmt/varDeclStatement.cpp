@@ -2,9 +2,7 @@
 namespace angara {
 
     std::shared_ptr<Stmt> Parser::varDeclaration(bool is_const) {
-        Token name = consume(TokenType::IDENTIFIER, "Expect variable name.");
-
-        // The 'as <type>' clause is now optional again.
+        Token name = consume(TokenType::IDENTIFIER, "Expected variable name.");
         std::shared_ptr<ASTType> typeAnnotation = nullptr;
         if (match({TokenType::AS})) {
             typeAnnotation = type();
@@ -15,17 +13,15 @@ namespace angara {
             initializer = expression();
         }
 
-        // A variable MUST have either a type annotation or an initializer.
-        // This rule is still important.
         if (!typeAnnotation && !initializer) {
-            throw error(name, "A variable declaration must have an explicit type ('as <type>') or an initializer ('= <value>').");
+            throw error(name, "Variable declaration requires either a type annotation ('as <type>') or an initializer ('= <value>').");
         }
 
         if (is_const && !initializer) {
-            throw error(name, "A 'const' variable must be initialized.");
+            throw error(name, "A 'const' variable requires an initializer ('= <value>').");
         }
 
-        consume(TokenType::SEMICOLON, "Expect ';' after variable declaration.");
+        consume(TokenType::SEMICOLON, "Expected ';' after variable declaration.");
         return std::make_shared<VarDeclStmt>(std::move(name), typeAnnotation, std::move(initializer), is_const);
     }
 

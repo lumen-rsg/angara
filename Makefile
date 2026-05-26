@@ -1,8 +1,6 @@
-# --- Configuration & Paths ---
 INSTALL_MOD_DIR := /opt/angara/modules
 INSTALL_BIN_DIR := /usr/local/bin
 
-# --- Colors & Formatting ---
 ESC     := \033
 RESET   := $(ESC)[0m
 BOLD    := $(ESC)[1m
@@ -13,7 +11,6 @@ BLUE    := $(ESC)[1;34m
 MAGENTA := $(ESC)[1;35m
 CYAN    := $(ESC)[1;36m
 
-# --- OS Detection ---
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
     SO_EXT      := dylib
@@ -28,7 +25,6 @@ else
     SONAME_FLAG := -Wl,-soname
 endif
 
-# --- LLVM Configuration ---
 LLVM_CONFIG := $(shell ls /usr/bin/llvm-config-* 2>/dev/null | sort -t- -k3 -V | tail -1 || which llvm-config 2>/dev/null)
 ifeq ($(UNAME_S),Darwin)
     ifeq ($(LLVM_CONFIG),)
@@ -40,7 +36,6 @@ LLVM_LDFLAGS  := $(shell $(LLVM_CONFIG) --ldflags 2>/dev/null)
 LLVM_LIBS     := $(shell $(LLVM_CONFIG) --libs core native 2>/dev/null)
 LLVM_SYSTEM_LIBS := $(shell $(LLVM_CONFIG) --system-libs 2>/dev/null)
 
-# --- Toolchain & Flags ---
 CC  := clang
 CXX := clang++
 
@@ -49,7 +44,6 @@ CXXFLAGS := -std=c++23 -fPIC -Wall -Wno-trigraphs -Iangc/includes
 
 LDFLAGS_BIN := $(LLVM_LDFLAGS) $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS)
 
-# --- Dependency Resolution (pkg-config) ---
 CURL_CFLAGS := $(shell pkg-config --cflags libcurl 2>/dev/null)
 CURL_LIBS   := $(shell pkg-config --libs libcurl 2>/dev/null)
 LWS_CFLAGS  := $(shell pkg-config --cflags libwebsockets openssl 2>/dev/null)
@@ -79,7 +73,6 @@ ifeq ($(UNAME_S),Darwin)
     endif
 endif
 
-# --- File Definitions ---
 MOD_SRCS := $(wildcard modules/*.c)
 MOD_OBJS := $(patsubst %.c,build/obj/%.o,$(MOD_SRCS))
 MOD_OUTS := $(patsubst modules/%.c,build/modules/%.$(SO_EXT),$(MOD_SRCS))
@@ -91,8 +84,7 @@ ANGC_SRCS := $(shell find angc -name "*.cpp")
 ANGC_OBJS := $(patsubst %.cpp,build/obj/%.o,$(ANGC_SRCS))
 ANGC_OUT  := build/angc
 
-# --- Main Targets ---
-.PHONY: all logo clean install
+.PHONY: all logo clean install install_vim uninstall_vim
 
 all: logo $(ANGC_OUT)
 	@printf "$(BOLD)$(GREEN)>>> Build Completed Successfully <<<$(RESET)\n"
@@ -305,13 +297,11 @@ build/modules/%.$(SO_EXT): build/obj/modules/%.o
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@-$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
 
-# --- Linkage Rules (Compiler) ---
 $(ANGC_OUT): $(ANGC_OBJS)
 	@mkdir -p $(@D)
 	@printf "$(CYAN)[BN] $(RESET) %s\n" "$@"
 	@$(CXX) $^ $(LDFLAGS_BIN) -o $@
 
-# --- Installation Rules ---
 install: install_libraries install_executables
 	@printf "$(BOLD)$(GREEN)>>> Full Installation Complete <<<$(RESET)\n"
 
@@ -325,7 +315,47 @@ install_executables: $(ANGC_OUT)
 	@mkdir -p $(INSTALL_BIN_DIR)
 	@cp $(ANGC_OUT) $(INSTALL_BIN_DIR)/
 
-# --- Clean ---
+ifeq ($(NVIM_RUNTIME),)
+    NVIM_RUNTIME := $(HOME)/.local/share/nvim/site
+endif
+ifeq ($(VIM_RUNTIME),)
+    VIM_RUNTIME := $(HOME)/.vim
+endif
+
+install_vim:
+	@printf "$(CYAN)[IN] $(RESET) Installing Angara syntax highlight plugin...\n"
+ifeq ($(VIM_EDITOR),nvim)
+	@mkdir -p $(NVIM_RUNTIME)/pack/angara/start/angara
+	@cp -r vim-angara/syntax  $(NVIM_RUNTIME)/pack/angara/start/angara/
+	@cp -r vim-angara/ftdetect $(NVIM_RUNTIME)/pack/angara/start/angara/
+	@cp -r vim-angara/ftplugin $(NVIM_RUNTIME)/pack/angara/start/angara/
+	@cp -r vim-angara/indent  $(NVIM_RUNTIME)/pack/angara/start/angara/
+	@printf "$(BOLD)$(GREEN)>>> Installed to $(NVIM_RUNTIME)/pack/angara/start/angara/ <<<$(RESET)\n"
+else ifeq ($(VIM_EDITOR),vim)
+	@mkdir -p $(VIM_RUNTIME)/pack/angara/start/angara
+	@cp -r vim-angara/syntax  $(VIM_RUNTIME)/pack/angara/start/angara/
+	@cp -r vim-angara/ftdetect $(VIM_RUNTIME)/pack/angara/start/angara/
+	@cp -r vim-angara/ftplugin $(VIM_RUNTIME)/pack/angara/start/angara/
+	@cp -r vim-angara/indent  $(VIM_RUNTIME)/pack/angara/start/angara/
+	@printf "$(BOLD)$(GREEN)>>> Installed to $(VIM_RUNTIME)/pack/angara/start/angara/ <<<$(RESET)\n"
+else
+	@printf "$(YELLOW)Usage: make install_vim VIM_EDITOR=vim|nvim$(RESET)\n"
+	@printf "$(YELLOW)  Optional: VIM_RUNTIME=<path>  (default: ~/.vim or ~/.local/share/nvim)$(RESET)\n"
+	@exit 1
+endif
+
+uninstall_vim:
+ifeq ($(VIM_EDITOR),nvim)
+	@rm -rf $(NVIM_RUNTIME)/pack/angara
+	@printf "$(RED)[RM] $(RESET) Removed plugin from $(NVIM_RUNTIME)/pack/angara\n"
+else ifeq ($(VIM_EDITOR),vim)
+	@rm -rf $(VIM_RUNTIME)/pack/angara
+	@printf "$(RED)[RM] $(RESET) Removed plugin from $(VIM_RUNTIME)/pack/angara\n"
+else
+	@printf "$(YELLOW)Usage: make uninstall_vim VIM_EDITOR=vim|nvim$(RESET)\n"
+	@exit 1
+endif
+
 clean:
 	@printf "$(RED)[CL] $(RESET) Cleaning build directory...\n"
 	@rm -rf build
