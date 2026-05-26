@@ -6,7 +6,6 @@
 
 namespace angara {
 
-    // Helper to trim whitespace
     std::string trim(const std::string& str) {
         size_t first = str.find_first_not_of(" \t\r\n");
         if (std::string::npos == first) return str;
@@ -14,12 +13,11 @@ namespace angara {
         return str.substr(first, (last - first) + 1);
     }
 
-    // Helper to parse lists: "[a, b, c]" -> vector
     std::vector<std::string> parse_list(const std::string& value) {
         std::vector<std::string> list;
         std::string v = trim(value);
         if (v.size() >= 2 && v.front() == '[' && v.back() == ']') {
-            v = v.substr(1, v.size() - 2); // Strip []
+            v = v.substr(1, v.size() - 2);
             std::stringstream ss(v);
             std::string item;
             while (std::getline(ss, item, ',')) {
@@ -30,7 +28,6 @@ namespace angara {
         return list;
     }
 
-    // Helper to detect if sources contain C++ files
     bool has_cpp_sources(const std::vector<std::string>& sources) {
         for (const auto& s : sources) {
             if (s.size() >= 4 && s.substr(s.size() - 4) == ".cpp") return true;
@@ -52,8 +49,6 @@ namespace angara {
         NativeModuleConfig currentNativeModule;
         BuildStep currentBuildStep;
 
-        // Section tracking
-        // "workspace", "project", "native-module", "pre-build", "post-build", "profile"
         std::string currentSection;
 
         auto push_project = [&]() {
@@ -78,11 +73,9 @@ namespace angara {
             line = trim(line);
             if (line.empty() || line[0] == '#') continue;
 
-            // --- Handle Section Headers ---
             if (line.front() == '[' && line.back() == ']') {
                 std::string header = line.substr(1, line.size() - 2);
 
-                // Before switching section, flush any pending native module
                 if (currentSection == "native-module") {
                     push_native_module();
                 }
@@ -106,14 +99,12 @@ namespace angara {
                 continue;
             }
 
-            // --- Handle Key-Value Pairs ---
             size_t eqPos = line.find('=');
             if (eqPos == std::string::npos) continue;
 
             std::string key = trim(line.substr(0, eqPos));
             std::string value = trim(line.substr(eqPos + 1));
 
-            // === WORKSPACE SECTION ===
             if (currentSection == "workspace") {
                 if (key == "name") workspace.name = value;
                 else if (key == "author") workspace.author = value;
@@ -122,7 +113,6 @@ namespace angara {
                 else if (key == "angara_version" || key == "angara-version") workspace.angara_version = value;
             }
 
-            // === PROJECT SECTION ===
             else if (currentSection == "project") {
                 if (key == "name") {
                     currentProject.name = value;
@@ -148,7 +138,6 @@ namespace angara {
                 }
             }
 
-            // === NATIVE-MODULE SECTION ===
             else if (currentSection == "native-module") {
                 if (key == "name") currentNativeModule.name = value;
                 else if (key == "sources") currentNativeModule.sources = parse_list(value);
@@ -162,17 +151,14 @@ namespace angara {
                 }
             }
 
-            // === PRE-BUILD SECTION ===
             else if (currentSection == "pre-build") {
                 if (key == "command") currentBuildStep.command = value;
                 else if (key == "description") currentBuildStep.description = value;
-                // Support inline command on first unnamed line
                 if (currentProject.pre_build.command.empty() && !value.empty()) {
                     currentProject.pre_build = currentBuildStep;
                 }
             }
 
-            // === POST-BUILD SECTION ===
             else if (currentSection == "post-build") {
                 if (key == "command") currentBuildStep.command = value;
                 else if (key == "description") currentBuildStep.description = value;
@@ -181,7 +167,6 @@ namespace angara {
                 }
             }
 
-            // === PROFILE SECTION ===
             else if (currentSection == "profile") {
                 if (key == "mode") {
                     if (value == "release" || value == "Release") currentProject.profile.mode = BuildMode::RELEASE;
@@ -197,7 +182,6 @@ namespace angara {
             }
         }
 
-        // Flush any pending native module and project
         if (currentSection == "native-module") {
             push_native_module();
         }

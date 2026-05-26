@@ -17,64 +17,68 @@ namespace angara {
         RELEASE
     };
 
-    // --- Native C/C++ Module Declaration ---
+    /// Describes an inline native C/C++ module to compile alongside the Angara project.
     struct NativeModuleConfig {
-        std::string name;                       // Module name (e.g., "my_glue")
-        std::vector<std::string> sources;        // Source files (e.g., ["glue.c", "helper.cpp"])
-        std::vector<std::string> include_dirs;   // Additional include paths
-        std::vector<std::string> link_libs;      // Libraries to link (e.g., ["curl", "ssl"])
-        std::vector<std::string> link_frameworks;// macOS frameworks (e.g., ["OpenGL", "Cocoa"])
-        std::string cflags;                      // Extra C compiler flags
-        std::string ldflags;                     // Extra linker flags
-        bool is_cpp = false;                     // Compile as C++ if true
+        std::string name;
+        std::vector<std::string> sources;
+        std::vector<std::string> include_dirs;
+        std::vector<std::string> link_libs;
+        std::vector<std::string> link_frameworks;
+        std::string cflags;
+        std::string ldflags;
+        bool is_cpp = false;
     };
 
-    // --- Pre/Post Build Step ---
+    /// A shell command to run before or after the build.
     struct BuildStep {
-        std::string command;    // Shell command to execute
-        std::string description;// Human-readable description (optional)
+        std::string command;
+        std::string description;
     };
 
-    // --- Build Profile ---
+    /// Compiler and linker settings for a single project.
     struct BuildProfile {
         BuildMode mode = BuildMode::DEBUG;
-        std::string cflags;        // Additional compiler flags
-        std::string ldflags;       // Additional linker flags
-        std::string output_dir;    // Override output directory (default: project dir)
-        std::string target;        // Target triple override
-        int opt_level = 0;         // Optimization level (0-3)
+        std::string cflags;
+        std::string ldflags;
+        std::string output_dir;
+        std::string target;
+        int opt_level = 0;
     };
 
-    // --- Enhanced Project Config ---
+    /// Full configuration for a single project within a workspace.
     struct ProjectConfig {
         std::string name;
         std::string path;
         std::string author;
         std::string version;
-        std::string description;   // Brief project description
+        std::string description;
         ProjectType type;
-        std::string entry_point;   // e.g., "main.an"
-        std::vector<std::string> dependencies;   // Native modules: "io", "json"
-        std::vector<NativeModuleConfig> native_modules; // Inline native module builds
-        BuildStep pre_build;       // Run before compilation
-        BuildStep post_build;      // Run after successful build
-        BuildProfile profile;      // Build profile settings
-        bool freestanding = false; // -ffreestanding: no libc dependency in runtime
-        bool nostdlib = false;     // -nostdlib: don't link standard libraries
+        std::string entry_point;
+        std::vector<std::string> dependencies;
+        std::vector<NativeModuleConfig> native_modules;
+        BuildStep pre_build;
+        BuildStep post_build;
+        BuildProfile profile;
+        bool freestanding = false;
+        bool nostdlib = false;
     };
 
-    // --- Workspace Configuration ---
+    /// Top-level workspace configuration parsed from a .abs file.
     struct WorkspaceConfig {
         std::string name;
         std::string author;
         std::string version;
-        std::string description;   // Workspace description
-        std::string angara_version;// Minimum required Angara version (optional)
+        std::string description;
+        std::string angara_version;
         std::vector<ProjectConfig> projects;
     };
 
+    /// Parses .abs (Angara Build Specification) files into a WorkspaceConfig.
     class ConfigParser {
     public:
+        /// Parses the given .abs file and returns the workspace configuration.
+        /// @param path  Path to the .abs file.
+        /// @return The parsed workspace, or std::nullopt if the file could not be opened.
         static std::optional<WorkspaceConfig> parse(const std::string& path);
     };
 

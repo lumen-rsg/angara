@@ -30,16 +30,11 @@ namespace angara {
         return res == "y" || res == "yes";
     }
 
-    // =====================================================
-    // Main Entry Point
-    // =====================================================
-
     bool ProjectInitializer::run(const std::string& template_name) {
         if (template_name.empty()) {
             return init_interactive();
         }
 
-        // Derive name from current directory
         std::string name = fs::current_path().filename().string();
         std::string author = prompt("Author", "user");
 
@@ -53,14 +48,9 @@ namespace angara {
         return false;
     }
 
-    // =====================================================
-    // Template: App (default console application)
-    // =====================================================
-
     bool ProjectInitializer::init_app(const std::string& name, const std::string& author) {
         std::cout << CLR_BOLD << CLR_MAGENTA << "--- Creating App Project: " << name << " ---" << CLR_RESET << "\n";
 
-        // Create .abs
         std::ofstream abs_file("project.abs");
         abs_file << "[workspace]\n"
                  << "name = " << name << "\n"
@@ -77,7 +67,6 @@ namespace angara {
                  << "opt = 0\n";
         abs_file.close();
 
-        // Create main.an
         if (!fs::exists("main.an")) {
             std::ofstream src("main.an");
             src << "attach io;\n\n"
@@ -93,10 +82,6 @@ namespace angara {
         std::cout << CLR_GRAY << "  Run with: angc run" << CLR_RESET << "\n";
         return true;
     }
-
-    // =====================================================
-    // Template: Library
-    // =====================================================
 
     bool ProjectInitializer::init_lib(const std::string& name, const std::string& author) {
         std::cout << CLR_BOLD << CLR_MAGENTA << "--- Creating Library Project: " << name << " ---" << CLR_RESET << "\n";
@@ -117,7 +102,6 @@ namespace angara {
                  << "opt = 0\n";
         abs_file.close();
 
-        // Create lib.an
         if (!fs::exists("lib.an")) {
             std::ofstream src("lib.an");
             src << "// " << name << " — Angara Library\n\n"
@@ -132,10 +116,6 @@ namespace angara {
         std::cout << CLR_GRAY << "  Build with: angc" << CLR_RESET << "\n";
         return true;
     }
-
-    // =====================================================
-    // Template: Embedded / Bare-metal
-    // =====================================================
 
     bool ProjectInitializer::init_embedded(const std::string& name, const std::string& author) {
         std::cout << CLR_BOLD << CLR_MAGENTA << "--- Creating Embedded Project: " << name << " ---" << CLR_RESET << "\n";
@@ -160,7 +140,6 @@ namespace angara {
                  << "target = " << target << "\n";
         abs_file.close();
 
-        // Create main.an (bare-metal style)
         if (!fs::exists("main.an")) {
             std::ofstream src("main.an");
             src << "// " << name << " — Bare-metal Angara kernel\n"
@@ -182,7 +161,6 @@ namespace angara {
             src.close();
         }
 
-        // Create a basic linker script
         if (!fs::exists("linker.ld")) {
             std::ofstream ld("linker.ld");
             ld << "ENTRY(_start)\n\n"
@@ -217,10 +195,6 @@ namespace angara {
         return true;
     }
 
-    // =====================================================
-    // Template: GUI (ImGui + OpenGL)
-    // =====================================================
-
     bool ProjectInitializer::init_gui(const std::string& name, const std::string& author) {
         std::cout << CLR_BOLD << CLR_MAGENTA << "--- Creating GUI Project: " << name << " ---" << CLR_RESET << "\n";
 
@@ -247,7 +221,6 @@ namespace angara {
                  << "opt = 0\n";
         abs_file.close();
 
-        // Create main.an
         if (!fs::exists("main.an")) {
             std::ofstream src("main.an");
             src << "attach imgui;\n\n"
@@ -266,15 +239,10 @@ namespace angara {
         return true;
     }
 
-    // =====================================================
-    // Interactive Mode (original behavior, enhanced)
-    // =====================================================
-
     bool ProjectInitializer::init_interactive() {
         std::cout << CLR_BOLD << CLR_MAGENTA << "--- Angara Project Initialization ---" << CLR_RESET << "\n";
         std::cout << "This will create a new workspace configuration (project.abs).\n\n";
 
-        // 1. Workspace Configuration
         std::string ws_name = prompt("Workspace Name", fs::current_path().filename().string());
         std::string ws_author = prompt("Author Name", "user");
         std::string ws_version = prompt("Version", "0.1.0");
@@ -288,7 +256,6 @@ namespace angara {
         if (!ws_desc.empty()) abs_content << "description = " << ws_desc << "\n";
         abs_content << "\n";
 
-        // 2. Project Loop
         bool adding = true;
         while (adding) {
             std::cout << "\n" << CLR_BOLD << CLR_YELLOW << ">> New Project Entry" << CLR_RESET << "\n";
@@ -310,14 +277,12 @@ namespace angara {
             abs_content << "entry = " << p_entry << "\n";
             if (!p_desc.empty()) abs_content << "description = " << p_desc << "\n";
 
-            // Format dependencies list
             if (p_deps.empty()) {
                 abs_content << "dependencies = []\n\n";
             } else {
                 abs_content << "dependencies = [" << p_deps << "]\n\n";
             }
 
-            // Ask for native module
             if (confirm("  Add a native C/C++ module?")) {
                 std::string nm_name = prompt("    Module name", p_name + "_native");
                 std::string nm_sources = prompt("    Sources (comma separated)", "glue.c");
@@ -332,26 +297,22 @@ namespace angara {
                 abs_content << "\n";
             }
 
-            // Ask for pre-build step
             if (confirm("  Add pre-build step?")) {
                 std::string pre_cmd = prompt("    Command");
                 abs_content << "[pre-build]\n";
                 abs_content << "command = " << pre_cmd << "\n\n";
             }
 
-            // Ask for post-build step
             if (confirm("  Add post-build step?")) {
                 std::string post_cmd = prompt("    Command");
                 abs_content << "[post-build]\n";
                 abs_content << "command = " << post_cmd << "\n\n";
             }
 
-            // Build profile
             std::string p_mode = prompt("  Build mode (debug/release)", "debug");
             abs_content << "[profile]\n";
             abs_content << "mode = " << p_mode << "\n\n";
 
-            // Create directories and boilerplate
             try {
                 fs::create_directories(p_name);
                 std::string full_entry_path = p_name + "/" + p_entry;
@@ -366,7 +327,6 @@ namespace angara {
             adding = confirm("Add another project?");
         }
 
-        // 3. Write .abs file
         std::ofstream outfile("project.abs");
         outfile << abs_content.str();
         outfile.close();
