@@ -1,0 +1,816 @@
+/// Create an empty list.
+export func Empty() -> list<any> {
+    return [];
+}
+
+/// Generate a range of integers (C# Enumerable.Range).
+export func Range(start as i64, count as i64) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < count) {
+        result.push(start + i);
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Repeat a value n times (C# Enumerable.Repeat).
+export func Repeat(value as any, count as i64) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < count) {
+        result.push(value);
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Return the first element, or nil if empty (C# Enumerable.First).
+export func First(items as list<any>) -> any {
+    if (len(items) > 0) {
+        return items[0];
+    }
+    return nil;
+}
+
+/// Return the last element, or nil if empty (C# Enumerable.Last).
+export func Last(items as list<any>) -> any {
+    if (len(items) > 0) {
+        return items[len(items) - 1];
+    }
+    return nil;
+}
+
+/// Get element at index, or nil if out of range (C# Enumerable.ElementAtOrDefault).
+export func ElementAt(items as list<any>, index as i64) -> any {
+    if (index >= 0 && index < len(items)) {
+        return items[index];
+    }
+    return nil;
+}
+
+/// Check if the list contains a value (C# Enumerable.Contains).
+export func Contains(items as list<any>, value as any) -> bool {
+    let i = 0;
+    while (i < len(items)) {
+        if (items[i] == value) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+/// Find first index of value, or -1 (C# List.IndexOf).
+export func IndexOf(items as list<any>, value as any) -> i64 {
+    let i = 0;
+    while (i < len(items)) {
+        if (items[i] == value) {
+            return i;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+/// Find last index of value, or -1 (C# List.LastIndexOf).
+export func LastIndexOf(items as list<any>, value as any) -> i64 {
+    let i = len(items) - 1;
+    while (i >= 0) {
+        if (items[i] == value) {
+            return i;
+        }
+        i = i - 1;
+    }
+    return -1;
+}
+
+/// Get the total number of elements (C# List<T>.Count / Enumerable.Count).
+export func Count(items as list<any>) -> i64 {
+    return len(items);
+}
+
+/// Return a specified number of elements from the start (C# Enumerable.Take).
+export func Take(items as list<any>, n as i64) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < n && i < len(items)) {
+        result.push(items[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Bypass a specified number of elements, return the rest (C# Enumerable.Skip).
+export func Skip(items as list<any>, n as i64) -> list<any> {
+    let result as list<any> = [];
+    let i = n;
+    while (i < len(items)) {
+        result.push(items[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Take elements from start..end (Python-style slicing).
+export func Slice(items as list<any>, start as i64, end as i64) -> list<any> {
+    let result as list<any> = [];
+    let i = start;
+    while (i < end && i < len(items)) {
+        result.push(items[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Reverse the order of elements (C# Enumerable.Reverse).
+export func Reverse(items as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = len(items) - 1;
+    while (i >= 0) {
+        result.push(items[i]);
+        i = i - 1;
+    }
+    return result;
+}
+
+/// Concatenate two lists (C# Enumerable.Concat).
+export func Concat(a as list<any>, b as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(a)) {
+        result.push(a[i]);
+        i = i + 1;
+    }
+    i = 0;
+    while (i < len(b)) {
+        result.push(b[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Return distinct/unique elements (C# Enumerable.Distinct).
+export func Distinct(items as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(items)) {
+        let item = items[i];
+        let found = false;
+        let j = 0;
+        while (j < len(result)) {
+            if (result[j] == item) {
+                found = true;
+            }
+            j = j + 1;
+        }
+        if (!found) {
+            result.push(item);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Map each element through a transform function (C# Enumerable.Select).
+export func Select(items as list<any>, transform as any) -> list<any> {
+    @unsafe {
+        let result as list<any> = [];
+        let i = 0;
+        while (i < len(items)) {
+            result.push(transform(items[i]));
+            i = i + 1;
+        }
+        return result;
+    }
+    return [];
+}
+
+/// Filter elements that satisfy a predicate (C# Enumerable.Where).
+export func Where(items as list<any>, predicate as any) -> list<any> {
+    @unsafe {
+        let result as list<any> = [];
+        let i = 0;
+        while (i < len(items)) {
+            if (predicate(items[i])) {
+                result.push(items[i]);
+            }
+            i = i + 1;
+        }
+        return result;
+    }
+    return [];
+}
+
+/// Execute an action for each element (C# List.ForEach).
+export func ForEach(items as list<any>, action as any) -> any {
+    @unsafe {
+        let i = 0;
+        while (i < len(items)) {
+            action(items[i]);
+            i = i + 1;
+        }
+    }
+    return nil;
+}
+
+/// Reduce with an initial seed value (C# Enumerable.Aggregate).
+export func Aggregate(items as list<any>, seed as any, accumulator as any) -> any {
+    @unsafe {
+        let result = seed;
+        let i = 0;
+        while (i < len(items)) {
+            result = accumulator(result, items[i]);
+            i = i + 1;
+        }
+        return result;
+    }
+    return nil;
+}
+
+/// Check if any element satisfies the predicate (C# Enumerable.Any with predicate).
+export func AnyMatch(items as list<any>, predicate as any) -> bool {
+    @unsafe {
+        let i = 0;
+        while (i < len(items)) {
+            if (predicate(items[i])) {
+                return true;
+            }
+            i = i + 1;
+        }
+    }
+    return false;
+}
+
+/// Check if all elements satisfy the predicate (C# Enumerable.All).
+export func All(items as list<any>, predicate as any) -> bool {
+    @unsafe {
+        let i = 0;
+        while (i < len(items)) {
+            let ok = predicate(items[i]);
+            if (ok) {
+                // element passes
+            } else {
+                return false;
+            }
+            i = i + 1;
+        }
+    }
+    return true;
+}
+
+/// Count elements that satisfy a predicate (C# Enumerable.Count with predicate).
+export func CountMatch(items as list<any>, predicate as any) -> i64 {
+    @unsafe {
+        let count = 0;
+        let i = 0;
+        while (i < len(items)) {
+            if (predicate(items[i])) {
+                count = count + 1;
+            }
+            i = i + 1;
+        }
+        return count;
+    }
+    return 0;
+}
+
+/// Find first element matching predicate, or nil (C# Enumerable.FirstOrDefault).
+export func FirstMatch(items as list<any>, predicate as any) -> any {
+    @unsafe {
+        let i = 0;
+        while (i < len(items)) {
+            if (predicate(items[i])) {
+                return items[i];
+            }
+            i = i + 1;
+        }
+    }
+    return nil;
+}
+
+/// Find last element matching predicate, or nil (C# Enumerable.LastOrDefault).
+export func LastMatch(items as list<any>, predicate as any) -> any {
+    @unsafe {
+        let i = len(items) - 1;
+        while (i >= 0) {
+            if (predicate(items[i])) {
+                return items[i];
+            }
+            i = i - 1;
+        }
+    }
+    return nil;
+}
+
+/// Sort elements using a comparator (C# OrderBy simplified).
+/// comparator(a, b) returns true if a should come before b.
+export func SortBy(items as list<any>, comparator as any) -> list<any> {
+    // Copy the list
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(items)) {
+        result.push(items[i]);
+        i = i + 1;
+    }
+    // Bubble sort using the comparator (dynamic call — needs @unsafe)
+    @unsafe {
+        let n = len(result);
+        let outer = 0;
+        while (outer < n - 1) {
+            let inner = 0;
+            while (inner < n - outer - 1) {
+                if (comparator(result[inner + 1], result[inner])) {
+                    let tmp = result[inner];
+                    result[inner] = result[inner + 1];
+                    result[inner + 1] = tmp;
+                }
+                inner = inner + 1;
+            }
+            outer = outer + 1;
+        }
+    }
+    return result;
+}
+
+/// Sum all numeric elements.
+export func Sum(items as list<any>) -> i64 {
+    @unsafe {
+        let total = 0;
+        let i = 0;
+        while (i < len(items)) {
+            total = total + items[i];
+            i = i + 1;
+        }
+        return total;
+    }
+    return 0;
+}
+
+/// Find minimum numeric element, or 0 if empty.
+export func Min(items as list<any>) -> i64 {
+    if (len(items) == 0) { return 0; }
+    @unsafe {
+        let m = items[0];
+        let i = 1;
+        while (i < len(items)) {
+            if (items[i] < m) {
+                m = items[i];
+            }
+            i = i + 1;
+        }
+        return m;
+    }
+    return 0;
+}
+
+/// Find maximum numeric element, or 0 if empty.
+export func Max(items as list<any>) -> i64 {
+    if (len(items) == 0) { return 0; }
+    @unsafe {
+        let m = items[0];
+        let i = 1;
+        while (i < len(items)) {
+            if (items[i] > m) {
+                m = items[i];
+            }
+            i = i + 1;
+        }
+        return m;
+    }
+    return 0;
+}
+
+/// Compute average of numeric elements, or 0 if empty.
+export func Average(items as list<any>) -> i64 {
+    if (len(items) == 0) { return 0; }
+    return Sum(items) / len(items);
+}
+
+/// Return elements in 'a' but not in 'b' (C# Enumerable.Except).
+export func Except(a as list<any>, b as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(a)) {
+        let item = a[i];
+        if (!Contains(b, item)) {
+            result.push(item);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Return elements common to both lists (C# Enumerable.Intersect).
+export func Intersect(a as list<any>, b as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(a)) {
+        let item = a[i];
+        if (Contains(b, item) && !Contains(result, item)) {
+            result.push(item);
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Return distinct elements from both lists (C# Enumerable.Union).
+export func Union(a as list<any>, b as list<any>) -> list<any> {
+    return Distinct(Concat(a, b));
+}
+
+/// Join elements into a string with a separator (C# String.Join).
+export func Join(items as list<any>, separator as string) -> string {
+    let result = "";
+    let i = 0;
+    while (i < len(items)) {
+        if (i > 0) {
+            result = result + separator;
+        }
+        result = result + string(items[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Check if two lists have the same elements in order (C# Enumerable.SequenceEqual).
+export func SequenceEqual(a as list<any>, b as list<any>) -> bool {
+    if (len(a) != len(b)) {
+        return false;
+    }
+    let i = 0;
+    while (i < len(a)) {
+        if (a[i] != b[i]) {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+/// Check if the list is empty.
+export func IsEmpty(items as list<any>) -> bool {
+    return len(items) == 0;
+}
+
+/// Check if the list is not empty.
+export func Any(items as list<any>) -> bool {
+    return len(items) > 0;
+}
+
+/// Generate a range of integers with a step.
+export func RangeStep(start as i64, end as i64, step as i64) -> list<any> {
+    let result as list<any> = [];
+    let i = start;
+    if (step > 0) {
+        while (i < end) {
+            result.push(i);
+            i = i + step;
+        }
+    }
+    return result;
+}
+
+/// Generate a list of indices [0, 1, 2, ...] for a given list.
+export func Indices(items as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(items)) {
+        result.push(i);
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Check if any element in a boolean list is true (C# Enumerable.Any on bools).
+export func AnyTrue(items as list<any>) -> bool {
+    let i = 0;
+    while (i < len(items)) {
+        if (items[i] == true) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+/// Check if all elements in a boolean list are true (C# Enumerable.All on bools).
+export func AllTrue(items as list<any>) -> bool {
+    let i = 0;
+    while (i < len(items)) {
+        if (items[i] != true) {
+            return false;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+/// Count the number of true elements in a boolean list.
+export func CountTrue(items as list<any>) -> i64 {
+    let count = 0;
+    let i = 0;
+    while (i < len(items)) {
+        if (items[i] == true) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    return count;
+}
+
+/// Find the minimum string by alphabetical order.
+export func MinString(items as list<any>) -> string {
+    if (len(items) == 0) { return ""; }
+    let m = string(items[0]);
+    let i = 1;
+    while (i < len(items)) {
+        let s = string(items[i]);
+        if (s < m) {
+            m = s;
+        }
+        i = i + 1;
+    }
+    return m;
+}
+
+/// Find the maximum string by alphabetical order.
+export func MaxString(items as list<any>) -> string {
+    if (len(items) == 0) { return ""; }
+    let m = string(items[0]);
+    let i = 1;
+    while (i < len(items)) {
+        let s = string(items[i]);
+        if (s > m) {
+            m = s;
+        }
+        i = i + 1;
+    }
+    return m;
+}
+
+/// Find the longest string in a list.
+export func Longest(items as list<any>) -> string {
+    if (len(items) == 0) { return ""; }
+    let m = string(items[0]);
+    let mlen = len(m);
+    let i = 1;
+    while (i < len(items)) {
+        let s = string(items[i]);
+        if (len(s) > mlen) {
+            m = s;
+            mlen = len(s);
+        }
+        i = i + 1;
+    }
+    return m;
+}
+
+/// Find the shortest string in a list.
+export func Shortest(items as list<any>) -> string {
+    if (len(items) == 0) { return ""; }
+    let m = string(items[0]);
+    let mlen = len(m);
+    let i = 1;
+    while (i < len(items)) {
+        let s = string(items[i]);
+        if (len(s) < mlen) {
+            m = s;
+            mlen = len(s);
+        }
+        i = i + 1;
+    }
+    return m;
+}
+
+/// Convert all elements to their string representation.
+export func ToStrings(items as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(items)) {
+        result.push(string(items[i]));
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Map each element to a string through a transform (specialized string Select).
+export func MapStrings(items as list<any>, transform as any) -> list<any> {
+    @unsafe {
+        let result as list<any> = [];
+        let i = 0;
+        while (i < len(items)) {
+            result.push(string(transform(items[i])));
+            i = i + 1;
+        }
+        return result;
+    }
+    return [];
+}
+
+/// Map each element with its index (C# Enumerable.Select with index).
+export func SelectWithIndex(items as list<any>, transform as any) -> list<any> {
+    @unsafe {
+        let result as list<any> = [];
+        let i = 0;
+        while (i < len(items)) {
+            result.push(transform(items[i], i));
+            i = i + 1;
+        }
+        return result;
+    }
+    return [];
+}
+
+/// Flatten a list of lists into a single list (C# Enumerable.SelectMany).
+export func Flatten(items as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(items)) {
+        let inner = items[i];
+        let j = 0;
+        while (j < len(inner)) {
+            result.push(inner[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+/// FlatMap — map each element and flatten results.
+export func FlatMap(items as list<any>, transform as any) -> list<any> {
+    @unsafe {
+        let result as list<any> = [];
+        let i = 0;
+        while (i < len(items)) {
+            let mapped = transform(items[i]);
+            let j = 0;
+            while (j < len(mapped)) {
+                result.push(mapped[j]);
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        return result;
+    }
+    return [];
+}
+
+/// Zip two lists into a list of records {first, second} (C# Enumerable.Zip).
+export func Zip(a as list<any>, b as list<any>) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(a) && i < len(b)) {
+        result.push({"first": a[i], "second": b[i]});
+        i = i + 1;
+    }
+    return result;
+}
+
+/// ZipWith — combine elements from two lists using a function.
+export func ZipWith(a as list<any>, b as list<any>, fn as any) -> list<any> {
+    @unsafe {
+        let result as list<any> = [];
+        let i = 0;
+        while (i < len(a) && i < len(b)) {
+            result.push(fn(a[i], b[i]));
+            i = i + 1;
+        }
+        return result;
+    }
+    return [];
+}
+
+/// Split a list into chunks of a given size.
+export func Chunk(items as list<any>, size as i64) -> list<any> {
+    let result as list<any> = [];
+    let i = 0;
+    while (i < len(items)) {
+        let chunk as list<any> = [];
+        let j = 0;
+        while (j < size && i + j < len(items)) {
+            chunk.push(items[i + j]);
+            j = j + 1;
+        }
+        result.push(chunk);
+        i = i + size;
+    }
+    return result;
+}
+
+/// Rotate elements by n positions (positive = right, negative = left).
+export func Rotate(items as list<any>, n as i64) -> list<any> {
+    let count = len(items);
+    if (count == 0) { return items; }
+    let k = n % count;
+    if (k < 0) { k = k + count; }
+    if (k == 0) { return items; }
+    let result as list<any> = [];
+    let i = count - k;
+    while (i < count) {
+        result.push(items[i]);
+        i = i + 1;
+    }
+    i = 0;
+    while (i < count - k) {
+        result.push(items[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Partition elements into two lists based on a predicate.
+/// Returns a record {"match": [...], "rest": [...]}.
+export func Partition(items as list<any>, predicate as any) -> any {
+    @unsafe {
+        let matched as list<any> = [];
+        let rest as list<any> = [];
+        let i = 0;
+        while (i < len(items)) {
+            if (predicate(items[i])) {
+                matched.push(items[i]);
+            } else {
+                rest.push(items[i]);
+            }
+            i = i + 1;
+        }
+        return {"match": matched, "rest": rest};
+    }
+    return {"match": [], "rest": []};
+}
+
+/// Split a list at a given index, returns {left: [...], right: [...]}.
+export func SplitAt(items as list<any>, index as i64) -> any {
+    return {"left": Take(items, index), "right": Skip(items, index)};
+}
+
+/// Split a string by a delimiter character and return as list.
+export func SplitBy(input as string, sep as string) -> list<any> {
+    let result as list<any> = [];
+    let current = "";
+    let i = 0;
+    while (i < len(input)) {
+        let ch = input[i];
+        let is_sep = false;
+        let j = 0;
+        while (j < len(sep)) {
+            if (ch == sep[j]) {
+                is_sep = true;
+            }
+            j = j + 1;
+        }
+        if (is_sep) {
+            result.push(current);
+            current = "";
+        } else {
+            current = current + ch;
+        }
+        i = i + 1;
+    }
+    result.push(current);
+    return result;
+}
+
+/// Convert a list of chars (strings of length 1) to a single string.
+export func JoinChars(items as list<any>) -> string {
+    let result = "";
+    let i = 0;
+    while (i < len(items)) {
+        result = result + string(items[i]);
+        i = i + 1;
+    }
+    return result;
+}
+
+/// Filter characters in a string by a predicate.
+export func FilterChars(input as string, predicate as any) -> string {
+    @unsafe {
+        let result = "";
+        let i = 0;
+        while (i < len(input)) {
+            let ch = input[i];
+            if (predicate(ch)) {
+                result = result + ch;
+            }
+            i = i + 1;
+        }
+        return result;
+    }
+    return "";
+}
+
+/// Map each character in a string through a transform.
+export func MapChars(input as string, transform as any) -> string {
+    @unsafe {
+        let result = "";
+        let i = 0;
+        while (i < len(input)) {
+            result = result + string(transform(input[i]));
+            i = i + 1;
+        }
+        return result;
+    }
+    return "";
+}

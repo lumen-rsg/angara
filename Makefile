@@ -73,12 +73,13 @@ ifeq ($(UNAME_S),Darwin)
     endif
 endif
 
-MOD_SRCS := $(wildcard modules/*.c)
+MOD_SRCS := $(wildcard modules/*/*.c)
 MOD_OBJS := $(patsubst %.c,build/obj/%.o,$(MOD_SRCS))
-MOD_OUTS := $(patsubst modules/%.c,build/modules/%.$(SO_EXT),$(MOD_SRCS))
+MOD_OUTS := $(patsubst modules/%.c,build/modules/%.$(SO_EXT),$(filter modules/%.c,$(MOD_SRCS)))
+MOD_OUTS := $(foreach f,$(MOD_SRCS),build/modules/$(notdir $(patsubst %.c,%.$(SO_EXT),$f)))
 
-JSON_BR_SRC := modules/json_bridge.cpp
-JSON_BR_OBJ := build/obj/modules/json_bridge.o
+JSON_BR_SRC := modules/data/json_bridge.cpp
+JSON_BR_OBJ := build/obj/modules/data/json_bridge.o
 
 ANGC_SRCS := $(shell find angc -name "*.cpp")
 ANGC_OBJS := $(patsubst %.cpp,build/obj/%.o,$(ANGC_SRCS))
@@ -124,7 +125,6 @@ logo:
 	@printf "$(CYAN) ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ $(RESET)\n"
 	@printf "$(MAGENTA)[MK] Building Angara v3 (LLVM) // cv2 was here$(RESET)\n\n"
 
-# --- Compilation Rules ---
 build/obj/%.o: %.c
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CC]  $(RESET) %s\n" "$<"
@@ -135,62 +135,62 @@ build/obj/%.o: %.cpp
 	@printf "$(GREEN)[CX] $(RESET) %s\n" "$<"
 	@$(CXX) $(CXXFLAGS) $(LLVM_CXXFLAGS) -c $< -o $@
 
-build/obj/modules/http.o: modules/http.c
+build/obj/modules/net/http.o: modules/net/http.c
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CC]  $(RESET) %s (CURL)\n" "$<"
 	@$(CC) $(CFLAGS) $(CURL_CFLAGS) -c $< -o $@
 
-build/obj/modules/websocket.o: modules/websocket.c
+build/obj/modules/net/websocket.o: modules/net/websocket.c
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CC]  $(RESET) %s (LWS)\n" "$<"
 	@$(CC) $(CFLAGS) $(LWS_CFLAGS) -c $< -o $@
 
-build/obj/modules/amqp.o: modules/amqp.c
+build/obj/modules/net/amqp.o: modules/net/amqp.c
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CC]  $(RESET) %s (AMQP)\n" "$<"
 	@$(CC) $(CFLAGS) $(AMQP_CFLAGS) -c $< -o $@
 
-build/obj/modules/mqtt.o: modules/mqtt.c
+build/obj/modules/net/mqtt.o: modules/net/mqtt.c
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CC]  $(RESET) %s (MQTT)\n" "$<"
 	@$(CC) $(CFLAGS) $(MQTT_CFLAGS) -c $< -o $@
 
-build/obj/modules/matter.o: modules/matter.c
+build/obj/modules/embedded/matter.o: modules/embedded/matter.c
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CC]  $(RESET) %s (MATTER/CURL)\n" "$<"
 	@$(CC) $(CFLAGS) $(CURL_CFLAGS) -c $< -o $@
 
-build/obj/modules/rpc.o: modules/rpc.c
-	@mkdir -p $(@D)
-	@printf "$(GREEN)[CC]  $(RESET) %s (RPC)\n" "$<"
-	@-$(CC) $(CFLAGS) -c $< -o $@
-
-build/obj/modules/archive.o: modules/archive.c
+build/obj/modules/fs/archive.o: modules/fs/archive.c
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CC]  $(RESET) %s (ARCHIVE)\n" "$<"
 	@$(CC) $(CFLAGS) $(ARCHIVE_CFLAGS) -c $< -o $@
 
-build/obj/modules/sqlite.o: modules/sqlite.c
+build/obj/modules/data/sqlite.o: modules/data/sqlite.c
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CC]  $(RESET) %s (SQLITE)\n" "$<"
 	@$(CC) $(CFLAGS) $(SQLITE_CFLAGS) -c $< -o $@
 
-build/obj/modules/jwt.o: modules/jwt.c
+build/obj/modules/crypto/jwt.o: modules/crypto/jwt.c
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CC]  $(RESET) %s (JWT)\n" "$<"
-	@-$(CC) $(CFLAGS) -c $< -o $@
+	@-$(CC) $(CFLAGS) -Imodules/data -c $< -o $@
 
-build/obj/modules/net.o: modules/net.c
+build/obj/modules/net/net.o: modules/net/net.c
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CC]  $(RESET) %s (NET)\n" "$<"
 	@-$(CC) $(CFLAGS) -c $< -o $@
 
-build/obj/modules/json_bridge.o: modules/json_bridge.cpp
+build/obj/modules/net/rpc.o: modules/net/rpc.c
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CC]  $(RESET) %s (RPC)\n" "$<"
+	@-$(CC) $(CFLAGS) -Imodules/data -c $< -o $@
+
+build/obj/modules/data/json_bridge.o: modules/data/json_bridge.cpp
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CX] $(RESET) %s (JSON Bridge)\n" "$<"
 	@-$(CXX) $(CXXFLAGS) -Iangc-ls/vendor -c $< -o $@
 
-build/obj/modules/imgui.o: modules/imgui.cpp
+build/obj/modules/gui/imgui.o: modules/gui/imgui.cpp
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CX] $(RESET) %s (ImGui Module)\n" "$<"
 	@-$(CXX) $(CXXFLAGS) -DGL_SILENCE_DEPRECATION=1 \
@@ -202,18 +202,17 @@ build/obj/imgui/%.o: $(IMGUI_DIR)/%.cpp
 	@-$(CXX) $(CXXFLAGS) -DGL_SILENCE_DEPRECATION=1 \
 		-I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends $(GLFW_CFLAGS) -c $< -o $@
 
-# --- Linkage Rules (Modules) ---
-build/modules/http.$(SO_EXT): build/obj/modules/http.o
+build/modules/http.$(SO_EXT): build/obj/modules/net/http.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@-$(CC) $< -shared $(CURL_LIBS) -o $@
 
-build/modules/websocket.$(SO_EXT): build/obj/modules/websocket.o
+build/modules/websocket.$(SO_EXT): build/obj/modules/net/websocket.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@-$(CC) $< -shared $(LWS_LIBS) -o $@
 
-build/modules/time.$(SO_EXT): build/obj/modules/time.o
+build/modules/time.$(SO_EXT): build/obj/modules/system/time.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 ifeq ($(UNAME_S),Darwin)
@@ -222,22 +221,22 @@ else
 	@-$(CC) $< -shared -lrt -o $@
 endif
 
-build/modules/amqp.$(SO_EXT): build/obj/modules/amqp.o
+build/modules/amqp.$(SO_EXT): build/obj/modules/net/amqp.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@-$(CC) $< -shared $(AMQP_LIBS) -o $@
 
-build/modules/mqtt.$(SO_EXT): build/obj/modules/mqtt.o
+build/modules/mqtt.$(SO_EXT): build/obj/modules/net/mqtt.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@-$(CC) $< -shared $(MQTT_LIBS) -o $@
 
-build/modules/matter.$(SO_EXT): build/obj/modules/matter.o
+build/modules/matter.$(SO_EXT): build/obj/modules/embedded/matter.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@-$(CC) $< -shared $(CURL_LIBS) -o $@
 
-build/modules/math.$(SO_EXT): build/obj/modules/math.o
+build/modules/math.$(SO_EXT): build/obj/modules/math/math.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 ifeq ($(UNAME_S),Darwin)
@@ -246,7 +245,7 @@ else
 	@-$(CC) $< -shared -lm -o $@
 endif
 
-build/modules/sys.$(SO_EXT): build/obj/modules/sys.o
+build/modules/sys.$(SO_EXT): build/obj/modules/system/sys.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 ifeq ($(UNAME_S),Darwin)
@@ -255,44 +254,71 @@ else
 	@-$(CC) $< -shared -o $@
 endif
 
-build/modules/json.$(SO_EXT): build/obj/modules/json.o $(JSON_BR_OBJ)
+build/modules/json.$(SO_EXT): build/obj/modules/data/json.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@-$(CXX) $^ -shared -o $@
 
-build/modules/rpc.$(SO_EXT): build/obj/modules/rpc.o $(JSON_BR_OBJ)
+build/modules/rpc.$(SO_EXT): build/obj/modules/net/rpc.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (RPC+JSON)\n" "$@"
 	@-$(CXX) $^ -shared -o $@
 
-build/modules/archive.$(SO_EXT): build/obj/modules/archive.o
+build/modules/archive.$(SO_EXT): build/obj/modules/fs/archive.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (ARCHIVE+ZLIB)\n" "$@"
 	@-$(CC) $< -shared $(ARCHIVE_LIBS) -o $@
 
-build/modules/sqlite.$(SO_EXT): build/obj/modules/sqlite.o
+build/modules/sqlite.$(SO_EXT): build/obj/modules/data/sqlite.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (SQLITE3)\n" "$@"
 	@-$(CC) $< -shared $(SQLITE_LIBS) -o $@
 
-build/modules/jwt.$(SO_EXT): build/obj/modules/jwt.o $(JSON_BR_OBJ)
+build/modules/jwt.$(SO_EXT): build/obj/modules/crypto/jwt.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (JWT+JSON)\n" "$@"
 	@-$(CXX) $^ -shared -o $@
 
-build/modules/net.$(SO_EXT): build/obj/modules/net.o
+build/modules/net.$(SO_EXT): build/obj/modules/net/net.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (NET)\n" "$@"
 	@-$(CC) $< -shared -o $@
 
-build/modules/imgui.$(SO_EXT): build/obj/modules/imgui.o $(IMGUI_OBJS)
+build/modules/imgui.$(SO_EXT): build/obj/modules/gui/imgui.o $(IMGUI_OBJS)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (ImGui+GLFW+OpenGL)\n" "$@"
 	@-$(CXX) -shared $^ $(GLFW_LIBS) $(IMGUI_FRAMEWORKS) \
 		$(SONAME_FLAG),libimgui.$(SO_EXT) \
 		-o $@
 
-build/modules/%.$(SO_EXT): build/obj/modules/%.o
+build/modules/io.$(SO_EXT): build/obj/modules/io/io.o
+build/modules/term.$(SO_EXT): build/obj/modules/io/term.o
+build/modules/color.$(SO_EXT): build/obj/modules/io/color.o
+build/modules/os.$(SO_EXT): build/obj/modules/system/os.o
+build/modules/env.$(SO_EXT): build/obj/modules/system/env.o
+build/modules/process.$(SO_EXT): build/obj/modules/system/process.o
+build/modules/unistd.$(SO_EXT): build/obj/modules/system/unistd.o
+build/modules/fs.$(SO_EXT): build/obj/modules/fs/fs.o
+build/modules/path.$(SO_EXT): build/obj/modules/fs/path.o
+build/modules/adv_string.$(SO_EXT): build/obj/modules/text/adv_string.o
+build/modules/regex.$(SO_EXT): build/obj/modules/text/regex.o
+build/modules/encoding.$(SO_EXT): build/obj/modules/text/encoding.o
+build/modules/hash.$(SO_EXT): build/obj/modules/crypto/hash.o
+build/modules/uuid.$(SO_EXT): build/obj/modules/crypto/uuid.o
+build/modules/random.$(SO_EXT): build/obj/modules/math/random.o
+build/modules/csv.$(SO_EXT): build/obj/modules/data/csv.o
+build/modules/config.$(SO_EXT): build/obj/modules/data/config.o
+build/modules/sort.$(SO_EXT): build/obj/modules/data/sort.o
+build/modules/args.$(SO_EXT): build/obj/modules/data/args.o
+build/modules/assert.$(SO_EXT): build/obj/modules/testing/assert.o
+
+build/modules/io.$(SO_EXT) build/modules/term.$(SO_EXT) build/modules/color.$(SO_EXT) \
+build/modules/os.$(SO_EXT) build/modules/env.$(SO_EXT) build/modules/process.$(SO_EXT) \
+build/modules/unistd.$(SO_EXT) build/modules/fs.$(SO_EXT) build/modules/path.$(SO_EXT) \
+build/modules/adv_string.$(SO_EXT) build/modules/regex.$(SO_EXT) build/modules/encoding.$(SO_EXT) \
+build/modules/hash.$(SO_EXT) build/modules/uuid.$(SO_EXT) build/modules/random.$(SO_EXT) \
+build/modules/csv.$(SO_EXT) build/modules/config.$(SO_EXT) build/modules/sort.$(SO_EXT) \
+build/modules/args.$(SO_EXT) build/modules/assert.$(SO_EXT):
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@-$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
