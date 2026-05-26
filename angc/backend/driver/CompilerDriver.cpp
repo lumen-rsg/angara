@@ -1,7 +1,3 @@
-//
-// Created by cv2 on 07.09.2025.
-//
-
 #include "CompilerDriver.h"
 #include "ErrorHandler.h"
 #include "Lexer.h"
@@ -14,28 +10,20 @@
 #include <fstream>
 #include <sstream>
 
-#include <dlfcn.h> // For dlopen, dlsym
+#include <dlfcn.h>
 #include <filesystem>
 
 namespace angara {
 
     class TypeStringParser {
     public:
-        // The parser is initialized with the full source string and a map of
-        // class names that have been discovered in the current module.
         TypeStringParser(const std::string& str,
                          std::map<std::string, std::shared_ptr<ClassType>>& known_classes)
                 : m_source(str), m_known_classes(known_classes) {}
 
-        // --- Public Parser Interface ---
-
-        // This is the primary method called by the driver. It parses a single,
-        // complete type signature from the current position in the string.
         std::shared_ptr<Type> parse_single_type() {
             return parse_optional();
         }
-
-        // --- Public Utilities for the Driver ---
 
         bool is_at_end() {
             return m_current >= m_source.length();
@@ -62,9 +50,6 @@ namespace angara {
         }
 
     private:
-        // --- Internal Parser Grammar Rules ---
-
-        // An optional type is a base type followed by an optional '?'.
         std::shared_ptr<Type> parse_optional() {
             auto base_type = parse_base();
             if (!is_at_end() && peek() == '?') {
@@ -74,7 +59,6 @@ namespace angara {
             return base_type;
         }
 
-        // A base type is a primitive, a class name, a list, or a record.
         std::shared_ptr<Type> parse_base() {
             if (is_at_end()) {
                 throw std::runtime_error("Unexpected end of type string.");
@@ -93,7 +77,7 @@ namespace angara {
                 throw std::runtime_error("Unknown class name '" + class_name + "' in type string.");
             }
 
-            m_current++; // Consume the single-character type token
+            m_current++;
             switch (c) {
                 case 'i': return std::make_shared<PrimitiveType>("i64");
                 case 'd': return std::make_shared<PrimitiveType>("f64");
@@ -122,18 +106,12 @@ namespace angara {
     };
 
     void CompilerDriver::log_step(const std::string& message) {
-        // 1. Clear the current line (which has the progress bar on it).
         std::cout << "\r\033[K";
-
-        // 2. Print the log message on its own line.
         std::cout << CLR_BOLD << CLR_GREEN << "-> " << CLR_RESET << CLR_BOLD << message << CLR_RESET << std::endl;
-
-        // 3. Reprint the last known progress bar state on the new line.
         print_progress(m_last_progress_message);
     }
 
     CompilerDriver::CompilerDriver() {
-        // Defaults, but BuildSystem should override these via set_paths
         m_angara_module_path = ".";
         m_native_module_path = ".";
     }
@@ -152,12 +130,10 @@ namespace angara {
     }
 
     void CompilerDriver::print_progress(const std::string& current_file) {
-        // Store the message so other functions can reprint it.
         m_last_progress_message = current_file;
 
         int bar_width = 20;
         float progress = (m_total_modules > 0) ? (float)m_modules_compiled / m_total_modules : 0;
-        // Don't let the bar go to 100% until the very end.
         if (m_modules_compiled == m_total_modules && current_file != "Done!") {
             progress = 0.99;
         }
@@ -173,7 +149,6 @@ namespace angara {
         ss << CLR_BOLD << CLR_GREEN << "] " << CLR_RESET << "(" << m_modules_compiled << "/" << m_total_modules << ") "
            << "Compiling: " << current_file;
 
-        // \r moves to the beginning. \033[K clears the line.
         std::cout << ss.str() << "\r\033[K" << std::flush;
     }
 
@@ -197,22 +172,19 @@ namespace angara {
         m_generated_object_files.clear();
         m_native_lib_names.clear();
 
-        // 1. Kick off the recursive resolution.
-        // This triggers resolveModule -> loadNative/compileAngara recursively.
         auto root_module = resolveModule(root_file_path, Token());
 
         if (!root_module || m_had_error) {
             return false;
         }
 
-        // 2. Print build timing.
         auto end_time = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - m_build_start_time);
         double seconds = duration.count() / 1000.0;
         int total_modules = static_cast<int>(m_generated_object_files.size());
         int native_count = static_cast<int>(m_native_lib_names.size());
 
-        std::cout << CLR_BOLD << CLR_GREEN << "✓ " << CLR_RESET << "Compiled "
+        std::cout << CLR_BOLD << CLR_GREEN << "[OK] " << CLR_RESET << "Compiled "
                   << total_modules << " module" << (total_modules != 1 ? "s" : "")
                   << (native_count > 0 ? " + " + std::to_string(native_count) + " native lib" + (native_count != 1 ? "s" : "") : "")
                   << " in " << CLR_BOLD << seconds << "s" << CLR_RESET << std::endl;
@@ -221,23 +193,15 @@ namespace angara {
     }
 
     std::string CompilerDriver::get_base_name(const std::string& path) {
-        // Find the position of the last directory separator ('/' or '\')
         size_t last_slash = path.find_last_of("/\\");
-
-        // If a separator is found, the substring starts after it. Otherwise, start at the beginning.
         size_t start = (last_slash == std::string::npos) ? 0 : last_slash + 1;
 
-        // Find the position of the last dot (for the file extension)
         size_t last_dot = path.find_last_of('.');
-
-        // If there's no dot, or the dot is before the last slash (e.g., "a.b/c"),
-        // then the substring goes to the end of the string.
         if (last_dot == std::string::npos || last_dot < start) {
             last_dot = path.length();
         }
 
         std::string basename = path.substr(start, last_dot - start);
-        // If the name starts with "lib", strip it. e.g., "libfs" -> "std::filesystem"
         if (basename.rfind("lib", 0) == 0) {
             return basename.substr(3);
         }
@@ -247,7 +211,6 @@ namespace angara {
     static std::optional<std::string> find_candidate(const std::filesystem::path& dir, const std::string& name) {
         std::error_code ec;
 
-        // If the name already has an extension, check it directly
         if (std::filesystem::path(name).has_extension()) {
             std::filesystem::path p = dir / name;
             if (std::filesystem::exists(p, ec) && !std::filesystem::is_directory(p, ec)) {
@@ -255,13 +218,11 @@ namespace angara {
             }
         }
 
-        // 1. Try Angara Source (.an)
         std::filesystem::path an_path = dir / (name + ".an");
         if (std::filesystem::exists(an_path, ec) && !std::filesystem::is_directory(an_path, ec)) {
             return std::filesystem::canonical(an_path).string();
         }
 
-        // 2. Try Native Libraries (.so, .dylib)
         const std::vector<std::string> native_exts = { ".so", ".dylib", ".dll" };
         for (const auto& ext : native_exts) {
             std::filesystem::path p = dir / (name + ext);
@@ -277,19 +238,13 @@ namespace angara {
     std::shared_ptr<ModuleType> CompilerDriver::resolveModule(const std::string& path_or_id, const Token& import_token) {
     namespace fs = std::filesystem;
     std::string found_path = "";
-    std::string module_name = ""; // We will determine this carefully
+    std::string module_name = "";
 
-    // 1. Determine Search Context
     fs::path base_dir = fs::current_path();
     if (import_token.file && !import_token.file->empty()) {
         base_dir = fs::path(*import_token.file).parent_path();
     }
 
-    // ==========================================================
-    // PHASE A: Discovery (Find the physical file)
-    // ==========================================================
-
-    // Check if it's an absolute path already
     fs::path input_path(path_or_id);
     if (input_path.is_absolute()) {
         std::error_code ec;
@@ -302,15 +257,12 @@ namespace angara {
         if (is_relative) {
             if (auto p = find_candidate(base_dir, path_or_id)) found_path = *p;
         } else {
-            // Priority 1: Exact Project Name
             if (m_project_entries.count(path_or_id)) {
                 found_path = m_project_entries.at(path_or_id);
             }
-            // Priority 2: Local Sibling
             if (found_path.empty()) {
                 if (auto p = find_candidate(base_dir, path_or_id)) found_path = *p;
             }
-            // Priority 3: Internal Project Files (cross-project)
             if (found_path.empty()) {
                 for (auto const& [name, entry_file] : m_project_entries) {
                     fs::path proj_dir = fs::path(entry_file).parent_path();
@@ -320,11 +272,9 @@ namespace angara {
                     }
                 }
             }
-            // Priority 4: StdLib (Source)
             if (found_path.empty()) {
                 if (auto p = find_candidate(fs::path(m_angara_module_path), path_or_id)) found_path = *p;
             }
-            // Priority 5: Native Modules (Binary)
             if (found_path.empty()) {
                 if (auto p = find_candidate(fs::path(m_native_module_path), path_or_id)) found_path = *p;
             }
@@ -333,16 +283,13 @@ namespace angara {
 
     if (found_path.empty()) {
         std::string loc = (import_token.file) ? *import_token.file : "entry point";
-        std::cerr << "Error: Module '" << path_or_id << "' not found (imported from " << loc << ")\n";
+        std::cerr << CLR_RED << "[ERROR] Module '" << path_or_id << "' not found.\n"
+                  << "         Searched: project entries, local directory, standard library, native modules.\n"
+                  << "         Imported from " << loc << CLR_RESET << "\n";
         m_had_error = true;
         return nullptr;
     }
 
-    // ==========================================================
-    // PHASE B: Identification (Determine the UNIQUE Module Name)
-    // ==========================================================
-
-    // 1. Does this path match a known Project Entry Point?
     for (auto const& [projName, entryPath] : m_project_entries) {
         if (found_path == entryPath) {
             module_name = projName;
@@ -350,39 +297,30 @@ namespace angara {
         }
     }
 
-    // 2. If it's a file inside a project folder but NOT the entry point
     if (module_name.empty()) {
         for (auto const& [projName, entryPath] : m_project_entries) {
             fs::path proj_dir = fs::path(entryPath).parent_path();
             if (found_path.find(proj_dir.string()) == 0) {
-                // It's a helper file. Combine Project + Filename for uniqueness
-                // e.g., "RabbitMQHelper_utils"
                 module_name = projName + "_" + get_base_name(found_path);
                 break;
             }
         }
     }
 
-    // 3. Fallback to filename (StdLib or unmanaged files)
     if (module_name.empty()) {
         module_name = get_base_name(found_path);
     }
 
-    // 4. CRITICAL: Never allow "main" as a module name
-    // If we are left with "main", it means it's a single file app.
     if (module_name == "main") {
         module_name = "app_main";
     }
-
-    // ==========================================================
-    // PHASE C: Compilation and Caching
-    // ==========================================================
 
     if (m_module_cache.count(found_path)) return m_module_cache[found_path];
 
     for (const auto& s : m_compilation_stack) {
         if (s == found_path) {
-            std::cerr << "Error: Circular dependency: " << found_path << "\n";
+            std::cerr << CLR_RED << "[ERROR] Circular dependency detected: '" << found_path << "'.\n"
+                      << "         A module cannot import itself, directly or indirectly." << CLR_RESET << "\n";
             m_had_error = true;
             return nullptr;
         }
@@ -395,7 +333,6 @@ namespace angara {
         result = loadNativeModule(found_path, import_token);
         if (result) m_native_lib_names.push_back(get_base_name(found_path));
     } else {
-        // Pass our carefully calculated module_name to the compiler
         result = compileAngaraSource(found_path, module_name);
     }
 
@@ -426,7 +363,8 @@ namespace angara {
         try {
         if (!typeChecker.check(statements)) { errorHandler.printSummary(); m_had_error = true; return nullptr; }
         } catch (const std::exception& e) {
-            std::cerr << "\nEXCEPTION in TypeChecker: " << e.what() << "\n";
+            std::cerr << "\n" << CLR_RED << "[ERROR] Type checker threw an exception while processing '" << path << "'.\n"
+                      << "         " << e.what() << CLR_RESET << "\n";
             m_had_error = true;
             return nullptr;
         }
@@ -434,7 +372,6 @@ namespace angara {
         auto mod = typeChecker.getModuleType();
         m_angara_module_names.push_back(module_name);
 
-        // --- LLVM Backend ---
         try {
             LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding);
             if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
@@ -443,7 +380,8 @@ namespace angara {
             }
             m_generated_object_files.insert(llvmBackend.get_object_file_path());
         } catch (const std::exception& e) {
-            std::cerr << "\nEXCEPTION in LLVM backend: " << e.what() << "\n";
+            std::cerr << "\n" << CLR_RED << "[ERROR] LLVM backend threw an exception while generating code for '" << path << "'.\n"
+                      << "         " << e.what() << CLR_RESET << "\n";
             m_had_error = true;
             return nullptr;
         }
@@ -458,8 +396,9 @@ namespace angara {
 
         void* handle = dlopen(path.c_str(), RTLD_LAZY);
         if (!handle) {
-            std::cerr << "\n" << CLR_BOLD << CLR_RED << "Error at line " << import_token.line << CLR_RESET
-                      << ": Could not load native module '" << path << "'. Reason: " << dlerror() << "\n";
+            std::cerr << "\n" << CLR_RED << "[ERROR] Could not load native module '" << path << "'.\n"
+                      << "         " << dlerror() << "\n"
+                      << "         Ensure the shared library is compatible with your platform." << CLR_RESET << "\n";
             m_had_error = true;
             return nullptr;
         }
@@ -467,15 +406,13 @@ namespace angara {
         std::string module_name = get_base_name(path);
         std::string init_func_name = "Angara_" + module_name + "_Init";
 
-        // The init function receives a vtable of runtime functions.
-        // At compile-time, we pass NULL — the module should only define
-        // its export table during init, not call runtime functions.
         typedef const AngaraFuncDef* (*AngaraModuleInitFn)(int*, const AngaraAPI*);
         auto init_fn = (AngaraModuleInitFn)dlsym(handle, init_func_name.c_str());
 
         if (!init_fn) {
-            std::cerr << "\n" << CLR_BOLD << CLR_RED << "Error at line " << import_token.line << CLR_RESET
-                      << ": Invalid native module '" << path << "'. Missing entry point: " << init_func_name << "\n";
+            std::cerr << "\n" << CLR_RED << "[ERROR] Invalid native module '" << path << "'.\n"
+                      << "         Missing entry point: '" << init_func_name << "'.\n"
+                      << "         The module may not be a valid Angara native extension." << CLR_RESET << "\n";
             m_had_error = true;
             dlclose(handle);
             return nullptr;
@@ -487,26 +424,22 @@ namespace angara {
         auto module_type = std::make_shared<ModuleType>(module_name);
         module_type->is_native = true;
 
-        // A map to hold all native classes discovered in this module.
         std::map<std::string, std::shared_ptr<ClassType>> native_classes;
 
-        // --- Pass 1: Discover all CLASS definitions ---
         for (int i = 0; i < def_count; i++) {
             const AngaraFuncDef& func_def = defs[i];
             if (func_def.constructs) {
                 const AngaraClassDef* class_def = func_def.constructs;
-                if (native_classes.count(class_def->name)) { /* error: duplicate class */ continue; }
+                if (native_classes.count(class_def->name)) { continue; }
 
                 auto class_type = std::make_shared<ClassType>(class_def->name);
                 class_type->is_native = true;
                 native_classes[class_def->name] = class_type;
 
-                // Export the ClassType itself so it can be used in annotations.
                 module_type->exports[class_def->name] = class_type;
             }
         }
 
-        // Iterate through all exported functions in the module.
         for (int i = 0; i < def_count; i++) {
             const AngaraFuncDef& func_def = defs[i];
             if (!func_def.name || !func_def.type_string) continue;
@@ -514,7 +447,6 @@ namespace angara {
             try {
                 TypeStringParser parser(func_def.type_string, native_classes);
 
-                // 1. Parse all parameter types.
                 std::vector<std::shared_ptr<Type>> params;
                 bool is_variadic = false;
                 while (!parser.is_at_end() && parser.peek() != '-') {
@@ -523,29 +455,22 @@ namespace angara {
                         parser.consume_variadic();
                         is_variadic = true;
 
-                        // --- THIS IS THE FIX ---
-                        // A variadic marker must be the last thing in the parameter list.
-                        // This means the very next character MUST be the '->' arrow.
                         if (parser.peek() != '-') {
                             throw std::runtime_error("Variadic '...' must be the final item in the parameter list before '->'.");
                         }
-                        // The `break` is also essential, as it stops the loop from trying to parse more parameters.
                         break;
                     }
                 }
 
-                // 2. Consume the '->' arrow.
                 parser.consume('-');
                 parser.consume('>');
 
-                // 3. Parse the return type.
                 auto return_type = parser.parse_single_type();
 
                 if (!parser.is_at_end()) {
                     throw std::runtime_error("Unexpected characters after return type in signature '" + std::string(func_def.type_string) + "'.");
                 }
 
-                // 4. If it's a constructor, populate the class methods and fields.
                 if (func_def.constructs) {
                     const AngaraClassDef* class_def = func_def.constructs;
                     auto class_type = native_classes.at(class_def->name);
@@ -555,7 +480,6 @@ namespace angara {
                             const AngaraMethodDef& method_def = class_def->methods[m];
                             if (!method_def.name || !method_def.type_string) continue;
 
-                            // --- Create a NEW, SEPARATE parser for the method's signature ---
                             TypeStringParser method_parser(method_def.type_string, native_classes);
 
                             std::vector<std::shared_ptr<Type>> method_params;
@@ -575,7 +499,6 @@ namespace angara {
                         }
                     }
 
-                    // Populate the class's fields.
                     if (class_def->fields) {
                         for (int f = 0; class_def->fields[f].name != nullptr; ++f) {
                             const AngaraFieldDef& field_def = class_def->fields[f];
@@ -596,7 +519,7 @@ namespace angara {
                 module_type->exports[func_def.name] = func_type;
 
             } catch (const std::runtime_error& e) {
-                std::cerr << "\n" << CLR_BOLD << CLR_YELLOW << "Warning:" << CLR_RESET << " Could not parse ABI definition for '"
+                std::cerr << "\n" << CLR_YELLOW << "[WARN] " << CLR_RESET << "Could not parse ABI definition for '"
                           << (func_def.name ? func_def.name : "unknown")
                           << "' in module '" << path << "': " << e.what() << "\n";
             }
@@ -606,4 +529,4 @@ namespace angara {
         return module_type;
     }
 
-} // namespace angara
+}

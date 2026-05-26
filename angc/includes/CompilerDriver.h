@@ -14,7 +14,7 @@
 
 namespace angara {
 
-    // --- ModuleType Definition ---
+    /// Represents a compiled or loaded module and its public exports.
     struct ModuleType : Type {
         const std::string name;
         std::map<std::string, std::shared_ptr<Type>> exports;
@@ -26,92 +26,117 @@ namespace angara {
         std::string toString() const override { return "module<" + name + ">"; }
     };
 
+    /// Top-level driver that orchestrates the full compilation pipeline:
+    /// module resolution, lexing, parsing, type checking, and LLVM code generation.
     class CompilerDriver {
     public:
         CompilerDriver();
         virtual ~CompilerDriver() = default;
 
-        // Configuration
+        /// Sets the search paths for standard library sources and native module binaries.
+        /// @param std_lib_path     Path to Angara source modules (e.g. /opt/angara/src/modules).
+        /// @param native_lib_path  Path to compiled shared libraries (e.g. /opt/angara/modules).
         void set_paths(std::string std_lib_path, std::string native_lib_path);
 
-        // Target triple for cross-compilation
+        /// Sets the LLVM target triple for cross-compilation.
         void set_target(const std::string& triple) { m_target_triple = triple; }
         const std::string& get_target() const { return m_target_triple; }
 
-        // Sysroot for cross-compilation linker
+        /// Sets the sysroot path for the cross-compilation linker.
         void set_sysroot(const std::string& path) { m_sysroot = path; }
         const std::string& get_sysroot() const { return m_sysroot; }
 
-        // Freestanding / nostdlib flags
+        /// Enables or disables freestanding mode (no libc, bare-metal).
         void set_freestanding(bool val) { m_freestanding = val; }
         bool is_freestanding() const { return m_freestanding; }
+
+        /// Enables or disables nostdlib mode (skip linking standard libraries).
         void set_nostdlib(bool val) { m_nostdlib = val; }
         bool is_nostdlib() const { return m_nostdlib; }
 
-        // Main Entry Point
-        // Recursively transpiles 'root_file_path' and all its imports into C files.
-        // Returns true if all stages (Lex, Parse, Check, Transpile) succeeded.
+        /// Compiles a root source file and all its transitive imports.
+        /// Runs Lex -> Parse -> TypeCheck -> LLVM codegen for each module.
+        /// @param project         The project configuration.
+        /// @param root_file_path  Absolute path to the entry source file.
+        /// @return True if all stages succeeded.
         bool compile(const ProjectConfig& project, const std::string& root_file_path);
 
-        // Core Resolution Logic
+        /// Resolves a module by path or identifier, searching the configured paths.
+        /// Returns a cached module if already compiled. Triggers recursive compilation
+        /// for Angara sources, or native loading for shared libraries.
+        /// @param path_or_id    The module path, name, or project identifier.
+        /// @param import_token  The 'attach' token (for error location), or empty.
+        /// @return The resolved module, or nullptr on failure.
         std::shared_ptr<ModuleType> resolveModule(
             const std::string& path_or_id,
             const Token& import_token
         );
+
+        /// Compiles a single Angara source file through all pipeline stages.
+        /// @param path          Absolute path to the .an source file.
+        /// @param module_name   A unique name for this compilation unit.
+        /// @return The resulting module type, or nullptr on failure.
         std::shared_ptr<ModuleType> compileAngaraSource(
             const std::string& path,
             const std::string& module_name
         );
 
-        // Output Retrieval (Used by BuildSystem to know what to link)
+        /// Returns the set of generated object file paths from LLVM codegen.
         const std::set<std::string>& get_generated_object_files() const;
+
+        /// Returns the list of native library names that were linked during compilation.
         const std::vector<std::string>& get_native_libs_linked() const;
 
-        // Static Utility
+        /// Extracts the base filename without extension, stripping any "lib" prefix.
+        /// @param path  A file path.
+        /// @return The base name (e.g. "io" from "/opt/angara/modules/libio.so").
         static std::string get_base_name(const std::string& path);
+
+        /// Reads a file's contents into a string. Returns empty string on failure.
         static std::string read_file(const std::string& path);
 
+        /// Sets the map of project names to their absolute entry file paths.
         inline void set_workspace_projects(std::map<std::string, std::string> project_entries) {
             m_project_entries = std::move(project_entries);
         }
 
     protected:
-        // Internal Helpers
+        /// Prints a log line, temporarily clearing the progress bar.
         void log_step(const std::string& message);
+
+        /// Loads a native shared library and registers its exported functions and classes.
+        /// @param path          Absolute path to the .so/.dylib/.dll.
+        /// @param import_token  The 'attach' token for error reporting.
+        /// @return The loaded module, or nullptr on failure.
         std::shared_ptr<ModuleType> loadNativeModule(const std::string& path, const Token& import_token);
 
-        // State
         bool m_had_error = false;
 
-        // Search Paths (Configured by BuildSystem)
-        std::string m_angara_module_path; // /opt/angara/src/modules
-        std::string m_native_module_path; // /opt/angara/modules
+        std::string m_angara_module_path;
+        std::string m_native_module_path;
 
-        // Compilation State
         std::map<std::string, std::shared_ptr<ModuleType>> m_module_cache;
         std::vector<std::string> m_compilation_stack;
-        SymbolTable m_global_symbols; // Global symbols across the compilation unit
+        SymbolTable m_global_symbols;
         std::map<std::string, std::string> m_project_entries;
 
-        // Cross-compilation
-        std::string m_target_triple; // LLVM target triple (empty = host default)
-        std::string m_sysroot;       // Linker sysroot path
+        std::string m_target_triple;
+        std::string m_sysroot;
 
-        // Freestanding / nostdlib
         bool m_freestanding = false;
         bool m_nostdlib = false;
 
-        // Outputs
         std::set<std::string> m_generated_object_files;
-        std::vector<std::string> m_angara_module_names; // Names for init_globals
-        std::vector<std::string> m_native_lib_names;    // For linker arguments
+        std::vector<std::string> m_angara_module_names;
+        std::vector<std::string> m_native_lib_names;
 
-        // Progress Tracking
         int m_total_modules = 0;
         int m_modules_compiled = 0;
         std::string m_last_progress_message;
         std::chrono::time_point<std::chrono::high_resolution_clock> m_build_start_time;
+
+        /// Renders the compilation progress bar to stdout.
         void print_progress(const std::string& current_file);
     };
 
-} // namespace angara
+}
