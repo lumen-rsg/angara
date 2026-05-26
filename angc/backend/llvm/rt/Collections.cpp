@@ -1,4 +1,3 @@
-// Angara LLVM Backend — Runtime: Collections (List + Record)
 #include "RuntimeBuilder.h"
 
 using namespace llvm;
@@ -25,7 +24,6 @@ void RuntimeBuilder::generateListOps() {
         return result;
     };
 
-    // --- list_new() -> AngaraObject ---
     {
         auto* fn_ty = FunctionType::get(obj_ty, {}, false);
         auto* fn = createRuntimeFunc("__ang_list_new", fn_ty);
@@ -39,14 +37,12 @@ void RuntimeBuilder::generateListOps() {
         auto* mem = b.CreateCall(malloc_fn, {list_size}, "mem");
         auto* list_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
 
-        // Header
         auto* header_ptr = b.CreateStructGEP(m_list_type, list_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_LIST),
             b.CreateStructGEP(m_obj_header_type, header_ptr, 0));
         b.CreateStore(ConstantInt::get(i64_ty, 1),
             b.CreateStructGEP(m_obj_header_type, header_ptr, 1));
 
-        // count = 0, capacity = 0, elements = null
         b.CreateStore(ConstantInt::get(i64_ty, 0), b.CreateStructGEP(m_list_type, list_ptr, 1));
         b.CreateStore(ConstantInt::get(i64_ty, 0), b.CreateStructGEP(m_list_type, list_ptr, 2));
         b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
@@ -55,7 +51,6 @@ void RuntimeBuilder::generateListOps() {
         b.CreateRet(pack_obj(b, list_ptr));
     }
 
-    // --- list_new_with_elements(i64 count, AngaraObject* elems) -> AngaraObject ---
     {
         auto* fn_ty = FunctionType::get(obj_ty, {i64_ty, PointerType::get(m_ctx, 0)}, false);
         auto* fn = createRuntimeFunc("__ang_list_new_with_elements", fn_ty);
@@ -79,18 +74,15 @@ void RuntimeBuilder::generateListOps() {
         b.CreateStore(count, b.CreateStructGEP(m_list_type, list_ptr, 1));
         b.CreateStore(count, b.CreateStructGEP(m_list_type, list_ptr, 2));
 
-        // Allocate elements array: count * sizeof(AngaraObject)
         auto* elem_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(obj_ty));
         auto* total = b.CreateMul(count, elem_size);
         auto* elems_mem = b.CreateCall(malloc_fn, {total});
-        // memcpy from source
         b.CreateCall(m_module.getFunction("memcpy"),
             {elems_mem, b.CreateBitCast(elems, i8_ptr), total});
         b.CreateStore(b.CreateBitCast(elems_mem, PointerType::get(m_ctx, 0)),
             b.CreateStructGEP(m_list_type, list_ptr, 3));
 
-        // Incref all elements
         auto* loop_bb = BasicBlock::Create(m_ctx, "loop", fn);
         auto* body_bb = BasicBlock::Create(m_ctx, "body", fn);
         auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
@@ -115,7 +107,6 @@ void RuntimeBuilder::generateListOps() {
         bd.CreateRet(pack_obj(bd, list_ptr));
     }
 
-    // --- list_push(AngaraObject list, AngaraObject val) ---
     {
         auto* fn_ty = FunctionType::get(Type::getVoidTy(m_ctx), {obj_ty, obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_list_push", fn_ty);
@@ -129,7 +120,6 @@ void RuntimeBuilder::generateListOps() {
         auto* list_arg = fn->arg_begin();
         auto* val_arg = fn->arg_begin() + 1;
 
-        // Extract list pointer
         auto* payload = b.CreateExtractValue(list_arg, {1});
         auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
         auto* list_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
@@ -144,7 +134,6 @@ void RuntimeBuilder::generateListOps() {
         auto* need_grow = b.CreateICmpEQ(count, cap, "need_grow");
         b.CreateCondBr(need_grow, grow_bb, store_bb);
 
-        // Grow: new_cap = max(count + 1, cap * 2)
         IRBuilder<> bg(grow_bb);
         auto* new_cap1 = bg.CreateAdd(count, ConstantInt::get(i64_ty, 1));
         auto* doubled = bg.CreateShl(cap, 1);
@@ -160,21 +149,16 @@ void RuntimeBuilder::generateListOps() {
         bg.CreateStore(new_cap, cap_addr);
         bg.CreateBr(store_bb);
 
-        // Store the element
         IRBuilder<> bs(store_bb);
-        // Re-read count and elems (may have changed in grow)
         auto* count2 = bs.CreateLoad(i64_ty, count_addr, "count2");
         auto* elems2 = bs.CreateLoad(PointerType::get(m_ctx, 0), elems_addr, "elems2");
         auto* elem_ptr = bs.CreateGEP(obj_ty, elems2, {count2});
         bs.CreateStore(val_arg, elem_ptr);
-        // Incref the pushed value
         bs.CreateCall(m_module.getFunction("__ang_incref"), {val_arg});
-        // count++
         bs.CreateStore(bs.CreateAdd(count2, ConstantInt::get(i64_ty, 1)), count_addr);
         bs.CreateRetVoid();
     }
 
-    // --- list_get(AngaraObject list, AngaraObject index) -> AngaraObject ---
     {
         auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_list_get", fn_ty);
@@ -188,11 +172,9 @@ void RuntimeBuilder::generateListOps() {
         auto* list_arg = fn->arg_begin();
         auto* idx_arg = fn->arg_begin() + 1;
 
-        // Extract index as i64
         auto* idx_payload = b.CreateExtractValue(idx_arg, {1});
         auto* idx = b.CreateBitCast(idx_payload, i64_ty, "idx");
 
-        // Extract list pointer
         auto* payload = b.CreateExtractValue(list_arg, {1});
         auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
         auto* list_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
@@ -213,7 +195,6 @@ void RuntimeBuilder::generateListOps() {
         IRBuilder<> bd(done_bb);
         auto* phi = bd.CreatePHI(obj_ty, 2, "val");
         phi->addIncoming(result, in_bounds_bb);
-        // nil for out of bounds
         Value* nil_val = UndefValue::get(obj_ty);
         nil_val = bd.CreateInsertValue(nil_val, ConstantInt::get(i32_ty, TAG_NIL), {0});
         nil_val = bd.CreateInsertValue(nil_val,
@@ -222,7 +203,6 @@ void RuntimeBuilder::generateListOps() {
         bd.CreateRet(phi);
     }
 
-    // --- list_set(AngaraObject list, AngaraObject index, AngaraObject val) ---
     {
         auto* fn_ty = FunctionType::get(Type::getVoidTy(m_ctx), {obj_ty, obj_ty, obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_list_set", fn_ty);
@@ -245,7 +225,6 @@ void RuntimeBuilder::generateListOps() {
             b.CreateStructGEP(m_list_type, list_ptr, 3), "elems");
         auto* elem_ptr = b.CreateGEP(obj_ty, elems, {idx});
 
-        // Decref old, store new, incref new
         auto* old = b.CreateLoad(obj_ty, elem_ptr, "old");
         b.CreateCall(m_module.getFunction("__ang_decref"), {old});
         b.CreateStore(val_arg, elem_ptr);
@@ -254,10 +233,6 @@ void RuntimeBuilder::generateListOps() {
         b.CreateRetVoid();
     }
 }
-
-// ============================================================================
-// Record Operations
-// ============================================================================
 
 void RuntimeBuilder::generateRecordOps() {
     auto* i8_ty = Type::getInt8Ty(m_ctx);
@@ -279,7 +254,6 @@ void RuntimeBuilder::generateRecordOps() {
         return result;
     };
 
-    // --- record_new() -> AngaraObject ---
     {
         auto* fn_ty = FunctionType::get(obj_ty, {}, false);
         auto* fn = createRuntimeFunc("__ang_record_new", fn_ty);
@@ -306,7 +280,6 @@ void RuntimeBuilder::generateRecordOps() {
         b.CreateRet(pack_obj(b, rec_ptr));
     }
 
-    // --- record_get(AngaraObject record, i8* key) -> AngaraObject ---
     {
         auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, i8_ptr}, false);
         auto* fn = createRuntimeFunc("__ang_record_get", fn_ty);
@@ -360,7 +333,6 @@ void RuntimeBuilder::generateRecordOps() {
         bf.CreateRet(val);
 
         IRBuilder<> bnf(not_found_bb);
-        // Return nil
         Value* nil_val = UndefValue::get(obj_ty);
         nil_val = bnf.CreateInsertValue(nil_val, ConstantInt::get(i32_ty, TAG_NIL), {0});
         nil_val = bnf.CreateInsertValue(nil_val,
@@ -368,7 +340,6 @@ void RuntimeBuilder::generateRecordOps() {
         bnf.CreateRet(nil_val);
     }
 
-    // --- record_set(AngaraObject record, i8* key, AngaraObject val) ---
     {
         auto* fn_ty = FunctionType::get(Type::getVoidTy(m_ctx), {obj_ty, i8_ptr, obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_record_set", fn_ty);
@@ -400,7 +371,6 @@ void RuntimeBuilder::generateRecordOps() {
         auto* entries = b.CreateLoad(PointerType::get(m_ctx, 0), entries_addr, "entries");
         b.CreateBr(loop_bb);
 
-        // Linear search for existing key
         IRBuilder<> bl(loop_bb);
         auto* i_phi = bl.CreatePHI(i64_ty, 2, "i");
         i_phi->addIncoming(ConstantInt::get(i64_ty, 0), entry);
@@ -421,7 +391,6 @@ void RuntimeBuilder::generateRecordOps() {
         bn.CreateBr(loop_bb);
         i_phi->addIncoming(next_i, next_bb);
 
-        // Found: update value (decref old, incref new)
         IRBuilder<> bf(found_bb);
         auto* found_entry = bf.CreateGEP(m_record_entry_type, entries, {i_phi});
         auto* val_addr = bf.CreateStructGEP(m_record_entry_type, found_entry, 1);
@@ -431,13 +400,11 @@ void RuntimeBuilder::generateRecordOps() {
         bf.CreateCall(m_module.getFunction("__ang_incref"), {val_arg});
         bf.CreateBr(done_bb);
 
-        // Not found: insert new entry
         IRBuilder<> bnf(not_found_bb);
         auto* cap = bnf.CreateLoad(i64_ty, cap_addr, "cap");
         auto* need_grow = bnf.CreateICmpEQ(count, cap);
         bnf.CreateCondBr(need_grow, grow_bb, insert_bb);
 
-        // Grow entries array
         IRBuilder<> bg(grow_bb);
         auto* new_cap1 = bg.CreateAdd(count, ConstantInt::get(i64_ty, 1));
         auto* doubled = bg.CreateShl(cap, 1);
@@ -453,22 +420,18 @@ void RuntimeBuilder::generateRecordOps() {
         bg.CreateStore(new_cap, cap_addr);
         bg.CreateBr(insert_bb);
 
-        // Insert the new entry
         IRBuilder<> bi(insert_bb);
         auto* cur_entries = bi.CreateLoad(PointerType::get(m_ctx, 0), entries_addr);
         auto* cur_count = bi.CreateLoad(i64_ty, count_addr);
         auto* new_entry = bi.CreateGEP(m_record_entry_type, cur_entries, {cur_count});
 
-        // key = strdup(key_arg)
         auto* strdup_fn = m_module.getFunction("strdup");
         auto* copied_key = bi.CreateCall(strdup_fn, {key_arg});
         bi.CreateStore(copied_key, bi.CreateStructGEP(m_record_entry_type, new_entry, 0));
 
-        // value = val_arg (with incref)
         bi.CreateStore(val_arg, bi.CreateStructGEP(m_record_entry_type, new_entry, 1));
         bi.CreateCall(m_module.getFunction("__ang_incref"), {val_arg});
 
-        // count++
         bi.CreateStore(bi.CreateAdd(cur_count, ConstantInt::get(i64_ty, 1)), count_addr);
         bi.CreateBr(done_bb);
 

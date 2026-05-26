@@ -1,7 +1,3 @@
-// Angara LLVM Backend — Runtime: Module API VTable
-// Builds the AngaraAPI struct of function pointers used by native modules at runtime.
-// All wrappers are generated as LLVM IR with ExternalLinkage so they're callable
-// through function pointers from shared-library modules (.dylib / .so).
 #include "RuntimeBuilder.h"
 
 using namespace llvm;
@@ -24,14 +20,12 @@ void RuntimeBuilder::generateModuleAPIVTable() {
     auto* memcpy_fn = m_module.getFunction("memcpy");
     auto* strlen_fn = m_module.getFunction("strlen");
 
-    // Helper: create ExternalLinkage function
     auto mkExt = [&](const std::string& name, FunctionType* type) -> Function* {
         auto* fn = Function::Create(type, Function::ExternalLinkage, name, m_module);
         fn->setDSOLocal(true);
         return fn;
     };
 
-    // Helper: pack raw ptr into AngaraObject with TAG_OBJ
     auto packObj = [&](IRBuilder<>& b, Value* raw_ptr) -> Value* {
         auto* p = b.CreatePtrToInt(b.CreateBitCast(raw_ptr, i8_ptr), i64_ty);
         Value* r = UndefValue::get(obj_ty);
@@ -40,14 +34,10 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         return r;
     };
 
-    // Helper: unpack AngaraObject payload to raw ptr
     auto unpackPtr = [&](IRBuilder<>& b, Value* val) -> Value* {
         return b.CreateIntToPtr(b.CreateExtractValue(val, {1}), ptr_ty);
     };
 
-    // ==================================================================
-    // Direct-mapped __ang_* functions (matching signatures)
-    // ==================================================================
     auto* fn_string       = m_module.getFunction("__ang_string_from_c");
     auto* fn_string_concat= m_module.getFunction("__ang_string_concat");
     auto* fn_record_new   = m_module.getFunction("__ang_record_new");
@@ -59,9 +49,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
     auto* fn_decref       = m_module.getFunction("__ang_decref");
     auto* fn_to_string    = m_module.getFunction("__ang_to_string");
 
-    // ==================================================================
-    // Wrapper: as_cstr(AngaraObject) -> i8*
-    // ==================================================================
     Function* fn_as_cstr;
     {
         auto* ft = FunctionType::get(i8_ptr, {obj_ty}, false);
@@ -74,9 +61,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRet(chars);
     }
 
-    // ==================================================================
-    // Wrapper: str_len(AngaraObject) -> i64
-    // ==================================================================
     Function* fn_str_len;
     {
         auto* ft = FunctionType::get(i64_ty, {obj_ty}, false);
@@ -89,9 +73,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRet(len);
     }
 
-    // ==================================================================
-    // Wrapper: obj_type(AngaraObject) -> i32
-    // ==================================================================
     Function* fn_obj_type;
     {
         auto* ft = FunctionType::get(i32_ty, {obj_ty}, false);
@@ -113,9 +94,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         bn.CreateRet(ConstantInt::get(i32_ty, -1));
     }
 
-    // ==================================================================
-    // Wrapper: list_get(AngaraObject, i64) -> AngaraObject
-    // ==================================================================
     Function* fn_list_get;
     {
         auto* ft = FunctionType::get(obj_ty, {obj_ty, i64_ty}, false);
@@ -131,9 +109,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRet(b.CreateCall(callee, {list, wrapped}));
     }
 
-    // ==================================================================
-    // Wrapper: list_set(AngaraObject, i64, AngaraObject) -> void
-    // ==================================================================
     Function* fn_list_set;
     {
         auto* ft = FunctionType::get(void_ty, {obj_ty, i64_ty, obj_ty}, false);
@@ -151,9 +126,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRetVoid();
     }
 
-    // ==================================================================
-    // Wrapper: list_len(AngaraObject) -> i64
-    // ==================================================================
     Function* fn_list_len;
     {
         auto* ft = FunctionType::get(i64_ty, {obj_ty}, false);
@@ -165,9 +137,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRet(cnt);
     }
 
-    // ==================================================================
-    // Wrapper: record_len(AngaraObject) -> i64
-    // ==================================================================
     Function* fn_record_len;
     {
         auto* ft = FunctionType::get(i64_ty, {obj_ty}, false);
@@ -179,9 +148,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRet(cnt);
     }
 
-    // ==================================================================
-    // Wrapper: record_key_at(AngaraObject, i64) -> i8*
-    // ==================================================================
     Function* fn_record_key_at;
     {
         auto* ft = FunctionType::get(i8_ptr, {obj_ty, i64_ty}, false);
@@ -197,9 +163,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRet(key);
     }
 
-    // ==================================================================
-    // Wrapper: record_val_at(AngaraObject, i64) -> AngaraObject
-    // ==================================================================
     Function* fn_record_val_at;
     {
         auto* ft = FunctionType::get(obj_ty, {obj_ty, i64_ty}, false);
@@ -215,9 +178,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRet(v);
     }
 
-    // ==================================================================
-    // Wrapper: native_instance_new(void* data, void(*finalize)(void*), const char* name)
-    // ==================================================================
     Function* fn_native_instance_new;
     {
         auto* ft = FunctionType::get(obj_ty, {i8_ptr, i8_ptr, i8_ptr}, false);
@@ -228,17 +188,15 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* fin_arg   = fn_native_instance_new->arg_begin() + 1;
         auto* name_arg  = fn_native_instance_new->arg_begin() + 2;
 
-        auto* size = ConstantInt::get(i64_ty, 40);  // manual size: header(16) + 3 ptrs(24)
+        auto* size = ConstantInt::get(i64_ty, 40);
         auto* mem = b.CreateCall(malloc_fn, {size});
         auto* inst = b.CreateBitCast(mem, ptr_ty);
 
-        // Header: obj_type = OBJ_NATIVE_INSTANCE, ref_count = 1
         auto* hdr = b.CreateStructGEP(m_native_instance_type, inst, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_NATIVE_INSTANCE),
                       b.CreateStructGEP(m_obj_header_type, hdr, 0));
         b.CreateStore(ConstantInt::get(i64_ty, 1),
                       b.CreateStructGEP(m_obj_header_type, hdr, 1));
-        // data, finalize, name(strdup)
         b.CreateStore(data_arg, b.CreateStructGEP(m_native_instance_type, inst, 1));
         b.CreateStore(fin_arg,   b.CreateStructGEP(m_native_instance_type, inst, 2));
         auto* name_copy = b.CreateCall(strdup_fn, {name_arg});
@@ -247,9 +205,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRet(packObj(b, inst));
     }
 
-    // ==================================================================
-    // Wrapper: native_instance_data(AngaraObject) -> void*
-    // ==================================================================
     Function* fn_native_instance_data;
     {
         auto* ft = FunctionType::get(i8_ptr, {obj_ty}, false);
@@ -261,9 +216,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRet(data);
     }
 
-    // ==================================================================
-    // Wrapper: throw_error(const char* msg) -> void
-    // ==================================================================
     Function* fn_throw_error;
     {
         auto* ft = FunctionType::get(void_ty, {i8_ptr}, false);
@@ -277,9 +229,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRetVoid();
     }
 
-    // ==================================================================
-    // Wrapper: truthy(AngaraObject) -> bool
-    // ==================================================================
     Function* fn_truthy;
     {
         auto* ft = FunctionType::get(i1_ty, {obj_ty}, false);
@@ -313,7 +262,7 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* nv = bi.CreateICmpNE(bi.CreateBitCast(iv, i64_ty), ConstantInt::get(i64_ty, 0));
         bi.CreateBr(merge_bb);
 
-        IRBuilder<> bo(obj_bb);  // TAG_F64, TAG_OBJ → true
+        IRBuilder<> bo(obj_bb);
         bo.CreateBr(merge_bb);
 
         IRBuilder<> bm(merge_bb);
@@ -325,9 +274,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         bm.CreateRet(phi);
     }
 
-    // ==================================================================
-    // Wrapper: equals(AngaraObject, AngaraObject) -> bool
-    // ==================================================================
     Function* fn_equals;
     {
         auto* ft = FunctionType::get(i1_ty, {obj_ty, obj_ty}, false);
@@ -338,16 +284,12 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* e = fn_equals->arg_begin() + 1;
         auto* callee = m_module.getFunction("__ang_equals");
         auto* res = b.CreateCall(callee, {a, e});
-        // Result is AngaraObject with TAG_BOOL; extract payload
         auto* pl = b.CreateExtractValue(res, {1});
         auto* bv = b.CreateICmpNE(b.CreateTrunc(b.CreateBitCast(pl, i64_ty), i1_ty),
                                    ConstantInt::get(i1_ty, false));
         b.CreateRet(bv);
     }
 
-    // ==================================================================
-    // Wrapper: string_len(const char* s, size_t len) -> AngaraObject
-    // ==================================================================
     Function* fn_string_len;
     {
         auto* ft = FunctionType::get(obj_ty, {i8_ptr, i64_ty}, false);
@@ -362,7 +304,7 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateCall(memcpy_fn, {buf, src, len});
         b.CreateStore(ConstantInt::get(i8_ty, 0), b.CreateGEP(i8_ty, buf, {len}));
 
-        auto* str_size = ConstantInt::get(i64_ty, 32);  // manual: header(16) + len(8) + chars_ptr(8)
+        auto* str_size = ConstantInt::get(i64_ty, 32);
         auto* mem = b.CreateCall(malloc_fn, {str_size});
         auto* str_ptr = b.CreateBitCast(mem, ptr_ty);
 
@@ -377,9 +319,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRet(packObj(b, str_ptr));
     }
 
-    // ==================================================================
-    // Wrapper: string_no_copy(char* s, size_t len) -> AngaraObject
-    // ==================================================================
     Function* fn_string_no_copy;
     {
         auto* ft = FunctionType::get(obj_ty, {i8_ptr, i64_ty}, false);
@@ -389,7 +328,7 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* src = fn_string_no_copy->arg_begin();
         auto* len = fn_string_no_copy->arg_begin() + 1;
 
-        auto* str_size = ConstantInt::get(i64_ty, 32);  // manual: header(16) + len(8) + chars_ptr(8)
+        auto* str_size = ConstantInt::get(i64_ty, 32);
         auto* mem = b.CreateCall(malloc_fn, {str_size});
         auto* str_ptr = b.CreateBitCast(mem, ptr_ty);
 
@@ -404,9 +343,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRet(packObj(b, str_ptr));
     }
 
-    // ==================================================================
-    // Wrapper: record_new_with_fields(int count, AngaraObject* kv_pairs)
-    // ==================================================================
     Function* fn_record_new_wf;
     {
         auto* ft = FunctionType::get(obj_ty, {i32_ty, i8_ptr}, false);
@@ -421,7 +357,6 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* kv    = fn_record_new_wf->arg_begin() + 1;
         auto* count_i64 = b.CreateSExt(count, i64_ty);
 
-        // Create empty record
         auto* rec = b.CreateCall(m_module.getFunction("__ang_record_new"), {});
         b.CreateBr(loop_bb);
 
@@ -432,15 +367,12 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         bl.CreateCondBr(cmp, body_bb, done_bb);
 
         IRBuilder<> bb(body_bb);
-        // kv_pairs[i*2] = key (AngaraObject with TAG_OBJ -> string)
-        // kv_pairs[i*2+1] = value
         auto* off_key = bb.CreateMul(i, ConstantInt::get(i64_ty, 2));
         auto* off_val = bb.CreateAdd(off_key, ConstantInt::get(i64_ty, 1));
         auto* key_ptr = bb.CreateGEP(obj_ty, kv, {off_key});
         auto* val_ptr = bb.CreateGEP(obj_ty, kv, {off_val});
         auto* key_obj = bb.CreateLoad(obj_ty, key_ptr);
         auto* val_obj = bb.CreateLoad(obj_ty, val_ptr);
-        // Extract C string from key object
         auto* key_payload = bb.CreateExtractValue(key_obj, {1});
         auto* key_raw = bb.CreateIntToPtr(key_payload, ptr_ty);
         auto* key_chars = bb.CreateLoad(i8_ptr, bb.CreateStructGEP(m_string_type, key_raw, 2));
@@ -453,41 +385,37 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         bd.CreateRet(rec);
     }
 
-    // ==================================================================
-    // Build the AngaraAPI struct constant (27 function pointers)
-    // Order must match Angara.h struct AngaraAPI exactly
-    // ==================================================================
     std::vector<Type*> api_fields(27, ptr_ty);
     auto* api_type = StructType::create(m_ctx, api_fields, "AngaraAPI");
 
     std::vector<Constant*> fields = {
-        /*  0 string              */ fn_string,
-        /*  1 string_len          */ fn_string_len,
-        /*  2 string_no_copy      */ fn_string_no_copy,
-        /*  3 string_concat       */ fn_string_concat,
-        /*  4 as_cstr             */ fn_as_cstr,
-        /*  5 str_len             */ fn_str_len,
-        /*  6 list_new            */ fn_list_new,
-        /*  7 list_push           */ fn_list_push,
-        /*  8 list_get            */ fn_list_get,
-        /*  9 list_set            */ fn_list_set,
-        /* 10 list_len            */ fn_list_len,
-        /* 11 record_new          */ fn_record_new,
-        /* 12 record_new_with_fields */ fn_record_new_wf,
-        /* 13 record_set          */ fn_record_set,
-        /* 14 record_get          */ fn_record_get,
-        /* 15 record_len          */ fn_record_len,
-        /* 16 record_key_at       */ fn_record_key_at,
-        /* 17 record_val_at       */ fn_record_val_at,
-        /* 18 native_instance_new */ fn_native_instance_new,
-        /* 19 native_instance_data*/ fn_native_instance_data,
-        /* 20 incref              */ fn_incref,
-        /* 21 decref              */ fn_decref,
-        /* 22 to_string           */ fn_to_string,
-        /* 23 truthy              */ fn_truthy,
-        /* 24 equals              */ fn_equals,
-        /* 25 throw_error         */ fn_throw_error,
-        /* 26 obj_type            */ fn_obj_type,
+        fn_string,
+        fn_string_len,
+        fn_string_no_copy,
+        fn_string_concat,
+        fn_as_cstr,
+        fn_str_len,
+        fn_list_new,
+        fn_list_push,
+        fn_list_get,
+        fn_list_set,
+        fn_list_len,
+        fn_record_new,
+        fn_record_new_wf,
+        fn_record_set,
+        fn_record_get,
+        fn_record_len,
+        fn_record_key_at,
+        fn_record_val_at,
+        fn_native_instance_new,
+        fn_native_instance_data,
+        fn_incref,
+        fn_decref,
+        fn_to_string,
+        fn_truthy,
+        fn_equals,
+        fn_throw_error,
+        fn_obj_type,
     };
 
     auto* api_const = ConstantStruct::get(api_type, fields);

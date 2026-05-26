@@ -1,5 +1,3 @@
-// Angara LLVM Backend — Runtime IR Builder (Core)
-// Generates all runtime functions as LLVM IR directly into the module.
 #include "RuntimeBuilder.h"
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/raw_ostream.h>
@@ -8,16 +6,8 @@ using namespace llvm;
 
 namespace angara {
 
-// ============================================================================
-// Constructor
-// ============================================================================
-
 RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>& builder, bool freestanding)
     : m_ctx(context), m_module(module), m_builder(builder), m_freestanding(freestanding) {}
-
-// ============================================================================
-// Top-level: generate everything
-// ============================================================================
 
 void RuntimeBuilder::generateRuntime() {
     generateTypes();
@@ -43,10 +33,6 @@ void RuntimeBuilder::generateRuntime() {
     generateModuleAPIVTable();
 }
 
-// ============================================================================
-// Helper: create an internal runtime function
-// ============================================================================
-
 Function* RuntimeBuilder::createRuntimeFunc(const std::string& name, FunctionType* type, bool variadic) {
     auto callee = m_module.getOrInsertFunction(name, type);
     auto* fn = cast<Function>(callee.getCallee());
@@ -54,10 +40,6 @@ Function* RuntimeBuilder::createRuntimeFunc(const std::string& name, FunctionTyp
     fn->setDSOLocal(true);
     return fn;
 }
-
-// ============================================================================
-// Type generation
-// ============================================================================
 
 void RuntimeBuilder::generateTypes() {
     m_angara_obj_type = StructType::create(m_ctx, {
@@ -116,9 +98,9 @@ void RuntimeBuilder::generateTypes() {
 
     m_native_instance_type = StructType::create(m_ctx, {
         m_obj_header_type,
-        PointerType::get(m_ctx, 0),  // data
-        PointerType::get(m_ctx, 0),  // finalize
-        PointerType::get(m_ctx, 0),  // name
+        PointerType::get(m_ctx, 0),
+        PointerType::get(m_ctx, 0),
+        PointerType::get(m_ctx, 0),
     }, "AngaraNativeInstance");
 
     m_thread_type = StructType::create(m_ctx, {
@@ -144,10 +126,6 @@ void RuntimeBuilder::generateTypes() {
         ConstantAggregateZero::get(m_angara_obj_type),
         "__ang_current_exception");
 }
-
-// ============================================================================
-// libc declarations
-// ============================================================================
 
 void RuntimeBuilder::declareCLibFunctions() {
     auto* void_ty = Type::getVoidTy(m_ctx);
@@ -188,7 +166,6 @@ void RuntimeBuilder::declareCLibFunctions() {
     m_module.getOrInsertFunction("memset", FunctionType::get(i8_ptr, {i8_ptr, i32_ty, i64_ty}, false));
 
     if (m_freestanding) {
-        // __ang_builtin_memcpy
         {
             auto* fn_ty = FunctionType::get(i8_ptr, {i8_ptr, i8_ptr, i64_ty}, false);
             auto* fn = createRuntimeFunc("__ang_builtin_memcpy", fn_ty);
@@ -198,7 +175,6 @@ void RuntimeBuilder::declareCLibFunctions() {
             b.CreateMemCpy(dst, Align(1), src, Align(1), b.CreateSExt(n, i64_ty));
             b.CreateRet(dst);
         }
-        // __ang_builtin_strlen
         {
             auto* fn_ty = FunctionType::get(i64_ty, {i8_ptr}, false);
             auto* fn = createRuntimeFunc("__ang_builtin_strlen", fn_ty);
@@ -217,7 +193,6 @@ void RuntimeBuilder::declareCLibFunctions() {
             bb.CreateBr(loop_bb); i_phi->addIncoming(next, body_bb);
             IRBuilder<> bd(done_bb); bd.CreateRet(i_phi);
         }
-        // __ang_builtin_strcmp
         {
             auto* fn_ty = FunctionType::get(i32_ty, {i8_ptr, i8_ptr}, false);
             auto* fn = createRuntimeFunc("__ang_builtin_strcmp", fn_ty);
@@ -240,7 +215,6 @@ void RuntimeBuilder::declareCLibFunctions() {
             IRBuilder<> bd(diff_bb);
             bd.CreateRet(bd.CreateSub(bd.CreateSExt(ca, i32_ty), bd.CreateSExt(cb, i32_ty)));
         }
-        // __ang_builtin_memset
         {
             auto* fn_ty = FunctionType::get(i8_ptr, {i8_ptr, i32_ty, i64_ty}, false);
             auto* fn = createRuntimeFunc("__ang_builtin_memset", fn_ty);
@@ -253,4 +227,4 @@ void RuntimeBuilder::declareCLibFunctions() {
     }
 }
 
-} // namespace angara
+}

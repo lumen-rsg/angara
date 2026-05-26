@@ -1,4 +1,3 @@
-// Angara LLVM Backend — Statement Codegen
 #include "LLVMBackend.h"
 #include "RuntimeBuilder.h"
 
@@ -31,11 +30,9 @@ void LLVMBackend::cgStmt(const std::shared_ptr<Stmt>& s) {
 void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
     auto* v = s.initializer ? cg(s.initializer) : makeNil();
 
-    // Look up the variable's type from the type checker
     auto type_it = m_type_checker.m_variable_types.find(&s);
     auto var_type = (type_it != m_type_checker.m_variable_types.end()) ? type_it->second : nullptr;
 
-    // Apply semantic narrowing for sized integer types
     if (var_type && isSizedIntType(var_type)) {
         v = truncateForType(v, var_type);
     }
@@ -157,14 +154,11 @@ void LLVMBackend::cgTry(const TryStmt& s) {
     auto* catchBB = llvm::BasicBlock::Create(*ctx,"catch",fn);
     auto* afterAll = llvm::BasicBlock::Create(*ctx,"after_try",fn);
 
-    // Exception frame: { [512 x i8] jmp_buf, i8* prev }
-    // Must match the layout used in __ang_throw and __ang_try_end
     auto* frameType = llvm::StructType::create(*ctx,
         {llvm::ArrayType::get(llvm::Type::getInt8Ty(*ctx),512),
          llvm::PointerType::get(*ctx, 0)}, "EF");
     auto* frame = builder->CreateAlloca(frameType);
 
-    // Inline: push frame onto exception chain (frame->prev = chain_head, chain_head = frame)
     auto* frame_raw = builder->CreateBitCast(frame, llvm::PointerType::get(*ctx, 0));
     auto* prev_addr = builder->CreateStructGEP(frameType, frame, 1);
     auto* old_chain = builder->CreateLoad(llvm::PointerType::get(*ctx, 0),
@@ -172,7 +166,6 @@ void LLVMBackend::cgTry(const TryStmt& s) {
     builder->CreateStore(old_chain, prev_addr);
     builder->CreateStore(frame_raw, rt->getExceptionChain());
 
-    // Inline: setjmp(frame->jmp_buf) — MUST be in this function's frame for longjmp to work
     auto* jmp_buf_ptr = builder->CreateStructGEP(frameType, frame, 0);
     auto* i8_ptr_ty = llvm::PointerType::get(*ctx, 0);
     auto* setjmp_fn = fn->getParent()->getFunction("setjmp");
@@ -180,7 +173,6 @@ void LLVMBackend::cgTry(const TryStmt& s) {
         llvm::FunctionType::get(llvm::Type::getInt32Ty(*ctx), {i8_ptr_ty}, false),
         setjmp_fn,
         {builder->CreateBitCast(jmp_buf_ptr, i8_ptr_ty)}, "setjmp_result");
-    // Mark setjmp as returns_twice so LLVM doesn't optimize away the second return path
     if (auto* ci = llvm::dyn_cast<llvm::CallInst>(sr)) {
         ci->addFnAttr(llvm::Attribute::ReturnsTwice);
     }
@@ -215,4 +207,4 @@ void LLVMBackend::cgTry(const TryStmt& s) {
     builder->SetInsertPoint(afterAll);
 }
 
-} // namespace angara
+}

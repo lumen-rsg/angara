@@ -1,4 +1,3 @@
-// Angara LLVM Backend — Core Infrastructure
 #include "LLVMBackend.h"
 #include "RuntimeBuilder.h"
 #include <llvm/IR/Verifier.h>
@@ -13,10 +12,6 @@
 #include <iostream>
 
 namespace angara {
-
-// ============================================================================
-// Constructor / Destructor
-// ============================================================================
 
 LLVMBackend::~LLVMBackend() {
     (void)rt.release();
@@ -48,16 +43,10 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
     objType = rt->getAngaraObjType();
 }
 
-// ============================================================================
-// Main entry
-// ============================================================================
-
 bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     const std::shared_ptr<ModuleType>& moduleType, std::vector<std::string>& allMods) {
     moduleName = moduleType ? moduleType->name : "main";
     codegenTopLevelDecls(stmts);
-    // Only generate the C main entry point if this module defines a user "main" function.
-    // Library modules (like collections) have no main — skip to avoid duplicate symbols.
     std::string user_main_name = mangle(moduleName, "main");
     if (mod->getFunction(user_main_name)) {
         codegenMainFunction(stmts, moduleName, allMods);
@@ -102,10 +91,6 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     objPath = base+".o";
     return true;
 }
-
-// ============================================================================
-// AngaraObject inline constructors
-// ============================================================================
 
 llvm::Value* LLVMBackend::makeNil() {
     llvm::Value* r = llvm::UndefValue::get(objType);
@@ -153,10 +138,6 @@ llvm::Value* LLVMBackend::makeStr(const std::string& s) {
     return callRtByName("__ang_string_from_c", {builder->CreateGlobalString(s)});
 }
 
-// ============================================================================
-// Extractors
-// ============================================================================
-
 llvm::Value* LLVMBackend::getI64(llvm::Value* o) { return builder->CreateExtractValue(o,{1}); }
 llvm::Value* LLVMBackend::getF64(llvm::Value* o) { return builder->CreateBitCast(builder->CreateExtractValue(o,{1}), llvm::Type::getDoubleTy(*ctx)); }
 llvm::Value* LLVMBackend::getBool(llvm::Value* o) { return builder->CreateTrunc(builder->CreateExtractValue(o,{1}), llvm::Type::getInt1Ty(*ctx)); }
@@ -170,10 +151,6 @@ llvm::Value* LLVMBackend::isTruthy(llvm::Value* o) {
     return builder->CreateSelect(is_obj, llvm::ConstantInt::getTrue(*ctx), nonzero);
 }
 
-// ============================================================================
-// Runtime call helper
-// ============================================================================
-
 llvm::Value* LLVMBackend::callRt(llvm::FunctionCallee c, const std::vector<llvm::Value*>& a) {
     return builder->CreateCall(c, a);
 }
@@ -183,10 +160,6 @@ llvm::Value* LLVMBackend::callRtByName(const std::string& name, const std::vecto
     if (fn) return builder->CreateCall(fn, a);
     return makeNil();
 }
-
-// ============================================================================
-// Variable management
-// ============================================================================
 
 llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string& name) {
     llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().begin());
@@ -205,17 +178,9 @@ void LLVMBackend::storeVar(const std::string& n, llvm::Value* v) {
     if (auto it=globals.find("g_"+n); it!=globals.end()) { builder->CreateStore(v,it->second); return; }
 }
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
 std::string LLVMBackend::mangle(const std::string& m, const std::string& n) { return "__ang_"+m+"_"+sanitize(n); }
 std::string LLVMBackend::mangleMethod(const std::string& c, const std::string& m) { return "__ang_"+sanitize(c)+"_"+sanitize(m); }
 std::string LLVMBackend::sanitize(const std::string& n) { std::string r; for(char c:n) r+=(std::isalnum(c)||c=='_')?c:'_'; return r; }
-
-// ============================================================================
-// Integer narrowing helpers (Option B: semantic truncation at boundaries)
-// ============================================================================
 
 bool LLVMBackend::isSizedIntType(const std::shared_ptr<Type>& type) {
     if (!type || type->kind != TypeKind::PRIMITIVE) return false;
@@ -236,22 +201,17 @@ int LLVMBackend::getIntBitWidth(const std::shared_ptr<Type>& type) {
     if (name == "i8"  || name == "u8")  return 8;
     if (name == "i16" || name == "u16") return 16;
     if (name == "i32" || name == "u32") return 32;
-    return 64; // i64, u64, or anything else
+    return 64;
 }
 
 llvm::Value* LLVMBackend::truncateForType(llvm::Value* val, const std::shared_ptr<Type>& type) {
     if (!isSizedIntType(type)) return val;
     int bits = getIntBitWidth(type);
-    if (bits >= 64) return val; // i64/u64 — no truncation needed
+    if (bits >= 64) return val;
 
-    // Extract the raw i64 payload
     llvm::Value* payload = getI64(val);
-
-    // Truncate to the target bit width
     llvm::Type* truncTy = llvm::IntegerType::get(*ctx, bits);
     llvm::Value* truncated = builder->CreateTrunc(payload, truncTy, "narrow");
-
-    // Zero-extend back to i64 (this masks out the high bits)
     llvm::Value* masked = builder->CreateZExt(truncated, llvm::Type::getInt64Ty(*ctx), "masked");
 
     return makeI64(masked);

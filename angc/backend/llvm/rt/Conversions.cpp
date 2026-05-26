@@ -1,4 +1,3 @@
-// Angara LLVM Backend — Runtime: Conversions, Equality, Deep Clone
 #include "RuntimeBuilder.h"
 
 using namespace llvm;
@@ -12,7 +11,6 @@ void RuntimeBuilder::generateConversions() {
     auto* i8_ptr = PointerType::get(m_ctx, 0);
     auto* obj_ty = m_angara_obj_type;
 
-    // Helper: create nil
     auto make_nil = [&](IRBuilder<>& b) -> Value* {
         Value* nil_val = UndefValue::get(obj_ty);
         nil_val = b.CreateInsertValue(nil_val, ConstantInt::get(i32_ty, TAG_NIL), {0});
@@ -21,7 +19,6 @@ void RuntimeBuilder::generateConversions() {
         return nil_val;
     };
 
-    // --- to_i64(AngaraObject val) -> AngaraObject ---
     {
         auto* fn_ty = FunctionType::get(obj_ty, {obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_to_i64", fn_ty);
@@ -42,11 +39,9 @@ void RuntimeBuilder::generateConversions() {
         sw->addCase(ConstantInt::get(i32_ty, TAG_F64), is_f64_bb);
         sw->addCase(ConstantInt::get(i32_ty, TAG_BOOL), is_bool_bb);
 
-        // i64: return as-is
         IRBuilder<> bi(is_i64_bb);
         bi.CreateRet(val);
 
-        // f64: truncate to i64 and pack
         IRBuilder<> bf(is_f64_bb);
         auto* fval = bf.CreateBitCast(bf.CreateExtractValue(val, {1}), f64_ty);
         auto* ival = bf.CreateFPToSI(fval, i64_ty);
@@ -55,7 +50,6 @@ void RuntimeBuilder::generateConversions() {
         result = bf.CreateInsertValue(result, ival, {1});
         bf.CreateRet(result);
 
-        // bool: zext to i64
         IRBuilder<> bb(is_bool_bb);
         auto* bval = bb.CreateTrunc(bb.CreateBitCast(bb.CreateExtractValue(val, {1}), i64_ty), Type::getInt1Ty(m_ctx));
         auto* extended = bb.CreateZExt(bval, i64_ty);
@@ -68,7 +62,6 @@ void RuntimeBuilder::generateConversions() {
         bd.CreateRet(make_nil(bd));
     }
 
-    // --- to_f64(AngaraObject val) -> AngaraObject ---
     {
         auto* fn_ty = FunctionType::get(obj_ty, {obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_to_f64", fn_ty);
@@ -102,7 +95,6 @@ void RuntimeBuilder::generateConversions() {
         bd.CreateRet(make_nil(bd));
     }
 
-    // --- to_bool(AngaraObject val) -> AngaraObject ---
     {
         auto* fn_ty = FunctionType::get(obj_ty, {obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_to_bool", fn_ty);
@@ -110,7 +102,6 @@ void RuntimeBuilder::generateConversions() {
 
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<> b(entry);
-        // For simplicity, delegate to truthiness check and pack as bool
         auto* val = fn->arg_begin();
         auto* tag = b.CreateExtractValue(val, {0}, "tag");
         auto* payload = b.CreateExtractValue(val, {1}, "payload");
@@ -154,11 +145,9 @@ void RuntimeBuilder::generateConversions() {
         bf.CreateRet(pack_bool(bf, nonzero_f));
 
         IRBuilder<> bo(obj_bb);
-        // Objects are truthy (simplified)
         bo.CreateRet(pack_bool(bo, ConstantInt::get(Type::getInt1Ty(m_ctx), 1)));
     }
 
-    // --- typeof(AngaraObject val) -> AngaraObject (string) ---
     {
         auto* fn_ty = FunctionType::get(obj_ty, {obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_typeof", fn_ty);
@@ -203,10 +192,6 @@ void RuntimeBuilder::generateConversions() {
     }
 }
 
-// ============================================================================
-// Equality
-// ============================================================================
-
 void RuntimeBuilder::generateEquality() {
     auto* i32_ty = Type::getInt32Ty(m_ctx);
     auto* i64_ty = Type::getInt64Ty(m_ctx);
@@ -222,7 +207,6 @@ void RuntimeBuilder::generateEquality() {
         return result;
     };
 
-    // --- equals(AngaraObject a, AngaraObject b) -> AngaraObject ---
     {
         auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_equals", fn_ty);
@@ -236,7 +220,6 @@ void RuntimeBuilder::generateEquality() {
         auto* tag_a = bb.CreateExtractValue(a, {0}, "tag_a");
         auto* tag_b = bb.CreateExtractValue(b_arg, {0}, "tag_b");
 
-        // If tags differ, check for i64/f64 cross-comparison
         auto* tags_eq = bb.CreateICmpEQ(tag_a, tag_b, "tags_eq");
         auto* both_num = bb.CreateOr(
             bb.CreateAnd(
@@ -258,21 +241,17 @@ void RuntimeBuilder::generateEquality() {
         auto* payload_a = bcs.CreateExtractValue(a, {1});
         auto* payload_b = bcs.CreateExtractValue(b_arg, {1});
 
-        // Same tag: compare payloads
         auto* same_tag_bb = BasicBlock::Create(m_ctx, "same_tag", fn);
         auto* cross_num_bb = BasicBlock::Create(m_ctx, "cross_num", fn);
         bcs.CreateCondBr(tags_eq, same_tag_bb, cross_num_bb);
 
-        // Same tag comparison
         IRBuilder<> bst(same_tag_bb);
         auto* nil_eq_bb = BasicBlock::Create(m_ctx, "nil_eq", fn);
         auto* sw = bst.CreateSwitch(tag_a, nil_eq_bb, 5);
 
-        // nil == nil → true
         IRBuilder<> bne(nil_eq_bb);
         bne.CreateRet(pack_bool(bne, ConstantInt::get(Type::getInt1Ty(m_ctx), 1)));
 
-        // bool comparison
         auto* bool_eq_bb = BasicBlock::Create(m_ctx, "bool_eq", fn);
         sw->addCase(ConstantInt::get(i32_ty, TAG_BOOL), bool_eq_bb);
         {
@@ -282,7 +261,6 @@ void RuntimeBuilder::generateEquality() {
             bbe.CreateRet(pack_bool(bbe, bbe.CreateICmpEQ(ba, bb2)));
         }
 
-        // i64 comparison
         auto* i64_eq_bb = BasicBlock::Create(m_ctx, "i64_eq", fn);
         sw->addCase(ConstantInt::get(i32_ty, TAG_I64), i64_eq_bb);
         {
@@ -292,7 +270,6 @@ void RuntimeBuilder::generateEquality() {
             bie.CreateRet(pack_bool(bie, bie.CreateICmpEQ(ia, ib)));
         }
 
-        // f64 comparison
         auto* f64_eq_bb = BasicBlock::Create(m_ctx, "f64_eq", fn);
         sw->addCase(ConstantInt::get(i32_ty, TAG_F64), f64_eq_bb);
         {
@@ -302,17 +279,14 @@ void RuntimeBuilder::generateEquality() {
             bfe.CreateRet(pack_bool(bfe, bfe.CreateFCmpOEQ(da, db)));
         }
 
-        // obj comparison: pointer equality for now
         auto* obj_eq_bb = BasicBlock::Create(m_ctx, "obj_eq", fn);
         sw->addCase(ConstantInt::get(i32_ty, TAG_OBJ), obj_eq_bb);
         {
             IRBuilder<> boe(obj_eq_bb);
             auto* pa = boe.CreateBitCast(payload_a, i64_ty);
             auto* pb = boe.CreateBitCast(payload_b, i64_ty);
-            // For strings, compare content
             auto* is_string_bb = BasicBlock::Create(m_ctx, "is_str_eq", fn);
             auto* ptr_eq_bb = BasicBlock::Create(m_ctx, "ptr_eq", fn);
-            // Check if both are strings
             auto* ptr_a = boe.CreateIntToPtr(pa, PointerType::get(m_ctx, 0));
             auto* obj_type_a = boe.CreateLoad(i32_ty, boe.CreateStructGEP(m_obj_header_type, ptr_a, 0));
             auto* is_str_a = boe.CreateICmpEQ(obj_type_a, ConstantInt::get(i32_ty, OBJ_STRING));
@@ -322,7 +296,6 @@ void RuntimeBuilder::generateEquality() {
             auto* both_str = boe.CreateAnd(is_str_a, is_str_b);
             boe.CreateCondBr(both_str, is_string_bb, ptr_eq_bb);
 
-            // String comparison
             IRBuilder<> bse(is_string_bb);
             auto* str_a = bse.CreateIntToPtr(pa, PointerType::get(m_ctx, 0));
             auto* str_b = bse.CreateIntToPtr(pb, PointerType::get(m_ctx, 0));
@@ -333,27 +306,20 @@ void RuntimeBuilder::generateEquality() {
             auto* eq = bse.CreateICmpEQ(cmp, ConstantInt::get(i32_ty, 0));
             bse.CreateRet(pack_bool(bse, eq));
 
-            // Pointer equality for other objects
             IRBuilder<> bpe(ptr_eq_bb);
             bpe.CreateRet(pack_bool(bpe, bpe.CreateICmpEQ(pa, pb)));
         }
 
-        // Cross numeric comparison (i64 vs f64)
         IRBuilder<> bcn(cross_num_bb);
         auto* ia = bcn.CreateBitCast(payload_a, i64_ty);
         auto* da = bcn.CreateSIToFP(ia, f64_ty);
         auto* db = bcn.CreateBitCast(payload_b, f64_ty);
-        // Determine which is i64 and which is f64
         auto* a_is_i64 = bcn.CreateICmpEQ(tag_a, ConstantInt::get(i32_ty, TAG_I64));
         auto* a_as_f64 = bcn.CreateSelect(a_is_i64, da, bcn.CreateBitCast(payload_a, f64_ty));
         auto* b_as_f64 = bcn.CreateSelect(a_is_i64, db, bcn.CreateBitCast(payload_b, f64_ty));
         bcn.CreateRet(pack_bool(bcn, bcn.CreateFCmpOEQ(a_as_f64, b_as_f64)));
     }
 }
-
-// ============================================================================
-// Deep Clone (stub — returns the value with incref for heap objects)
-// ============================================================================
 
 void RuntimeBuilder::generateDeepClone() {
     auto* obj_ty = m_angara_obj_type;
@@ -365,7 +331,6 @@ void RuntimeBuilder::generateDeepClone() {
     IRBuilder<> b(entry);
     auto* val = fn->arg_begin();
 
-    // For now: incref and return (shallow clone)
     auto* incref_fn = m_module.getFunction("__ang_incref");
     b.CreateCall(incref_fn, {val});
     b.CreateRet(val);

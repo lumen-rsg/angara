@@ -9,9 +9,7 @@ void LLVMBackend::codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>&
         if (auto s = std::dynamic_pointer_cast<const VarDeclStmt>(stmt))
             codegenGlobalVarDecl(*s);
         else if (auto s = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
-            // Intrinsic functions are handled inline by cgCall — no LLVM function to emit
             if (s->is_intrinsic) continue;
-            // Foreign functions get a C ABI wrapper
             if (s->is_foreign) { codegenForeignFuncDecl(*s); continue; }
             codegenFunctionDecl(*s, moduleName);
         }
@@ -43,7 +41,6 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     std::vector<llvm::Type*> param_types(stmt.params.size(), objType);
     auto* fn_type = llvm::FunctionType::get(objType, param_types, false);
 
-    // Reuse existing declaration if one was forward-declared (e.g., from a closure wrapper)
     auto* fn = mod->getFunction(func_name);
     if (!fn) {
         fn = llvm::Function::Create(fn_type, llvm::Function::ExternalLinkage,
@@ -96,9 +93,8 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
         }
     }
 
-    // Find init method and determine constructor params
     std::shared_ptr<FuncStmt> init_method;
-    std::string init_class_name = class_name; // The class that defines init
+    std::string init_class_name = class_name;
     size_t init_param_count = 0;
 
     for (const auto& member : stmt.members) {
@@ -111,7 +107,6 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
         }
     }
 
-    // If no init found locally, check superclass chain via the type checker
     if (!init_method) {
         auto sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(class_name);
         if (sym && sym->type->kind == TypeKind::CLASS) {
@@ -122,7 +117,6 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
                 if (ft) {
                     init_param_count = ft->param_types.size();
                 }
-                // Walk up to find which class defines init
                 auto current = ct;
                 while (current) {
                     if (current->methods.count("init")) {
@@ -135,16 +129,12 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
         }
     }
 
-    // Generate methods FIRST (so init exists when constructor calls it)
     for (const auto& member : stmt.members) {
         if (auto method = std::dynamic_pointer_cast<const MethodMember>(member)) {
             const auto& method_stmt = method->declaration;
             std::string method_name = mangleMethod(class_name, method_stmt->name.lexeme);
-            // Register method by name (for dispatch in cgCall)
             methodLookup[method_stmt->name.lexeme] = method_name;
 
-            // 'this' is implicit (has_this flag), params doesn't include it
-            // LLVM function: this, param0, param1, ...
             std::vector<llvm::Type*> param_types(method_stmt->params.size() + 1, objType);
             auto* fn_type = llvm::FunctionType::get(objType, param_types, false);
             auto* fn = llvm::Function::Create(fn_type, llvm::Function::ExternalLinkage,
@@ -158,12 +148,10 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
             namedVals.clear();
             namedTypes.clear();
 
-            // First arg is always 'this'
             auto* this_alloca = allocLocal(fn, "this");
             builder->CreateStore(&*fn->arg_begin(), this_alloca);
             namedVals["this"] = this_alloca;
 
-            // Remaining args: bind params[0..n] (this is NOT in params)
             size_t pi = 0;
             for (auto it = fn->arg_begin() + 1; it != fn->arg_end() && pi < method_stmt->params.size(); ++it, ++pi) {
                 std::string pname = sanitize(method_stmt->params[pi].name.lexeme);
@@ -187,12 +175,10 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
         }
     }
 
-    // Constructor params = init method params (this is NOT in params, so no -1)
     size_t ctor_param_count = (init_method || init_param_count > 0)
         ? init_param_count
         : class_fields.size();
 
-    // Constructor (generated after methods so it can call init)
     std::string ctor_name = "Angara_" + class_name + "_new";
     {
         std::vector<llvm::Type*> param_types(ctor_param_count, objType);
@@ -209,8 +195,6 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
         llvm::Value* obj = callRtByName("__ang_record_new", {});
 
         if (init_method || init_param_count > 0) {
-            // Call init(this, args...) — first arg is 'this', rest are ctor params
-            // Use init_class_name to find the correct mangled init (may be in superclass)
             std::string init_mangled = mangleMethod(init_class_name, "init");
             llvm::Function* init_fn = this->mod->getFunction(init_mangled);
             if (init_fn) {
@@ -222,7 +206,6 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
                 builder->CreateCall(init_fn, args);
             }
         } else {
-            // No init method: set fields directly from constructor args
             size_t i = 0;
             for (auto& arg : fn->args()) {
                 if (i < class_fields.size()) {
@@ -236,7 +219,6 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
         builder->CreateRet(obj);
         namedVals = std::move(saved_values);
     }
-    // Register constructor for this class
     constructorLookup[class_name] = ctor_name;
 }
 
@@ -265,22 +247,12 @@ void LLVMBackend::codegenDataDecl(const DataStmt& stmt) {
 
     builder->CreateRet(obj);
     namedVals = std::move(saved_values);
-    // Register data class constructor
     constructorLookup[data_name] = "Angara_data_new_" + data_name;
 }
 
 void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
-    // Foreign function: generates a C ABI extern declaration + an AngaraObject wrapper.
-    //
-    // Angara code:  foreign func pinMode(pin as i64, mode as i64) -> nil;
-    // Generates:
-    //   1. LLVM declare:  declare void @pinMode(i64, i64)
-    //   2. AngaraObject wrapper:  define @__ang_main_pinMode(AngaraObject, AngaraObject) -> AngaraObject
-    //      which extracts i64 from each AngaraObject param, calls @pinMode, wraps result
-
-    // --- Resolve return type ---
     auto isVoidType = [](const std::shared_ptr<ASTType>& type) -> bool {
-        if (!type) return true; // no return type = void/nil
+        if (!type) return true;
         if (auto* s = dynamic_cast<const SimpleType*>(type.get()))
             return s->name.lexeme == "nil" || s->name.lexeme == "void";
         return false;
@@ -297,9 +269,9 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
             if (n == "i64")    return llvm::Type::getInt64Ty(*ctx);
             if (n == "f32")    return llvm::Type::getFloatTy(*ctx);
             if (n == "f64")    return llvm::Type::getDoubleTy(*ctx);
-            if (n == "string") return llvm::PointerType::get(*ctx, 0); // const char*
+            if (n == "string") return llvm::PointerType::get(*ctx, 0);
         }
-        return llvm::Type::getInt64Ty(*ctx); // default
+        return llvm::Type::getInt64Ty(*ctx);
     };
 
     auto getTypeName = [](const std::shared_ptr<ASTType>& type) -> std::string {
@@ -312,7 +284,6 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
     bool returnsVoid = isVoidType(stmt.returnType);
     llvm::Type* cRetType = returnsVoid ? llvm::Type::getVoidTy(*ctx) : resolveCType(stmt.returnType);
 
-    // Resolve param C types
     std::vector<llvm::Type*> cParamTypes;
     std::vector<std::string> paramTypeNames;
     for (const auto& param : stmt.params) {
@@ -320,12 +291,10 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
         paramTypeNames.push_back(getTypeName(param.type));
     }
 
-    // 1. Declare the extern C function (resolved at link time)
     std::string cFuncName = stmt.name.lexeme;
     auto* cFnType = llvm::FunctionType::get(cRetType, cParamTypes, false);
     auto* cFunc = llvm::Function::Create(cFnType, llvm::Function::ExternalLinkage, cFuncName, mod.get());
 
-    // 2. Generate AngaraObject wrapper: __ang_<module>_<name>(AngaraObject, ...) -> AngaraObject
     std::string wrapperName = mangle(moduleName, stmt.name.lexeme);
     std::vector<llvm::Type*> wrapperParamTypes(stmt.params.size(), objType);
     auto* wrapperFnType = llvm::FunctionType::get(objType, wrapperParamTypes, false);
@@ -338,7 +307,6 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
     auto saved_values = std::move(namedVals);
     namedVals.clear();
 
-    // Extract native C values from AngaraObject params
     std::vector<llvm::Value*> cArgs;
     size_t idx = 0;
     for (auto& arg : wrapperFn->args()) {
@@ -361,7 +329,6 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
         } else if (typeName == "f32") {
             cArgs.push_back(builder->CreateFPTrunc(getF64(&arg), llvm::Type::getFloatTy(*ctx)));
         } else if (typeName == "string") {
-            // Pass raw pointer from AngaraObject payload
             cArgs.push_back(builder->CreateIntToPtr(getI64(&arg), llvm::PointerType::get(*ctx, 0)));
         } else {
             cArgs.push_back(getI64(&arg));
@@ -369,10 +336,8 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
         idx++;
     }
 
-    // Call the C function
     llvm::CallInst* cResult = builder->CreateCall(cFunc, cArgs);
 
-    // Wrap C result into AngaraObject
     if (returnsVoid) {
         builder->CreateRet(makeNil());
     } else {
@@ -388,7 +353,6 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
         } else if (retTypeName == "f32") {
             builder->CreateRet(makeF64(builder->CreateFPExt(cResult, llvm::Type::getDoubleTy(*ctx))));
         } else if (retTypeName == "string") {
-            // C string → Angara string via runtime
             builder->CreateRet(callRtByName("__ang_string_from_c", {cResult}));
         } else {
             builder->CreateRet(makeI64(cResult));
@@ -415,7 +379,6 @@ void LLVMBackend::codegenEnumDecl(const EnumStmt& stmt) {
 void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& statements,
                                         const std::string& module_name,
                                         const std::vector<std::string>&) {
-    // In freestanding mode, generate _start entry point (no libc dependency)
     std::string entry_name = m_freestanding ? "_start" : "main";
     auto* main_type = llvm::FunctionType::get(
         m_freestanding ? llvm::Type::getVoidTy(*ctx) : llvm::Type::getInt32Ty(*ctx), false);
@@ -428,13 +391,11 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
     namedVals.clear();
     namedTypes.clear();
 
-    // Initialize native modules at runtime (pass AngaraAPI vtable so ang_api != NULL)
     if (!m_freestanding) {
         auto* vtable = rt->getAPIVtable();
         if (vtable) {
             auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
             auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
-            // AngaraFuncDef* Angara_<mod>_Init(int* def_count, const AngaraAPI* api)
             auto* init_fn_type = llvm::FunctionType::get(ptr_ty,
                 {llvm::PointerType::get(i32_ty, 0), ptr_ty}, false);
 
@@ -499,22 +460,16 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
     }
 
     if (m_freestanding) {
-        // Freestanding: infinite loop (no OS to return to)
         auto* halt_bb = llvm::BasicBlock::Create(*ctx, "halt", main_fn);
         builder->CreateBr(halt_bb);
         builder->SetInsertPoint(halt_bb);
-        builder->CreateBr(halt_bb); // infinite halt loop
+        builder->CreateBr(halt_bb);
     } else {
         builder->CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0));
     }
 }
 
-// ============================================================================
-// Native Module Support — declare externals for attach'd native modules
-// ============================================================================
 void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stmt>>& statements) {
-    // Use m_module_resolutions from type checker, keyed by raw AttachStmt ptr.
-    // The shared_ptrs in 'statements' keep the objects alive.
     for (const auto& stmt : statements) {
         auto attach = std::dynamic_pointer_cast<const AttachStmt>(stmt);
         if (!attach) continue;
@@ -526,7 +481,6 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
         for (auto& [export_name, export_type] : mod_type->exports) {
             auto func_type = std::dynamic_pointer_cast<FunctionType>(export_type);
             if (!func_type) {
-                // It's a class type — register methods
                 auto class_type = std::dynamic_pointer_cast<ClassType>(export_type);
                 if (class_type && class_type->is_native) {
                     for (auto& [method_name, method_info] : class_type->methods) {
@@ -539,7 +493,6 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
                         llvm::Function::Create(nmt, llvm::Function::ExternalLinkage, nmn, mod.get());
 
                         std::string mwn = mangleMethod(class_type->name, method_name);
-                        // +1 for self (the native instance), which the call site always passes as arg[0]
                         int total_args = mpc + 1;
                         std::vector<llvm::Type*> mwp(total_args, objType);
                         auto* mwt = llvm::FunctionType::get(objType, mwp, false);
@@ -548,7 +501,6 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
                         auto* ms = builder->GetInsertBlock();
                         builder->SetInsertPoint(me);
                         {
-                            // Build args array: [self, user_param_0, user_param_1, ...]
                             auto* mat = llvm::ArrayType::get(objType, total_args);
                             auto* ma = builder->CreateAlloca(mat);
                             int mi = 0;
@@ -572,14 +524,12 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
             }
             int param_count = (int)func_type->param_types.size();
 
-            // Declare native: AngaraObject Angara_<mod>_<name>(i32, AngaraObject*)
             std::string native_name = "Angara_" + mod_name + "_" + export_name;
             auto* native_fn_type = llvm::FunctionType::get(objType,
                 {llvm::Type::getInt32Ty(*ctx), llvm::PointerType::get(*ctx, 0)}, false);
             llvm::Function::Create(native_fn_type, llvm::Function::ExternalLinkage,
                                     native_name, mod.get());
 
-            // Wrapper: __ang_<mod>_<name>(AngaraObject...) -> AngaraObject
             std::string wrapper_name = mangle(mod_name, export_name);
             std::vector<llvm::Type*> wpt(param_count, objType);
             auto* wft = llvm::FunctionType::get(objType, wpt, false);
@@ -617,7 +567,6 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
             }
             if (sb) builder->SetInsertPoint(sb);
 
-            // Register as constructor if returns native class instance
             if (func_type->return_type) {
                 if (auto it = std::dynamic_pointer_cast<InstanceType>(func_type->return_type)) {
                     auto ct = it->class_type;
@@ -628,4 +577,4 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
     }
 }
 
-} // namespace angara
+}

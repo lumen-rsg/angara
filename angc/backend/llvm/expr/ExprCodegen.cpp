@@ -1,13 +1,9 @@
-// Angara LLVM Backend — Expression Codegen
 #include "LLVMBackend.h"
 #include "RuntimeBuilder.h"
 #include <llvm/IR/Intrinsics.h>
 
 namespace angara {
 
-// ============================================================================
-// Expression dispatch
-// ============================================================================
 llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
     if (!e) return makeNil();
     if (auto* p = dynamic_cast<const Literal*>(e.get())) return cgLiteral(*p);
@@ -15,22 +11,16 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
     if (auto* p = dynamic_cast<const Unary*>(e.get())) return cgUnary(*p);
     if (auto* p = dynamic_cast<const Grouping*>(e.get())) return cg(p->expression);
     if (auto* p = dynamic_cast<const VarExpr*>(e.get())) {
-        // First-class function reference: if VarExpr resolves to a function type,
-        // wrap the named function in a closure object.
         auto type_it = m_type_checker.m_expression_types.find(e.get());
         if (type_it != m_type_checker.m_expression_types.end() &&
             type_it->second->kind == TypeKind::FUNCTION) {
             auto func_type = std::dynamic_pointer_cast<FunctionType>(type_it->second);
-            // Check if this is already a closure variable (in namedVals)
             if (namedVals.find(sanitize(p->name.lexeme)) != namedVals.end()) {
                 return loadVar(p->name.lexeme);
             }
-            // It's a top-level function reference — generate a closure wrapper
             std::string mangled = mangle(moduleName, p->name.lexeme);
             int arity = (int)func_type->param_types.size();
 
-            // Generate a unique wrapper function that adapts the closure
-            // calling convention (i32, ptr) to the direct calling convention
             std::string wrapper_name = "__ang_wrap_" + sanitize(p->name.lexeme) + "_" + std::to_string(m_lambda_counter++);
 
             auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
@@ -45,7 +35,6 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
 
             auto* args_ptr = wrapper_fn->arg_begin() + 1;
 
-            // Extract arguments from the args array and call the real function
             std::vector<llvm::Value*> direct_args;
             auto* wrap_arr_type = llvm::ArrayType::get(objType, arity);
             for (int i = 0; i < arity; i++) {
@@ -55,8 +44,6 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
                 direct_args.push_back(builder->CreateLoad(objType, elem_ptr));
             }
 
-            // Call the actual named function via callModuleFn
-            // We need to look it up directly
             llvm::Function* target_fn = this->mod->getFunction(mangled);
             if (!target_fn) target_fn = this->mod->getFunction("__ang_" + sanitize(p->name.lexeme));
 
@@ -64,7 +51,6 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
                 auto* result = builder->CreateCall(target_fn, direct_args);
                 builder->CreateRet(result);
             } else {
-                // Forward declaration — insert it and call it
                 auto* direct_fn_type = llvm::FunctionType::get(objType,
                     std::vector<llvm::Type*>(arity, objType), false);
                 auto* forward_fn = llvm::Function::Create(direct_fn_type, llvm::Function::ExternalLinkage,
@@ -73,10 +59,8 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
                 builder->CreateRet(result);
             }
 
-            // Restore builder
             if (saved_insert_block) builder->SetInsertPoint(saved_insert_block);
 
-            // Create a closure object wrapping the wrapper
             return callRtByName("__ang_closure_new", {
                 wrapper_fn,
                 llvm::ConstantInt::get(i32_ty, arity),
@@ -182,7 +166,6 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             return phi;
         }
         case TokenType::STAR: {
-            // Check if this is string * number repetition
             {
                 auto lt = m_type_checker.m_expression_types.find(e.left.get());
                 if (lt != m_type_checker.m_expression_types.end() && lt->second->toString() == "string") {
@@ -426,7 +409,6 @@ llvm::Value* LLVMBackend::cgUnary(const Unary& e) {
 llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
     auto* v = cg(e.value);
     if (auto* var = dynamic_cast<const VarExpr*>(e.target.get())) {
-        // Apply semantic narrowing for typed integer variables
         auto type_it = namedTypes.find(var->name.lexeme);
         if (type_it != namedTypes.end() && isSizedIntType(type_it->second)) {
             v = truncateForType(v, type_it->second);
@@ -487,13 +469,11 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                     }
                 }
             }
-            // Check if modName is a local/global variable (list/record/mutex/thread) rather than a module
             std::string gkey = "g_" + sanitize(modName);
             bool is_var = namedVals.find(sanitize(modName)) != namedVals.end() ||
                           globals.find(gkey) != globals.end();
             if (is_var) {
                 auto* varObj = loadVar(modName);
-                // Built-in list methods
                 if (fnName == "push" || fnName == "add") {
                     if (!expr.arguments.empty())
                         return callRtByName("__ang_list_push", {varObj, cg(expr.arguments[0])});
@@ -512,7 +492,6 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                 if (fnName == "length" || fnName == "len" || fnName == "size" || fnName == "count") {
                     return callRtByName("__ang_len", {varObj});
                 }
-                // Built-in mutex methods
                 if (fnName == "lock") {
                     callRtByName("__ang_mutex_lock", {varObj});
                     return makeNil();
@@ -521,11 +500,9 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                     callRtByName("__ang_mutex_unlock", {varObj});
                     return makeNil();
                 }
-                // Built-in thread methods
                 if (fnName == "join") {
                     return callRtByName("__ang_thread_join", {varObj});
                 }
-                // Not a recognized built-in — fall through to module function lookup
             }
             if (modName=="io") {
                 if (fnName=="println"||fnName=="print") {
@@ -557,7 +534,6 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
     if (auto* var = dynamic_cast<const VarExpr*>(expr.callee.get())) {
         std::string fn = var->name.lexeme;
 
-        // Intrinsics: inline volatile IR generation
         if (fn == "peek8" || fn == "peek16" || fn == "peek32" || fn == "peek64") {
             if (!expr.arguments.empty()) {
                 auto* addr = getI64(cg(expr.arguments[0]));
@@ -619,13 +595,11 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             if (!expr.arguments.empty()) return callRtByName("__ang_to_bool",{cg(expr.arguments[0])});
             return makeBool(false);
         }
-        // Check if it's a local variable holding a closure (first-class function call)
         if (namedVals.find(sanitize(fn)) != namedVals.end()) {
             auto type_it = m_type_checker.m_expression_types.find(expr.callee.get());
             bool is_callable = false;
             if (type_it != m_type_checker.m_expression_types.end()) {
                 auto kind = type_it->second->kind;
-                // Explicit function type, or 'any' (which may be a closure passed as param)
                 if (kind == TypeKind::FUNCTION || kind == TypeKind::ANY) {
                     is_callable = true;
                 }
@@ -638,7 +612,6 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             }
         }
 
-        // Built-in Exception constructor: use runtime's exception_new
         if (fn == "Exception") {
             std::vector<llvm::Value*> args;
             for (auto& a : expr.arguments) args.push_back(cg(a));
@@ -646,12 +619,10 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             return callRtByName("__ang_exception_new", args);
         }
 
-        // Built-in Mutex constructor
         if (fn == "Mutex") {
             return callRtByName("__ang_mutex_new", {});
         }
 
-        // Built-in spawn: spawns a function in a new thread
         if (fn == "spawn") {
             if (!expr.arguments.empty()) {
                 auto* closure = cg(expr.arguments[0]);
@@ -686,10 +657,7 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
     llvm::Function* f = this->mod->getFunction(mangled);
     if (!f) f = this->mod->getFunction("__ang_"+sanitize(fn));
 
-    // If not found, create a forward declaration for the cross-module function
-    // All Angara functions return %AngaraObject and take %AngaraObject params
     if (!f) {
-        // Try the mangled name first, then the sanitized name
         std::string declName = mangled;
         auto* fnTy = llvm::FunctionType::get(objType,
             std::vector<llvm::Type*>(args.size(), objType), false);
@@ -698,8 +666,6 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
 
     auto ft = f->getFunctionType();
     bool direct_call = true;
-    // Only use the closure calling convention (i32 argc, ptr args) for functions
-    // that explicitly have that signature — NOT for 0-param functions.
     if (ft->getNumParams() == 2 &&
         ft->getParamType(0)->isIntegerTy(32) &&
         ft->getParamType(1)->isPointerTy()) {
@@ -732,8 +698,6 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
 }
 
 llvm::Value* LLVMBackend::cgGet(const GetExpr& e) {
-    // Special case: enum variant access (e.g., Color.Red)
-    // Check if the object is a VarExpr whose type is an enum type
     if (auto* var = dynamic_cast<const VarExpr*>(e.object.get())) {
         auto type_it = m_type_checker.m_expression_types.find(e.object.get());
         if (type_it != m_type_checker.m_expression_types.end() &&
@@ -748,7 +712,6 @@ llvm::Value* LLVMBackend::cgGet(const GetExpr& e) {
     }
 
     auto* obj = cg(e.object);
-    // Special case: .message property uses exception_get_message runtime function
     if (e.name.lexeme == "message") {
         return callRtByName("__ang_exception_get_message", {obj});
     }
@@ -853,27 +816,17 @@ llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {
 
 llvm::Value* LLVMBackend::cgRetype(const RetypeExpr& e) { return cg(e.expression); }
 
-// ============================================================================
-// Lambda (anonymous function) codegen
-// ============================================================================
-
 llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
-    // Generate a unique name for the lambda's LLVM function
     std::string lambda_fn_name = "__ang_lambda_" + std::to_string(m_lambda_counter++);
 
-    // The lambda function follows the closure calling convention:
-    //   define AngaraObject @lambda_fn(i32 %argc, AngaraObject* %args)
     auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
     auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
     auto* fn_type = llvm::FunctionType::get(objType, {i32_ty, ptr_ty}, false);
     auto* lambda_fn = llvm::Function::Create(fn_type, llvm::Function::PrivateLinkage,
                                               lambda_fn_name, mod.get());
 
-    // Save current builder state
     auto* saved_insert_block = builder->GetInsertBlock();
 
-    // Capture parent scope variables: store their current values into globals
-    // so the lambda function (which is a separate LLVM function) can access them.
     std::map<std::string, llvm::GlobalVariable*> capture_globals;
     for (const auto& [name, alloca] : namedVals) {
         std::string gname = "__ang_cap_" + lambda_fn_name + "_" + name;
@@ -883,23 +836,19 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
                 *mod, objType, false, llvm::GlobalValue::PrivateLinkage,
                 llvm::ConstantAggregateZero::get(objType), gname);
         }
-        // Store the current value of the variable into the global
         auto* val = builder->CreateLoad(objType, alloca, name);
         builder->CreateStore(val, global);
         capture_globals[name] = global;
     }
 
-    // Generate the lambda body
     auto* entry = llvm::BasicBlock::Create(*ctx, "entry", lambda_fn);
     builder->SetInsertPoint(entry);
 
-    // Save and swap named values (the lambda has its own scope)
     auto saved_values = std::move(namedVals);
     auto saved_types = std::move(namedTypes);
     namedVals.clear();
     namedTypes.clear();
 
-    // Restore captured variables from globals into local allocas
     for (const auto& [name, global] : capture_globals) {
         std::string sname = sanitize(name);
         auto* alloca = allocLocal(lambda_fn, sname);
@@ -908,8 +857,6 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
         namedVals[sname] = alloca;
     }
 
-    // Bind lambda parameters from the args array
-    // The closure calling convention: args[0] = first param, args[1] = second, etc.
     auto* argc_arg = lambda_fn->arg_begin();
     auto* args_arg = lambda_fn->arg_begin() + 1;
     auto* lambda_arr_type = llvm::ArrayType::get(objType, e.param_names.size());
@@ -918,7 +865,6 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
         std::string pname = sanitize(e.param_names[i].lexeme);
         auto* alloca = allocLocal(lambda_fn, pname);
 
-        // Load args[i] from the args array
         auto* elem_ptr = builder->CreateGEP(lambda_arr_type, args_arg,
             {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
              llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
@@ -927,43 +873,33 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
         namedVals[pname] = alloca;
     }
 
-    // Generate the body statements
     for (const auto& stmt : e.body) {
         cgStmt(stmt);
     }
 
-    // Ensure the lambda function has a terminator
     if (!builder->GetInsertBlock()->getTerminator()) {
         builder->CreateRet(makeNil());
     }
 
-    // Restore named values
     namedVals = std::move(saved_values);
     namedTypes = std::move(saved_types);
 
-    // Restore builder to the caller's insertion point
     if (saved_insert_block) {
         builder->SetInsertPoint(saved_insert_block);
     }
 
-    // Create a closure object wrapping this function
     int arity = (int)e.param_names.size();
     return callRtByName("__ang_closure_new", {
         lambda_fn,
         llvm::ConstantInt::get(i32_ty, arity),
-        llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0) // not native
+        llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0)
     });
 }
-
-// ============================================================================
-// Closure call — calls an AngaraObject that is a closure
-// ============================================================================
 
 llvm::Value* LLVMBackend::cgClosureCall(llvm::Value* callee, const std::vector<llvm::Value*>& args) {
     auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
     int argc = (int)args.size();
 
-    // Allocate an array for the arguments
     if (argc > 0) {
         auto* arr_type = llvm::ArrayType::get(objType, argc);
         auto* arr_alloca = builder->CreateAlloca(arr_type);
@@ -989,4 +925,4 @@ llvm::Value* LLVMBackend::cgClosureCall(llvm::Value* callee, const std::vector<l
     });
 }
 
-} // namespace angara
+}

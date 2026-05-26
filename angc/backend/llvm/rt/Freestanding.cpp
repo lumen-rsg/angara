@@ -1,4 +1,3 @@
-// Angara LLVM Backend — Runtime: Freestanding Stubs
 #include "RuntimeBuilder.h"
 
 using namespace llvm;
@@ -23,10 +22,8 @@ void RuntimeBuilder::generateFreestandingStubs() {
         auto* fn = createRuntimeFunc(name, ty); fc = FunctionCallee(fn);
         auto* e = BasicBlock::Create(m_ctx, "entry", fn); IRBuilder<> b(e); b.CreateRet(make_nil(b));
     };
-    // Memory management — no-ops (no heap)
     stub_void("__ang_decref", FunctionType::get(void_ty, {obj_ty}, false), m_fn_decref);
     stub_void("__ang_incref", FunctionType::get(void_ty, {obj_ty}, false), m_fn_incref);
-    // Equality — simple payload compare
     {
         auto* fn = createRuntimeFunc("__ang_equals", FunctionType::get(obj_ty, {obj_ty, obj_ty}, false));
         m_fn_equals = FunctionCallee(fn);
@@ -41,7 +38,6 @@ void RuntimeBuilder::generateFreestandingStubs() {
         r = b.CreateInsertValue(r, ext, {1});
         b.CreateRet(r);
     }
-    // Exception stubs
     stub_nil("__ang_exception_new", FunctionType::get(obj_ty, {obj_ty}, false), m_fn_exception_new);
     stub_void("__ang_throw", FunctionType::get(void_ty, {obj_ty}, false), m_fn_throw);
     {
@@ -51,25 +47,20 @@ void RuntimeBuilder::generateFreestandingStubs() {
         IRBuilder<>(e).CreateRet(ConstantInt::get(i32_ty, 0));
     }
     stub_void("__ang_try_end", FunctionType::get(void_ty, {}, false), m_fn_try_end);
-    // String stubs
     stub_nil("__ang_string_from_c", FunctionType::get(obj_ty, {PointerType::get(m_ctx, 0)}, false), m_fn_string_from_c);
     stub_nil("__ang_string_concat", FunctionType::get(obj_ty, {obj_ty, obj_ty}, false), m_fn_string_concat);
     stub_nil("__ang_string_repeat", FunctionType::get(obj_ty, {obj_ty, obj_ty}, false), m_fn_string_repeat);
     stub_nil("__ang_to_string", FunctionType::get(obj_ty, {obj_ty}, false), m_fn_to_string);
-    // Record stubs
     stub_nil("__ang_record_new", FunctionType::get(obj_ty, {}, false), m_fn_record_new);
     stub_nil("__ang_record_get", FunctionType::get(obj_ty, {obj_ty, PointerType::get(m_ctx, 0)}, false), m_fn_record_get);
     stub_void("__ang_record_set", FunctionType::get(void_ty, {obj_ty, PointerType::get(m_ctx, 0), obj_ty}, false), m_fn_record_set);
-    // Len
     stub_nil("__ang_len", FunctionType::get(obj_ty, {obj_ty}, false), m_fn_len);
-    // IO stubs
     stub_void("__ang_io_print", FunctionType::get(void_ty, {obj_ty, obj_ty}, false), m_fn_io_print);
     stub_void("__ang_io_println", FunctionType::get(void_ty, {obj_ty, obj_ty}, false), m_fn_io_println);
     stub_void("__ang_io_write", FunctionType::get(void_ty, {obj_ty, obj_ty}, false), m_fn_io_write);
     stub_void("__ang_io_flush", FunctionType::get(void_ty, {obj_ty}, false), m_fn_io_flush);
     stub_nil("__ang_io_read_line", FunctionType::get(obj_ty, {}, false), m_fn_io_read_line);
     stub_nil("__ang_io_read_all", FunctionType::get(obj_ty, {}, false), m_fn_io_read_all);
-    // List stubs
     stub_nil("__ang_list_new", FunctionType::get(obj_ty, {}, false), m_fn_list_new);
     stub_nil("__ang_list_get", FunctionType::get(obj_ty, {obj_ty, obj_ty}, false), m_fn_list_get);
     stub_void("__ang_list_push", FunctionType::get(void_ty, {obj_ty, obj_ty}, false), m_fn_list_push);

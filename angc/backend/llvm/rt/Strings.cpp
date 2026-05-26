@@ -1,4 +1,3 @@
-// Angara LLVM Backend — Runtime: String Operations
 #include "RuntimeBuilder.h"
 
 using namespace llvm;
@@ -17,7 +16,6 @@ void RuntimeBuilder::generateStringOps() {
     auto* strdup_fn = m_module.getFunction("strdup");
     auto* memcpy_fn = m_module.getFunction("memcpy");
 
-    // Helper lambda: pack an Object* into an AngaraObject with TAG_OBJ
     auto pack_obj = [&](IRBuilder<>& b, Value* raw_ptr) -> Value* {
         auto* ptr_i8 = b.CreateBitCast(raw_ptr, i8_ptr);
         auto* ptr_i64 = b.CreatePtrToInt(ptr_i8, i64_ty);
@@ -28,7 +26,6 @@ void RuntimeBuilder::generateStringOps() {
         return result;
     };
 
-    // --- string_from_c(i8* chars) -> AngaraObject ---
     {
         auto* fn_ty = FunctionType::get(obj_ty, {i8_ptr}, false);
         auto* fn = createRuntimeFunc("__ang_string_from_c", fn_ty);
@@ -38,36 +35,29 @@ void RuntimeBuilder::generateStringOps() {
         IRBuilder<> b(entry);
         auto* chars = fn->arg_begin();
 
-        // strlen
         auto* len = b.CreateCall(strlen_fn, {chars}, "len");
 
-        // Allocate string struct: malloc(sizeof(AngaraString))
         auto* str_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_string_type));
         auto* mem = b.CreateCall(malloc_fn, {str_size}, "mem");
         auto* str_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0), "str_ptr");
 
-        // Set header: obj_type = OBJ_STRING, ref_count = 1
         auto* header_ptr = b.CreateStructGEP(m_string_type, str_ptr, 0);
         auto* type_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING), type_addr);
         auto* rc_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 1);
         b.CreateStore(ConstantInt::get(i64_ty, 1), rc_addr);
 
-        // Set length
         auto* len_addr = b.CreateStructGEP(m_string_type, str_ptr, 1);
         b.CreateStore(len, len_addr);
 
-        // Set chars = strdup(chars)
         auto* copied = b.CreateCall(strdup_fn, {chars}, "copied");
         auto* chars_addr = b.CreateStructGEP(m_string_type, str_ptr, 2);
         b.CreateStore(copied, chars_addr);
 
-        // Pack as AngaraObject
         b.CreateRet(pack_obj(b, str_ptr));
     }
 
-    // --- string_concat(AngaraObject a, AngaraObject b) -> AngaraObject ---
     {
         auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_string_concat", fn_ty);
@@ -78,7 +68,6 @@ void RuntimeBuilder::generateStringOps() {
         auto* a = fn->arg_begin();
         auto* b_arg = fn->arg_begin() + 1;
 
-        // Extract string a
         auto* a_payload = b.CreateExtractValue(a, {1});
         auto* a_ptr_i64 = b.CreateBitCast(a_payload, i64_ty);
         auto* a_str = b.CreateIntToPtr(a_ptr_i64, PointerType::get(m_ctx, 0));
@@ -87,7 +76,6 @@ void RuntimeBuilder::generateStringOps() {
         auto* a_len_ptr = b.CreateStructGEP(m_string_type, a_str, 1);
         auto* a_len = b.CreateLoad(i64_ty, a_len_ptr);
 
-        // Extract string b
         auto* b_payload = b.CreateExtractValue(b_arg, {1});
         auto* b_ptr_i64 = b.CreateBitCast(b_payload, i64_ty);
         auto* b_str = b.CreateIntToPtr(b_ptr_i64, PointerType::get(m_ctx, 0));
@@ -96,34 +84,26 @@ void RuntimeBuilder::generateStringOps() {
         auto* b_len_ptr = b.CreateStructGEP(m_string_type, b_str, 1);
         auto* b_len = b.CreateLoad(i64_ty, b_len_ptr);
 
-        // new_len = a_len + b_len
         auto* new_len = b.CreateAdd(a_len, b_len, "new_len");
-        // Allocate: new_len + 1 for null terminator
         auto* buf_size = b.CreateAdd(new_len, ConstantInt::get(i64_ty, 1));
         auto* buf = b.CreateCall(malloc_fn, {buf_size}, "buf");
-        // memcpy a
         b.CreateCall(memcpy_fn, {buf, a_chars, a_len});
-        // memcpy b
         auto* dest = b.CreateGEP(i8_ty, buf, {a_len});
         b.CreateCall(memcpy_fn, {dest, b_chars, b_len});
-        // Null terminator
         auto* null_pos = b.CreateGEP(i8_ty, buf, {new_len});
         b.CreateStore(ConstantInt::get(i8_ty, 0), null_pos);
 
-        // Allocate new string struct
         auto* str_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_string_type));
         auto* mem = b.CreateCall(malloc_fn, {str_size}, "mem");
         auto* str_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
 
-        // Header
         auto* header_ptr = b.CreateStructGEP(m_string_type, str_ptr, 0);
         auto* type_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING), type_addr);
         auto* rc_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 1);
         b.CreateStore(ConstantInt::get(i64_ty, 1), rc_addr);
 
-        // Length and chars
         auto* len_addr = b.CreateStructGEP(m_string_type, str_ptr, 1);
         b.CreateStore(new_len, len_addr);
         auto* chars_addr = b.CreateStructGEP(m_string_type, str_ptr, 2);
@@ -132,7 +112,6 @@ void RuntimeBuilder::generateStringOps() {
         b.CreateRet(pack_obj(b, str_ptr));
     }
 
-    // --- string_repeat(AngaraObject str, AngaraObject count) -> AngaraObject ---
     {
         auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_string_repeat", fn_ty);
@@ -149,15 +128,12 @@ void RuntimeBuilder::generateStringOps() {
         auto* str_arg = fn->arg_begin();
         auto* count_arg = fn->arg_begin() + 1;
 
-        // Extract repeat count
         auto* count_payload = b.CreateExtractValue(count_arg, {1});
         auto* count_val = b.CreateBitCast(count_payload, i64_ty, "count");
 
-        // If count <= 0, return empty string
         auto* is_non_positive = b.CreateICmpSLE(count_val, ConstantInt::get(i64_ty, 0));
         b.CreateCondBr(is_non_positive, zero_bb, prep_bb);
 
-        // zero case: return empty string
         {
             IRBuilder<> bz(zero_bb);
             auto* gsptr = bz.CreateGlobalString("");
@@ -165,7 +141,6 @@ void RuntimeBuilder::generateStringOps() {
             bz.CreateRet(bz.CreateCall(str_from_c, {gsptr}));
         }
 
-        // prep: Extract source string chars and length, allocate buffer
         IRBuilder<> bp(prep_bb);
         auto* payload = bp.CreateExtractValue(str_arg, {1});
         auto* ptr_i64 = bp.CreateBitCast(payload, i64_ty);
@@ -175,13 +150,11 @@ void RuntimeBuilder::generateStringOps() {
         auto* len_ptr = bp.CreateStructGEP(m_string_type, str_ptr, 1);
         auto* src_len = bp.CreateLoad(i64_ty, len_ptr, "src_len");
 
-        // new_len = src_len * count
         auto* new_len = bp.CreateMul(src_len, count_val, "new_len");
         auto* buf_size = bp.CreateAdd(new_len, ConstantInt::get(i64_ty, 1));
         auto* buf = bp.CreateCall(malloc_fn, {buf_size}, "buf");
         bp.CreateBr(loop_bb);
 
-        // Loop: PHI must be first in block
         IRBuilder<> bl(loop_bb);
         auto* i_phi = bl.CreatePHI(i64_ty, 2, "i");
         i_phi->addIncoming(ConstantInt::get(i64_ty, 0), prep_bb);
@@ -198,26 +171,22 @@ void RuntimeBuilder::generateStringOps() {
             i_phi->addIncoming(next, body_bb);
         }
 
-        // Done: null terminate and create string
         {
             IRBuilder<> bd(done_bb);
             auto* null_pos = bd.CreateGEP(i8_ty, buf, {new_len});
             bd.CreateStore(ConstantInt::get(i8_ty, 0), null_pos);
 
-            // Allocate new string struct
             auto* str_size = ConstantInt::get(i64_ty,
                 m_module.getDataLayout().getTypeAllocSize(m_string_type));
             auto* mem = bd.CreateCall(malloc_fn, {str_size}, "mem");
             auto* new_str_ptr = bd.CreateBitCast(mem, PointerType::get(m_ctx, 0));
 
-            // Header
             auto* header_ptr = bd.CreateStructGEP(m_string_type, new_str_ptr, 0);
             auto* type_addr = bd.CreateStructGEP(m_obj_header_type, header_ptr, 0);
             bd.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING), type_addr);
             auto* rc_addr = bd.CreateStructGEP(m_obj_header_type, header_ptr, 1);
             bd.CreateStore(ConstantInt::get(i64_ty, 1), rc_addr);
 
-            // Length and chars
             auto* len_addr = bd.CreateStructGEP(m_string_type, new_str_ptr, 1);
             bd.CreateStore(new_len, len_addr);
             auto* chars_addr = bd.CreateStructGEP(m_string_type, new_str_ptr, 2);
@@ -227,8 +196,6 @@ void RuntimeBuilder::generateStringOps() {
         }
     }
 
-    // --- to_string(AngaraObject val) -> AngaraObject ---
-    // Converts any Angara value to its string representation.
     {
         auto* fn_ty = FunctionType::get(obj_ty, {obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_to_string", fn_ty);
@@ -254,7 +221,6 @@ void RuntimeBuilder::generateStringOps() {
         sw->addCase(ConstantInt::get(i32_ty, TAG_F64), f64_bb);
         sw->addCase(ConstantInt::get(i32_ty, TAG_OBJ), obj_bb);
 
-        // nil -> "nil"
         {
             IRBuilder<> bn(nil_bb);
             auto* gsptr = bn.CreateGlobalString("nil");
@@ -263,7 +229,6 @@ void RuntimeBuilder::generateStringOps() {
             bn.CreateRet(result);
         }
 
-        // bool -> "true" or "false"
         {
             IRBuilder<> bb(bool_bb);
             auto* payload = bb.CreateExtractValue(val, {1});
@@ -282,12 +247,10 @@ void RuntimeBuilder::generateStringOps() {
             bf.CreateRet(bf.CreateCall(str_from_c, {gsptr_f}));
         }
 
-        // i64 -> snprintf
         {
             IRBuilder<> bi(i64_bb);
             auto* payload = bi.CreateExtractValue(val, {1});
             auto* i64_val = bi.CreateBitCast(payload, i64_ty, "ival");
-            // Buffer for int64: max 21 chars
             auto* buf = bi.CreateAlloca(ArrayType::get(i8_ty, 32));
             auto* buf_ptr = bi.CreateBitCast(buf, i8_ptr);
             auto* fmt = bi.CreateGlobalString("%ld");
@@ -297,7 +260,6 @@ void RuntimeBuilder::generateStringOps() {
             bi.CreateRet(bi.CreateCall(str_from_c, {buf_ptr}));
         }
 
-        // f64 -> snprintf
         {
             IRBuilder<> bf(f64_bb);
             auto* payload = bf.CreateExtractValue(val, {1});
@@ -311,7 +273,6 @@ void RuntimeBuilder::generateStringOps() {
             bf.CreateRet(bf.CreateCall(str_from_c, {buf_ptr}));
         }
 
-        // obj -> check if string, otherwise "<object>"
         {
             IRBuilder<> bo(obj_bb);
             auto* payload = bo.CreateExtractValue(val, {1});
@@ -324,7 +285,6 @@ void RuntimeBuilder::generateStringOps() {
             bo.CreateCondBr(is_str, str_bb, not_str_bb);
 
             IRBuilder<> bs(str_bb);
-            // Return the same string (but we should incref it)
             auto* incref_fn = m_module.getFunction("__ang_incref");
             bs.CreateCall(incref_fn, {val});
             bs.CreateRet(val);
@@ -335,7 +295,6 @@ void RuntimeBuilder::generateStringOps() {
             bns.CreateRet(bns.CreateCall(str_from_c, {gsptr}));
         }
 
-        // merge (unreachable for now, but needed for phi)
         {
             IRBuilder<> bm(merge_bb);
             bm.CreateRet(UndefValue::get(obj_ty));

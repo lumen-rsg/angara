@@ -1,4 +1,3 @@
-// Angara LLVM Backend — Runtime: Memory Management
 #include "RuntimeBuilder.h"
 
 using namespace llvm;
@@ -12,8 +11,6 @@ void RuntimeBuilder::generateMemoryManagement() {
     auto* i8_ptr = PointerType::get(m_ctx, 0);
     auto* obj_ty = m_angara_obj_type;
 
-    // --- free_object(void* obj_ptr) ---
-    // Deallocates a heap object based on its ObjectType.
     {
         auto* fn_ty = FunctionType::get(void_ty, {i8_ptr}, false);
         auto* fn = createRuntimeFunc("__ang_free_object", fn_ty);
@@ -31,7 +28,6 @@ void RuntimeBuilder::generateMemoryManagement() {
         IRBuilder<> b(entry);
         auto* obj_ptr = fn->arg_begin();
 
-        // Get object type: *(i32*)(obj_ptr)
         auto* obj_type_addr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
         auto* obj_type = b.CreateLoad(i32_ty, obj_type_addr, "obj_type");
 
@@ -44,10 +40,8 @@ void RuntimeBuilder::generateMemoryManagement() {
         switch_inst->addCase(ConstantInt::get(i32_ty, OBJ_BOUND_METHOD), is_bound_bb);
         switch_inst->addCase(ConstantInt::get(i32_ty, OBJ_NATIVE_INSTANCE), is_native_bb);
 
-        // --- String free: free(chars), free(string) ---
         {
             IRBuilder<> bs(is_string_bb);
-            // chars is at offset: header(16) + length(8) = 24
             auto* str_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
             auto* chars_ptr = bs.CreateStructGEP(m_string_type, str_ptr, 2);
             auto* chars = bs.CreateLoad(PointerType::get(m_ctx, 0), chars_ptr, "chars");
@@ -57,7 +51,6 @@ void RuntimeBuilder::generateMemoryManagement() {
             bs.CreateRetVoid();
         }
 
-        // --- List free: decref all elements, free(elements), free(list) ---
         {
             IRBuilder<> bl(is_list_bb);
             auto* list_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
@@ -66,7 +59,6 @@ void RuntimeBuilder::generateMemoryManagement() {
             auto* elems_ptr = bl.CreateStructGEP(m_list_type, list_ptr, 3);
             auto* elems = bl.CreateLoad(PointerType::get(m_ctx, 0), elems_ptr, "elems");
 
-            // Loop to decref each element
             auto* loop_bb = BasicBlock::Create(m_ctx, "loop", fn);
             auto* body_bb = BasicBlock::Create(m_ctx, "body", fn);
             auto* done_bb = BasicBlock::Create(m_ctx, "done_elems", fn);
@@ -83,7 +75,6 @@ void RuntimeBuilder::generateMemoryManagement() {
             IRBuilder<> bb(body_bb);
             auto* elem_ptr = bb.CreateGEP(obj_ty, elems, {i_phi});
             auto* elem_val = bb.CreateLoad(obj_ty, elem_ptr, "elem");
-            // Call decref on element (may be forward-declared, will be defined later)
             auto* decref_ty = FunctionType::get(void_ty, {obj_ty}, false);
             auto decref_callee = m_module.getOrInsertFunction("__ang_decref", decref_ty);
             bb.CreateCall(decref_callee, {elem_val});
@@ -98,7 +89,6 @@ void RuntimeBuilder::generateMemoryManagement() {
             bd.CreateRetVoid();
         }
 
-        // --- Record free: free each key, decref each value, free(entries), free(record) ---
         {
             IRBuilder<> br(is_record_bb);
             auto* rec_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
@@ -141,7 +131,6 @@ void RuntimeBuilder::generateMemoryManagement() {
             bd.CreateRetVoid();
         }
 
-        // --- Exception free: decref message, free(exception) ---
         {
             IRBuilder<> be(is_exception_bb);
             auto* exc_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
@@ -154,7 +143,6 @@ void RuntimeBuilder::generateMemoryManagement() {
             be.CreateRetVoid();
         }
 
-        // --- Closure free: free(closure) ---
         {
             IRBuilder<> bc(is_closure_bb);
             auto* free_fn = m_module.getFunction("free");
@@ -162,7 +150,6 @@ void RuntimeBuilder::generateMemoryManagement() {
             bc.CreateRetVoid();
         }
 
-        // --- BoundMethod free: decref receiver, decref method_closure, free ---
         {
             IRBuilder<> bb(is_bound_bb);
             auto* bm_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
@@ -178,20 +165,16 @@ void RuntimeBuilder::generateMemoryManagement() {
             bb.CreateRetVoid();
         }
 
-        // --- NativeInstance free: call finalize(data) if non-null, free(name), free(struct) ---
         {
             IRBuilder<> bn(is_native_bb);
             auto* ni_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
 
-            // Load finalize fn ptr (field 2)
             auto* finalize_ptr = bn.CreateStructGEP(m_native_instance_type, ni_ptr, 2);
             auto* finalize_fn = bn.CreateLoad(PointerType::get(m_ctx, 0), finalize_ptr, "finalize");
 
-            // Load data ptr (field 1)
             auto* data_ptr = bn.CreateStructGEP(m_native_instance_type, ni_ptr, 1);
             auto* data = bn.CreateLoad(PointerType::get(m_ctx, 0), data_ptr, "data");
 
-            // Conditionally call finalize(data) if finalize != null
             auto* has_finalize = bn.CreateICmpNE(finalize_fn,
                 ConstantPointerNull::get(PointerType::get(m_ctx, 0)));
             auto* call_fin_bb = BasicBlock::Create(m_ctx, "call_fin", fn);
@@ -204,18 +187,15 @@ void RuntimeBuilder::generateMemoryManagement() {
             bf.CreateBr(after_fin_bb);
 
             IRBuilder<> ba(after_fin_bb);
-            // Free name string (field 3, from strdup)
             auto* name_ptr = ba.CreateStructGEP(m_native_instance_type, ni_ptr, 3);
             auto* name = ba.CreateLoad(PointerType::get(m_ctx, 0), name_ptr, "name");
             auto* free_fn2 = m_module.getFunction("free");
             ba.CreateCall(free_fn2, {name});
-            // Free struct
             auto* free_fn3 = m_module.getFunction("free");
             ba.CreateCall(free_fn3, {obj_ptr});
             ba.CreateRetVoid();
         }
 
-        // --- Default free: just free the pointer ---
         {
             IRBuilder<> bd(default_bb);
             auto* free_fn = m_module.getFunction("free");
@@ -224,8 +204,6 @@ void RuntimeBuilder::generateMemoryManagement() {
         }
     }
 
-    // --- incref(AngaraObject val) ---
-    // If val.type == TAG_OBJ, increment ref_count.
     {
         auto* fn_ty = FunctionType::get(void_ty, {obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_incref", fn_ty);
@@ -242,11 +220,9 @@ void RuntimeBuilder::generateMemoryManagement() {
         b.CreateCondBr(is_obj, is_obj_bb, done_bb);
 
         IRBuilder<> b2(is_obj_bb);
-        // Extract pointer from payload
         auto* payload = b2.CreateExtractValue(val, {1}, "payload");
         auto* ptr_i64 = b2.CreateBitCast(payload, i64_ty, "ptr_as_i64");
         auto* obj_ptr = b2.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0), "obj_ptr");
-        // ref_count is at offset 1 in header
         auto* rc_addr = b2.CreateStructGEP(m_obj_header_type, obj_ptr, 1);
         auto* rc = b2.CreateLoad(i64_ty, rc_addr, "rc");
         auto* new_rc = b2.CreateAdd(rc, ConstantInt::get(i64_ty, 1), "new_rc");
@@ -257,8 +233,6 @@ void RuntimeBuilder::generateMemoryManagement() {
         b3.CreateRetVoid();
     }
 
-    // --- decref(AngaraObject val) ---
-    // If val.type == TAG_OBJ, decrement ref_count; if 0, call __ang_free_object.
     {
         auto* fn_ty = FunctionType::get(void_ty, {obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_decref", fn_ty);
