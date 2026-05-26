@@ -1,7 +1,3 @@
-//
-// Created by cv2 on 8/31/25.
-//
-
 #pragma once
 
 #include "Expr.h"
@@ -17,42 +13,72 @@
 
 namespace angara {
 
+    /// Tracks a native symbol used from an imported module, for linker resolution.
     struct UsedNativeSymbol {
         std::shared_ptr<ModuleType> from_module;
         std::string symbol_name;
         std::shared_ptr<Type> symbol_type;
 
-        // For sorting and uniqueness
         bool operator<(const UsedNativeSymbol& other) const {
             if (from_module->name != other.from_module->name) return from_module->name < other.from_module->name;
             return symbol_name < other.symbol_name;
         }
     };
 
+    /// Walks the AST after parsing and verifies that all types are correct before code generation.
+    /// Implements a multi-pass approach: resolve imports, declare headers, define signatures, then check bodies.
     class TypeChecker : public ExprVisitor, public StmtVisitor {
     public:
+        /// Constructs a TypeChecker for the given compilation module.
+        /// @param driver        The compiler driver, used for cross-module resolution.
+        /// @param errorHandler  Error reporter for diagnostics.
+        /// @param module_name   Name of the module being type-checked.
         TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler, const std::string& module_name);
 
-        // The main entry point. Returns true if type checking generators.
+        /// Runs the full multi-pass type-checking pipeline over the given top-level statements.
+        /// @return True if type checking succeeded with no errors.
         bool check(const std::vector<std::shared_ptr<Stmt>>& statements);
+
+        /// Visits an @unsafe block, enabling dynamic operations within.
         void visit(std::shared_ptr<const UnsafeBlockStmt> stmt) override;
 
+        /// Maps each expression node to its resolved type (used by code generation).
         std::map<const Expr*, std::shared_ptr<Type>> m_expression_types;
 
+        /// The symbol table holding all declared variables, functions, types, and imports.
         SymbolTable m_symbols;
+
+        /// Maps each variable declaration to its resolved type.
         std::map<const VarDeclStmt*, std::shared_ptr<Type>> m_variable_types;
+
+        /// Returns the symbol table (for use by later compiler stages).
         [[nodiscard]] const SymbolTable& getSymbolTable() const;
+
+        /// Returns the module type descriptor (for use by later compiler stages).
         [[nodiscard]] std::shared_ptr<ModuleType> getModuleType() const;
+
+        /// Maps each variable reference to its resolved symbol (for code generation).
         std::map<const VarExpr*, std::shared_ptr<Symbol>> m_variable_resolutions;
+
+        /// Maps each attach statement to its resolved module type.
         std::map<const AttachStmt*, std::shared_ptr<ModuleType>> m_module_resolutions;
+
+        /// Set of native symbols used from imported modules (for linker resolution).
         std::set<UsedNativeSymbol> m_used_native_symbols;
+
+        /// Converts an AST type node into a semantic Type object.
+        /// @param ast_type  The AST type annotation to resolve.
+        /// @return The resolved semantic type, or an error type if resolution fails.
         std::shared_ptr<Type> resolveType(const std::shared_ptr<ASTType>& ast_type);
+
+        /// Maps sizeof expressions to their resolved inner types.
         std::map<const SizeofExpr*, std::shared_ptr<Type>> m_sizeof_resolutions;
+
+        /// Whether the checker is currently inside an @unsafe block.
         bool m_is_in_unsafe_context = false;
 
     private:
-        // --- Visitor Methods ---
-        // Statements (return void)
+        // --- Expression visitors ---
 
         std::any visit(const Literal& expr) override;
         std::any visit(const Binary& expr) override;
@@ -74,10 +100,11 @@ namespace angara {
         std::any visit(const SizeofExpr& expr) override;
         std::any visit(const RetypeExpr& expr) override;
         std::any visit(const LambdaExpr& expr) override;
+        std::any visit(const IsExpr &expr) override;
+
+        // --- Statement visitors ---
 
         void visit(std::shared_ptr<const ContractStmt> stmt) override;
-        void defineContractHeader(const ContractStmt &stmt);
-        void resolveAttach(const AttachStmt &stmt);
         void visit(std::shared_ptr<const VarDeclStmt> stmt) override;
         void visit(std::shared_ptr<const IfStmt> stmt) override;
         void visit(std::shared_ptr<const EmptyStmt> stmt) override;
@@ -94,40 +121,100 @@ namespace angara {
         void visit(std::shared_ptr<const ExpressionStmt> stmt) override;
         void visit(std::shared_ptr<const BlockStmt> stmt) override;
         void visit(std::shared_ptr<const ForeignHeaderStmt> stmt) override;
+        void visit(std::shared_ptr<const EnumStmt> stmt) override;
+        void visit(std::shared_ptr<const DataStmt> stmt) override;
+        void visit(std::shared_ptr<const BreakStmt> stmt) override;
+        void visit(std::shared_ptr<const ContinueStmt> stmt) override;
 
+        // --- Header definition passes ---
 
-
-        // --- Helper Methods ---
-        // A helper to get the canonical Type from an ASTType node
-
-        static bool isNumeric(const std::shared_ptr<Type>& type);
-        std::shared_ptr<Type> popType();
-
+        /// Populates the EnumType with its variants and constructor signatures.
         void defineEnumHeader(const EnumStmt &stmt);
 
-        void visit(std::shared_ptr<const EnumStmt> stmt) override;
+        /// Populates the ContractType with its required fields and methods.
+        void defineContractHeader(const ContractStmt &stmt);
 
-        // Error reporting
+        /// Populates the TraitType with its required method signatures.
+        void defineTraitHeader(const TraitStmt &stmt);
+
+        /// Populates the ClassType with fields, methods, superclass link, and validates contracts/traits.
+        void defineClassHeader(const ClassStmt &stmt);
+
+        /// Creates the FunctionType signature and declares it in the symbol table.
+        void defineFunctionHeader(const FuncStmt &stmt);
+
+        /// Populates the DataType with fields and constructor signature.
+        void defineDataHeader(const DataStmt &stmt);
+
+        /// Resolves an attach/import statement, loading the module and declaring imported symbols.
+        void resolveAttach(const AttachStmt &stmt);
+
+        // --- Type helpers ---
+
+        /// Returns true if the type is an integer (i8..i64, u8..u64).
+        static bool isInteger(const std::shared_ptr<Type> &type);
+
+        /// Returns true if the type is an unsigned integer (u8..u64).
+        static bool isUnsignedInteger(const std::shared_ptr<Type> &type);
+
+        /// Returns true if the type is a float (f32, f64).
+        static bool isFloat(const std::shared_ptr<Type> &type);
+
+        /// Returns true if the type is numeric (integer or float).
+        static bool isNumeric(const std::shared_ptr<Type>& type);
+
+        /// Returns true if the type can be used in a boolean context.
+        static bool isTruthy(const std::shared_ptr<Type> &type);
+
+        /// Pops the top type from the internal type stack (used to pass types up from expressions).
+        /// @return The popped type, or an error type if the stack is empty.
+        std::shared_ptr<Type> popType();
+
+        /// Pushes a type onto the internal stack and records it in the expression type map.
+        void pushAndSave(const Expr *expr, const std::shared_ptr<Type>& type);
+
+        /// Checks whether `actual` can be assigned where `expected` is required.
+        bool check_type_compatibility(const std::shared_ptr<Type> &expected, const std::shared_ptr<Type> &actual);
+
+        /// Checks structural compatibility between a DataType and a RecordType.
+        bool check_structural_match(const std::shared_ptr<DataType>& data_type,
+                                    const std::shared_ptr<RecordType>& record_type);
+
+        /// Validates a `spawn()` call: first arg must be a function, remaining args match its parameters.
+        void check_spawn_call(const CallExpr &call, const std::vector<std::shared_ptr<Type>> &arg_types);
+
+        /// Validates a standard function/method call against its signature (arity + argument types).
+        void check_function_call(const CallExpr &call, const std::shared_ptr<FunctionType> &func_type,
+                                 const std::vector<std::shared_ptr<Type>> &arg_types);
+
+        /// Resolves a variable reference, applying type narrowing from `if is` checks if applicable.
+        std::shared_ptr<Symbol> resolve_and_narrow(const VarExpr &expr);
+
+        // --- Error reporting ---
+
+        /// Reports a type-checking error.
         void error(const Token& token, const std::string& message, const std::string& code = "");
+
+        /// Reports a type-checking warning.
         void warning(const Token& token, const std::string& message, const std::string& code = "");
+
+        /// Reports a supplementary note attached to the previous diagnostic.
         void note(const Token &token, const std::string &message);
+
+        /// Exits the current scope and warns about any unused local variables.
         void exitScopeAndWarn();
 
-        bool m_is_in_trait = false;
+        /// Searches candidates for close matches to a misspelled name and emits a "did you mean?" note.
         void find_and_report_suggestion(const Token& bad_token, const std::vector<std::string>& candidates);
 
+        // --- State ---
 
-
-    private:
         ErrorHandler& m_errorHandler;
-
-        // We use a stack to pass type information up from expressions.
         std::stack<std::shared_ptr<Type>> m_type_stack;
-
         bool m_hadError = false;
         int m_loop_depth = 0;
+        bool m_is_in_trait = false;
 
-        // Pre-create canonical primitive types to avoid repeated allocations
         std::shared_ptr<Type> m_type_i8, m_type_i16, m_type_i32, m_type_i64;
         std::shared_ptr<Type> m_type_u8, m_type_u16, m_type_u32, m_type_u64;
         std::shared_ptr<Type> m_type_f32, m_type_f64;
@@ -144,48 +231,8 @@ namespace angara {
         std::shared_ptr<ModuleType> m_module_type;
         std::stack<std::shared_ptr<Type>> m_function_return_types;
         std::shared_ptr<ClassType> m_current_class = nullptr;
-
-
-
-        void defineClassHeader(const ClassStmt &stmt);
-        void defineFunctionHeader(const FuncStmt &stmt);
-        void defineTraitHeader(const TraitStmt &stmt);
-
-        static bool isInteger(const std::shared_ptr<Type> &type);
-
-        static bool isUnsignedInteger(const std::shared_ptr<Type> &type);
-
-        static bool isFloat(const std::shared_ptr<Type> &type);
-
-        void pushAndSave(const Expr *expr, const std::shared_ptr<Type>& type);
-
-        static bool isTruthy(const std::shared_ptr<Type> &type);
-
-        void visit(std::shared_ptr<const BreakStmt> stmt) override;
-        void visit(std::shared_ptr<const ContinueStmt> stmt) override;
         std::map<const Symbol*, std::shared_ptr<Type>> m_narrowed_types;
-
-        // --- GENERIC SUPPORT ---
-        // Tracks currently-in-scope type parameters (e.g., T in `data Box<T>`)
-        // Maps type parameter name to its TypeParameterType
         std::map<std::string, std::shared_ptr<TypeParameterType>> m_active_type_params;
-
-        std::shared_ptr<Symbol> resolve_and_narrow(const VarExpr &expr);
-
-        std::any visit(const IsExpr &expr) override;
-
-        bool check_structural_match(const std::shared_ptr<DataType>& data_type,
-                                    const std::shared_ptr<RecordType>& record_type);
-        bool check_type_compatibility(const std::shared_ptr<Type> &expected, const std::shared_ptr<Type> &actual);
-
-        void check_spawn_call(const CallExpr &call, const std::vector<std::shared_ptr<Type>> &arg_types);
-
-        void check_function_call(const CallExpr &call, const std::shared_ptr<FunctionType> &func_type,
-                                 const std::vector<std::shared_ptr<Type>> &arg_types);
-
-        void visit(std::shared_ptr<const DataStmt> stmt) override;
-
-        void defineDataHeader(const DataStmt &stmt);
     };
 
-} // namespace angara
+}

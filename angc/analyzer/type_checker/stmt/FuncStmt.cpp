@@ -1,13 +1,7 @@
-//
-// Created by cv2 on 9/19/25.
-//
-
 #include "TypeChecker.h"
 namespace angara {
 
     void TypeChecker::defineFunctionHeader(const FuncStmt& stmt) {
-        // --- GENERIC SUPPORT ---
-        // Register type parameters in scope (e.g., T in `func identity<T>(x as T) -> T`)
         auto saved_type_params = m_active_type_params;
         for (const auto& tp : stmt.type_params) {
             m_active_type_params[tp.lexeme] = std::make_shared<TypeParameterType>(tp.lexeme);
@@ -17,7 +11,7 @@ namespace angara {
 
         if (stmt.has_this) {
             if (m_current_class == nullptr) {
-                error(stmt.name, "Cannot use 'this' in a non-method function.");
+                error(stmt.name, "'this' can only be used in a method, not in a standalone function.");
             }
         }
 
@@ -25,7 +19,7 @@ namespace angara {
             if (p.type) {
                 param_types.push_back(resolveType(p.type));
             } else {
-                error(p.name, "Missing type annotation for parameter '" + p.name.lexeme + "'.");
+                error(p.name, "Parameter '" + p.name.lexeme + "' is missing a type annotation.");
                 param_types.push_back(m_type_error);
             }
         }
@@ -45,23 +39,20 @@ namespace angara {
             function_type->is_intrinsic = true;
         }
 
-        // For a foreign function, we simply declare it. It has no Angara-level closure.
-        // The transpiler will use this symbol table entry to generate a direct C call.
         if (stmt.is_foreign || stmt.is_intrinsic) {
             if (auto conflicting = m_symbols.declare(stmt.name, function_type, true)) {
-                error(stmt.name, "re-declaration of symbol '" + stmt.name.lexeme + "'.");
-                note(conflicting->declaration_token, "previous declaration was here.");
+                error(stmt.name, "Symbol '" + stmt.name.lexeme + "' is already declared.");
+                note(conflicting->declaration_token, "Previous declaration was here.");
             }
-            // A foreign function cannot be exported; it's an import.
             if (stmt.is_exported) {
                 error(stmt.name, "A 'foreign' function is an import and cannot be exported.");
             }
-            return; // Skip the rest of the logic for closures/exports
+            return;
         }
 
         if (auto conflicting_symbol = m_symbols.declare(stmt.name, function_type, true)) {
-            error(stmt.name, "re-declaration of symbol '" + stmt.name.lexeme + "'.");
-            note(conflicting_symbol->declaration_token, "previous declaration was here.");
+            error(stmt.name, "Symbol '" + stmt.name.lexeme + "' is already declared.");
+            note(conflicting_symbol->declaration_token, "Previous declaration was here.");
         }
 
         if (stmt.is_exported || stmt.name.lexeme == "main") {
@@ -72,60 +63,45 @@ namespace angara {
             }
         }
 
-        // Restore type param scope
         m_active_type_params = saved_type_params;
     }
 
     void TypeChecker::visit(std::shared_ptr<const FuncStmt> stmt) {
-        // This visitor is called in Pass 2 to check the body of a function.
-        // The signature was already processed in Pass 1.
-
-        // A function with no body (a trait method) has no implementation to check.
         if (!stmt->body || stmt->is_foreign) {
             return;
         }
 
-        // 1. Fetch the full FunctionType from the symbol table (created in Pass 1).
         auto symbol = m_symbols.resolve(stmt->name.lexeme);
-        // Note: for methods, the name is not in the global scope. We need to look it up
-        // in the current class context.
         std::shared_ptr<FunctionType> func_type;
         if (m_current_class && m_current_class->methods.count(stmt->name.lexeme)) {
             func_type = std::dynamic_pointer_cast<FunctionType>(m_current_class->methods.at(stmt->name.lexeme).type);
         } else if (symbol && symbol->type->kind == TypeKind::FUNCTION) {
             func_type = std::dynamic_pointer_cast<FunctionType>(symbol->type);
         } else {
-            return; // Error was already reported in Pass 1
+            return;
         }
 
-        // 2. Enter a new scope for the function's body.
         m_symbols.enterScope();
         m_function_return_types.push(func_type->return_type);
 
-        // --- GENERIC SUPPORT ---
-        // Register type parameters so T can be used inside the body
         auto saved_type_params = m_active_type_params;
         for (const auto& tp : stmt->type_params) {
             m_active_type_params[tp.lexeme] = std::make_shared<TypeParameterType>(tp.lexeme);
         }
 
-        // 3. If it's a method, declare 'this'.
         if (stmt->has_this && m_current_class) {
             Token this_token(TokenType::THIS, "this", stmt->name.line, 0);
             m_symbols.declare(this_token, std::make_shared<InstanceType>(m_current_class), true);
         }
 
-        // 4. Declare all parameters as local variables.
         for (size_t i = 0; i < stmt->params.size(); ++i) {
             m_symbols.declare(stmt->params[i].name, func_type->param_types[i], true);
         }
 
-        // 5. Type-check every statement in the function's body.
         for (const auto& bodyStmt : (*stmt->body)) {
             bodyStmt->accept(*this, bodyStmt);
         }
 
-        // 6. Restore the context.
         m_active_type_params = saved_type_params;
         m_function_return_types.pop();
         exitScopeAndWarn();

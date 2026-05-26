@@ -1,13 +1,7 @@
-//
-// Created by cv2 on 8/31/25.
-//
-
 #include "TypeChecker.h"
 #include <stdexcept>
 #include "ErrorHandler.h"
 namespace angara {
-
-// --- Constructor and Main Entry Point ---
 
     const SymbolTable& TypeChecker::getSymbolTable() const {
         return m_symbols;
@@ -18,26 +12,20 @@ namespace angara {
     }
 
     std::shared_ptr<Symbol> TypeChecker::resolve_and_narrow(const VarExpr& expr) {
-        // 1. First, resolve the symbol normally from the symbol table.
         auto symbol = m_symbols.resolve(expr.name.lexeme);
         if (!symbol) return nullptr;
 
-        // 2. Check if this symbol has a narrowed type in our special map.
         if (const auto it = m_narrowed_types.find(symbol.get()); it != m_narrowed_types.end()) {
-            // It does! Create a temporary, "fake" symbol on the stack
-            // that has the same properties but with the new, narrowed type.
             Symbol narrowed_symbol = *symbol;
             narrowed_symbol.type = it->second;
             return std::make_shared<Symbol>(narrowed_symbol);
         }
 
-        // 3. No narrowing applies. Return the original symbol.
         return symbol;
     }
 
     TypeChecker::TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler, const std::string& module_name)
     : m_errorHandler(errorHandler), m_driver(driver) {
-        // Integer Types
         m_type_i8 = std::make_shared<PrimitiveType>("i8");
         m_type_i16 = std::make_shared<PrimitiveType>("i16");
         m_type_i32 = std::make_shared<PrimitiveType>("i32");
@@ -46,10 +34,8 @@ namespace angara {
         m_type_u16 = std::make_shared<PrimitiveType>("u16");
         m_type_u32 = std::make_shared<PrimitiveType>("u32");
         m_type_u64 = std::make_shared<PrimitiveType>("u64");
-        // Float Types
         m_type_f32 = std::make_shared<PrimitiveType>("f32");
         m_type_f64 = std::make_shared<PrimitiveType>("f64");
-        // Other Primitives
         m_type_bool = std::make_shared<PrimitiveType>("bool");
         m_type_string = std::make_shared<PrimitiveType>("string");
         m_type_nil = std::make_shared<NilType>();
@@ -62,14 +48,12 @@ namespace angara {
         m_type_c_ptr = std::make_shared<CPtrType>();
 
 
-        // func len(any) -> i64;
         const auto len_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{m_type_any},
                 m_type_i64
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "len", 0, 0), len_type, true);
 
-        // func typeof(any) -> string;
         const auto typeof_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{m_type_any},
                 m_type_string
@@ -77,17 +61,16 @@ namespace angara {
         m_symbols.declare(Token(TokenType::IDENTIFIER, "typeof", 0, 0), typeof_type, true);
 
         auto worker_fn_type = std::make_shared<FunctionType>(
-            std::vector<std::shared_ptr<Type>>{}, // No parameters
+            std::vector<std::shared_ptr<Type>>{},
             m_type_nil
         );
 
-        // Define the signature for `spawn` itself: function(function() -> void) -> Thread
         const auto spawn_type = std::make_shared<FunctionType>(
             std::vector<std::shared_ptr<Type>>{std::make_shared<FunctionType>(
-                std::vector<std::shared_ptr<Type>>{}, std::make_shared<AnyType>(), true // A generic function
+                std::vector<std::shared_ptr<Type>>{}, std::make_shared<AnyType>(), true
             )},
             m_type_thread,
-            true // spawn itself is variadic
+            true
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "spawn", 0, 0), spawn_type, true);
 
@@ -97,27 +80,23 @@ namespace angara {
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "Mutex", 0, 0), mutex_constructor_type, true);
 
-        // func string(any) -> string
         auto string_conv_type = std::make_shared<FunctionType>(
             std::vector<std::shared_ptr<Type>>{m_type_any}, m_type_string
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "string", 0, 0), string_conv_type, true);
 
-        // func i64(any) -> i64
         auto i64_conv_type = std::make_shared<FunctionType>(
             std::vector<std::shared_ptr<Type>>{m_type_any}, m_type_i64
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "i64", 0, 0), i64_conv_type, true);
-        m_symbols.declare(Token(TokenType::IDENTIFIER, "int", 0, 0), i64_conv_type, true); // Alias
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "int", 0, 0), i64_conv_type, true);
 
-        // func f64(any) -> f64
         auto f64_conv_type = std::make_shared<FunctionType>(
             std::vector<std::shared_ptr<Type>>{m_type_any}, m_type_f64
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "f64", 0, 0), f64_conv_type, true);
-        m_symbols.declare(Token(TokenType::IDENTIFIER, "float", 0, 0), f64_conv_type, true); // Alias
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "float", 0, 0), f64_conv_type, true);
 
-        // func bool(any) -> bool
         auto bool_conv_type = std::make_shared<FunctionType>(
             std::vector<std::shared_ptr<Type>>{m_type_any}, m_type_bool
         );
@@ -127,7 +106,6 @@ namespace angara {
                 std::vector<std::shared_ptr<Type>>{m_type_string},
                 m_type_exception
         );
-        // Declare the symbol "Exception" in the global scope.
         m_symbols.declare(Token(TokenType::IDENTIFIER, "Exception", 0, 0), exception_constructor_type, true);
 
         m_module_type = std::make_shared<ModuleType>(module_name);
@@ -160,29 +138,17 @@ namespace angara {
     }
 
     bool TypeChecker::isTruthy(const std::shared_ptr<Type>& type) {
-        // In our new, more flexible system, almost any type can be evaluated
-        // in a boolean context. The only exceptions might be types that have
-        // no logical "empty" or "zero" state.
-
-        // For now, we can say that every valid type is truthy.
-        // The only non-truthy type would be an error type.
         if (type->kind == TypeKind::ERROR) {
             return false;
         }
 
-        // Allow everything: bool, nil, numbers, strings, lists, records, functions, etc.
         return true;
     }
-
-    // in TypeChecker.cpp
 
 
 bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     m_hadError = false;
 
-        // --- NEW PRE-PASS: Resolve all module attachments FIRST ---
-        // This is critical. It populates the symbol table with imported types
-        // before any local types are analyzed.
         for (const auto& stmt : statements) {
             if (auto attach_stmt = std::dynamic_pointer_cast<const AttachStmt>(stmt)) {
                 resolveAttach(*attach_stmt);
@@ -190,44 +156,41 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         }
         if (m_hadError) return false;
 
-        // --- PASS 1: Declare all top-level type names ---
         for (const auto& stmt : statements) {
             if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
                 auto class_type = std::make_shared<ClassType>(class_stmt->name.lexeme);
                 if (auto conflicting_symbol = m_symbols.declare(class_stmt->name, class_type, true)) {
-                    error(class_stmt->name, "re-declaration of symbol '" + class_stmt->name.lexeme + "'.");
+                    error(class_stmt->name, "Symbol '" + class_stmt->name.lexeme + "' is already declared.");
                     note(conflicting_symbol->declaration_token, "previous declaration was here.");
                 }
             } else if (auto trait_stmt = std::dynamic_pointer_cast<const TraitStmt>(stmt)) {
                 auto trait_type = std::make_shared<TraitType>(trait_stmt->name.lexeme);
                 if (auto conflicting_symbol = m_symbols.declare(trait_stmt->name, trait_type, true)) {
-                    error(trait_stmt->name, "re-declaration of symbol '" + trait_stmt->name.lexeme + "'.");
+                    error(trait_stmt->name, "Symbol '" + trait_stmt->name.lexeme + "' is already declared.");
                     note(conflicting_symbol->declaration_token, "previous declaration was here.");
                 }
             } else if (auto contract_stmt = std::dynamic_pointer_cast<const ContractStmt>(stmt)) {
                 auto contract_type = std::make_shared<ContractType>(contract_stmt->name.lexeme);
                 if (auto conflicting_symbol = m_symbols.declare(contract_stmt->name, contract_type, true)) {
-                    error(contract_stmt->name, "re-declaration of symbol '" + contract_stmt->name.lexeme + "'.");
+                    error(contract_stmt->name, "Symbol '" + contract_stmt->name.lexeme + "' is already declared.");
                     note(conflicting_symbol->declaration_token, "previous declaration was here.");
                 }
             }
             else if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
                 auto data_type = std::make_shared<DataType>(data_stmt->name.lexeme);
                 if (auto conflicting = m_symbols.declare(data_stmt->name, data_type, true)) {
-                    error(data_stmt->name, "re-declaration of symbol '" + data_stmt->name.lexeme + "'.");
+                    error(data_stmt->name, "Symbol '" + data_stmt->name.lexeme + "' is already declared.");
                     note(conflicting->declaration_token, "previous declaration was here.");
                 }
             } else if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
                 auto enum_type = std::make_shared<EnumType>(enum_stmt->name.lexeme);
                 if (auto conflicting = m_symbols.declare(enum_stmt->name, enum_type, true)) {
-                    error(enum_stmt->name, "re-declaration of symbol '" + enum_stmt->name.lexeme + "'.");
+                    error(enum_stmt->name, "Symbol '" + enum_stmt->name.lexeme + "' is already declared.");
                     note(conflicting->declaration_token, "previous declaration was here.");
                 }
             }
         }
     if (m_hadError) return false;
-
-    // --- PASS 2: Define all headers and signatures (Order is important!) ---
 
         for (const auto& stmt : statements) {
             if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
@@ -241,7 +204,6 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         }
     }
 
-    // -- STAGE 2a: Define CONTRACT headers FIRST --
     for (const auto& stmt : statements) {
         if (auto contract_stmt = std::dynamic_pointer_cast<const ContractStmt>(stmt)) {
             defineContractHeader(*contract_stmt);
@@ -249,7 +211,6 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     }
     if (m_hadError) return false;
 
-    // -- STAGE 2b: Define TRAIT headers NEXT --
     for (const auto& stmt : statements) {
         if (auto trait_stmt = std::dynamic_pointer_cast<const TraitStmt>(stmt)) {
             defineTraitHeader(*trait_stmt);
@@ -257,7 +218,6 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     }
     if (m_hadError) return false;
 
-    // -- STAGE 2c: Define CLASS headers, which validates traits and contracts --
     for (const auto& stmt : statements) {
         if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
                 defineClassHeader(*class_stmt);
@@ -265,7 +225,6 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     }
     if (m_hadError) return false;
 
-    // -- STAGE 2d: Define global FUNCTION headers LAST --
     for (const auto& stmt : statements) {
         if (auto func_stmt = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
             if (m_symbols.resolve(func_stmt->name.lexeme) == nullptr) {
@@ -275,7 +234,6 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     }
     if (m_hadError) return false;
 
-    // --- PASS 3: Check all implementation code ---
     for (const auto& stmt : statements) {
         stmt->accept(*this, stmt);
     }
@@ -299,8 +257,6 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     void TypeChecker::exitScopeAndWarn() {
         auto unused = m_symbols.exitScope();
         for (const auto& sym : unused) {
-            // Don't warn about unused imports, functions, type-level symbols, or 'this'
-            // Only warn about local variables (depth > 0 means not global)
             if (sym->depth > 0 && sym->type->kind != TypeKind::FUNCTION &&
                 sym->type->kind != TypeKind::MODULE &&
                 sym->name != "this") {
@@ -310,12 +266,8 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         }
     }
 
-    // Pops a type from our internal type stack.
-    // This is used to get the result type of an expression.
     std::shared_ptr<Type> TypeChecker::popType() {
         if (m_type_stack.empty()) {
-            // Return error type instead of crashing. This allows the compiler
-            // to continue and report more errors rather than throwing.
             return m_type_error;
         }
         auto type = m_type_stack.top();
@@ -330,22 +282,17 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         return m_type_error;
     }
 
-    // --- Case 1: The type is an Optional Type, e.g., `User?` ---
     if (auto optional_ast_node = std::dynamic_pointer_cast<const OptionalTypeNode>(ast_type)) {
-        // Recursively resolve the type that is being wrapped.
         auto wrapped_semantic_type = resolveType(optional_ast_node->base_type);
         if (wrapped_semantic_type->kind == TypeKind::ERROR) {
             return m_type_error;
         }
-        // Return our internal semantic OptionalType.
         return std::make_shared<OptionalType>(wrapped_semantic_type);
     }
 
-    // --- Case 2: A simple type name, e.g., 'i64' or 'User' ---
     if (auto simple = std::dynamic_pointer_cast<const SimpleType>(ast_type)) {
         const std::string& name = simple->name.lexeme;
 
-        // Check for built-in primitive types first.
         if (name == "i64" || name == "int") return m_type_i64;
         if (name == "i32") return m_type_i32;
         if (name == "i16") return m_type_i16;
@@ -365,9 +312,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         if (name == "Exception") return m_type_exception;
         if (name == "Mutex") return m_type_mutex;
 
-        // Handle the generic `record` keyword as a special built-in type.
         if (name == "record") {
-            // It resolves to a RecordType with no predefined fields.
             return std::make_shared<RecordType>(std::map<std::string, std::shared_ptr<Type>>{});
         }
 
@@ -375,14 +320,11 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
             return std::make_shared<ListType>(m_type_any);
         }
 
-        // --- GENERIC SUPPORT ---
-        // Check if this is a type parameter in scope (e.g., T in `data Box<T>`)
         auto tp_it = m_active_type_params.find(name);
         if (tp_it != m_active_type_params.end()) {
             return tp_it->second;
         }
 
-        // If not a primitive, it must be a user-defined type. Look it up.
         auto symbol = m_symbols.resolve(name);
         if (symbol) {
             if (symbol->type->kind == TypeKind::CLASS) {
@@ -394,7 +336,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
     }
         }
 
-        error(simple->name, "Unknown type name '" + name + "'.");
+        error(simple->name, "Unknown type '" + name + "'.");
         std::vector<std::string> candidates;
         for (const auto& scope : m_symbols.getScopes()) {
             for (const auto& [sym_name, sym] : scope) {
@@ -410,14 +352,12 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         return m_type_error;
     }
 
-    // --- Case 3: A generic type, e.g., 'list<T>' or 'Box<i64>' ---
     if (auto generic = std::dynamic_pointer_cast<const GenericType>(ast_type)) {
         const std::string& base_name = generic->name.lexeme;
 
-        // Built-in: list<T>
         if (base_name == "list") {
             if (generic->arguments.size() != 1) {
-                error(generic->name, "The 'list' type requires exactly one generic argument.");
+                error(generic->name, "Type 'list' expects exactly one type argument (e.g., 'list<i64>').");
                 return m_type_error;
             }
             auto element_type = resolveType(generic->arguments[0]);
@@ -425,17 +365,13 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
             return std::make_shared<ListType>(element_type);
         }
 
-        // --- GENERIC SUPPORT: User-defined generic types ---
-        // Look up the base type (e.g., 'Box') in the symbol table
         auto symbol = m_symbols.resolve(base_name);
         if (symbol) {
             auto& base_type = symbol->type;
 
-            // Check if the base type is a generic DataType
             if (base_type->kind == TypeKind::DATA) {
                 auto data_type = std::dynamic_pointer_cast<DataType>(base_type);
                 if (data_type->is_generic()) {
-                    // Validate argument count matches parameter count
                     if (generic->arguments.size() != data_type->type_params.size()) {
                         error(generic->name, "Generic type '" + base_name + "' expects " +
                               std::to_string(data_type->type_params.size()) +
@@ -444,7 +380,6 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
                         return m_type_error;
                     }
 
-                    // Resolve each argument type
                     std::map<std::string, std::shared_ptr<Type>> type_args;
                     for (size_t i = 0; i < generic->arguments.size(); ++i) {
                         auto arg_type = resolveType(generic->arguments[i]);
@@ -452,12 +387,10 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
                         type_args[data_type->type_params[i]] = arg_type;
                     }
 
-                    // Create a GenericInstanceType
                     return std::make_shared<GenericInstanceType>(data_type, std::move(type_args));
                 }
             }
 
-            // Check if the base type is a generic ClassType
             if (base_type->kind == TypeKind::CLASS) {
                 auto class_type = std::dynamic_pointer_cast<ClassType>(base_type);
                 if (class_type->is_generic()) {
@@ -481,24 +414,22 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
             }
         }
 
-        error(generic->name, "Unknown generic type '" + base_name + "'.");
+        error(generic->name, "Unknown generic type '" + base_name + "'. Only generic types with a '<...>' suffix are valid here.");
         return m_type_error;
     }
 
-    // --- Case 4: An inline record type, e.g., `{ name: string }` ---
     if (auto record_type_expr = std::dynamic_pointer_cast<const RecordTypeExpr>(ast_type)) {
         std::map<std::string, std::shared_ptr<Type>> fields;
         for (const auto& field_def : record_type_expr->fields) {
             const std::string& field_name = field_def.name.lexeme;
             if (fields.contains(field_name)) {
-                error(field_def.name, "Duplicate field name '" + field_name + "' in record type definition.");
+                error(field_def.name, "Duplicate field '" + field_name + "' in record type.");
             }
             fields[field_name] = resolveType(field_def.type);
         }
         return std::make_shared<RecordType>(fields);
     }
 
-    // --- Case 5: A function type, e.g., `function() -> nil` ---
     if (auto func_type_expr = std::dynamic_pointer_cast<const FunctionTypeExpr>(ast_type)) {
         std::vector<std::shared_ptr<Type>> param_types;
         for (const auto& p_ast_type : func_type_expr->param_types) {
@@ -508,7 +439,6 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         return std::make_shared<FunctionType>(param_types, return_type);
     }
 
-    // If the AST node type is unknown, it's a compiler bug.
     return m_type_error;
 }
 
@@ -520,8 +450,6 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         const std::string& misspelled = bad_token.lexeme;
         std::string best_guess;
 
-        // A reasonable threshold. Don't suggest "banana" for "cat".
-        // A good starting point is 1/3 of the word's length, with a max of 3.
         size_t min_distance = std::min((size_t)3, (misspelled.length() / 3) + 1);
 
         for (const auto& candidate : candidates) {
@@ -537,4 +465,4 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         }
     }
 
-} // namespace angara
+}

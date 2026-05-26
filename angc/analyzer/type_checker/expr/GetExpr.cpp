@@ -1,71 +1,49 @@
-//
-// Created by cv2 on 9/19/25.
-//
 #include "TypeChecker.h"
 namespace angara {
 
 std::any TypeChecker::visit(const GetExpr& expr) {
-    // 1. First, recursively type check the object on the left of the operator.
     expr.object->accept(*this);
     auto object_type = popType();
 
-    // Bail out early if the object itself had a type error.
     if (object_type->kind == TypeKind::ERROR) {
         pushAndSave(&expr, m_type_error);
         return {};
     }
 
-    // 2. Determine if this is an optional chain (`?.`) or a regular access (`.`).
     bool is_optional_chain = (expr.op.type == TokenType::QUESTION_DOT);
     std::shared_ptr<Type> unwrapped_object_type = object_type;
 
-    // 3. Handle the optionality of the object.
     if (object_type->kind == TypeKind::OPTIONAL) {
-        // The object is optional (e.g., `Player?`). We can proceed with either `.` or `?.`.
-        // We will work with the type it wraps (e.g., `Player`).
         unwrapped_object_type = std::dynamic_pointer_cast<OptionalType>(object_type)->wrapped_type;
-    } else if (is_optional_chain) {
-        // This is the case `non_optional?.field`. It's redundant but safe.
-        // TODO: Add a compiler warning/note here for good style.
     }
 
-    // A regular access (`.`) on an optional type is a compile-time error.
-    // This prevents accidental null pointer errors.
     if (object_type->kind == TypeKind::OPTIONAL && !is_optional_chain) {
-        error(expr.op, "Cannot access property on an optional type '" + object_type->toString() + "'. Use the optional chaining operator '?.' instead.");
+        error(expr.op, "Cannot access property on an optional type '" + object_type->toString() + "' — use '?.' for safe access, or unwrap the value first.");
         pushAndSave(&expr, m_type_error);
         return {};
     }
 
-    // 4. Find the property on the (now unwrapped) type.
     const std::string& property_name = expr.name.lexeme;
-    std::shared_ptr<Type> property_type = m_type_error; // Default to error
-
-
-
-    // --- Dispatch based on the kind of the unwrapped type ---
+    std::shared_ptr<Type> property_type = m_type_error;
 
     if (unwrapped_object_type->kind == TypeKind::DATA) {
         auto data_type = std::dynamic_pointer_cast<DataType>(unwrapped_object_type);
 
         if (property_name == "clone") {
-            // Case A: The special .clone() method
             property_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{},
-                data_type // Returns instance of self
+                data_type
             );
         } else if (property_name == "deep_clone") {
             property_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{},
-                data_type // Returns instance of self (deeply copied)
+                data_type
             );
         }
         else {
-            // Case B: Regular field lookup
-            // This must be in an ELSE block so it doesn't run for "clone"
             auto field_it = data_type->fields.find(property_name);
             if (field_it == data_type->fields.end()) {
-                error(expr.name, "Data block of type '" + data_type->name + "' has no field named '" + property_name + "'.");
+                error(expr.name, "Data type '" + data_type->name + "' has no field named '" + property_name + "'.");
             } else {
                 property_type = field_it->second.type;
             }
@@ -75,17 +53,15 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         auto instance_type = std::dynamic_pointer_cast<InstanceType>(unwrapped_object_type);
         const ClassType::MemberInfo* prop_info = instance_type->class_type->findProperty(property_name);
         if (!prop_info) {
-            error(expr.name, "Instance of class '" + instance_type->toString() + "' has no property named '" + property_name + "'.");
+            error(expr.name, "Class '" + instance_type->toString() + "' has no property or method named '" + property_name + "'.");
 
             std::vector<std::string> candidates;
-            // This is a simplification; a full implementation would walk the superclass chain. // TODO
             for(const auto& [name, member] : instance_type->class_type->fields) candidates.push_back(name);
             for(const auto& [name, member] : instance_type->class_type->methods) candidates.push_back(name);
             find_and_report_suggestion(expr.name, candidates);
         } else {
-            // Check for private access
             if (prop_info->access == AccessLevel::PRIVATE && (m_current_class == nullptr || m_current_class->name != instance_type->class_type->name)) {
-                error(expr.name, "Property '" + property_name + "' is private and cannot be accessed from this context.");
+                error(expr.name, "Property '" + property_name + "' is private and cannot be accessed from outside the class.");
             } else {
                 property_type = prop_info->type;
             }
@@ -100,13 +76,9 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         } else {
             auto variant_constructor_type = std::dynamic_pointer_cast<FunctionType>(variant_it->second);
 
-            // If a variant takes no arguments (is nullary), accessing it directly
-            // (e.g., `WebEvent.PageLoad`) immediately produces an instance of the enum.
             if (variant_constructor_type->param_types.empty()) {
-                property_type = variant_constructor_type->return_type; // This is the EnumType itself
+                property_type = variant_constructor_type->return_type;
             } else {
-                // If it takes arguments, accessing it returns the constructor function,
-                // which must then be called.
                 property_type = variant_constructor_type;
             }
         }
@@ -132,20 +104,20 @@ std::any TypeChecker::visit(const GetExpr& expr) {
                 std::vector<std::shared_ptr<Type>>{list_type->element_type},
                 m_type_nil
             );
-        } else if (property_name == "remove_at") { // <-- ADD THIS
+        } else if (property_name == "remove_at") {
             property_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{m_type_i64},
-                list_type->element_type // Returns the element type
+                list_type->element_type
             );
-        } else if (property_name == "remove") { // <-- ADD THIS
+        } else if (property_name == "remove") {
             property_type = std::make_shared<FunctionType>(
                std::vector<std::shared_ptr<Type>>{list_type->element_type},
-               m_type_bool // Returns true or false
+               m_type_bool
            );
         } else if (property_name == "deep_clone") {
             property_type = std::make_shared<FunctionType>(
               std::vector<std::shared_ptr<Type>>{},
-              unwrapped_object_type // Returns list<T>
+              unwrapped_object_type
           );
         } else if (property_name == "length" || property_name == "len" || property_name == "size" || property_name == "count") {
             property_type = std::make_shared<FunctionType>(
@@ -154,7 +126,7 @@ std::any TypeChecker::visit(const GetExpr& expr) {
             );
         }
         else {
-            error(expr.name, "Type 'list' has no property named '" + property_name + "'.");
+            error(expr.name, "Type 'list' has no property or method named '" + property_name + "'. Available: push, remove_at, remove, deep_clone, length.");
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::RECORD) {
@@ -175,30 +147,28 @@ std::any TypeChecker::visit(const GetExpr& expr) {
                unwrapped_object_type
            );
         }
-        // --- ADD THIS BLOCK ---
         else if (property_name == "deep_clone") {
             property_type = std::make_shared<FunctionType>(
                std::vector<std::shared_ptr<Type>>{},
-               unwrapped_object_type // Returns a record
+               unwrapped_object_type
            );
         }
-        // ----------------------
         else {
-            error(expr.name, "Type 'record' has no property named '" + property_name + "'. Use subscript `[]` to access fields.");
+            error(expr.name, "Type 'record' has no property named '" + property_name + "'. Use subscript '[]' to access fields, or one of: remove, keys, clone, deep_clone.");
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::THREAD) {
         if (property_name == "join") {
             property_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_any);
         } else {
-            error(expr.name, "Type 'Thread' has no property named '" + property_name + "'.");
+            error(expr.name, "Type 'Thread' has no property named '" + property_name + "'. Available: join.");
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::MUTEX) {
         if (property_name == "lock" || property_name == "unlock") {
             property_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_nil);
         } else {
-            error(expr.name, "Type 'Mutex' has no property named '" + property_name + "'.");
+            error(expr.name, "Type 'Mutex' has no property named '" + property_name + "'. Available: lock, unlock.");
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::EXCEPTION) {
@@ -207,23 +177,18 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         if (field_it == exception_type->fields.end()) {
             error(expr.name, "Type 'Exception' has no property named '" + property_name + "'.");
         } else {
-            property_type = field_it->second.type; // Should resolve to `string`
+            property_type = field_it->second.type;
         }
     }
     else {
-        error(expr.op, "Type '" + object_type->toString() + "' has no properties that can be accessed.");
+        error(expr.op, "Type '" + object_type->toString() + "' has no accessible properties or methods.");
     }
 
-    // --- 5. Determine the Final Result Type ---
     if (property_type->kind == TypeKind::ERROR) {
-        // If the property lookup failed, the result is an error.
         pushAndSave(&expr, m_type_error);
     } else if (is_optional_chain || object_type->kind == TypeKind::OPTIONAL) {
-        // If this was an optional chain OR if the original object was optional,
-        // the result of the access is also optional.
         pushAndSave(&expr, std::make_shared<OptionalType>(property_type));
     } else {
-        // Otherwise, it's a regular access on a non-optional type.
         pushAndSave(&expr, property_type);
     }
 

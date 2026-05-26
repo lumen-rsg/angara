@@ -1,7 +1,3 @@
-//
-// Created by cv2 on 9/19/25.
-//
-
 #include "TypeChecker.h"
 namespace angara {
 
@@ -13,15 +9,15 @@ namespace angara {
         switch (expr.op.type) {
             case TokenType::MINUS:
                 if (isNumeric(right_type)) result_type = right_type;
-                else error(expr.op, "Operand for '-' must be a number.");
+                else error(expr.op, "Operator '-' requires a numeric operand, but got '" + right_type->toString() + "'.");
                 break;
             case TokenType::BANG:
                 if (right_type->toString() == "bool") result_type = m_type_bool;
-                else error(expr.op, "Operand for '!' must be a boolean.");
+                else error(expr.op, "Operator '!' requires a boolean operand, but got '" + right_type->toString() + "'.");
                 break;
             case TokenType::TILDE:
                 if (isNumeric(right_type)) result_type = m_type_i64;
-                else error(expr.op, "Operand for '~' must be a number.");
+                else error(expr.op, "Operator '~' requires a numeric operand, but got '" + right_type->toString() + "'.");
                 break;
             default: ;
         }

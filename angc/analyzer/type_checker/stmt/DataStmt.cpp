@@ -1,31 +1,18 @@
-//
-// Created by cv2 on 9/19/25.
-//
 #include "TypeChecker.h"
 namespace angara {
 
     void TypeChecker::visit(std::shared_ptr<const DataStmt> stmt) {
-        // All the important work (defining the type, fields, and constructor)
-        // was done in Pass 1 and Pass 2 (defineDataHeader).
-        // In this pass, there is no executable code to check.
-        // We just need to make sure we don't try to visit the field VarDeclStmts
-        // again as if they were local variables.
     }
 
     void TypeChecker::defineDataHeader(const DataStmt& stmt) {
-        // 1. Get the placeholder DataType we created in Pass 1.
         auto symbol = m_symbols.resolve(stmt.name.lexeme);
         auto data_type = std::dynamic_pointer_cast<DataType>(symbol->type);
 
-        // --- GENERIC SUPPORT ---
-        // Store the type parameter names on the DataType
         for (const auto& tp : stmt.type_params) {
             data_type->type_params.push_back(tp.lexeme);
         }
 
-        // Register type parameters in scope so field types can reference them
-        // e.g., in `data Box<T> { let value as T; }`, T must resolve during field type resolution
-        auto saved_type_params = m_active_type_params; // save for restoration
+        auto saved_type_params = m_active_type_params;
         for (const auto& tp : stmt.type_params) {
             m_active_type_params[tp.lexeme] = std::make_shared<TypeParameterType>(tp.lexeme);
         }
@@ -35,64 +22,48 @@ namespace angara {
         }
 
         if (stmt.is_foreign) {
-            // For a foreign struct, we just populate its fields.
-            // We DO NOT create an Angara constructor for it.
             Token dummy_token;
             data_type->is_foreign = true;
             for (const auto& field_decl : stmt.fields) {
                 if (data_type->fields.count(field_decl->name.lexeme)) {
-                    error(field_decl->name, "Duplicate field '" + field_decl->name.lexeme + "' in foreign data block.");
+                    error(field_decl->name, "Duplicate field '" + field_decl->name.lexeme + "' in foreign data block '" + stmt.name.lexeme + "'.");
                     continue;
                 }
                 auto field_type = resolveType(field_decl->typeAnnotation);
-                // All fields in a C struct are implicitly public and mutable from C's perspective.
                 data_type->fields[field_decl->name.lexeme] = {field_type, AccessLevel::PUBLIC, dummy_token, false};
             }
-            // Crucially, we DO NOT set `data_type->constructor_type`.
-            // Restore type param scope
             m_active_type_params = saved_type_params;
             return;
         }
 
-        // 2. Populate the fields and build the constructor signature.
         std::vector<std::shared_ptr<Type>> ctor_params;
         Token dummy_token;
 
         for (const auto& field_decl : stmt.fields) {
             if (data_type->fields.count(field_decl->name.lexeme)) {
-                error(field_decl->name, "Duplicate field '" + field_decl->name.lexeme + "' in data block.");
+                error(field_decl->name, "Duplicate field '" + field_decl->name.lexeme + "' in data block '" + stmt.name.lexeme + "'.");
                 continue;
             }
 
             std::shared_ptr<Type> field_type;
             if (field_decl->typeAnnotation) {
                 field_type = resolveType(field_decl->typeAnnotation);
-            } else if (field_decl->initializer) {
-                // Type inference from default values is an advanced feature.
-                // For now, let's require explicit types for data blocks.
-                error(field_decl->name, "Fields in a 'data' block must have an explicit type annotation.");
-                field_type = m_type_error;
             } else {
-                error(field_decl->name, "Fields in a 'data' block must have an explicit type annotation.");
+                error(field_decl->name, "Data block fields must have an explicit type annotation (e.g., 'let x as i64').");
                 field_type = m_type_error;
             }
 
             if (field_decl->initializer) {
-                error(field_decl->name, "Fields in a 'data' block cannot have default initializers. Initialization is done via the constructor.");
+                error(field_decl->name, "Data block fields cannot have default initializers — values are provided through the constructor.");
             }
 
-            // Add to the fields map. All fields are implicitly public.
             data_type->fields[field_decl->name.lexeme] = {field_type, AccessLevel::PUBLIC, dummy_token, field_decl->is_const};
 
-            // Add this field's type to the constructor's parameter list.
             ctor_params.push_back(field_type);
         }
 
-        // 3. Create and store the constructor's FunctionType.
-        // The return type is the data type itself.
         data_type->constructor_type = std::make_shared<FunctionType>(ctor_params, data_type);
 
-        // Restore type param scope
         m_active_type_params = saved_type_params;
     }
 

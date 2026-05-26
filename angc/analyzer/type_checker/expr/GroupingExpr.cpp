@@ -1,7 +1,3 @@
-//
-// Created by cv2 on 9/19/25.
-//
-
 #include "TypeChecker.h"
 namespace angara {
 

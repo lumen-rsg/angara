@@ -1,18 +1,12 @@
-//
-// Created by cv2 on 9/19/25.
-//
-
 #include "TypeChecker.h"
 namespace angara {
 
     std::any TypeChecker::visit(const AssignExpr& expr) {
-        // 1. Determine the type of the value being assigned (RHS).
         expr.value->accept(*this);
         const auto rhs_type = popType();
 
 
         if (const auto subscript_target = std::dynamic_pointer_cast<const SubscriptExpr>(expr.target)) {
-            // We need to get the types of the collection and index before proceeding.
             subscript_target->object->accept(*this);
             const auto collection_type = popType();
             subscript_target->index->accept(*this);
@@ -25,63 +19,50 @@ namespace angara {
             if (collection_type->kind == TypeKind::LIST) {
                 const auto list_type = std::dynamic_pointer_cast<ListType>(collection_type);
                 if (!isInteger(index_type)) {
-                    error(subscript_target->bracket, "List index for assignment must be an integer, but got '" + index_type->toString() + "'.");
+                    error(subscript_target->bracket, "List index must be an integer, but got '" + index_type->toString() + "'.");
                 }
                 if (list_type->element_type->toString() != rhs_type->toString()) {
-                    error(expr.op, "Type mismatch. Cannot assign value of type '" + rhs_type->toString() + "' to an element of a list of type '" + list_type->toString() + "'.");
+                    error(expr.op, "Cannot assign a value of type '" + rhs_type->toString() + "' to a list element of type '" + list_type->element_type->toString() + "'.");
                 }
             }
             else if (collection_type->kind == TypeKind::RECORD) {
                 auto record_type = std::dynamic_pointer_cast<RecordType>(collection_type);
                 if (index_type->toString() != "string") {
-                    error(subscript_target->bracket, "Record key for assignment must be a string...");
+                    error(subscript_target->bracket, "Record key for assignment must be a string, but got '" + index_type->toString() + "'.");
                 } else {
-                    // --- THIS IS THE FIX ---
-                    // If the target is the GENERIC record type `{}`, then any
-                    // assignment with a string key is valid. It's a dynamic operation.
                     if (record_type->fields.empty()) {
-                        // This is a dynamic field addition. The operation is valid.
-                        // We don't need to do any more checks here.
+                        // Dynamic field addition on generic record — always valid.
                     } else {
-                        // It's a specific record type. We must do static checking.
                         if (auto key_literal = std::dynamic_pointer_cast<const Literal>(subscript_target->index)) {
                             auto field_it = record_type->fields.find(key_literal->token.lexeme);
                             if (field_it == record_type->fields.end()) {
-                                error(key_literal->token, "Record of type '" + record_type->toString() + "' has no statically-known field named '" + key_literal->token.lexeme + "'.");
+                                error(key_literal->token, "Record has no field named '" + key_literal->token.lexeme + "'.");
                             } else if (!check_type_compatibility(field_it->second, rhs_type)) {
-                                error(expr.op, "Type mismatch. Cannot assign value of type '" + rhs_type->toString() + "' to field '" + key_literal->token.lexeme + "' of type '" + field_it->second->toString() + "'.");
+                                error(expr.op, "Cannot assign a value of type '" + rhs_type->toString() + "' to field '" + key_literal->token.lexeme + "' which expects type '" + field_it->second->toString() + "'.");
                             }
                         }
-                        // DYNAMIC ASSIGNMENT on a specific record (e.g. rec[var_key] = val)
-                        // This is also allowed.
                     }
-                    // --- END OF FIX ---
                 }
             }
             pushAndSave(&expr, rhs_type);
             return {};
         }
 
-        // 2. Determine the type of the target being assigned to (LHS).
         expr.target->accept(*this);
         auto lhs_type = popType();
 
-        // 3. If either sub-expression had an error, stop immediately.
         if (rhs_type->kind == TypeKind::ERROR || lhs_type->kind == TypeKind::ERROR) {
             pushAndSave(&expr, m_type_error);
             return {};
         }
 
         if (!check_type_compatibility(lhs_type, rhs_type)) {
-            // We can add a special check here for integer literals if we want to be
-            // even more robust, but the main logic is now centralized.
             bool types_match = false;
             if (isInteger(lhs_type) && rhs_type->toString() == "i64") {
                 if (std::dynamic_pointer_cast<const Literal>(expr.value)) {
                     types_match = true;
                 }
             }
-            // In @unsafe context, allow assigning 'any' to any target type.
             if (m_is_in_unsafe_context && rhs_type->kind == TypeKind::ANY) {
                 types_match = true;
             }
@@ -93,7 +74,6 @@ namespace angara {
             }
         }
 
-        // 5. Check for const-ness and other assignment rules based on the target's kind.
         if (const auto var_target = std::dynamic_pointer_cast<const VarExpr>(expr.target)) {
             if (const auto symbol = m_symbols.resolve(var_target->name.lexeme); symbol && symbol->is_const) {
                 error(var_target->name, "Cannot assign to 'const' variable '" + symbol->name + "'.");
@@ -102,26 +82,19 @@ namespace angara {
         }
 
         else if (const auto get_target = std::dynamic_pointer_cast<const GetExpr>(expr.target)) {
-            // We need to re-evaluate the object type to get the ClassType.
             get_target->object->accept(*this);
 
             if (const auto object_type = popType(); object_type->kind == TypeKind::INSTANCE) {
                 const auto instance_type = std::dynamic_pointer_cast<InstanceType>(object_type);
                 const std::string& field_name = get_target->name.lexeme;
 
-                // Use our recursive helper to find the field in the inheritance chain.
-
                 if (const ClassType::MemberInfo* field_info = instance_type->class_type->findProperty(field_name); field_info == nullptr) {
-                    // The GetExpr visitor would have already caught this, but we check again for safety.
-                    // Note: findProperty looks for methods too, we should only allow assigning to fields.
-                    error(get_target->name, "Instance of class '" + instance_type->toString() +
+                    error(get_target->name, "Class '" + instance_type->toString() +
                                             "' has no field named '" + field_name + "'.");
                 } else {
-                    // Check if the found property is actually a field.
                     if (instance_type->class_type->methods.contains(field_name)) {
-                        error(get_target->name, "Cannot assign to a method. '" + field_name + "' is a method, not a field.");
+                        error(get_target->name, "Cannot assign to method '" + field_name + "' — methods are not assignable.");
                     } else {
-                        // It's a field. Now check if it's const.
                         if (field_info->is_const) {
                             error(get_target->name, "Cannot assign to 'const' field '" + field_name + "'.");
                         }
@@ -130,7 +103,6 @@ namespace angara {
             }
         }
 
-        // An assignment expression evaluates to the assigned value.
         pushAndSave(&expr, rhs_type);
         return {};
     }
