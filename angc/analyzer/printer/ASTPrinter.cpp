@@ -1,13 +1,9 @@
-//
-// Created by cv2 on 25.11.2025.
-//
 #include "ASTPrinter.h"
 #include "Colors.h"
 #include <sstream>
 
 namespace angara {
 
-    // --- Tree Characters ---
     const char* const TREE_FORK = "├── ";
     const char* const TREE_END  = "└── ";
     const char* const TREE_DOWN = "│   ";
@@ -18,14 +14,11 @@ namespace angara {
     void ASTPrinter::print(const std::vector<std::shared_ptr<Stmt>>& statements) {
         std::cout << CLR_BOLD << CLR_MAGENTA << "\n=== Abstract Syntax Tree ===\n" << CLR_RESET;
         for (size_t i = 0; i < statements.size(); ++i) {
-            // Root level nodes
             bool isLast = (i == statements.size() - 1);
             printChild("", statements[i], isLast);
         }
         std::cout << CLR_BOLD << CLR_MAGENTA << "============================\n\n" << CLR_RESET;
     }
-
-    // --- Helpers ---
 
     void ASTPrinter::printHeader(const std::string& label, const std::string& extra) {
         std::cout << m_prefix;
@@ -76,31 +69,22 @@ namespace angara {
         std::string oldPrefix = m_prefix;
         std::string oldChildPrefix = m_childPrefix;
 
-        // Calculate prefix for this node (The ClassMember wrapper)
         m_prefix = m_childPrefix + (isLast ? TREE_END : TREE_FORK);
         m_childPrefix = m_childPrefix + (isLast ? TREE_EMPTY : TREE_DOWN);
 
         if (auto field = std::dynamic_pointer_cast<FieldMember>(member)) {
             std::string access = (field->access == AccessLevel::PUBLIC) ? "public" : "private";
 
-            // Print the wrapper node header
             std::cout << m_prefix << CLR_BOLD << CLR_CYAN << "FieldMember" << CLR_RESET << " " << CLR_YELLOW << access << CLR_RESET << "\n";
-
-            // Print the underlying VarDeclStmt as a child of this wrapper
-            // 'true' because it's the only child of this wrapper
             printChild("", field->declaration, true);
 
         } else if (auto method = std::dynamic_pointer_cast<MethodMember>(member)) {
             std::string access = (method->access == AccessLevel::PUBLIC) ? "public" : "private";
 
-            // Print the wrapper node header
             std::cout << m_prefix << CLR_BOLD << CLR_CYAN << "MethodMember" << CLR_RESET << " " << CLR_YELLOW << access << CLR_RESET << "\n";
-
-            // Print the underlying FuncStmt as a child of this wrapper
             printChild("", method->declaration, true);
         }
 
-        // Restore prefixes
         m_prefix = oldPrefix;
         m_childPrefix = oldChildPrefix;
     }
@@ -109,14 +93,11 @@ namespace angara {
     void ASTPrinter::printChildren(const std::string& listName, const std::vector<std::shared_ptr<T>>& list, bool isLastGroup) {
         if (list.empty()) return;
 
-        // Optional: Print a group header?
         for (size_t i = 0; i < list.size(); ++i) {
             bool isLastItem = (i == list.size() - 1) && isLastGroup;
             printChild("", list[i], isLastItem);
         }
     }
-
-    // ==================== EXPRESSIONS ====================
 
     std::any ASTPrinter::visit(const Binary& expr) {
         printHeader("BinaryExpr", expr.op.lexeme);
@@ -186,7 +167,6 @@ namespace angara {
         for (size_t i = 0; i < expr.keys.size(); ++i) {
             bool isLast = (i == expr.keys.size() - 1);
 
-            // Create a synthetic node presentation for Key: Value
             std::string oldPrefix = m_prefix;
             std::string oldChildPrefix = m_childPrefix;
 
@@ -194,8 +174,6 @@ namespace angara {
             m_childPrefix = m_childPrefix + (isLast ? TREE_EMPTY : TREE_DOWN);
 
             std::cout << m_prefix << CLR_GREEN << "\"" << expr.keys[i].lexeme << "\"" << CLR_RESET << ":\n";
-
-            // Print the value as a child of the key
             printChild("val", expr.values[i], true);
 
             m_prefix = oldPrefix;
@@ -240,8 +218,6 @@ namespace angara {
     std::any ASTPrinter::visit(const IsExpr& expr) {
         printHeader("IsExpr");
         printChild("object", expr.object, true);
-        // Note: ASTType printing isn't fully implemented in this visitor,
-        // but we could convert the type to string here.
         return {};
     }
 
@@ -253,7 +229,6 @@ namespace angara {
             bool isLast = (i == expr.cases.size() - 1);
             const auto& c = expr.cases[i];
 
-            // Manually handle the 'Case' structure since it's not a standard Expr
             std::string oldPrefix = m_prefix;
             std::string oldChildPrefix = m_childPrefix;
 
@@ -284,8 +259,6 @@ namespace angara {
         return {};
     }
 
-    // ==================== STATEMENTS ====================
-
     void ASTPrinter::visit(std::shared_ptr<const ExpressionStmt> stmt) {
         printHeader("ExpressionStmt");
         printChild("", stmt->expression, true);
@@ -298,7 +271,6 @@ namespace angara {
         if (stmt->is_static) info += " [static]";
 
         printHeader(kind, info);
-        // If we had a stringifier for ASTType, we'd print it here.
         if (stmt->initializer) {
             printChild("init", stmt->initializer, true);
         }
@@ -312,7 +284,6 @@ namespace angara {
     void ASTPrinter::visit(std::shared_ptr<const IfStmt> stmt) {
         printHeader("IfStmt");
         if (stmt->declaration) {
-            // if let
             printHeader("IfLetDecl", stmt->declaration->name.lexeme);
             printChild("init", stmt->declaration->initializer, false);
         } else {
@@ -355,7 +326,6 @@ namespace angara {
         if (stmt->is_exported) info += " [export]";
 
         printHeader("FuncStmt", info);
-        // Printing params is a bit manual without nodes, could list them in header
         if (stmt->body) {
             printChildren("body", *stmt->body, true);
         }
@@ -386,7 +356,6 @@ namespace angara {
         printHeader("TryStmt");
         printChild("try", stmt->tryBlock, false);
 
-        // Catch block simulation
         std::string oldPrefix = m_prefix;
         std::string oldChildPrefix = m_childPrefix;
 
@@ -405,7 +374,6 @@ namespace angara {
     void ASTPrinter::visit(std::shared_ptr<const ClassStmt> stmt) {
         printHeader("ClassStmt", stmt->name.lexeme);
         if (stmt->superclass) printHeader("Inherits", stmt->superclass->name.lexeme);
-
         printChildren("members", stmt->members, true);
     }
 
@@ -416,7 +384,6 @@ namespace angara {
 
     void ASTPrinter::visit(std::shared_ptr<const ContractStmt> stmt) {
         printHeader("ContractStmt", stmt->name.lexeme);
-        // Members...
     }
 
     void ASTPrinter::visit(std::shared_ptr<const BreakStmt> stmt) {
@@ -434,7 +401,6 @@ namespace angara {
 
     void ASTPrinter::visit(std::shared_ptr<const EnumStmt> stmt) {
         printHeader("EnumStmt", stmt->name.lexeme);
-        // Variants...
     }
 
     void ASTPrinter::visit(std::shared_ptr<const ForeignHeaderStmt> stmt) {

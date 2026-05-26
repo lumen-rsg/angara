@@ -1,26 +1,17 @@
-//
-// Created by cv2 on 8/31/25.
-//
-
 #include "SymbolTable.h"
 
 namespace angara {
 
     SymbolTable::SymbolTable() {
-        // When the symbol table is created, we always start with a single,
-        // top-level "global" scope.
         enterScope();
     }
 
     void SymbolTable::enterScope() {
-        // To enter a new scope, we just push a new, empty map onto our stack of scopes.
         m_scopes.emplace_back();
     }
 
     std::vector<std::shared_ptr<Symbol>> SymbolTable::exitScope() {
         std::vector<std::shared_ptr<Symbol>> unused;
-        // To exit a scope, we pop the current map off the stack.
-        // We should never be able to exit the bottom-most global scope.
         if (m_scopes.size() > 1) {
             auto& scope = m_scopes.back();
             for (const auto& [name, sym] : scope) {
@@ -42,7 +33,7 @@ namespace angara {
         auto& current_scope = m_scopes.back();
         auto it = current_scope.find(token.lexeme);
         if (it != current_scope.end()) {
-            return it->second; // Return conflicting symbol
+            return it->second;
         }
 
         auto symbol = std::make_shared<Symbol>();
@@ -51,41 +42,32 @@ namespace angara {
         symbol->declaration_token = token;
         symbol->is_const = is_const;
         symbol->depth = getScopeDepth();
-        symbol->from_module = std::move(from_module); // Store the origin module
+        symbol->from_module = std::move(from_module);
 
         current_scope[token.lexeme] = symbol;
-        return nullptr; // Success
+        return nullptr;
     }
 
     std::shared_ptr<Symbol> SymbolTable::resolve(const std::string& name) {
-        // To resolve a variable, we walk the scope stack backwards, from the
-        // innermost scope to the outermost (global) scope.
-
         for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); ++it) {
             const auto& scope = *it;
             auto symbol_it = scope.find(name);
             if (symbol_it != scope.end()) {
-                // Mark this symbol as used
                 symbol_it->second->used = true;
                 return symbol_it->second;
             }
         }
-
-        // If we've walked all the scopes and haven't found the name, it's undeclared.
         return nullptr;
     }
 
     const std::map<std::string, std::shared_ptr<Symbol>>& SymbolTable::getGlobalScope() const {
-        // The global scope is always the first one we pushed.
         return m_scopes.front();
     }
 
     int SymbolTable::getScopeDepth() const {
-        // The global scope is depth 0. A scope inside that is depth 1, etc.
-        // The number of maps on the stack minus one gives the depth.
         return m_scopes.size() - 1;
     }
 
     const std::vector<std::map<std::string, std::shared_ptr<Symbol>>>& SymbolTable::getScopes() const { return m_scopes; }
 
-} // namespace angara
+}

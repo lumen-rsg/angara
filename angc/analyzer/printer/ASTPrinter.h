@@ -10,32 +10,53 @@
 
 namespace angara {
 
+    /// Pretty-prints an AST as a colored tree to stdout.
+    /// Implements both ExprVisitor and StmtVisitor to traverse every node type.
     class ASTPrinter : public ExprVisitor, public StmtVisitor {
     public:
         ASTPrinter();
 
-        // Entry point to print a list of statements (e.g. a program)
+        /// Prints the full AST for a list of top-level statements.
+        /// @param statements  The program's top-level statement list.
         void print(const std::vector<std::shared_ptr<Stmt>>& statements);
 
     private:
-        // --- State Management ---
-        std::string m_prefix;       // The string prefix for the current line (e.g. "│   ")
-        std::string m_childPrefix;  // The prefix to pass down to children
+        std::string m_prefix;
+        std::string m_childPrefix;
 
-        // --- Helpers ---
-        // Prints the node header with color
+        /// Prints a colored node header line (e.g. "FuncStmt main [export]").
+        /// @param label  The node type name.
+        /// @param extra  Optional trailing info (name, operator, etc.).
         void printHeader(const std::string& label, const std::string& extra = "");
 
-        // Helper to visit a child node, handling the tree drawing logic
+        /// Visits a child statement node, drawing the appropriate tree connector.
+        /// @param fieldName  Optional label printed before the node (e.g. "body").
+        /// @param stmt       The child statement to print.
+        /// @param isLast     Whether this is the last sibling in its group.
         void printChild(const std::string& fieldName, const std::shared_ptr<Stmt>& stmt, bool isLast);
+
+        /// Visits a child expression node, drawing the appropriate tree connector.
+        /// @param fieldName  Optional label printed before the node.
+        /// @param expr       The child expression to print.
+        /// @param isLast     Whether this is the last sibling in its group.
         void printChild(const std::string& fieldName, const std::shared_ptr<Expr>& expr, bool isLast);
+
+        /// Visits a class member node (field or method), unwrapping its access level.
+        /// @param fieldName  Optional label printed before the node.
+        /// @param member     The class member to print.
+        /// @param isLast     Whether this is the last sibling in its group.
         void printChild(const std::string& fieldName, const std::shared_ptr<ClassMember>& member, bool isLast);
 
-        // Helper for vectors of nodes
+        /// Iterates over a vector of child nodes, printing each with tree connectors.
+        /// @tparam T        Statement or expression pointer type.
+        /// @param listName   Label for the group (currently unused for rendering).
+        /// @param list       The vector of child nodes.
+        /// @param isLastGroup  Whether this group is the last child of its parent.
         template <typename T>
         void printChildren(const std::string& listName, const std::vector<std::shared_ptr<T>>& list, bool isLastGroup);
 
-        // --- Visitor Implementations (Expressions) ---
+        // --- Expression visitors ---
+
         std::any visit(const Binary& expr) override;
         std::any visit(const Grouping& expr) override;
         std::any visit(const Literal& expr) override;
@@ -58,7 +79,8 @@ namespace angara {
         std::any visit(const RetypeExpr& expr) override;
         std::any visit(const LambdaExpr& expr) override;
 
-        // --- Visitor Implementations (Statements) ---
+        // --- Statement visitors ---
+
         void visit(std::shared_ptr<const ExpressionStmt> stmt) override;
         void visit(std::shared_ptr<const VarDeclStmt> stmt) override;
         void visit(std::shared_ptr<const BlockStmt> stmt) override;
