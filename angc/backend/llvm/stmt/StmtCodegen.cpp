@@ -30,8 +30,8 @@ void LLVMBackend::cgStmt(const std::shared_ptr<Stmt>& s) {
 void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
     auto* v = s.initializer ? cg(s.initializer) : makeNil();
 
-    auto type_it = m_type_checker.m_variable_types.find(&s);
-    auto var_type = (type_it != m_type_checker.m_variable_types.end()) ? type_it->second : nullptr;
+    auto type_it = m_type_checker.getVariableTypes().find(&s);
+    auto var_type = (type_it != m_type_checker.getVariableTypes().end()) ? type_it->second : nullptr;
 
     if (var_type && isSizedIntType(var_type)) {
         v = truncateForType(v, var_type);

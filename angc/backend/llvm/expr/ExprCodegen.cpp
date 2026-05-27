@@ -11,8 +11,8 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
     if (auto* p = dynamic_cast<const Unary*>(e.get())) return cgUnary(*p);
     if (auto* p = dynamic_cast<const Grouping*>(e.get())) return cg(p->expression);
     if (auto* p = dynamic_cast<const VarExpr*>(e.get())) {
-        auto type_it = m_type_checker.m_expression_types.find(e.get());
-        if (type_it != m_type_checker.m_expression_types.end() &&
+        auto type_it = m_type_checker.getExpressionTypes().find(e.get());
+        if (type_it != m_type_checker.getExpressionTypes().end() &&
             type_it->second->kind == TypeKind::FUNCTION) {
             auto func_type = std::dynamic_pointer_cast<FunctionType>(type_it->second);
             if (namedVals.find(sanitize(p->name.lexeme)) != namedVals.end()) {
@@ -167,8 +167,8 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
         }
         case TokenType::STAR: {
             {
-                auto lt = m_type_checker.m_expression_types.find(e.left.get());
-                if (lt != m_type_checker.m_expression_types.end() && lt->second->toString() == "string") {
+                auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+                if (lt != m_type_checker.getExpressionTypes().end() && lt->second->toString() == "string") {
                     return callRtByName("__ang_string_repeat", {l, r});
                 }
             }
@@ -211,10 +211,10 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             fdivBB = builder->GetInsertBlock();
             builder->CreateBr(mdivBB);
             builder->SetInsertPoint(idivBB);
-            auto lt = m_type_checker.m_expression_types.find(e.left.get());
-            auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
-            bool unsigned_div = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
-                                (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
+            auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+            auto rt2 = m_type_checker.getExpressionTypes().find(e.right.get());
+            bool unsigned_div = (lt != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(lt->second)) ||
+                                (rt2 != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(rt2->second));
             auto* ia = makeI64(unsigned_div ? builder->CreateUDiv(getI64(l),getI64(r))
                                             : builder->CreateSDiv(getI64(l),getI64(r)));
             idivBB = builder->GetInsertBlock();
@@ -240,10 +240,10 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             fmodBB = builder->GetInsertBlock();
             builder->CreateBr(mmodBB);
             builder->SetInsertPoint(imodBB);
-            auto lt = m_type_checker.m_expression_types.find(e.left.get());
-            auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
-            bool unsigned_mod = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
-                                (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
+            auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+            auto rt2 = m_type_checker.getExpressionTypes().find(e.right.get());
+            bool unsigned_mod = (lt != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(lt->second)) ||
+                                (rt2 != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(rt2->second));
             auto* ia = makeI64(unsigned_mod ? builder->CreateURem(getI64(l),getI64(r))
                                             : builder->CreateSRem(getI64(l),getI64(r)));
             imodBB = builder->GetInsertBlock();
@@ -272,10 +272,10 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             fcmpBB = builder->GetInsertBlock();
             builder->CreateBr(mcmpBB);
             builder->SetInsertPoint(icmpBB);
-            auto lt = m_type_checker.m_expression_types.find(e.left.get());
-            auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
-            bool unsigned_cmp = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
-                                (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
+            auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+            auto rt2 = m_type_checker.getExpressionTypes().find(e.right.get());
+            bool unsigned_cmp = (lt != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(lt->second)) ||
+                                (rt2 != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(rt2->second));
             auto* ib = makeBool(unsigned_cmp ? builder->CreateICmpULT(getI64(l),getI64(r))
                                              : builder->CreateICmpSLT(getI64(l),getI64(r)));
             icmpBB = builder->GetInsertBlock();
@@ -301,10 +301,10 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             fcmpBB = builder->GetInsertBlock();
             builder->CreateBr(mcmpBB);
             builder->SetInsertPoint(icmpBB);
-            auto lt = m_type_checker.m_expression_types.find(e.left.get());
-            auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
-            bool unsigned_cmp = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
-                                (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
+            auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+            auto rt2 = m_type_checker.getExpressionTypes().find(e.right.get());
+            bool unsigned_cmp = (lt != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(lt->second)) ||
+                                (rt2 != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(rt2->second));
             auto* ib = makeBool(unsigned_cmp ? builder->CreateICmpULE(getI64(l),getI64(r))
                                              : builder->CreateICmpSLE(getI64(l),getI64(r)));
             icmpBB = builder->GetInsertBlock();
@@ -330,10 +330,10 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             fcmpBB = builder->GetInsertBlock();
             builder->CreateBr(mcmpBB);
             builder->SetInsertPoint(icmpBB);
-            auto lt = m_type_checker.m_expression_types.find(e.left.get());
-            auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
-            bool unsigned_cmp = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
-                                (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
+            auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+            auto rt2 = m_type_checker.getExpressionTypes().find(e.right.get());
+            bool unsigned_cmp = (lt != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(lt->second)) ||
+                                (rt2 != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(rt2->second));
             auto* ib = makeBool(unsigned_cmp ? builder->CreateICmpUGT(getI64(l),getI64(r))
                                              : builder->CreateICmpSGT(getI64(l),getI64(r)));
             icmpBB = builder->GetInsertBlock();
@@ -359,10 +359,10 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             fcmpBB = builder->GetInsertBlock();
             builder->CreateBr(mcmpBB);
             builder->SetInsertPoint(icmpBB);
-            auto lt = m_type_checker.m_expression_types.find(e.left.get());
-            auto rt2 = m_type_checker.m_expression_types.find(e.right.get());
-            bool unsigned_cmp = (lt != m_type_checker.m_expression_types.end() && isUnsignedIntType(lt->second)) ||
-                                (rt2 != m_type_checker.m_expression_types.end() && isUnsignedIntType(rt2->second));
+            auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+            auto rt2 = m_type_checker.getExpressionTypes().find(e.right.get());
+            bool unsigned_cmp = (lt != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(lt->second)) ||
+                                (rt2 != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(rt2->second));
             auto* ib = makeBool(unsigned_cmp ? builder->CreateICmpUGE(getI64(l),getI64(r))
                                              : builder->CreateICmpSGE(getI64(l),getI64(r)));
             icmpBB = builder->GetInsertBlock();
@@ -596,9 +596,9 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             return makeBool(false);
         }
         if (namedVals.find(sanitize(fn)) != namedVals.end()) {
-            auto type_it = m_type_checker.m_expression_types.find(expr.callee.get());
+            auto type_it = m_type_checker.getExpressionTypes().find(expr.callee.get());
             bool is_callable = false;
-            if (type_it != m_type_checker.m_expression_types.end()) {
+            if (type_it != m_type_checker.getExpressionTypes().end()) {
                 auto kind = type_it->second->kind;
                 if (kind == TypeKind::FUNCTION || kind == TypeKind::ANY) {
                     is_callable = true;
@@ -699,8 +699,8 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
 
 llvm::Value* LLVMBackend::cgGet(const GetExpr& e) {
     if (auto* var = dynamic_cast<const VarExpr*>(e.object.get())) {
-        auto type_it = m_type_checker.m_expression_types.find(e.object.get());
-        if (type_it != m_type_checker.m_expression_types.end() &&
+        auto type_it = m_type_checker.getExpressionTypes().find(e.object.get());
+        if (type_it != m_type_checker.getExpressionTypes().end() &&
             type_it->second->kind == TypeKind::ENUM) {
             auto enum_type = std::dynamic_pointer_cast<EnumType>(type_it->second);
             std::string global_name = "Angara_enum_" + enum_type->name + "_" + e.name.lexeme;

@@ -42,40 +42,37 @@ namespace angara {
         /// Visits an @unsafe block, enabling dynamic operations within.
         void visit(std::shared_ptr<const UnsafeBlockStmt> stmt) override;
 
-        /// Maps each expression node to its resolved type (used by code generation).
-        std::map<const Expr*, std::shared_ptr<Type>> m_expression_types;
-
-        /// The symbol table holding all declared variables, functions, types, and imports.
-        SymbolTable m_symbols;
-
-        /// Maps each variable declaration to its resolved type.
-        std::map<const VarDeclStmt*, std::shared_ptr<Type>> m_variable_types;
-
         /// Returns the symbol table (for use by later compiler stages).
         [[nodiscard]] const SymbolTable& getSymbolTable() const;
 
         /// Returns the module type descriptor (for use by later compiler stages).
         [[nodiscard]] std::shared_ptr<ModuleType> getModuleType() const;
 
-        /// Maps each variable reference to its resolved symbol (for code generation).
-        std::map<const VarExpr*, std::shared_ptr<Symbol>> m_variable_resolutions;
-
-        /// Maps each attach statement to its resolved module type.
-        std::map<const AttachStmt*, std::shared_ptr<ModuleType>> m_module_resolutions;
-
-        /// Set of native symbols used from imported modules (for linker resolution).
-        std::set<UsedNativeSymbol> m_used_native_symbols;
-
         /// Converts an AST type node into a semantic Type object.
         /// @param ast_type  The AST type annotation to resolve.
         /// @return The resolved semantic type, or an error type if resolution fails.
         std::shared_ptr<Type> resolveType(const std::shared_ptr<ASTType>& ast_type);
 
-        /// Maps sizeof expressions to their resolved inner types.
-        std::map<const SizeofExpr*, std::shared_ptr<Type>> m_sizeof_resolutions;
+        /// Returns the map of expression nodes to their resolved types (for code generation).
+        [[nodiscard]] const std::map<const Expr*, std::shared_ptr<Type>>& getExpressionTypes() const { return m_expression_types; }
 
-        /// Whether the checker is currently inside an @unsafe block.
-        bool m_is_in_unsafe_context = false;
+        /// Returns the map of variable declarations to their resolved types.
+        [[nodiscard]] const std::map<const VarDeclStmt*, std::shared_ptr<Type>>& getVariableTypes() const { return m_variable_types; }
+
+        /// Returns the map of variable references to their resolved symbols.
+        [[nodiscard]] const std::map<const VarExpr*, std::shared_ptr<Symbol>>& getVariableResolutions() const { return m_variable_resolutions; }
+
+        /// Returns the map of attach statements to their resolved module types.
+        [[nodiscard]] const std::map<const AttachStmt*, std::shared_ptr<ModuleType>>& getModuleResolutions() const { return m_module_resolutions; }
+
+        /// Returns the set of native symbols used from imported modules.
+        [[nodiscard]] const std::set<UsedNativeSymbol>& getUsedNativeSymbols() const { return m_used_native_symbols; }
+
+        /// Returns the map of sizeof expressions to their resolved inner types.
+        [[nodiscard]] const std::map<const SizeofExpr*, std::shared_ptr<Type>>& getSizeofResolutions() const { return m_sizeof_resolutions; }
+
+        /// Returns true if the checker is currently inside an @unsafe block.
+        [[nodiscard]] bool isInUnsafeContext() const { return m_is_in_unsafe_context; }
 
     private:
         // --- Expression visitors ---
@@ -233,6 +230,17 @@ namespace angara {
         std::shared_ptr<ClassType> m_current_class = nullptr;
         std::map<const Symbol*, std::shared_ptr<Type>> m_narrowed_types;
         std::map<std::string, std::shared_ptr<TypeParameterType>> m_active_type_params;
+
+        // --- Mapped state (populated during type checking, read by backend) ---
+
+        std::map<const Expr*, std::shared_ptr<Type>> m_expression_types;
+        SymbolTable m_symbols;
+        std::map<const VarDeclStmt*, std::shared_ptr<Type>> m_variable_types;
+        std::map<const VarExpr*, std::shared_ptr<Symbol>> m_variable_resolutions;
+        std::map<const AttachStmt*, std::shared_ptr<ModuleType>> m_module_resolutions;
+        std::set<UsedNativeSymbol> m_used_native_symbols;
+        std::map<const SizeofExpr*, std::shared_ptr<Type>> m_sizeof_resolutions;
+        bool m_is_in_unsafe_context = false;
     };
 
 }

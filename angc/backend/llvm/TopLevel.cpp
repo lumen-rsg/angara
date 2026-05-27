@@ -402,8 +402,8 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
             for (const auto& stmt : statements) {
                 auto attach = std::dynamic_pointer_cast<const AttachStmt>(stmt);
                 if (!attach) continue;
-                auto res_it = m_type_checker.m_module_resolutions.find(attach.get());
-                if (res_it == m_type_checker.m_module_resolutions.end()) continue;
+                auto res_it = m_type_checker.getModuleResolutions().find(attach.get());
+                if (res_it == m_type_checker.getModuleResolutions().end()) continue;
                 auto& mod_type = res_it->second;
                 if (!mod_type || !mod_type->is_native) continue;
 
@@ -473,8 +473,8 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
     for (const auto& stmt : statements) {
         auto attach = std::dynamic_pointer_cast<const AttachStmt>(stmt);
         if (!attach) continue;
-        auto res_it = m_type_checker.m_module_resolutions.find(attach.get());
-        if (res_it == m_type_checker.m_module_resolutions.end()) continue;
+        auto res_it = m_type_checker.getModuleResolutions().find(attach.get());
+        if (res_it == m_type_checker.getModuleResolutions().end()) continue;
         auto& mod_type = res_it->second;
         if (!mod_type || !mod_type->is_native) continue;
         const std::string& mod_name = mod_type->name;
