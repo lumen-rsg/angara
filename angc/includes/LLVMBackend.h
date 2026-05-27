@@ -193,6 +193,7 @@ namespace angara {
 
         std::map<std::string, std::string> constructorLookup;
         std::map<std::string, std::string> methodLookup;
+        std::string m_current_superclass;
 
         bool m_freestanding = false;
         bool m_dump_ir = false;

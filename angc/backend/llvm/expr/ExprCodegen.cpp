@@ -435,6 +435,21 @@ llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
                 return v;
             }
         }
+        // Check if the object is a record type to dispatch correctly for variable keys
+        auto type_it = m_type_checker.getExpressionTypes().find(sub->object.get());
+        bool is_record = type_it != m_type_checker.getExpressionTypes().end() &&
+            (type_it->second->kind == TypeKind::RECORD ||
+             type_it->second->kind == TypeKind::INSTANCE ||
+             type_it->second->kind == TypeKind::GENERIC_INSTANCE);
+        if (is_record) {
+            auto* key_obj = cg(sub->index);
+            auto* fn_as_cstr = this->mod->getFunction("__ang_api_as_cstr");
+            if (fn_as_cstr) {
+                auto* key_cstr = builder->CreateCall(fn_as_cstr, {key_obj});
+                callRtByName("__ang_record_set", {obj, key_cstr, v});
+                return v;
+            }
+        }
         callRtByName("__ang_list_set", {obj, cg(sub->index), v});
         return v;
     }
@@ -458,7 +473,24 @@ llvm::Value* LLVMBackend::cgUpdate(const UpdateExpr& e) {
 
 llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
     if (!expr.callee) return makeNil();
+
+    // Handle super.method(args...) calls
     if (auto* get = dynamic_cast<const GetExpr*>(expr.callee.get())) {
+        if (auto* super_expr = dynamic_cast<const SuperExpr*>(get->object.get())) {
+            if (!m_current_superclass.empty()) {
+                std::string method_name = mangleMethod(m_current_superclass, get->name.lexeme);
+                llvm::Function* mf = this->mod->getFunction(method_name);
+                if (mf) {
+                    std::vector<llvm::Value*> args;
+                    args.push_back(loadVar("this"));
+                    for (auto& a : expr.arguments) args.push_back(cg(a));
+                    auto* ft = mf->getFunctionType();
+                    while (args.size() < ft->getNumParams()) args.push_back(makeNil());
+                    return builder->CreateCall(mf, args);
+                }
+            }
+            return makeNil();
+        }
         if (auto* obj = dynamic_cast<const VarExpr*>(get->object.get())) {
             std::string modName = obj->name.lexeme, fnName = get->name.lexeme;
             {
@@ -537,6 +569,26 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         }
         return cg(get->object);
     }
+
+    // Handle super(args...) constructor calls and super.method(args...) calls
+    if (auto* super_expr = dynamic_cast<const SuperExpr*>(expr.callee.get())) {
+        if (!m_current_superclass.empty()) {
+            std::string method_name = super_expr->method.has_value()
+                ? mangleMethod(m_current_superclass, super_expr->method->lexeme)
+                : mangleMethod(m_current_superclass, "init");
+            llvm::Function* super_fn = this->mod->getFunction(method_name);
+            if (super_fn) {
+                std::vector<llvm::Value*> args;
+                args.push_back(loadVar("this"));
+                for (auto& a : expr.arguments) args.push_back(cg(a));
+                auto* ft = super_fn->getFunctionType();
+                while (args.size() < ft->getNumParams()) args.push_back(makeNil());
+                return builder->CreateCall(super_fn, args);
+            }
+        }
+        return makeNil();
+    }
+
     if (auto* var = dynamic_cast<const VarExpr*>(expr.callee.get())) {
         std::string fn = var->name.lexeme;
 
@@ -718,6 +770,35 @@ llvm::Value* LLVMBackend::cgGet(const GetExpr& e) {
     }
 
     auto* obj = cg(e.object);
+
+    // Optional chaining (?.): short-circuit to nil if the object is nil
+    if (e.op.type == TokenType::QUESTION_DOT) {
+        auto* fn = builder->GetInsertBlock()->getParent();
+        auto* entryBB = builder->GetInsertBlock();
+        auto* accessBB = llvm::BasicBlock::Create(*ctx, "opt_access", fn);
+        auto* mergeBB = llvm::BasicBlock::Create(*ctx, "opt_merge", fn);
+
+        auto* tag = getTag(obj);
+        auto* is_nil = builder->CreateICmpEQ(tag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0));
+        builder->CreateCondBr(is_nil, mergeBB, accessBB);
+
+        builder->SetInsertPoint(accessBB);
+        llvm::Value* fieldResult;
+        if (e.name.lexeme == "message") {
+            fieldResult = callRtByName("__ang_exception_get_message", {obj});
+        } else {
+            fieldResult = callRtByName("__ang_record_get", {obj, builder->CreateGlobalString(e.name.lexeme)});
+        }
+        auto* accessEndBB = builder->GetInsertBlock();
+        builder->CreateBr(mergeBB);
+
+        builder->SetInsertPoint(mergeBB);
+        auto* phi = builder->CreatePHI(objType, 2);
+        phi->addIncoming(makeNil(), entryBB);
+        phi->addIncoming(fieldResult, accessEndBB);
+        return phi;
+    }
+
     if (e.name.lexeme == "message") {
         return callRtByName("__ang_exception_get_message", {obj});
     }
@@ -759,6 +840,24 @@ llvm::Value* LLVMBackend::cgLogical(const LogicalExpr& e) {
         phi->addIncoming(l, leftBB); phi->addIncoming(r, rhs);
         return phi;
     }
+    // Nil coalescing (??): if left is nil, use right; otherwise use left
+    if (e.op.type == TokenType::QUESTION_QUESTION) {
+        auto* leftBB = builder->GetInsertBlock();
+        auto* rhsBB = llvm::BasicBlock::Create(*ctx, "ncoalesce_r", fn);
+        auto* mergeBB = llvm::BasicBlock::Create(*ctx, "ncoalesce_m", fn);
+        auto* tag = getTag(l);
+        auto* is_nil = builder->CreateICmpEQ(tag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0));
+        builder->CreateCondBr(is_nil, rhsBB, mergeBB);
+        builder->SetInsertPoint(rhsBB);
+        auto* r = cg(e.right);
+        auto* rhsEndBB = builder->GetInsertBlock();
+        builder->CreateBr(mergeBB);
+        builder->SetInsertPoint(mergeBB);
+        auto* phi = builder->CreatePHI(objType, 2);
+        phi->addIncoming(l, leftBB);
+        phi->addIncoming(r, rhsEndBB);
+        return phi;
+    }
     return l;
 }
 
@@ -768,6 +867,22 @@ llvm::Value* LLVMBackend::cgSubscript(const SubscriptExpr& e) {
         if (lit->token.type == TokenType::STRING) {
             return callRtByName("__ang_record_get", {obj, builder->CreateGlobalString(lit->token.lexeme)});
         }
+    }
+    // Check if the object is a record type to dispatch correctly for variable keys
+    auto type_it = m_type_checker.getExpressionTypes().find(e.object.get());
+    bool is_record = type_it != m_type_checker.getExpressionTypes().end() &&
+        (type_it->second->kind == TypeKind::RECORD ||
+         type_it->second->kind == TypeKind::INSTANCE ||
+         type_it->second->kind == TypeKind::GENERIC_INSTANCE);
+    if (is_record) {
+        // For record with non-literal key, extract C string from boxed key
+        auto* key_obj = cg(e.index);
+        auto* fn_as_cstr = this->mod->getFunction("__ang_api_as_cstr");
+        if (fn_as_cstr) {
+            auto* key_cstr = builder->CreateCall(fn_as_cstr, {key_obj});
+            return callRtByName("__ang_record_get", {obj, key_cstr});
+        }
+        // Fallback: treat as list get
     }
     return callRtByName("__ang_list_get", {obj, cg(e.index)});
 }

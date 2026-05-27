@@ -86,6 +86,9 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
 void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
     std::string class_name = stmt.name.lexeme;
 
+    // Track the superclass name so super() calls can resolve the parent init.
+    m_current_superclass = stmt.superclass ? stmt.superclass->name.lexeme : "";
+
     std::vector<std::shared_ptr<VarDeclStmt>> class_fields;
     for (const auto& member : stmt.members) {
         if (auto field = std::dynamic_pointer_cast<const FieldMember>(member)) {
@@ -220,6 +223,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
         namedVals = std::move(saved_values);
     }
     constructorLookup[class_name] = ctor_name;
+    m_current_superclass.clear();
 }
 
 void LLVMBackend::codegenDataDecl(const DataStmt& stmt) {
