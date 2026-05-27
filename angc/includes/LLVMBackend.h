@@ -82,6 +82,8 @@ namespace angara {
         llvm::Value* cgRecord(const RecordExpr& e);
         llvm::Value* cgTernary(const TernaryExpr& e);
         llvm::Value* cgIs(const IsExpr& e);
+        llvm::Value* cgCast(const CastExpr& e);
+        llvm::Value* cgDeref(const DerefExpr& e);
         llvm::Value* cgMatch(const MatchExpr& e);
         llvm::Value* cgLambda(const LambdaExpr& e);
 

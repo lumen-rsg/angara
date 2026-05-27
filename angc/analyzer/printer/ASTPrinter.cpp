@@ -221,6 +221,18 @@ namespace angara {
         return {};
     }
 
+    std::any ASTPrinter::visit(const CastExpr& expr) {
+        printHeader("CastExpr");
+        printChild("object", expr.object, true);
+        return {};
+    }
+
+    std::any ASTPrinter::visit(const DerefExpr& expr) {
+        printHeader("DerefExpr");
+        printChild("right", expr.right, true);
+        return {};
+    }
+
     std::any ASTPrinter::visit(const MatchExpr& expr) {
         printHeader("MatchExpr");
         printChild("cond", expr.condition, expr.cases.empty());

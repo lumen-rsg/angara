@@ -93,6 +93,8 @@ namespace angara {
         std::any visit(const MatchExpr& expr) override;
         std::any visit(const LambdaExpr& expr) override;
         std::any visit(const IsExpr &expr) override;
+        std::any visit(const CastExpr &expr) override;
+        std::any visit(const DerefExpr &expr) override;
 
         // --- Statement visitors ---
 

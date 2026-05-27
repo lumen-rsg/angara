@@ -244,6 +244,10 @@ llvm::Type* LLVMBackend::resolveCFieldType(const std::shared_ptr<Type>& type) {
     if (type->kind == TypeKind::VOID) {
         return llvm::Type::getVoidTy(*ctx);
     }
+    if (type->kind == TypeKind::FUNCTION) {
+        // C function pointer — opaque ptr
+        return llvm::PointerType::get(*ctx, 0);
+    }
     return llvm::Type::getInt64Ty(*ctx);
 }
 
@@ -287,6 +291,80 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
     if (type->kind == TypeKind::POINTER) {
         // Raw pointer: extract i64 payload → inttoptr
         return builder->CreateIntToPtr(getI64(obj), llvm::PointerType::get(*ctx, 0));
+    }
+    if (type->kind == TypeKind::FUNCTION) {
+        // Angara closure → C function pointer via trampoline
+        auto func_type = std::dynamic_pointer_cast<FunctionType>(type);
+
+        // Generate a unique key for this callback signature
+        static int trampoline_counter = 0;
+        std::string key = "ffi_trampoline_" + std::to_string(trampoline_counter++);
+
+        // Create a global to hold the closure AngaraObject (for the trampoline to load)
+        auto* closure_global = new llvm::GlobalVariable(
+            *mod, objType, false,
+            llvm::GlobalValue::InternalLinkage,
+            llvm::ConstantStruct::get(objType,
+                {llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0),
+                 llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)}),
+            "Angara_" + key + "_closure");
+
+        // Store the closure into the global
+        builder->CreateStore(obj, closure_global);
+
+        // Generate the trampoline function with C calling convention
+        std::vector<llvm::Type*> c_param_types;
+        for (const auto& pt : func_type->param_types) {
+            c_param_types.push_back(resolveCFieldType(pt));
+        }
+        auto* c_return_type = resolveCFieldType(func_type->return_type);
+        auto* trampoline_type = llvm::FunctionType::get(c_return_type, c_param_types, false);
+        auto* trampoline = llvm::Function::Create(trampoline_type,
+            llvm::Function::ExternalLinkage, "Angara_" + key, mod.get());
+
+        // Emit the trampoline body
+        auto* tram_entry = llvm::BasicBlock::Create(*ctx, "entry", trampoline);
+        auto saved_insert_point = builder->saveIP();
+        builder->SetInsertPoint(tram_entry);
+
+        // 1. Load the closure from the global
+        auto* closure = builder->CreateLoad(objType, closure_global, "closure");
+
+        // 2. Marshal each C arg to AngaraObject and pack into array
+        int argc = func_type->param_types.size();
+        auto* args_array = builder->CreateAlloca(objType,
+            llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), std::max(argc, 1)),
+            "args");
+        for (int i = 0; i < argc; i++) {
+            auto* arg_val = trampoline->arg_begin() + i;
+            auto* angara_val = marshalCToAngara(arg_val, func_type->param_types[i]);
+            auto* slot = builder->CreateGEP(objType, args_array,
+                {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
+            builder->CreateStore(angara_val, slot);
+        }
+
+        // 3. Call __ang_call(closure, argc, args_array)
+        auto* call_result = callRtByName("__ang_call", {
+            closure,
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), argc),
+            builder->CreateBitCast(args_array, llvm::PointerType::get(*ctx, 0))
+        });
+
+        // 4. Marshal the result back to C
+        auto* c_result = marshalAngaraToC(call_result, func_type->return_type);
+
+        // Handle void return
+        if (func_type->return_type->kind == TypeKind::VOID) {
+            builder->CreateRetVoid();
+        } else {
+            builder->CreateRet(c_result);
+        }
+
+        // Restore the original insert point
+        builder->restoreIP(saved_insert_point);
+
+        // Return the trampoline function pointer as the C value
+        return trampoline;
     }
 
     return getI64(obj);
@@ -348,6 +426,80 @@ llvm::Value* LLVMBackend::marshalCToAngara(llvm::Value* c_val, const std::shared
     if (type->kind == TypeKind::POINTER) {
         // Raw C pointer → store as i64 payload (no NativeInstance wrapping)
         return makeI64(builder->CreatePtrToInt(c_val, llvm::Type::getInt64Ty(*ctx)));
+    }
+    if (type->kind == TypeKind::FUNCTION) {
+        // C function pointer → Angara closure wrapper
+        auto func_type = std::dynamic_pointer_cast<FunctionType>(type);
+
+        static int wrapper_counter = 0;
+        std::string key = "ffi_cfn_wrapper_" + std::to_string(wrapper_counter++);
+
+        // Store the C function pointer in a global (the wrapper will load and call it)
+        auto* c_fnptr_global = new llvm::GlobalVariable(
+            *mod, llvm::PointerType::get(*ctx, 0), false,
+            llvm::GlobalValue::InternalLinkage,
+            llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)),
+            "Angara_" + key + "_cfn");
+        builder->CreateStore(c_val, c_fnptr_global);
+
+        // Generate a wrapper with Angara closure calling convention:
+        // AngaraObject wrapper(i32 argc, void* args_array)
+        auto* wrapper_type = llvm::FunctionType::get(objType, {
+            llvm::Type::getInt32Ty(*ctx), llvm::PointerType::get(*ctx, 0)
+        }, false);
+        auto* wrapper = llvm::Function::Create(wrapper_type,
+            llvm::Function::ExternalLinkage, "Angara_" + key, mod.get());
+
+        auto saved_insert_point = builder->saveIP();
+        auto* wrapper_entry = llvm::BasicBlock::Create(*ctx, "entry", wrapper);
+        builder->SetInsertPoint(wrapper_entry);
+
+        // 1. Load the C function pointer from the global
+        auto* c_fn = builder->CreateLoad(llvm::PointerType::get(*ctx, 0), c_fnptr_global, "c_fn");
+
+        // 2. Unpack AngaraObject args from the array, marshal each to C
+        int argc = func_type->param_types.size();
+        auto* args_ptr = wrapper->arg_begin() + 1; // void* args_array
+        std::vector<llvm::Value*> c_args;
+        for (int i = 0; i < argc; i++) {
+            auto* slot = builder->CreateGEP(objType, args_ptr,
+                {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
+            auto* ang_obj = builder->CreateLoad(objType, slot, "arg");
+            c_args.push_back(marshalAngaraToC(ang_obj, func_type->param_types[i]));
+        }
+
+        // 3. Call the C function pointer with the marshalled args
+        // Build the C function type for the call
+        std::vector<llvm::Type*> c_param_types;
+        for (const auto& pt : func_type->param_types) {
+            c_param_types.push_back(resolveCFieldType(pt));
+        }
+        auto* c_ret_type = resolveCFieldType(func_type->return_type);
+        auto* c_fn_type = llvm::FunctionType::get(c_ret_type, c_param_types, false);
+        auto* c_result = builder->CreateCall(c_fn_type, c_fn, c_args);
+
+        // 4. Marshal the result back to AngaraObject
+        if (func_type->return_type->kind == TypeKind::VOID) {
+            builder->CreateRet(makeNil());
+        } else {
+            builder->CreateRet(marshalCToAngara(c_result, func_type->return_type));
+        }
+
+        builder->restoreIP(saved_insert_point);
+
+        // Create a closure wrapping this wrapper function
+        llvm::Value* closure;
+        auto* closure_new_fn = mod->getFunction("__ang_closure_new");
+        if (closure_new_fn) {
+            closure = builder->CreateCall(closure_new_fn, {
+                wrapper,
+                llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), argc),
+                llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 1) // native = true
+            });
+        } else {
+            closure = makeNil();
+        }
+        return closure;
     }
 
     return makeI64(c_val);

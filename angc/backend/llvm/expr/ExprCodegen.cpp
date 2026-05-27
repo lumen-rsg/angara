@@ -81,6 +81,8 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
     if (auto* p = dynamic_cast<const ThisExpr*>(e.get())) return loadVar("this");
     if (auto* p = dynamic_cast<const SuperExpr*>(e.get())) return makeNil();
     if (auto* p = dynamic_cast<const IsExpr*>(e.get())) return cgIs(*p);
+    if (auto* p = dynamic_cast<const CastExpr*>(e.get())) return cgCast(*p);
+    if (auto* p = dynamic_cast<const DerefExpr*>(e.get())) return cgDeref(*p);
     if (auto* p = dynamic_cast<const MatchExpr*>(e.get())) return cgMatch(*p);
     if (auto* p = dynamic_cast<const LambdaExpr*>(e.get())) return cgLambda(*p);
     return makeNil();
@@ -1021,6 +1023,61 @@ llvm::Value* LLVMBackend::cgTernary(const TernaryExpr& e) {
 llvm::Value* LLVMBackend::cgIs(const IsExpr& e) {
     auto* tag = getTag(cg(e.object));
     return makeBool(builder->CreateICmpEQ(tag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_I64)));
+}
+
+llvm::Value* LLVMBackend::cgCast(const CastExpr& e) {
+    auto* val = cg(e.object);
+    auto target_type_it = m_type_checker.getExpressionTypes().find(&e);
+    auto source_type_it = m_type_checker.getExpressionTypes().find(e.object.get());
+
+    if (target_type_it == m_type_checker.getExpressionTypes().end() ||
+        source_type_it == m_type_checker.getExpressionTypes().end()) {
+        return val;
+    }
+
+    auto& target = target_type_it->second;
+    auto& source = source_type_it->second;
+
+    // Pointer-to-pointer cast: reinterpret the i64 payload
+    if (source->kind == TypeKind::POINTER && target->kind == TypeKind::POINTER) {
+        return val; // same representation (i64 payload with TAG_I64)
+    }
+    // Integer-to-pointer cast
+    if (isNumeric(source) && target->kind == TypeKind::POINTER) {
+        return val; // already stored as i64 payload
+    }
+    // Pointer-to-integer cast
+    if (source->kind == TypeKind::POINTER && isNumeric(target)) {
+        return val; // already stored as i64 payload
+    }
+    // Foreign data → pointer (extract raw pointer from NativeInstance)
+    if (source->kind == TypeKind::DATA && target->kind == TypeKind::POINTER) {
+        auto* data_ptr = callRtByName("__ang_api_native_instance_data", {val});
+        return makeI64(builder->CreatePtrToInt(data_ptr, llvm::Type::getInt64Ty(*ctx)));
+    }
+    // Numeric truncation/extension: for now just return as-is
+    // (the value is already stored as i64; the type checker records the narrower type)
+    return val;
+}
+
+llvm::Value* LLVMBackend::cgDeref(const DerefExpr& e) {
+    auto* ptr_val = cg(e.right);
+
+    // Get the pointee type from the type checker
+    auto type_it = m_type_checker.getExpressionTypes().find(&e);
+    if (type_it == m_type_checker.getExpressionTypes().end()) {
+        return makeNil();
+    }
+    auto& pointee_type = type_it->second;
+
+    // Extract the raw pointer from the i64 payload
+    auto* raw_i64 = getI64(ptr_val);
+    auto* raw_ptr = builder->CreateIntToPtr(raw_i64, llvm::PointerType::get(*ctx, 0));
+
+    // Load and wrap in AngaraObject based on pointee type
+    auto* c_type = resolveCFieldType(pointee_type);
+    auto* loaded = builder->CreateLoad(c_type, raw_ptr, "deref");
+    return marshalCToAngara(loaded, pointee_type);
 }
 
 llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {

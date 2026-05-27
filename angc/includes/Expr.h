@@ -34,6 +34,8 @@ namespace angara {
     struct ThisExpr;
     struct SuperExpr;
     struct IsExpr;
+    struct CastExpr;
+    struct DerefExpr;
     struct MatchExpr;
     struct LambdaExpr;
 
@@ -59,6 +61,8 @@ namespace angara {
         virtual std::any visit(const ThisExpr &expr) = 0;
         virtual std::any visit(const SuperExpr &expr) = 0;
         virtual std::any visit(const IsExpr &expr) = 0;
+        virtual std::any visit(const CastExpr &expr) = 0;
+        virtual std::any visit(const DerefExpr &expr) = 0;
         virtual std::any visit(const MatchExpr& expr) = 0;
         virtual std::any visit(const LambdaExpr& expr) = 0;
 
@@ -269,6 +273,37 @@ namespace angara {
                 : object(std::move(object)),
                   keyword(std::move(keyword)),
                   type(std::move(type)) {}
+
+        std::any accept(ExprVisitor &visitor) const override {
+            return visitor.visit(*this);
+        }
+    };
+
+    // Represents a type cast expression: expr as Type
+    // Used for pointer type conversions in FFI contexts (e.g., ptr as *i64)
+    struct CastExpr : Expr {
+        const std::shared_ptr<Expr> object;
+        const Token keyword;                   // The 'as' token
+        const std::shared_ptr<ASTType> target; // The target type
+
+        CastExpr(std::shared_ptr<Expr> object, Token keyword, std::shared_ptr<ASTType> target)
+                : object(std::move(object)),
+                  keyword(std::move(keyword)),
+                  target(std::move(target)) {}
+
+        std::any accept(ExprVisitor &visitor) const override {
+            return visitor.visit(*this);
+        }
+    };
+
+    // Represents a pointer dereference: *expr (FFI only)
+    // Only valid when expr has a PointerType — enforced by the type checker.
+    struct DerefExpr : Expr {
+        const Token op;                    // The '*' token
+        const std::shared_ptr<Expr> right; // The pointer expression
+
+        DerefExpr(Token op, std::shared_ptr<Expr> right)
+                : op(std::move(op)), right(std::move(right)) {}
 
         std::any accept(ExprVisitor &visitor) const override {
             return visitor.visit(*this);
