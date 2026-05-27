@@ -320,7 +320,7 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
         auto* c_return_type = resolveCFieldType(func_type->return_type);
         auto* trampoline_type = llvm::FunctionType::get(c_return_type, c_param_types, false);
         auto* trampoline = llvm::Function::Create(trampoline_type,
-            llvm::Function::ExternalLinkage, "Angara_" + key, mod.get());
+            llvm::Function::InternalLinkage, "Angara_" + key, mod.get());
 
         // Emit the trampoline body
         auto* tram_entry = llvm::BasicBlock::Create(*ctx, "entry", trampoline);
@@ -476,7 +476,7 @@ llvm::Value* LLVMBackend::marshalCToAngara(llvm::Value* c_val, const std::shared
             llvm::Type::getInt32Ty(*ctx), llvm::PointerType::get(*ctx, 0)
         }, false);
         auto* wrapper = llvm::Function::Create(wrapper_type,
-            llvm::Function::ExternalLinkage, "Angara_" + key, mod.get());
+            llvm::Function::InternalLinkage, "Angara_" + key, mod.get());
 
         auto saved_insert_point = builder->saveIP();
         auto* wrapper_entry = llvm::BasicBlock::Create(*ctx, "entry", wrapper);
@@ -610,7 +610,8 @@ llvm::Value* LLVMBackend::callVariadicForeignFn(const std::string& c_func_name,
 
     size_t fixed_count = func_type->param_types.size();
     const auto& expr_types = m_type_checker.getExpressionTypes();
-    bool returnsVoid = func_type->return_type->kind == TypeKind::NIL;
+    bool returnsVoid = func_type->return_type->kind == TypeKind::NIL
+                     || func_type->return_type->kind == TypeKind::VOID;
 
     std::vector<llvm::Value*> cArgs;
 
