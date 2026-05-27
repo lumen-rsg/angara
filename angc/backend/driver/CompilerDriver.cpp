@@ -116,6 +116,12 @@ namespace angara {
         m_native_module_path = ".";
     }
 
+    CompilerDriver::~CompilerDriver() {
+        for (void* handle : m_native_handles) {
+            if (handle) dlclose(handle);
+        }
+    }
+
     void CompilerDriver::set_paths(std::string std_lib_path, std::string native_lib_path) {
         m_angara_module_path = std::move(std_lib_path);
         m_native_module_path = std::move(native_lib_path);
@@ -533,6 +539,7 @@ namespace angara {
         }
 
         m_modules_compiled++;
+        m_native_handles.push_back(handle);
         return module_type;
     }
 

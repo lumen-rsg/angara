@@ -31,7 +31,7 @@ namespace angara {
     class CompilerDriver {
     public:
         CompilerDriver();
-        virtual ~CompilerDriver() = default;
+        virtual ~CompilerDriver();
 
         /// Sets the search paths for standard library sources and native module binaries.
         /// @param std_lib_path     Path to Angara source modules (e.g. /opt/angara/src/modules).
@@ -139,6 +139,9 @@ namespace angara {
         int m_modules_compiled = 0;
         std::string m_last_progress_message;
         std::chrono::time_point<std::chrono::high_resolution_clock> m_build_start_time;
+
+        /// Open dlopen handles for native modules — closed in destructor.
+        std::vector<void*> m_native_handles;
 
         /// Renders the compilation progress bar to stdout.
         void print_progress(const std::string& current_file);
