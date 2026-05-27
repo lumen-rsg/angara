@@ -16,6 +16,7 @@
 #include "Parser.h"
 #include "ErrorHandler.h"
 #include "Colors.h"
+#include "StringUtils.h"
 
 #include <llvm/Config/llvm-config.h>
 
@@ -351,16 +352,16 @@ static int cmd_compile_single_file(const std::string& source_file, const CliFlag
 
     std::stringstream cmd_link;
     cmd_link << "clang";
-    if (!resolved_target.empty()) cmd_link << " -target " << resolved_target;
-    if (!flags.sysroot.empty()) cmd_link << " --sysroot " << flags.sysroot;
+    if (!resolved_target.empty()) cmd_link << " -target " << angara::shell_escape(resolved_target);
+    if (!flags.sysroot.empty()) cmd_link << " --sysroot " << angara::shell_escape(flags.sysroot);
 
     if (flags.release) cmd_link << " -O2";
     else cmd_link << " -O0";
 
-    cmd_link << " -o " << base_name;
+    cmd_link << " -o " << angara::shell_escape(base_name);
 
     for (const auto& o_file : driver.get_generated_object_files()) {
-        cmd_link << " " << o_file;
+        cmd_link << " " << angara::shell_escape(o_file);
     }
 
     std::set<std::string> libs;
@@ -379,7 +380,7 @@ static int cmd_compile_single_file(const std::string& source_file, const CliFlag
             cmd_link << " -l" << lib;
             continue;
         }
-        cmd_link << " " << mod_path;
+        cmd_link << " " << angara::shell_escape(mod_path);
     }
 
     if (flags.nostdlib) {

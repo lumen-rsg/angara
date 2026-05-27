@@ -107,10 +107,34 @@ MINIMAL_MODS := $(filter-out \
 	,$(MOD_OUTS))
 
 modules: logo $(MOD_OUTS) build/modules/imgui.$(SO_EXT)
-	@printf "$(BOLD)$(GREEN)>>> Modules Built Successfully <<<$(RESET)\n"
+	@FAILED=0; \
+	for mod in $(MOD_OUTS) build/modules/imgui.$(SO_EXT); do \
+		if [ ! -f "$$mod" ]; then \
+			printf "  $(RED)[FAIL]$(RESET) %s\n" "$$(basename $$mod)"; \
+			FAILED=$$((FAILED + 1)); \
+		fi; \
+	done; \
+	if [ $$FAILED -gt 0 ]; then \
+		printf "\n$(RED)$(BOLD)>>> $$FAILED module(s) failed to build <<<$(RESET)\n"; \
+		exit 1; \
+	else \
+		printf "$(BOLD)$(GREEN)>>> Modules Built Successfully <<<$(RESET)\n"; \
+	fi
 
 modules-minimal: logo $(MINIMAL_MODS)
-	@printf "$(BOLD)$(GREEN)>>> Minimal Modules Built Successfully <<<$(RESET)\n"
+	@FAILED=0; \
+	for mod in $(MINIMAL_MODS); do \
+		if [ ! -f "$$mod" ]; then \
+			printf "  $(RED)[FAIL]$(RESET) %s\n" "$$(basename $$mod)"; \
+			FAILED=$$((FAILED + 1)); \
+		fi; \
+	done; \
+	if [ $$FAILED -gt 0 ]; then \
+		printf "\n$(RED)$(BOLD)>>> $$FAILED minimal module(s) failed to build <<<$(RESET)\n"; \
+		exit 1; \
+	else \
+		printf "$(BOLD)$(GREEN)>>> Minimal Modules Built Successfully <<<$(RESET)\n"; \
+	fi
 
 imgui: logo build/modules/imgui.$(SO_EXT)
 	@printf "$(BOLD)$(GREEN)>>> ImGui Module Built Successfully <<<$(RESET)\n"

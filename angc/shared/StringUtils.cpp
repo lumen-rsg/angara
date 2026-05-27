@@ -26,4 +26,17 @@ namespace angara {
         return prevCol[len2];
     }
 
+    std::string shell_escape(const std::string& arg) {
+        std::string escaped = "'";
+        for (char c : arg) {
+            if (c == '\'') {
+                escaped += "'\\''";
+            } else {
+                escaped += c;
+            }
+        }
+        escaped += "'";
+        return escaped;
+    }
+
 } // namespace angara

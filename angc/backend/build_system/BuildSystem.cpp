@@ -1,6 +1,7 @@
 #include "../../includes/BuildSystem.h"
 #include "CompilerDriver.h"
 #include "Colors.h"
+#include "StringUtils.h"
 #include <iostream>
 #include <filesystem>
 #include <sstream>
@@ -259,7 +260,7 @@ namespace angara {
                 }
 
                 std::cout << "\n " << CLR_BOLD << CLR_CYAN << "[RN] " << CLR_RESET << "Running " << proj.name << "...\n\n";
-                int result = std::system(binary.string().c_str());
+                int result = std::system(angara::shell_escape(binary.string()).c_str());
                 return result == 0;
             }
         }
@@ -470,7 +471,7 @@ namespace angara {
 
             if (!mod.cflags.empty()) cmd << " " << mod.cflags;
 
-            cmd << " -c " << src_path.string() << " -o " << obj_path.string();
+            cmd << " -c " << angara::shell_escape(src_path.string()) << " -o " << angara::shell_escape(obj_path.string());
 
             std::cout << "     " << CLR_GREEN << "[CC] " << CLR_RESET << src_path.filename().string() << "\n";
 
@@ -488,7 +489,7 @@ namespace angara {
         std::stringstream link_cmd;
         link_cmd << compiler << " -shared";
         for (const auto& obj : object_files) {
-            link_cmd << " " << obj;
+            link_cmd << " " << angara::shell_escape(obj);
         }
 
         for (const auto& lib : mod.link_libs) {
@@ -505,7 +506,7 @@ namespace angara {
         link_cmd << " -Wl,-install_name,@rpath/lib" << mod.name << SO_EXT;
 #endif
 
-        link_cmd << " -o " << mod_output.string();
+        link_cmd << " -o " << angara::shell_escape(mod_output.string());
 
         std::cout << "     " << CLR_MAGENTA << "[LD] " << CLR_RESET << mod.name << SO_EXT << "\n";
 
@@ -531,28 +532,28 @@ namespace angara {
         std::stringstream cmd;
         cmd << "clang";
 
-        if (!m_target_triple.empty()) cmd << " -target " << m_target_triple;
-        else if (!config.profile.target.empty()) cmd << " -target " << config.profile.target;
-        if (!m_sysroot.empty()) cmd << " --sysroot " << m_sysroot;
+        if (!m_target_triple.empty()) cmd << " -target " << angara::shell_escape(m_target_triple);
+        else if (!config.profile.target.empty()) cmd << " -target " << angara::shell_escape(config.profile.target);
+        if (!m_sysroot.empty()) cmd << " --sysroot " << angara::shell_escape(m_sysroot);
 
         cmd << " " << resolve_opt_flags(config.profile);
 
-        cmd << " -o " << bin_path.string();
+        cmd << " -o " << angara::shell_escape(bin_path.string());
 
         if (config.type == ProjectType::LIBRARY) {
             cmd << " -shared -fPIC";
         }
 
         for (const auto& file : object_files) {
-            cmd << " " << file;
+            cmd << " " << angara::shell_escape(file);
         }
 
-        cmd << " -I" << project_root;
-        cmd << " -L" << m_native_lib_path;
+        cmd << " -I" << angara::shell_escape(project_root);
+        cmd << " -L" << angara::shell_escape(m_native_lib_path);
 
         fs::path local_mod_dir = fs::path(m_build_dir) / "modules";
         if (fs::exists(local_mod_dir)) {
-            cmd << " -L" << local_mod_dir.string();
+            cmd << " -L" << angara::shell_escape(local_mod_dir.string());
         }
 
         std::set<std::string> all_libs;

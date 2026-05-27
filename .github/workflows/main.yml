@@ -49,6 +49,10 @@ jobs:
           CXX: clang++
         run: make -j$(nproc) modules
 
+      # Run language test suite (positive + negative tests)
+      - name: Run Tests
+        run: bash tests/lang/run_tests.sh
+
       # Stage all release artifacts
       - name: Stage Artifacts
         run: |
