@@ -13,12 +13,7 @@
 
 namespace angara {
 
-LLVMBackend::~LLVMBackend() {
-    (void)rt.release();
-    (void)builder.release();
-    (void)mod.release();
-    (void)ctx.release();
-}
+LLVMBackend::~LLVMBackend() = default;
 
 LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding)
     : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding) {
