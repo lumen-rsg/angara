@@ -319,6 +319,24 @@ void LLVMBackend::codegenForeignDataDecl(const DataStmt& stmt) {
     m_foreign_data_types[data_name] = data_type;
     m_foreign_field_order[data_name] = std::move(field_names);
 
+    // Generate a finalizer that calls free() on the C struct data
+    std::string fin_name = "Angara_foreign_free_" + data_name;
+    auto* fin_type = llvm::FunctionType::get(llvm::Type::getVoidTy(*ctx),
+        {llvm::PointerType::get(*ctx, 0)}, false);
+    auto* fin_fn = llvm::Function::Create(fin_type, llvm::Function::ExternalLinkage,
+                                           fin_name, mod.get());
+    auto* fin_entry = llvm::BasicBlock::Create(*ctx, "entry", fin_fn);
+    builder->SetInsertPoint(fin_entry);
+    auto* free_fn = mod->getFunction("free");
+    if (!free_fn) {
+        auto* free_type = llvm::FunctionType::get(llvm::Type::getVoidTy(*ctx),
+            {llvm::PointerType::get(*ctx, 0)}, false);
+        free_fn = llvm::Function::Create(free_type, llvm::Function::ExternalLinkage,
+                                          "free", mod.get());
+    }
+    builder->CreateCall(free_fn, {fin_fn->arg_begin()});
+    builder->CreateRetVoid();
+
     // Constructor: malloc + memset(0) + wrap in NativeInstance
     std::string ctor_name = "Angara_foreign_new_" + data_name;
     auto* fn_type = llvm::FunctionType::get(objType, false);
@@ -356,9 +374,9 @@ void LLVMBackend::codegenForeignDataDecl(const DataStmt& stmt) {
 
     // Wrap in NativeInstance via __ang_api_native_instance_new
     auto* name_str = builder->CreateGlobalString(data_name);
-    auto* null_finalizer = llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
+    auto* finalizer = fin_fn;
     auto* native_obj = callRtByName("__ang_api_native_instance_new",
-                                     {raw_mem, null_finalizer, name_str});
+                                     {raw_mem, finalizer, name_str});
 
     builder->CreateRet(native_obj);
     constructorLookup[data_name] = ctor_name;

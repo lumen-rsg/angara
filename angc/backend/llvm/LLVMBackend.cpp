@@ -301,10 +301,13 @@ llvm::Value* LLVMBackend::marshalCToAngara(llvm::Value* c_val, const std::shared
         if (n == "f64")  return makeF64(c_val);
         if (n == "f32")  return makeF64(builder->CreateFPExt(c_val, llvm::Type::getDoubleTy(*ctx)));
         if (n == "string") return callRtByName("__ang_string_from_c", {c_val});
-        // Integer types: zext/sext to i64
+        // Integer types: zext for unsigned, sext for signed, then store in i64
         auto* cty = resolveCFieldType(type);
         if (cty->getIntegerBitWidth() < 64) {
-            return makeI64(builder->CreateZExt(c_val, llvm::Type::getInt64Ty(*ctx)));
+            if (isUnsignedInteger(type)) {
+                return makeI64(builder->CreateZExt(c_val, llvm::Type::getInt64Ty(*ctx)));
+            }
+            return makeI64(builder->CreateSExt(c_val, llvm::Type::getInt64Ty(*ctx)));
         }
         return makeI64(c_val);
     }
@@ -323,9 +326,15 @@ llvm::Value* LLVMBackend::marshalCToAngara(llvm::Value* c_val, const std::shared
 
             builder->SetInsertPoint(wrap_bb);
             auto* name_str = builder->CreateGlobalString(dt->name);
-            auto* null_finalizer = llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
+            // For non-opaque foreign data, use the free()-based finalizer generated in codegenForeignDataDecl.
+            // For opaque types (e.g., FILE*), use null — the user must manually release the resource.
+            llvm::Value* finalizer = llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
+            if (!dt->is_opaque) {
+                auto* fin_fn = mod->getFunction("Angara_foreign_free_" + dt->name);
+                if (fin_fn) finalizer = fin_fn;
+            }
             auto* native_obj = callRtByName("__ang_api_native_instance_new",
-                                             {c_val, null_finalizer, name_str});
+                                             {c_val, finalizer, name_str});
             auto* wrap_end_bb = builder->GetInsertBlock();
             builder->CreateBr(merge_bb);
 
