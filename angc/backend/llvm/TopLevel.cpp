@@ -347,12 +347,21 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
     auto sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(stmt.name.lexeme);
     auto func_type = std::dynamic_pointer_cast<FunctionType>(sym->type);
 
-    bool returnsVoid = !func_type || func_type->return_type->kind == TypeKind::NIL;
+    bool returnsVoid = !func_type || func_type->return_type->kind == TypeKind::NIL
+                        || func_type->return_type->kind == TypeKind::VOID;
     auto ret_type = func_type ? func_type->return_type : nullptr;
     bool isVariadic = func_type && func_type->is_variadic;
 
     // Build C function signature using resolved semantic types
-    llvm::Type* cRetType = returnsVoid ? llvm::Type::getVoidTy(*ctx) : resolveCFieldType(ret_type);
+    // Foreign data returns are pointers by default (can be opaque handles or struct pointers)
+    llvm::Type* cRetType;
+    if (returnsVoid) {
+        cRetType = llvm::Type::getVoidTy(*ctx);
+    } else if (ret_type->kind == TypeKind::DATA) {
+        cRetType = llvm::PointerType::get(*ctx, 0); // pointer return
+    } else {
+        cRetType = resolveCFieldType(ret_type);
+    }
 
     std::vector<llvm::Type*> cParamTypes;
     for (size_t i = 0; i < func_type->param_types.size(); i++) {

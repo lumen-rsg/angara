@@ -237,6 +237,13 @@ llvm::Type* LLVMBackend::resolveCFieldType(const std::shared_ptr<Type>& type) {
         // Opaque or unresolved: void pointer
         return llvm::PointerType::get(*ctx, 0);
     }
+    if (type->kind == TypeKind::POINTER) {
+        // All pointer types map to LLVM opaque pointer (regardless of depth)
+        return llvm::PointerType::get(*ctx, 0);
+    }
+    if (type->kind == TypeKind::VOID) {
+        return llvm::Type::getVoidTy(*ctx);
+    }
     return llvm::Type::getInt64Ty(*ctx);
 }
 
@@ -276,6 +283,10 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
             }
             return data_ptr; // opaque: return void*
         }
+    }
+    if (type->kind == TypeKind::POINTER) {
+        // Raw pointer: extract i64 payload → inttoptr
+        return builder->CreateIntToPtr(getI64(obj), llvm::PointerType::get(*ctx, 0));
     }
 
     return getI64(obj);
@@ -324,6 +335,10 @@ llvm::Value* LLVMBackend::marshalCToAngara(llvm::Value* c_val, const std::shared
             phi->addIncoming(native_obj, wrap_end_bb);
             return phi;
         }
+    }
+    if (type->kind == TypeKind::POINTER) {
+        // Raw C pointer → store as i64 payload (no NativeInstance wrapping)
+        return makeI64(builder->CreatePtrToInt(c_val, llvm::Type::getInt64Ty(*ctx)));
     }
 
     return makeI64(c_val);

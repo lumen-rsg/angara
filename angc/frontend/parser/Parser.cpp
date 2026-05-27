@@ -6,6 +6,12 @@ namespace angara {
 
 
     std::shared_ptr<ASTType> Parser::type() {
+        // Parse pointer prefix: *i8, **i8, *void
+        int ptr_depth = 0;
+        while (match({TokenType::STAR})) {
+            ptr_depth++;
+        }
+
         std::shared_ptr<ASTType> base_type;
 
         if (match({TokenType::LEFT_BRACE})) {
@@ -45,7 +51,8 @@ namespace angara {
         else if (match({
             TokenType::IDENTIFIER, TokenType::NIL,
             TokenType::TYPE_STRING,
-            TokenType::TYPE_INT, TokenType::TYPE_FLOAT, TokenType::TYPE_BOOL
+            TokenType::TYPE_INT, TokenType::TYPE_FLOAT, TokenType::TYPE_BOOL,
+            TokenType::TYPE_VOID
         })) {
             Token type_name_token = previous();
 
@@ -73,7 +80,12 @@ namespace angara {
         }
 
         if (match({TokenType::QUESTION})) {
-            return std::make_shared<OptionalTypeNode>(base_type);
+            base_type = std::make_shared<OptionalTypeNode>(base_type);
+        }
+
+        // Wrap in pointer type if * prefix was parsed
+        if (ptr_depth > 0) {
+            base_type = std::make_shared<PointerTypeExpr>(base_type, ptr_depth);
         }
 
         return base_type;

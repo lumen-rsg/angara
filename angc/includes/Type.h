@@ -33,6 +33,8 @@ namespace angara {
         FIXED_ARRAY,
         TYPE_PARAM, // A generic type parameter (e.g., T in data Box<T>)
         GENERIC_INSTANCE, // A concrete instantiation of a generic type (e.g., Box<i64>)
+        POINTER, // FFI pointer type (e.g., *i8, *void, **char)
+        VOID,    // C void type (only valid in FFI pointer context or as return type)
         ERROR // A special type to prevent cascading error messages
     };
 
@@ -358,6 +360,25 @@ namespace angara {
         [[nodiscard]] std::string toString() const override {
             return element_type->toString() + "[" + std::to_string(size) + "]";
         }
+    };
+
+    // FFI pointer type (e.g., *i8, *void, **char) — raw C pointer, stored as i64
+    struct PointerType : Type {
+        std::shared_ptr<Type> pointee_type;
+        int depth; // 1 for *, 2 for **
+
+        PointerType(std::shared_ptr<Type> pointee, int d)
+            : Type(TypeKind::POINTER), pointee_type(std::move(pointee)), depth(d) {}
+
+        [[nodiscard]] std::string toString() const override {
+            return std::string(depth, '*') + pointee_type->toString();
+        }
+    };
+
+    // C void type — only valid as *void (void*) or as a function return type
+    struct VoidType : Type {
+        VoidType() : Type(TypeKind::VOID) {}
+        [[nodiscard]] std::string toString() const override { return "void"; }
     };
 
     // --- GENERIC TYPE SYSTEM ---

@@ -295,6 +295,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         if (name == "Thread") return m_type_thread;
         if (name == "Exception") return m_type_exception;
         if (name == "Mutex") return m_type_mutex;
+        if (name == "void") return std::make_shared<VoidType>();
 
         if (name == "record") {
             return std::make_shared<RecordType>(std::map<std::string, std::shared_ptr<Type>>{});
@@ -427,6 +428,12 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         auto elem_type = resolveType(fixed_arr->element_type);
         if (elem_type->kind == TypeKind::ERROR) return m_type_error;
         return std::make_shared<FixedArrayType>(elem_type, fixed_arr->size);
+    }
+
+    if (auto ptr_expr = std::dynamic_pointer_cast<const PointerTypeExpr>(ast_type)) {
+        auto pointee = resolveType(ptr_expr->pointee_type);
+        if (pointee->kind == TypeKind::ERROR) return m_type_error;
+        return std::make_shared<PointerType>(pointee, ptr_expr->depth);
     }
 
     return m_type_error;

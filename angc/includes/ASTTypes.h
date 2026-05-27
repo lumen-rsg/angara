@@ -18,6 +18,7 @@ namespace angara {
     struct RecordTypeExpr;
     struct OptionalTypeNode;
     struct FixedArrayTypeExpr;
+    struct PointerTypeExpr;
 
 
     // Visitor pattern for AST Type nodes
@@ -30,6 +31,7 @@ namespace angara {
         virtual void visit(const RecordTypeExpr& type) = 0;
         virtual void visit(const OptionalTypeNode& type) = 0;
         virtual void visit(const FixedArrayTypeExpr& type) = 0;
+        virtual void visit(const PointerTypeExpr& type) = 0;
     };
 
     // Base class for all AST Type representations
@@ -117,6 +119,19 @@ namespace angara {
 
         FixedArrayTypeExpr(std::shared_ptr<ASTType> elem, int n)
             : element_type(std::move(elem)), size(n) {}
+
+        void accept(ASTTypeVisitor& visitor) const override {
+            visitor.visit(*this);
+        }
+    };
+
+    // Represents a pointer type like *i8, **i8, *void (FFI only)
+    struct PointerTypeExpr : ASTType {
+        const std::shared_ptr<ASTType> pointee_type;
+        const int depth; // 1 for *, 2 for **
+
+        PointerTypeExpr(std::shared_ptr<ASTType> pointee, int d)
+            : pointee_type(std::move(pointee)), depth(d) {}
 
         void accept(ASTTypeVisitor& visitor) const override {
             visitor.visit(*this);
