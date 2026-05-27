@@ -407,6 +407,7 @@ namespace angara {
         bool is_exported = false;
         bool is_foreign = false;
         bool is_opaque = false;
+        bool is_union = false;
 
         DataStmt(Token name, std::vector<std::shared_ptr<VarDeclStmt>> fields,
                  std::vector<Token> type_params = {})

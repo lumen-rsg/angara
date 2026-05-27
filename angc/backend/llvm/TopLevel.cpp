@@ -286,13 +286,35 @@ void LLVMBackend::codegenForeignDataDecl(const DataStmt& stmt) {
     // Structured foreign data: create a named LLVM struct with C-compatible layout
     std::vector<llvm::Type*> field_types;
     std::vector<std::string> field_names;
+    uint64_t max_field_size = 0;
+    llvm::Type* largest_field_type = nullptr;
+
     for (const auto& field_decl : stmt.fields) {
         auto field_type = data_type->fields[field_decl->name.lexeme].type;
-        field_types.push_back(resolveCFieldType(field_type));
+        auto* llvm_ft = resolveCFieldType(field_type);
         field_names.push_back(field_decl->name.lexeme);
+
+        if (data_type->is_union) {
+            // For unions, find the largest field
+            uint64_t fsize = mod->getDataLayout().getTypeAllocSize(llvm_ft).getFixedValue();
+            if (fsize > max_field_size) {
+                max_field_size = fsize;
+                largest_field_type = llvm_ft;
+            }
+        } else {
+            field_types.push_back(llvm_ft);
+        }
     }
 
-    auto* struct_type = llvm::StructType::create(*ctx, field_types, "AngaraFD_" + data_name);
+    llvm::StructType* struct_type;
+    if (data_type->is_union) {
+        // Union: struct with one field (the largest) — all fields overlap at offset 0
+        if (!largest_field_type) largest_field_type = llvm::Type::getInt64Ty(*ctx);
+        struct_type = llvm::StructType::create(*ctx, {largest_field_type}, "AngaraFU_" + data_name);
+    } else {
+        struct_type = llvm::StructType::create(*ctx, field_types, "AngaraFD_" + data_name);
+    }
+
     m_foreign_struct_types[data_name] = struct_type;
     m_foreign_data_types[data_name] = data_type;
     m_foreign_field_order[data_name] = std::move(field_names);

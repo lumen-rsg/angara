@@ -25,6 +25,7 @@ namespace angara {
             Token dummy_token;
             data_type->is_foreign = true;
             data_type->is_opaque = stmt.is_opaque;
+            data_type->is_union = stmt.is_union;
             for (const auto& field_decl : stmt.fields) {
                 if (data_type->fields.count(field_decl->name.lexeme)) {
                     error(field_decl->name, "Duplicate field '" + field_decl->name.lexeme + "' in foreign data block '" + stmt.name.lexeme + "'.");

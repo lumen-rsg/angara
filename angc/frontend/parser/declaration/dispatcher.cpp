@@ -40,7 +40,16 @@ namespace angara {
                     return data_decl;
                 }
 
-                throw error(peek(), "Expected 'func' or 'data' after 'foreign'.");
+                if (match({TokenType::UNION})) {
+                    auto union_decl = std::static_pointer_cast<DataStmt>(foreignDataDeclaration());
+                    union_decl->is_union = true;
+                    if (union_decl->is_exported) {
+                        throw error(union_decl->name, "A 'foreign union' declaration is an import and cannot be marked 'export'.");
+                    }
+                    return union_decl;
+                }
+
+                throw error(peek(), "Expected 'func', 'data', or 'union' after 'foreign'.");
             }
 
             std::shared_ptr<Stmt> decl_stmt = nullptr;

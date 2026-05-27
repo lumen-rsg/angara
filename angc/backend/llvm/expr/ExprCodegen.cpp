@@ -421,6 +421,45 @@ llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
         return v;
     }
     if (auto* get = dynamic_cast<const GetExpr*>(e.target.get())) {
+        // Check for foreign data field write
+        auto type_it = m_type_checker.getExpressionTypes().find(get->object.get());
+        if (type_it != m_type_checker.getExpressionTypes().end() && type_it->second->kind == TypeKind::DATA) {
+            auto dt = std::dynamic_pointer_cast<DataType>(type_it->second);
+            if (dt && dt->is_foreign && !dt->is_opaque) {
+                auto* obj = cg(get->object);
+                auto* data_ptr = callRtByName("__ang_api_native_instance_data", {obj});
+                auto sit = m_foreign_struct_types.find(dt->name);
+                if (sit == m_foreign_struct_types.end()) return v;
+                auto* struct_type = sit->second;
+                auto* struct_ptr = builder->CreateBitCast(data_ptr, llvm::PointerType::get(*ctx, 0));
+
+                auto order_it = m_foreign_field_order.find(dt->name);
+                if (order_it == m_foreign_field_order.end()) return v;
+
+                unsigned field_index = 0;
+                bool found = false;
+                for (const auto& fname : order_it->second) {
+                    if (fname == get->name.lexeme) { found = true; break; }
+                    field_index++;
+                }
+                if (!found) return v;
+
+                auto field_it = dt->fields.find(get->name.lexeme);
+                if (field_it == dt->fields.end()) return v;
+                auto& field_type = field_it->second.type;
+
+                llvm::Value* field_ptr;
+                if (dt->is_union) {
+                    field_ptr = struct_ptr;
+                } else {
+                    field_ptr = builder->CreateStructGEP(struct_type, struct_ptr, field_index);
+                }
+
+                auto* c_val = marshalAngaraToC(v, field_type);
+                builder->CreateStore(c_val, field_ptr);
+                return v;
+            }
+        }
         auto* obj = cg(get->object);
         callRtByName("__ang_record_set", {obj, builder->CreateGlobalString(get->name.lexeme), v});
         return v;

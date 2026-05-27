@@ -319,6 +319,7 @@ namespace angara {
         std::shared_ptr<FunctionType> constructor_type;
         bool is_foreign = false;
         bool is_opaque = false; // true for "foreign data FILE;" (no fields)
+        bool is_union = false;  // true for "foreign union Name { ... }"
 
         // --- GENERIC SUPPORT ---
         // Type parameter names for this generic data type (e.g., {"T"} for Box<T>)

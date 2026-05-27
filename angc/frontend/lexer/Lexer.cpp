@@ -41,6 +41,7 @@ namespace angara {
             {"is",       TokenType::IS},
             {"data",     TokenType::DATA},
             {"enum",     TokenType::ENUM},
+            {"union",    TokenType::UNION},
             {"match",    TokenType::MATCH},
             {"case",     TokenType::CASE},
             {"foreign",   TokenType::FOREIGN},

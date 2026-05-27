@@ -369,13 +369,19 @@ llvm::Value* LLVMBackend::cgForeignFieldAccess(const GetExpr& e, std::shared_ptr
     }
     if (!found) return makeNil();
 
-    // GEP to get a pointer to the field
-    auto* field_ptr = builder->CreateStructGEP(struct_type, struct_ptr, field_index);
-
     // Determine the field type and load + marshal
     auto field_it = data_type->fields.find(e.name.lexeme);
     if (field_it == data_type->fields.end()) return makeNil();
     auto& field_type = field_it->second.type;
+
+    // For unions, all fields overlap at offset 0 — load directly from struct_ptr
+    // For structs, use GEP to get the field pointer at the correct offset
+    llvm::Value* field_ptr;
+    if (data_type->is_union) {
+        field_ptr = struct_ptr; // all fields at offset 0
+    } else {
+        field_ptr = builder->CreateStructGEP(struct_type, struct_ptr, field_index);
+    }
 
     if (field_type->kind == TypeKind::FIXED_ARRAY) {
         // i8[N] field: get pointer to first element and create Angara string from it
