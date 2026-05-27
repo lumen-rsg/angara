@@ -21,6 +21,12 @@ static void sleep_ms(int ms) {
     std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
 
+static int random_int(int lo, int hi) {
+    static std::mt19937 gen(std::random_device{}());
+    std::uniform_int_distribution<> dist(lo, hi);
+    return dist(gen);
+}
+
 static void clear_line() {
     std::cout << "\r\033[2K" << std::flush;
 }
@@ -53,7 +59,7 @@ static void act_bios_boot() {
 
     for (const auto& [msg, ok] : checks) {
         std::cout << "  " << CLR_DIM << msg << CLR_RESET << std::flush;
-        sleep_ms(250 + rand() % 200);
+        sleep_ms(250 + random_int(0, 200));
         if (ok) {
             print_right_ok();
         } else {
@@ -112,7 +118,7 @@ static void act_compilation_progress() {
                   << " " << CLR_BOLD << CLR_CYAN << pct << "%" << CLR_RESET
                   << "  " << std::flush;
 
-        sleep_ms(300 + rand() % 400);
+        sleep_ms(300 + random_int(0, 400));
     }
 
     std::cout << "\r\033[2K";
@@ -178,10 +184,7 @@ static void act_wisdom() {
         "There is no place like 127.0.0.1",
     };
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dist(0, static_cast<int>(quotes.size()) - 1);
-    const std::string& quote = quotes[dist(gen)];
+    const std::string& quote = quotes[random_int(0, static_cast<int>(quotes.size()) - 1)];
 
     // Typing effect
     std::cout << "\n    " << CLR_BOLD << CLR_YELLOW << "\xc2\xbb " << CLR_RESET;
