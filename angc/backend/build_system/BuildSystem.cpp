@@ -2,6 +2,7 @@
 #include "CompilerDriver.h"
 #include "Colors.h"
 #include "StringUtils.h"
+#include "Platform.h"
 #include <iostream>
 #include <filesystem>
 #include <sstream>
@@ -18,15 +19,7 @@ namespace angara {
           m_std_lib_path(m_angara_home + "/src/modules")
     {}
 
-#if defined(__APPLE__)
-    static const char* const SO_EXT = ".dylib";
-#elif defined(__linux__)
-    static const char* const SO_EXT = ".so";
-#elif defined(_WIN32)
-    static const char* const SO_EXT = ".dll";
-#else
-    static const char* const SO_EXT = ".so";
-#endif
+    static constexpr const char* SO_EXT = ANGARA_SO_EXT;
 
     std::string BuildSystem::get_module_output_path(const std::string& module_name) const {
         return (fs::path(m_build_dir) / "modules" / (module_name + SO_EXT)).string();

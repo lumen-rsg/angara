@@ -17,6 +17,7 @@
 #include "ErrorHandler.h"
 #include "Colors.h"
 #include "StringUtils.h"
+#include "Platform.h"
 
 #include <llvm/Config/llvm-config.h>
 
@@ -26,15 +27,7 @@ const std::string ANGC_VERSION    = "3.1.0";
 const std::string BACKEND_VERSION = "5.0.0";
 const std::string ANGARA_SPEC     = "v3.1";
 
-#if defined(__APPLE__)
-    static const char* const NATIVE_EXT = ".dylib";
-#elif defined(__linux__)
-    static const char* const NATIVE_EXT = ".so";
-#elif defined(_WIN32)
-    static const char* const NATIVE_EXT = ".dll";
-#else
-    static const char* const NATIVE_EXT = ".so";
-#endif
+static constexpr const char* NATIVE_EXT = ANGARA_NATIVE_EXT;
 
 static bool g_verbose = false;
 
