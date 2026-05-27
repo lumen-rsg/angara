@@ -616,6 +616,11 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                 if (fnName=="read_line") return callRtByName("__ang_io_read_line", {});
                 if (fnName=="read_all") return callRtByName("__ang_io_read_all", {});
             }
+            // Check for variadic foreign function
+            auto vfit = m_variadic_foreign_funcs.find(fnName);
+            if (vfit != m_variadic_foreign_funcs.end()) {
+                return callVariadicForeignFn(fnName, vfit->second, expr.arguments);
+            }
             return callModuleFn(modName, fnName, expr.arguments);
         }
         return cg(get->object);
@@ -754,6 +759,11 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                 while (args.size() < ft->getNumParams()) args.push_back(makeNil());
                 return builder->CreateCall(ctor, args);
             }
+        }
+        // Check for variadic foreign function
+        auto vfit = m_variadic_foreign_funcs.find(fn);
+        if (vfit != m_variadic_foreign_funcs.end()) {
+            return callVariadicForeignFn(fn, vfit->second, expr.arguments);
         }
         return callModuleFn(moduleName, fn, expr.arguments);
     }

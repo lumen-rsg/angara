@@ -349,6 +349,7 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
 
     bool returnsVoid = !func_type || func_type->return_type->kind == TypeKind::NIL;
     auto ret_type = func_type ? func_type->return_type : nullptr;
+    bool isVariadic = func_type && func_type->is_variadic;
 
     // Build C function signature using resolved semantic types
     llvm::Type* cRetType = returnsVoid ? llvm::Type::getVoidTy(*ctx) : resolveCFieldType(ret_type);
@@ -375,10 +376,16 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
 
     // Declare the raw C function
     std::string cFuncName = stmt.name.lexeme;
-    auto* cFnType = llvm::FunctionType::get(cRetType, cParamTypes, false);
+    auto* cFnType = llvm::FunctionType::get(cRetType, cParamTypes, isVariadic);
     auto* cFunc = mod->getFunction(cFuncName);
     if (!cFunc) {
         cFunc = llvm::Function::Create(cFnType, llvm::Function::ExternalLinkage, cFuncName, mod.get());
+    }
+
+    // For variadic functions, skip wrapper generation — calls go directly to the C function
+    if (isVariadic) {
+        m_variadic_foreign_funcs[cFuncName] = func_type;
+        return;
     }
 
     // Create the Angara wrapper function

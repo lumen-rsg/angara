@@ -92,6 +92,11 @@ namespace angara {
         llvm::Value* callModuleFn(const std::string& mod, const std::string& fn,
                                    const std::vector<std::shared_ptr<Expr>>& args);
 
+        /// Calls a variadic foreign C function directly, marshalling fixed and variadic args.
+        llvm::Value* callVariadicForeignFn(const std::string& c_func_name,
+                                            const std::shared_ptr<FunctionType>& func_type,
+                                            const std::vector<std::shared_ptr<Expr>>& args);
+
         /// Statement codegen dispatch.
         void cgStmt(const std::shared_ptr<Stmt>& stmt);
         void cgVarDecl(const VarDeclStmt& s);
@@ -209,6 +214,9 @@ namespace angara {
         std::map<std::string, std::shared_ptr<DataType>> m_foreign_data_types;
         // Field names in declaration order (matching C struct layout)
         std::map<std::string, std::vector<std::string>> m_foreign_field_order;
+
+        // Variadic foreign functions: maps C function name -> semantic FunctionType
+        std::map<std::string, std::shared_ptr<FunctionType>> m_variadic_foreign_funcs;
 
         bool m_freestanding = false;
         bool m_dump_ir = false;

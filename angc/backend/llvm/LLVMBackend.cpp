@@ -371,4 +371,67 @@ llvm::Value* LLVMBackend::cgForeignFieldAccess(const GetExpr& e, std::shared_ptr
     return marshalCToAngara(c_val, field_type);
 }
 
+llvm::Value* LLVMBackend::callVariadicForeignFn(const std::string& c_func_name,
+                                                  const std::shared_ptr<FunctionType>& func_type,
+                                                  const std::vector<std::shared_ptr<Expr>>& args) {
+    // Look up the raw C function
+    auto* cFunc = mod->getFunction(c_func_name);
+    if (!cFunc) return makeNil();
+
+    size_t fixed_count = func_type->param_types.size();
+    const auto& expr_types = m_type_checker.getExpressionTypes();
+    bool returnsVoid = func_type->return_type->kind == TypeKind::NIL;
+
+    std::vector<llvm::Value*> cArgs;
+
+    // Marshal fixed params
+    for (size_t i = 0; i < fixed_count && i < args.size(); i++) {
+        auto* obj = cg(args[i]);
+        cArgs.push_back(marshalAngaraToC(obj, func_type->param_types[i]));
+    }
+
+    // Marshal variadic args with C default argument promotions
+    for (size_t i = fixed_count; i < args.size(); i++) {
+        auto* obj = cg(args[i]);
+
+        // Determine expression type
+        auto type_it = expr_types.find(args[i].get());
+        std::shared_ptr<Type> arg_type = (type_it != expr_types.end()) ? type_it->second : nullptr;
+
+        if (!arg_type || arg_type->kind == TypeKind::ERROR) {
+            // Unknown type — pass as i64
+            cArgs.push_back(getI64(obj));
+            continue;
+        }
+
+        // Marshal to C type, then apply default argument promotions
+        auto* c_val = marshalAngaraToC(obj, arg_type);
+
+        // Default argument promotions for C variadics:
+        // - float -> double
+        // - integer types smaller than int -> int (i32)
+        if (arg_type->kind == TypeKind::PRIMITIVE) {
+            const auto& n = arg_type->toString();
+            if (n == "f32") {
+                // float promotes to double
+                c_val = builder->CreateFPExt(c_val, llvm::Type::getDoubleTy(*ctx));
+            } else if (n == "bool" || n == "i8" || n == "u8" || n == "i16" || n == "u16") {
+                // Promote to i32 (C int)
+                c_val = builder->CreateZExt(c_val, llvm::Type::getInt32Ty(*ctx));
+            }
+        }
+
+        cArgs.push_back(c_val);
+    }
+
+    // Call the C function
+    llvm::CallInst* result = builder->CreateCall(cFunc, cArgs);
+
+    // Marshal return value
+    if (returnsVoid) {
+        return makeNil();
+    }
+    return marshalCToAngara(result, func_type->return_type);
+}
+
 } // namespace angara

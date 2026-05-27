@@ -29,7 +29,11 @@ namespace angara {
             return_type = resolveType(stmt.returnType);
         }
 
-        auto function_type = std::make_shared<FunctionType>(param_types, return_type);
+        bool has_variadic = false;
+        for (const auto& p : stmt.params) {
+            if (p.is_variadic) { has_variadic = true; break; }
+        }
+        auto function_type = std::make_shared<FunctionType>(param_types, return_type, has_variadic);
 
         if (stmt.is_foreign) {
             function_type->is_foreign = true;
