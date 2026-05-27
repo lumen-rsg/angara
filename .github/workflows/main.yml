@@ -6,6 +6,9 @@ on:
   push:
     branches:
       - stable
+  pull_request:
+    branches:
+      - stable
 
 jobs:
   build:
@@ -83,17 +86,38 @@ jobs:
       - name: Run Language Tests
         run: bash tests/lang/run_tests.sh
 
-      # ── Stage artifacts ──
+      - name: Run LLVM Backend Tests
+        run: |
+          for f in tests/llvm/*.an; do
+            echo "Testing: $f"
+            ./build/angc "$f" || exit 1
+            base=$(basename "$f" .an)
+            ./"$base" || exit 1
+          done
+
+      - name: Run Feature Tests
+        run: |
+          for f in tests/features/*.an; do
+            echo "Testing: $f"
+            ./build/angc "$f" || exit 1
+            base=$(basename "$f" .an)
+            ./"$base" || exit 1
+          done
+
+      # ── Stage artifacts (only on push to stable, not PRs) ──
       - name: Stage Artifacts
+        if: github.event_name == 'push'
         run: |
           mkdir -p release_artifacts/modules
           cp build/angc release_artifacts/
           cp build/modules/*.${{ matrix.ext }} release_artifacts/modules/ 2>/dev/null || true
 
       - name: Archive Release
+        if: github.event_name == 'push'
         run: tar -czvf ${{ matrix.artifact }}.tar.gz -C release_artifacts .
 
       - name: Upload Artifact
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -101,6 +125,7 @@ jobs:
 
   release:
     needs: build
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
     permissions:
