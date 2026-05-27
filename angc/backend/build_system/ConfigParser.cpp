@@ -177,7 +177,7 @@ namespace angara {
                 else if (key == "output_dir" || key == "output") currentProject.profile.output_dir = value;
                 else if (key == "target") currentProject.profile.target = value;
                 else if (key == "opt" || key == "opt_level" || key == "optimization") {
-                    try { currentProject.profile.opt_level = std::stoi(value); } catch (...) {}
+                    try { currentProject.profile.opt_level = std::stoi(value); } catch (const std::exception&) { currentProject.profile.opt_level = 0; }
                 }
             }
         }

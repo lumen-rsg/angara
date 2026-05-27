@@ -129,8 +129,11 @@ static std::string find_local_project_file() {
                 return entry.path().string();
             }
         }
-    } catch (...) {}
-    return "";
+    } catch (const std::exception& e) {
+        verbose("find_local_project_file: " + std::string(e.what()));
+    } catch (...) {
+        verbose("find_local_project_file: unknown exception");
+    }
 }
 
 static bool is_an_file(const std::string& s) {
@@ -198,8 +201,8 @@ static void list_modules() {
                 count++;
             }
         }
-    } catch (...) {
-        std::cout << CLR_YELLOW << "  (module directory not found)" << CLR_RESET << "\n";
+    } catch (const std::exception& e) {
+        std::cout << CLR_YELLOW << "  (module directory not found: " << e.what() << ")" << CLR_RESET << "\n";
     }
 
     if (count == 0) {
