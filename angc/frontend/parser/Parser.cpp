@@ -75,7 +75,8 @@ namespace angara {
     std::vector<std::shared_ptr<Stmt>> Parser::parseStmts() {
         std::vector<std::shared_ptr<Stmt>> statements;
         while (!isAtEnd()) {
-            statements.push_back(declaration());
+            auto stmt = declaration();
+            if (stmt) statements.push_back(std::move(stmt));
         }
         return statements;
     }

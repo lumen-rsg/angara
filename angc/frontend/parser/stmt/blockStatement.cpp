@@ -25,6 +25,7 @@ namespace angara {
             }
 
             auto stmt = declaration();
+            if (!stmt) continue;
 
             if (is_terminator(stmt)) {
                 hit_terminator = true;
