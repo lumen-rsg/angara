@@ -13,7 +13,8 @@ namespace angara {
 
     bool Parser::isForInLoop() {
         int current = m_current;
-        while (m_tokens[current].type != TokenType::RIGHT_PAREN &&
+        while (current < static_cast<int>(m_tokens.size()) &&
+               m_tokens[current].type != TokenType::RIGHT_PAREN &&
                m_tokens[current].type != TokenType::EOF_TOKEN) {
 
             if (m_tokens[current].type == TokenType::IN) {
@@ -23,7 +24,7 @@ namespace angara {
                 return false;
             }
             current++;
-               }
+        }
         return false;
     }
 
