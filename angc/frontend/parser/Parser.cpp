@@ -142,15 +142,15 @@ namespace angara {
         return previous();
     }
 
-    bool Parser::isAtEnd() {
+    bool Parser::isAtEnd() const {
         return peek().type == TokenType::EOF_TOKEN;
     }
 
-    Token Parser::peek() {
+    Token Parser::peek() const {
         return m_tokens[m_current];
     }
 
-    Token Parser::previous() {
+    Token Parser::previous() const {
         return m_tokens[m_current - 1];
     }
 

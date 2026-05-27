@@ -222,15 +222,15 @@ namespace angara {
 
         /// Checks if the parser has reached the end of the token stream.
         /// @return True if at EOF.
-        bool isAtEnd();
+        bool isAtEnd() const;
 
         /// Returns the current token without consuming it.
         /// @return The token at the current cursor position.
-        Token peek();
+        Token peek() const;
 
         /// Returns the most recently consumed token.
         /// @return The token immediately before the current cursor position.
-        Token previous();
+        Token previous() const;
 
         /// Lookahead to determine if the current `attach` is selective.
         /// @return True if the attach targets a specific function.

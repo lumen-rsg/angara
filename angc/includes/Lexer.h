@@ -39,7 +39,7 @@ namespace angara {
 
         /// Returns the current character without consuming it, or '\\0' if at end of source.
         /// @return The character at the current position.
-        char peek();
+        char peek() const;
 
         /// Returns the character one position ahead without consuming it, or '\\0' if out of bounds.
         /// @return The character at current+1.

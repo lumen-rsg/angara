@@ -114,7 +114,7 @@ namespace angara {
         return true;
     }
 
-    char Lexer::peek() {
+    char Lexer::peek() const {
         if (isAtEnd()) return '\0';
         return m_source[m_current];
     }
