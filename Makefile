@@ -39,8 +39,8 @@ LLVM_SYSTEM_LIBS := $(shell $(LLVM_CONFIG) --system-libs 2>/dev/null)
 CC  := clang
 CXX := clang++
 
-CFLAGS   := -fPIC -Wall -Iangc/includes
-CXXFLAGS := -std=c++23 -fPIC -Wall -Wno-trigraphs -Iangc/includes
+CFLAGS   := -fPIC -Wall -Wextra -g -MMD -MP -Iangc/includes
+CXXFLAGS := -std=c++23 -fPIC -Wall -Wextra -g -MMD -MP -Wno-trigraphs -Iangc/includes
 
 LDFLAGS_BIN := $(LLVM_LDFLAGS) $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS)
 
@@ -422,3 +422,6 @@ test-cpp: $(ANGC_OBJS) $(TEST_CPP_SRCS)
 clean:
 	@printf "$(RED)[CL] $(RESET) Cleaning build directory...\n"
 	@rm -rf build
+	@find . -name '*.d' -path '*/build/*' -delete 2>/dev/null || true
+
+-include build/obj/**/*.d
