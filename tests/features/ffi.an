@@ -79,7 +79,8 @@ export func main() -> i64 {
     });
 
     io.println(1, "qsort callback OK");
-    free(arr);
+    // arr is ARC-managed — NativeInstance wraps the malloc'd pointer with free() finalizer.
+    // No manual free() needed; ARC cleans it up when arr goes out of scope.
 
     return 0;
 }

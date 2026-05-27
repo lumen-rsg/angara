@@ -289,8 +289,8 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
         }
     }
     if (type->kind == TypeKind::POINTER) {
-        // Raw pointer: extract i64 payload → inttoptr
-        return builder->CreateIntToPtr(getI64(obj), llvm::PointerType::get(*ctx, 0));
+        // Pointer is stored as NativeInstance — extract the raw data pointer
+        return callRtByName("__ang_api_native_instance_data", {obj});
     }
     if (type->kind == TypeKind::FUNCTION) {
         // Angara closure → C function pointer via trampoline
@@ -424,8 +424,36 @@ llvm::Value* LLVMBackend::marshalCToAngara(llvm::Value* c_val, const std::shared
         }
     }
     if (type->kind == TypeKind::POINTER) {
-        // Raw C pointer → store as i64 payload (no NativeInstance wrapping)
-        return makeI64(builder->CreatePtrToInt(c_val, llvm::Type::getInt64Ty(*ctx)));
+        // Wrap C pointer in NativeInstance with free() finalizer (ARC-managed).
+        // If NULL, return nil. This ensures malloc'd pointers are freed on scope exit.
+        auto* fn = builder->GetInsertBlock()->getParent();
+        auto* entry_bb = builder->GetInsertBlock();
+        auto* wrap_bb = llvm::BasicBlock::Create(*ctx, "ptr_wrap", fn);
+        auto* merge_bb = llvm::BasicBlock::Create(*ctx, "ptr_merge", fn);
+
+        auto* is_null = builder->CreateICmpEQ(c_val,
+            llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)));
+        builder->CreateCondBr(is_null, merge_bb, wrap_bb);
+
+        builder->SetInsertPoint(wrap_bb);
+        auto* name_str = builder->CreateGlobalString("*void");
+        auto* free_fn = mod->getFunction("free");
+        if (!free_fn) {
+            auto* free_type = llvm::FunctionType::get(llvm::Type::getVoidTy(*ctx),
+                {llvm::PointerType::get(*ctx, 0)}, false);
+            free_fn = llvm::Function::Create(free_type, llvm::Function::ExternalLinkage,
+                                              "free", mod.get());
+        }
+        auto* native_obj = callRtByName("__ang_api_native_instance_new",
+                                         {c_val, free_fn, name_str});
+        auto* wrap_end_bb = builder->GetInsertBlock();
+        builder->CreateBr(merge_bb);
+
+        builder->SetInsertPoint(merge_bb);
+        auto* phi = builder->CreatePHI(objType, 2);
+        phi->addIncoming(makeNil(), entry_bb);
+        phi->addIncoming(native_obj, wrap_end_bb);
+        return phi;
     }
     if (type->kind == TypeKind::FUNCTION) {
         // C function pointer → Angara closure wrapper

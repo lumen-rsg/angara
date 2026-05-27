@@ -1046,14 +1046,17 @@ llvm::Value* LLVMBackend::cgCast(const CastExpr& e) {
     if (isNumeric(source) && target->kind == TypeKind::POINTER) {
         return val; // already stored as i64 payload
     }
-    // Pointer-to-integer cast
+    // Pointer-to-integer cast: extract raw ptr from NativeInstance → ptrtoint
     if (source->kind == TypeKind::POINTER && isNumeric(target)) {
-        return val; // already stored as i64 payload
-    }
-    // Foreign data → pointer (extract raw pointer from NativeInstance)
-    if (source->kind == TypeKind::DATA && target->kind == TypeKind::POINTER) {
         auto* data_ptr = callRtByName("__ang_api_native_instance_data", {val});
         return makeI64(builder->CreatePtrToInt(data_ptr, llvm::Type::getInt64Ty(*ctx)));
+    }
+    // Foreign data → pointer (extract raw pointer, wrap as borrowed NativeInstance)
+    if (source->kind == TypeKind::DATA && target->kind == TypeKind::POINTER) {
+        auto* data_ptr = callRtByName("__ang_api_native_instance_data", {val});
+        auto* name_str = builder->CreateGlobalString("borrowed_ptr");
+        auto* null_fin = llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
+        return callRtByName("__ang_api_native_instance_new", {data_ptr, null_fin, name_str});
     }
     // Numeric truncation/extension: for now just return as-is
     // (the value is already stored as i64; the type checker records the narrower type)
@@ -1070,13 +1073,20 @@ llvm::Value* LLVMBackend::cgDeref(const DerefExpr& e) {
     }
     auto& pointee_type = type_it->second;
 
-    // Extract the raw pointer from the i64 payload
-    auto* raw_i64 = getI64(ptr_val);
-    auto* raw_ptr = builder->CreateIntToPtr(raw_i64, llvm::PointerType::get(*ctx, 0));
+    // Extract the raw pointer from the NativeInstance wrapper
+    auto* raw_ptr = callRtByName("__ang_api_native_instance_data", {ptr_val});
 
     // Load and wrap in AngaraObject based on pointee type
     auto* c_type = resolveCFieldType(pointee_type);
     auto* loaded = builder->CreateLoad(c_type, raw_ptr, "deref");
+
+    // Dereferenced pointers are borrowed (not owned) — use null finalizer
+    if (pointee_type->kind == TypeKind::POINTER) {
+        auto* name_str = builder->CreateGlobalString("borrowed_ptr");
+        auto* null_fin = llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
+        return callRtByName("__ang_api_native_instance_new", {loaded, null_fin, name_str});
+    }
+
     return marshalCToAngara(loaded, pointee_type);
 }
 
