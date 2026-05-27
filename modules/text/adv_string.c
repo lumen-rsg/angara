@@ -402,6 +402,38 @@ AngaraObject Angara_adv_string_is_alnum(int arg_count, AngaraObject* args) {
     return ang_bool(true);
 }
 
+AngaraObject Angara_adv_string_levenshtein(int arg_count, AngaraObject* args) {
+    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
+        ang_api->throw_error("levenshtein(a, b) expects two strings.");
+        return ang_nil();
+    }
+    const char* a = ang_api->as_cstr(args[0]);
+    const char* b = ang_api->as_cstr(args[1]);
+    size_t la = strlen(a);
+    size_t lb = strlen(b);
+
+    // Allocate matrix as single array
+    size_t* d = (size_t*)malloc((la + 1) * (lb + 1) * sizeof(size_t));
+    #define D(i,j) d[(i) * (lb + 1) + (j)]
+
+    for (size_t i = 0; i <= la; i++) D(i, 0) = i;
+    for (size_t j = 0; j <= lb; j++) D(0, j) = j;
+
+    for (size_t i = 1; i <= la; i++) {
+        for (size_t j = 1; j <= lb; j++) {
+            size_t cost = (a[i-1] == b[j-1]) ? 0 : 1;
+            size_t del = D(i-1, j) + 1;
+            size_t ins = D(i, j-1) + 1;
+            size_t sub = D(i-1, j-1) + cost;
+            D(i, j) = del < ins ? (del < sub ? del : sub) : (ins < sub ? ins : sub);
+        }
+    }
+    size_t result = D(la, lb);
+    #undef D
+    free(d);
+    return ang_i64((int64_t)result);
+}
+
 static const AngaraFuncDef STRING_EXPORTS[] = {
     {"get",           Angara_adv_string_get,           "si->s",    NULL},
     {"substring",     Angara_adv_string_substring,     "sii->s",   NULL},
@@ -428,6 +460,7 @@ static const AngaraFuncDef STRING_EXPORTS[] = {
     {"to_i64",        Angara_adv_string_to_i64,        "s->i",     NULL},
     {"to_f64",        Angara_adv_string_to_f64,        "s->d",     NULL},
     {"chars",         Angara_adv_string_chars,         "s->l<s>",  NULL},
+    {"levenshtein",   Angara_adv_string_levenshtein,   "ss->i",    NULL},
     ANGARA_FUNC_END
 };
 
