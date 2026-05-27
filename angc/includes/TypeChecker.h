@@ -148,18 +148,6 @@ namespace angara {
 
         // --- Type helpers ---
 
-        /// Returns true if the type is an integer (i8..i64, u8..u64).
-        static bool isInteger(const std::shared_ptr<Type> &type);
-
-        /// Returns true if the type is an unsigned integer (u8..u64).
-        static bool isUnsignedInteger(const std::shared_ptr<Type> &type);
-
-        /// Returns true if the type is a float (f32, f64).
-        static bool isFloat(const std::shared_ptr<Type> &type);
-
-        /// Returns true if the type is numeric (integer or float).
-        static bool isNumeric(const std::shared_ptr<Type>& type);
-
         /// Returns true if the type can be used in a boolean context.
         static bool isTruthy(const std::shared_ptr<Type> &type);
 

@@ -178,16 +178,11 @@ std::string LLVMBackend::mangleMethod(const std::string& c, const std::string& m
 std::string LLVMBackend::sanitize(const std::string& n) { std::string r; for(char c:n) r+=(std::isalnum(c)||c=='_')?c:'_'; return r; }
 
 bool LLVMBackend::isSizedIntType(const std::shared_ptr<Type>& type) {
-    if (!type || type->kind != TypeKind::PRIMITIVE) return false;
-    const auto& name = type->toString();
-    return name == "i8"  || name == "i16" || name == "i32" || name == "i64" ||
-           name == "u8"  || name == "u16" || name == "u32" || name == "u64";
+    return isInteger(type);
 }
 
 bool LLVMBackend::isUnsignedIntType(const std::shared_ptr<Type>& type) {
-    if (!type || type->kind != TypeKind::PRIMITIVE) return false;
-    const auto& name = type->toString();
-    return name == "u8" || name == "u16" || name == "u32" || name == "u64";
+    return isUnsignedInteger(type);
 }
 
 int LLVMBackend::getIntBitWidth(const std::shared_ptr<Type>& type) {

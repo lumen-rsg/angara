@@ -3,6 +3,14 @@
 #include "ErrorHandler.h"
 namespace angara {
 
+    // Pull free functions from Type.h into class scope so visitor files
+    // that call isInteger/isFloat/isNumeric/isUnsignedInteger unqualified
+    // find them via argument-dependent lookup.
+    using angara::isInteger;
+    using angara::isFloat;
+    using angara::isNumeric;
+    using angara::isUnsignedInteger;
+
     const SymbolTable& TypeChecker::getSymbolTable() const {
         return m_symbols;
     }
@@ -115,25 +123,7 @@ namespace angara {
         m_expression_types[expr] = type;
     }
 
-    bool TypeChecker::isInteger(const std::shared_ptr<Type>& type) {
-        if (type->kind != TypeKind::PRIMITIVE) return false;
-        const auto& name = type->toString();
-        return name == "i8" || name == "i16" || name == "i32" || name == "i64" ||
-               name == "u8" || name == "u16" || name == "u32" || name == "u64";
-    }
-
-    bool TypeChecker::isUnsignedInteger(const std::shared_ptr<Type>& type) {
-        if (type->kind != TypeKind::PRIMITIVE) return false;
-        const auto& name = type->toString();
-        return name == "u8" || name == "u16" || name == "u32" || name == "u64";
-    }
-
-
-    bool TypeChecker::isFloat(const std::shared_ptr<Type>& type) {
-        if (type->kind != TypeKind::PRIMITIVE) return false;
-        const auto& name = type->toString();
-        return name == "f32" || name == "f64";
-    }
+    bool TypeChecker::isTruthy(const std::shared_ptr<Type>& type) {
 
     bool TypeChecker::isTruthy(const std::shared_ptr<Type>& type) {
         if (type->kind == TypeKind::ERROR) {
@@ -440,9 +430,6 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
     return m_type_error;
 }
 
-    bool TypeChecker::isNumeric(const std::shared_ptr<Type>& type) {
-        return isInteger(type) || isFloat(type);
-    }
 
     void TypeChecker::find_and_report_suggestion(const Token& bad_token, const std::vector<std::string>& candidates) {
         const std::string& misspelled = bad_token.lexeme;

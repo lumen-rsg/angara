@@ -233,6 +233,12 @@ namespace angara {
                name == "u8" || name == "u16" || name == "u32" || name == "u64";
     }
 
+    inline bool isUnsignedInteger(const std::shared_ptr<Type>& type) {
+        if (!type || type->kind != TypeKind::PRIMITIVE) return false;
+        const auto& name = type->toString();
+        return name == "u8" || name == "u16" || name == "u32" || name == "u64";
+    }
+
     inline bool isNumeric(const std::shared_ptr<Type>& type) {
         return isInteger(type) || isFloat(type);
     }
