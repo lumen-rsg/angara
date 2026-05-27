@@ -45,7 +45,7 @@ namespace angara {
                 "TYPE_STRING", "TYPE_INT", "TYPE_FLOAT", "TYPE_BOOL",
                 "TYPE_LIST", "TYPE_MAP", "TYPE_VOID",
 
-                "EOF_TOKEN", "EOF_TOKEN", "AS", "TYPE_I8", "TYPE_I16", "TYPE_I32", "TYPE_I64", "TYPE_U8", "TYPE_U16", "TYPE_U32", "TYPE_U64", "TYPE_UINT", "TYPE_F32",
+                "EOF_TOKEN", "AS", "TYPE_I8", "TYPE_I16", "TYPE_I32", "TYPE_I64", "TYPE_U8", "TYPE_U16", "TYPE_U32", "TYPE_U64", "TYPE_UINT", "TYPE_F32",
                 "TYPE_F64", "TYPE_NIL", "TYPE_RECORD", "TYPE_FUNCTION", "TYPE_ANY", "TYPE_THREAD"
         };
 
