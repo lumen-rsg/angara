@@ -58,6 +58,10 @@ namespace angara {
         void set_check_only(bool val) { m_check_only = val; }
         bool is_check_only() const { return m_check_only; }
 
+        /// Enables or disables IR dump (emit unoptimized .ll files).
+        void set_dump_ir(bool val) { m_dump_ir = val; }
+        bool is_dump_ir() const { return m_dump_ir; }
+
         /// Compiles a root source file and all its transitive imports.
         /// Runs Lex -> Parse -> TypeCheck -> LLVM codegen for each module.
         /// @param project         The project configuration.
@@ -130,6 +134,7 @@ namespace angara {
         bool m_freestanding = false;
         bool m_nostdlib = false;
         bool m_check_only = false;
+        bool m_dump_ir = false;
 
         std::set<std::string> m_generated_object_files;
         std::vector<std::string> m_angara_module_names;

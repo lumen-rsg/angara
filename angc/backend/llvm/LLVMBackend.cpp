@@ -15,8 +15,8 @@ namespace angara {
 
 LLVMBackend::~LLVMBackend() = default;
 
-LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding)
-    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding) {
+LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir)
+    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_dump_ir(dump_ir) {
     ctx = std::make_unique<llvm::LLVMContext>();
     mod = std::make_unique<llvm::Module>("angara_module", *ctx);
     builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
@@ -47,7 +47,7 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
         codegenMainFunction(stmts, moduleName, allMods);
     }
     std::string base = "ang_" + moduleName;
-    {
+    if (m_dump_ir) {
         std::error_code ec;
         llvm::raw_fd_ostream ir(base+".ll", ec, llvm::sys::fs::OF_Text);
         if (!ec) { mod->print(ir,nullptr); ir.close(); }

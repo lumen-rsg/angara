@@ -36,7 +36,8 @@ namespace angara {
         /// @param freestanding  If true, skip libc dependencies.
         LLVMBackend(TypeChecker& type_checker, ErrorHandler& errorHandler,
                     const std::string& target_triple = "",
-                    bool freestanding = false);
+                    bool freestanding = false,
+                    bool dump_ir = false);
 
         /// Releases LLVM objects (cleanup at process exit).
         ~LLVMBackend();
@@ -194,6 +195,7 @@ namespace angara {
         std::map<std::string, std::string> methodLookup;
 
         bool m_freestanding = false;
+        bool m_dump_ir = false;
 
         int m_lambda_counter = 0;
 

@@ -47,6 +47,7 @@ struct CliFlags {
     std::string target;
     std::string sysroot;
     bool dump_ast = false;
+    bool dump_ir = false;
     bool freestanding = false;
     bool nostdlib = false;
     bool release = false;
@@ -63,6 +64,9 @@ struct CliFlags {
                 args.erase(args.begin() + i, args.begin() + i + 2);
             } else if (args[i] == "--dump-ast") {
                 flags.dump_ast = true;
+                args.erase(args.begin() + i);
+            } else if (args[i] == "--dump-ir") {
+                flags.dump_ir = true;
                 args.erase(args.begin() + i);
             } else if (args[i] == "--freestanding") {
                 flags.freestanding = true;
@@ -166,6 +170,7 @@ static void print_help() {
     std::cout << "  --release                   Build in release mode (opt level 2)\n";
     std::cout << "  --debug                     Build in debug mode (default, opt level 0)\n";
     std::cout << "  --dump-ast                  Debug: Print Abstract Syntax Tree\n";
+    std::cout << "  --dump-ir                   Debug: Emit unoptimized LLVM IR (.ll)\n";
     std::cout << "  --target <triple>           Cross-compile for target triple\n";
     std::cout << "  --sysroot <path>            Set sysroot for cross-compilation linker\n";
     std::cout << "  --freestanding              Freestanding mode (no libc, bare-metal)\n";
@@ -313,6 +318,7 @@ static int cmd_compile_single_file(const std::string& source_file, const CliFlag
     if (!flags.sysroot.empty()) driver.set_sysroot(flags.sysroot);
     if (flags.freestanding) driver.set_freestanding(true);
     if (flags.nostdlib) driver.set_nostdlib(true);
+    if (flags.dump_ir) driver.set_dump_ir(true);
 
     std::string native_mod_path = "/opt/angara/modules";
     if (fs::exists("build/modules")) {
