@@ -368,15 +368,61 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
 
 void LLVMBackend::codegenEnumDecl(const EnumStmt& stmt) {
     for (size_t i = 0; i < stmt.variants.size(); i++) {
-        std::string name = "Angara_enum_" + stmt.name.lexeme + "_" + stmt.variants[i]->name.lexeme;
-        auto* init_const = llvm::ConstantStruct::get(objType, {
-            llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_I64),
-            llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)
-        });
-        auto* global = new llvm::GlobalVariable(
-            *mod, objType, true,
-            llvm::GlobalValue::PrivateLinkage, init_const, name);
-        globals["g_" + stmt.variants[i]->name.lexeme] = global;
+        const auto& variant = stmt.variants[i];
+        std::string name = "Angara_enum_" + stmt.name.lexeme + "_" + variant->name.lexeme;
+
+        if (variant->params.empty()) {
+            // Simple variant: global constant with TAG_I64 and variant index
+            auto* init_const = llvm::ConstantStruct::get(objType, {
+                llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_I64),
+                llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)
+            });
+            auto* global = new llvm::GlobalVariable(
+                *mod, objType, true,
+                llvm::GlobalValue::PrivateLinkage, init_const, name);
+            globals["g_" + variant->name.lexeme] = global;
+            // Also register qualified name for unambiguous lookup
+            globals["g_" + stmt.name.lexeme + "." + variant->name.lexeme] = global;
+        } else {
+            // Variant with associated data: constructor function
+            size_t param_count = variant->params.size();
+            std::string ctor_name = "__ang_" + stmt.name.lexeme + "_" + variant->name.lexeme;
+
+            std::vector<llvm::Type*> param_types(param_count, objType);
+            auto* fn_type = llvm::FunctionType::get(objType, param_types, false);
+            auto* fn = llvm::Function::Create(fn_type, llvm::Function::ExternalLinkage,
+                                               ctor_name, mod.get());
+
+            auto* entry = llvm::BasicBlock::Create(*ctx, "entry", fn);
+            builder->SetInsertPoint(entry);
+
+            auto saved_values = std::move(namedVals);
+            namedVals.clear();
+
+            // Create a record to hold the variant data
+            llvm::Value* record = callRtByName("__ang_record_new", {});
+
+            // Store the variant index as __tag
+            {
+                auto* tag_val = makeI64(llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i));
+                auto* tag_key = builder->CreateGlobalString("__tag");
+                callRtByName("__ang_record_set", {record, tag_key, tag_val});
+            }
+
+            // Store each parameter
+            size_t pidx = 0;
+            for (auto& arg : fn->args()) {
+                std::string field_name = "_" + std::to_string(pidx);
+                auto* key_ptr = builder->CreateGlobalString(field_name);
+                callRtByName("__ang_record_set", {record, key_ptr, &arg});
+                pidx++;
+            }
+
+            builder->CreateRet(record);
+            namedVals = std::move(saved_values);
+
+            constructorLookup[stmt.name.lexeme + "." + variant->name.lexeme] = ctor_name;
+        }
     }
 }
 

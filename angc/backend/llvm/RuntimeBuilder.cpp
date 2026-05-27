@@ -20,10 +20,10 @@ void RuntimeBuilder::generateRuntime() {
     declareCLibFunctions();
     generateMemoryManagement();
     generateStringOps();
+    generateEquality();
     generateListOps();
     generateRecordOps();
     generateConversions();
-    generateEquality();
     generateDeepClone();
     generateClosureOps();
     generateExceptionOps();

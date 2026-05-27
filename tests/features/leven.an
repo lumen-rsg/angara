@@ -9,7 +9,7 @@ export func main() -> i64 {
     let d = adv_string.levenshtein("kitten", "sitting");
     io.println(1, "kitten -> sitting: " + string(d));
 
-    if d != 3 {
+    if (d != 3) {
         io.println(1, "FAIL: expected 3, got " + string(d));
         return 1;
     }
@@ -17,7 +17,7 @@ export func main() -> i64 {
     let d2 = adv_string.levenshtein("", "abc");
     io.println(1, "'' -> 'abc': " + string(d2));
 
-    if d2 != 3 {
+    if (d2 != 3) {
         io.println(1, "FAIL: expected 3, got " + string(d2));
         return 1;
     }
@@ -25,7 +25,7 @@ export func main() -> i64 {
     let d3 = adv_string.levenshtein("same", "same");
     io.println(1, "same -> same: " + string(d3));
 
-    if d3 != 0 {
+    if (d3 != 0) {
         io.println(1, "FAIL: expected 0, got " + string(d3));
         return 1;
     }

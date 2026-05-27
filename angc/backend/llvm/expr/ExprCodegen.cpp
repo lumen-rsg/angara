@@ -510,6 +510,32 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             std::string gkey = "g_" + sanitize(modName);
             bool is_var = namedVals.find(sanitize(modName)) != namedVals.end() ||
                           globals.find(gkey) != globals.end();
+
+            // Check for enum variant constructor (e.g., WebEvent.KeyPress("h"))
+            if (!is_var) {
+                std::string enum_global = "g_" + modName + "." + fnName;
+                std::string ctor_key = modName + "." + fnName;
+
+                // Simple enum variant (no data) — return global constant
+                auto git = globals.find(enum_global);
+                if (git != globals.end()) {
+                    return builder->CreateLoad(objType, git->second);
+                }
+
+                // Enum variant with associated data — call constructor
+                auto cit = constructorLookup.find(ctor_key);
+                if (cit != constructorLookup.end()) {
+                    llvm::Function* ctor_fn = this->mod->getFunction(cit->second);
+                    if (ctor_fn) {
+                        std::vector<llvm::Value*> args;
+                        for (auto& a : expr.arguments) args.push_back(cg(a));
+                        auto* ft = ctor_fn->getFunctionType();
+                        while (args.size() < ft->getNumParams()) args.push_back(makeNil());
+                        return builder->CreateCall(ctor_fn, args);
+                    }
+                }
+            }
+
             if (is_var) {
                 auto* varObj = loadVar(modName);
                 if (fnName == "push" || fnName == "add") {
@@ -540,6 +566,33 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                 }
                 if (fnName == "join") {
                     return callRtByName("__ang_thread_join", {varObj});
+                }
+                if (fnName == "clone" || fnName == "deep_clone") {
+                    return callRtByName("__ang_deep_clone", {varObj});
+                }
+                if (fnName == "remove_at") {
+                    if (!expr.arguments.empty())
+                        return callRtByName("__ang_list_remove_at", {varObj, cg(expr.arguments[0])});
+                    return makeNil();
+                }
+                if (fnName == "remove") {
+                    if (!expr.arguments.empty()) {
+                        auto ntype_it = namedTypes.find(sanitize(modName));
+                        if (ntype_it != namedTypes.end() && ntype_it->second->kind == TypeKind::RECORD) {
+                            auto* key_obj = cg(expr.arguments[0]);
+                            auto* fn_as_cstr = this->mod->getFunction("__ang_api_as_cstr");
+                            if (fn_as_cstr) {
+                                auto* key_cstr = builder->CreateCall(fn_as_cstr, {key_obj});
+                                return callRtByName("__ang_record_remove", {varObj, key_cstr});
+                            }
+                        } else {
+                            return callRtByName("__ang_list_remove", {varObj, cg(expr.arguments[0])});
+                        }
+                    }
+                    return makeNil();
+                }
+                if (fnName == "keys") {
+                    return callRtByName("__ang_record_keys", {varObj});
                 }
             }
             if (modName=="io") {
