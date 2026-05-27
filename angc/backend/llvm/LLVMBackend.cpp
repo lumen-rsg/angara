@@ -30,7 +30,7 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
     std::string te;
     if (auto* t = llvm::TargetRegistry::lookupTarget(llvm::Triple(targetTriple.str()), te)) {
         llvm::TargetOptions opt;
-        if (auto* tm = t->createTargetMachine(targetTriple,"generic","",opt,std::nullopt))
+        if (auto tm = std::unique_ptr<llvm::TargetMachine>(t->createTargetMachine(targetTriple,"generic","",opt,std::nullopt)))
             mod->setDataLayout(tm->createDataLayout());
     }
     rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding);
