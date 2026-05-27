@@ -30,7 +30,7 @@ namespace angara {
         OPTIONAL,
         DATA,
         ENUM,
-        C_PTR,
+        FIXED_ARRAY,
         TYPE_PARAM, // A generic type parameter (e.g., T in data Box<T>)
         GENERIC_INSTANCE, // A concrete instantiation of a generic type (e.g., Box<i64>)
         ERROR // A special type to prevent cascading error messages
@@ -316,6 +316,7 @@ namespace angara {
         // Data types also have an implicit constructor. We store its signature here.
         std::shared_ptr<FunctionType> constructor_type;
         bool is_foreign = false;
+        bool is_opaque = false; // true for "foreign data FILE;" (no fields)
 
         // --- GENERIC SUPPORT ---
         // Type parameter names for this generic data type (e.g., {"T"} for Box<T>)
@@ -345,9 +346,18 @@ namespace angara {
         [[nodiscard]] std::string toString() const override { return name; }
     };
 
-    struct CPtrType : Type {
-        CPtrType() : Type(TypeKind::C_PTR) {}
-        std::string toString() const override { return "c_ptr"; }
+    // --- FIXED-SIZE ARRAY TYPE (for foreign data) ---
+    // Represents i8[256], u8[16], etc. — maps to inline C arrays.
+    struct FixedArrayType : Type {
+        std::shared_ptr<Type> element_type;
+        int size;
+
+        FixedArrayType(std::shared_ptr<Type> elem, int n)
+            : Type(TypeKind::FIXED_ARRAY), element_type(std::move(elem)), size(n) {}
+
+        [[nodiscard]] std::string toString() const override {
+            return element_type->toString() + "[" + std::to_string(size) + "]";
+        }
     };
 
     // --- GENERIC TYPE SYSTEM ---

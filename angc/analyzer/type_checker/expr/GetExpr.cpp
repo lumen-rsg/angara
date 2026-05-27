@@ -46,6 +46,10 @@ std::any TypeChecker::visit(const GetExpr& expr) {
                 error(expr.name, "Data type '" + data_type->name + "' has no field named '" + property_name + "'.");
             } else {
                 property_type = field_it->second.type;
+                // Foreign data i8[N] fields auto-convert to string at codegen time
+                if (data_type->is_foreign && property_type->kind == TypeKind::FIXED_ARRAY) {
+                    property_type = m_type_string;
+                }
             }
         }
     }

@@ -101,8 +101,6 @@ namespace angara {
             case TokenType::CASE: return "CASE";
             case TokenType::FOREIGN: return "FOREIGN";
             case TokenType::INTRINSIC: return "INTRINSIC";
-            case TokenType::SIZEOF: return "SIZEOF";
-            case TokenType::RETYPE: return "RETYPE";
 
             // Type Keywords
             case TokenType::TYPE_STRING: return "TYPE_STRING";

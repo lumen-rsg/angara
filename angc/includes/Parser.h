@@ -126,6 +126,9 @@ namespace angara {
         /// @return The parsed data-declaration node.
         std::shared_ptr<Stmt> dataDeclaration();
 
+        /// Parses a `foreign data` declaration (C-compatible struct or opaque handle).
+        std::shared_ptr<Stmt> foreignDataDeclaration();
+
         /// Parses an `enum` declaration.
         /// @return The parsed enum-declaration node.
         std::shared_ptr<Stmt> enumDeclaration();

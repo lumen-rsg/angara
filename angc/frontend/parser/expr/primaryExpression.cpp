@@ -7,28 +7,6 @@ namespace angara {
             return std::make_shared<Literal>(previous());
         }
 
-        if (match({TokenType::RETYPE})) {
-            Token keyword = previous();
-            consume(TokenType::LESS, "Expected '<' after 'retype'.");
-            auto target_type = type();
-            consume(TokenType::GREATER, "Expected '>' after target type in 'retype<T>'.");
-            consume(TokenType::LEFT_PAREN, "Expected '(' after 'retype<T>'.");
-            auto expr = expression();
-            consume(TokenType::RIGHT_PAREN, "Expected ')' to close 'retype<T>(expr)'.");
-            return std::make_shared<RetypeExpr>(keyword, target_type, expr);
-        }
-
-        if (match({TokenType::SIZEOF})) {
-            Token keyword = previous();
-            consume(TokenType::LESS, "Expected '<' after 'sizeof'.");
-            auto type_arg = type();
-            consume(TokenType::GREATER, "Expected '>' after type argument in 'sizeof<T>'.");
-            consume(TokenType::LEFT_PAREN, "Expected '()' after 'sizeof<T>'.");
-            consume(TokenType::RIGHT_PAREN, "Expected ')' to close 'sizeof<T>()'.");
-            return std::make_shared<SizeofExpr>(keyword, type_arg);
-        }
-
-
         if (match({TokenType::THIS})) {
             return std::make_shared<ThisExpr>(previous());
         }

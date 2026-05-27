@@ -83,7 +83,6 @@ namespace angara {
         llvm::Value* cgTernary(const TernaryExpr& e);
         llvm::Value* cgIs(const IsExpr& e);
         llvm::Value* cgMatch(const MatchExpr& e);
-        llvm::Value* cgRetype(const RetypeExpr& e);
         llvm::Value* cgLambda(const LambdaExpr& e);
 
         /// Calls a closure AngaraObject with the given arguments.
@@ -112,7 +111,17 @@ namespace angara {
         void codegenForeignFuncDecl(const FuncStmt& stmt);
         void codegenClassDecl(const ClassStmt& stmt);
         void codegenDataDecl(const DataStmt& stmt);
+        void codegenForeignDataDecl(const DataStmt& stmt);
         void codegenEnumDecl(const EnumStmt& stmt);
+
+        /// Resolves a semantic type to its C-compatible LLVM type for FFI.
+        llvm::Type* resolveCFieldType(const std::shared_ptr<Type>& type);
+        /// Converts a raw C value to an AngaraObject.
+        llvm::Value* marshalCToAngara(llvm::Value* c_val, const std::shared_ptr<Type>& type);
+        /// Extracts a raw C value from an AngaraObject.
+        llvm::Value* marshalAngaraToC(llvm::Value* obj, const std::shared_ptr<Type>& type);
+        /// Generates code for accessing a field on a foreign data struct.
+        llvm::Value* cgForeignFieldAccess(const GetExpr& e, std::shared_ptr<DataType> data_type);
 
         /// Declares external wrappers for native module exports.
         void codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stmt>>& statements);
@@ -194,6 +203,12 @@ namespace angara {
         std::map<std::string, std::string> constructorLookup;
         std::map<std::string, std::string> methodLookup;
         std::string m_current_superclass;
+
+        // Foreign data: maps data name -> LLVM struct type and semantic DataType
+        std::map<std::string, llvm::StructType*> m_foreign_struct_types;
+        std::map<std::string, std::shared_ptr<DataType>> m_foreign_data_types;
+        // Field names in declaration order (matching C struct layout)
+        std::map<std::string, std::vector<std::string>> m_foreign_field_order;
 
         bool m_freestanding = false;
         bool m_dump_ir = false;

@@ -59,6 +59,14 @@ namespace angara {
             } else {
                 base_type = std::make_shared<SimpleType>(type_name_token);
             }
+
+            // Check for fixed-size array: i8[256]
+            if (match({TokenType::LEFT_BRACKET})) {
+                Token size_token = consume(TokenType::NUMBER_INT, "Expected array size after '['.");
+                consume(TokenType::RIGHT_BRACKET, "Expected ']' after array size.");
+                int arr_size = std::stoi(size_token.lexeme);
+                base_type = std::make_shared<FixedArrayTypeExpr>(base_type, arr_size);
+            }
         }
         else {
             throw error(peek(), "Expected a type annotation (e.g., 'i64', 'string'), a function type ('function(A) -> B'), or a record type ('{ field: Type }').");

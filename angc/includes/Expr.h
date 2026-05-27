@@ -35,8 +35,6 @@ namespace angara {
     struct SuperExpr;
     struct IsExpr;
     struct MatchExpr;
-    struct SizeofExpr;
-    struct RetypeExpr;
     struct LambdaExpr;
 
     // The Visitor interface for expressions
@@ -62,8 +60,6 @@ namespace angara {
         virtual std::any visit(const SuperExpr &expr) = 0;
         virtual std::any visit(const IsExpr &expr) = 0;
         virtual std::any visit(const MatchExpr& expr) = 0;
-        virtual std::any visit(const SizeofExpr& expr) = 0;
-        virtual std::any visit(const RetypeExpr& expr) = 0;
         virtual std::any visit(const LambdaExpr& expr) = 0;
 
     };
@@ -296,33 +292,6 @@ namespace angara {
                 : keyword(std::move(keyword)),
                   condition(std::move(condition)),
                   cases(std::move(cases)) {}
-
-        std::any accept(ExprVisitor& visitor) const override {
-            return visitor.visit(*this);
-        }
-    };
-
-    struct SizeofExpr : Expr {
-        const Token keyword; // The 'sizeof' token for location info
-        const std::shared_ptr<ASTType> type_arg; // The type inside <...>
-
-        SizeofExpr(Token keyword, std::shared_ptr<ASTType> type_arg)
-            : keyword(std::move(keyword)), type_arg(std::move(type_arg)) {}
-
-        std::any accept(ExprVisitor& visitor) const override {
-            return visitor.visit(*this);
-        }
-    };
-
-    struct RetypeExpr : Expr {
-        const Token keyword; // The 'retype' token
-        const std::shared_ptr<ASTType> target_type; // The type in <...>
-        const std::shared_ptr<Expr> expression; // The c_ptr expression in (...)
-
-        RetypeExpr(Token keyword, std::shared_ptr<ASTType> target, std::shared_ptr<Expr> expr)
-            : keyword(std::move(keyword)),
-              target_type(std::move(target)),
-              expression(std::move(expr)) {}
 
         std::any accept(ExprVisitor& visitor) const override {
             return visitor.visit(*this);

@@ -68,9 +68,6 @@ namespace angara {
         /// Returns the set of native symbols used from imported modules.
         [[nodiscard]] const std::set<UsedNativeSymbol>& getUsedNativeSymbols() const { return m_used_native_symbols; }
 
-        /// Returns the map of sizeof expressions to their resolved inner types.
-        [[nodiscard]] const std::map<const SizeofExpr*, std::shared_ptr<Type>>& getSizeofResolutions() const { return m_sizeof_resolutions; }
-
         /// Returns true if the checker is currently inside an @unsafe block.
         [[nodiscard]] bool isInUnsafeContext() const { return m_is_in_unsafe_context; }
 
@@ -94,8 +91,6 @@ namespace angara {
         std::any visit(const ThisExpr &expr) override;
         std::any visit(const SuperExpr &expr) override;
         std::any visit(const MatchExpr& expr) override;
-        std::any visit(const SizeofExpr& expr) override;
-        std::any visit(const RetypeExpr& expr) override;
         std::any visit(const LambdaExpr& expr) override;
         std::any visit(const IsExpr &expr) override;
 
@@ -117,7 +112,6 @@ namespace angara {
         void visit(std::shared_ptr<const TraitStmt> stmt) override;
         void visit(std::shared_ptr<const ExpressionStmt> stmt) override;
         void visit(std::shared_ptr<const BlockStmt> stmt) override;
-        void visit(std::shared_ptr<const ForeignHeaderStmt> stmt) override;
         void visit(std::shared_ptr<const EnumStmt> stmt) override;
         void visit(std::shared_ptr<const DataStmt> stmt) override;
         void visit(std::shared_ptr<const BreakStmt> stmt) override;
@@ -211,7 +205,6 @@ namespace angara {
         std::shared_ptr<Type> m_type_thread;
         std::shared_ptr<Type> m_type_mutex;
         std::shared_ptr<Type> m_type_exception;
-        std::shared_ptr<Type> m_type_c_ptr;
         CompilerDriver& m_driver;
         std::shared_ptr<ModuleType> m_module_type;
         std::stack<std::shared_ptr<Type>> m_function_return_types;
@@ -227,7 +220,6 @@ namespace angara {
         std::map<const VarExpr*, std::shared_ptr<Symbol>> m_variable_resolutions;
         std::map<const AttachStmt*, std::shared_ptr<ModuleType>> m_module_resolutions;
         std::set<UsedNativeSymbol> m_used_native_symbols;
-        std::map<const SizeofExpr*, std::shared_ptr<Type>> m_sizeof_resolutions;
         bool m_is_in_unsafe_context = false;
     };
 

@@ -46,8 +46,6 @@ namespace angara {
             {"foreign",   TokenType::FOREIGN},
             {"function",  TokenType::TYPE_FUNCTION},
             {"intrinsic", TokenType::INTRINSIC},
-            {"sizeof",   TokenType::SIZEOF},
-            {"retype",   TokenType::RETYPE},
     };
 
     Lexer::Lexer(std::string source, std::shared_ptr<std::string> filename, ErrorHandler& errorHandler)

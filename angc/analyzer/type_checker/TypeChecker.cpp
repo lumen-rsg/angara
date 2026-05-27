@@ -53,7 +53,6 @@ namespace angara {
         m_type_mutex = std::make_shared<MutexType>();
         m_module_type = std::make_shared<ModuleType>(module_name);
         m_type_exception = std::make_shared<ExceptionType>();
-        m_type_c_ptr = std::make_shared<CPtrType>();
 
 
         const auto len_type = std::make_shared<FunctionType>(
@@ -294,7 +293,6 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         if (name == "nil") return m_type_nil;
         if (name == "any") return m_type_any;
         if (name == "Thread") return m_type_thread;
-        if (name == "c_ptr") return m_type_c_ptr;
         if (name == "Exception") return m_type_exception;
         if (name == "Mutex") return m_type_mutex;
 
@@ -423,6 +421,12 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         }
         auto return_type = resolveType(func_type_expr->return_type);
         return std::make_shared<FunctionType>(param_types, return_type);
+    }
+
+    if (auto fixed_arr = std::dynamic_pointer_cast<const FixedArrayTypeExpr>(ast_type)) {
+        auto elem_type = resolveType(fixed_arr->element_type);
+        if (elem_type->kind == TypeKind::ERROR) return m_type_error;
+        return std::make_shared<FixedArrayType>(elem_type, fixed_arr->size);
     }
 
     return m_type_error;

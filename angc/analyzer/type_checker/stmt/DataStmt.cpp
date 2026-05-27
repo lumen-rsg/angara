@@ -24,6 +24,7 @@ namespace angara {
         if (stmt.is_foreign) {
             Token dummy_token;
             data_type->is_foreign = true;
+            data_type->is_opaque = stmt.is_opaque;
             for (const auto& field_decl : stmt.fields) {
                 if (data_type->fields.count(field_decl->name.lexeme)) {
                     error(field_decl->name, "Duplicate field '" + field_decl->name.lexeme + "' in foreign data block '" + stmt.name.lexeme + "'.");
@@ -32,6 +33,10 @@ namespace angara {
                 auto field_type = resolveType(field_decl->typeAnnotation);
                 data_type->fields[field_decl->name.lexeme] = {field_type, AccessLevel::PUBLIC, dummy_token, false};
             }
+            // Foreign data types get a zero-arg constructor: utsname() -> allocate zeroed C struct
+            data_type->constructor_type = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{}, data_type
+            );
             m_active_type_params = saved_type_params;
             return;
         }

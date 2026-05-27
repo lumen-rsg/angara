@@ -23,12 +23,6 @@ namespace angara {
             }
 
             if (match({TokenType::FOREIGN})) {
-                if (peek().type == TokenType::STRING) {
-                    Token header_token = advance();
-                    consume(TokenType::SEMICOLON, "Expected ';' after foreign header declaration.");
-                    return std::make_shared<ForeignHeaderStmt>(header_token);
-                }
-
                 if (match({TokenType::FUNC})) {
                     auto func_decl = std::static_pointer_cast<FuncStmt>(function("function"));
                     if (func_decl->body) {
@@ -39,15 +33,14 @@ namespace angara {
                 }
 
                 if (match({TokenType::DATA})) {
-                    auto data_decl = std::static_pointer_cast<DataStmt>(dataDeclaration());
-                    data_decl->is_foreign = true;
+                    auto data_decl = std::static_pointer_cast<DataStmt>(foreignDataDeclaration());
                     if (data_decl->is_exported) {
                         throw error(data_decl->name, "A 'foreign data' declaration is an import and cannot be marked 'export'.");
                     }
                     return data_decl;
                 }
 
-                throw error(peek(), "Expected 'func', 'data', or a header string (e.g., \"libc.h\") after 'foreign'.");
+                throw error(peek(), "Expected 'func' or 'data' after 'foreign'.");
             }
 
             std::shared_ptr<Stmt> decl_stmt = nullptr;

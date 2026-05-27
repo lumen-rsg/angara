@@ -28,7 +28,30 @@ void LLVMBackend::cgStmt(const std::shared_ptr<Stmt>& s) {
 }
 
 void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
-    auto* v = s.initializer ? cg(s.initializer) : makeNil();
+    llvm::Value* v = nullptr;
+
+    if (s.initializer) {
+        v = cg(s.initializer);
+    } else if (s.typeAnnotation) {
+        // Check if this is a foreign data type that needs default construction
+        auto type_it = m_type_checker.getVariableTypes().find(&s);
+        if (type_it != m_type_checker.getVariableTypes().end() &&
+            type_it->second->kind == TypeKind::DATA) {
+            auto dt = std::dynamic_pointer_cast<DataType>(type_it->second);
+            if (dt && dt->is_foreign) {
+                auto ctor_it = constructorLookup.find(dt->name);
+                if (ctor_it != constructorLookup.end()) {
+                    auto* ctor_fn = mod->getFunction(ctor_it->second);
+                    if (ctor_fn) {
+                        v = builder->CreateCall(ctor_fn, {});
+                    }
+                }
+            }
+        }
+        if (!v) v = makeNil();
+    } else {
+        v = makeNil();
+    }
 
     auto type_it = m_type_checker.getVariableTypes().find(&s);
     auto var_type = (type_it != m_type_checker.getVariableTypes().end()) ? type_it->second : nullptr;

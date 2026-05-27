@@ -82,8 +82,6 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
     if (auto* p = dynamic_cast<const SuperExpr*>(e.get())) return makeNil();
     if (auto* p = dynamic_cast<const IsExpr*>(e.get())) return cgIs(*p);
     if (auto* p = dynamic_cast<const MatchExpr*>(e.get())) return cgMatch(*p);
-    if (auto* p = dynamic_cast<const SizeofExpr*>(e.get())) return makeI64((int64_t)16);
-    if (auto* p = dynamic_cast<const RetypeExpr*>(e.get())) return cgRetype(*p);
     if (auto* p = dynamic_cast<const LambdaExpr*>(e.get())) return cgLambda(*p);
     return makeNil();
 }
@@ -855,6 +853,16 @@ llvm::Value* LLVMBackend::cgGet(const GetExpr& e) {
     if (e.name.lexeme == "message") {
         return callRtByName("__ang_exception_get_message", {obj});
     }
+
+    // Check if the object is a foreign data type — use GEP-based field access
+    auto type_it = m_type_checker.getExpressionTypes().find(e.object.get());
+    if (type_it != m_type_checker.getExpressionTypes().end() && type_it->second->kind == TypeKind::DATA) {
+        auto dt = std::dynamic_pointer_cast<DataType>(type_it->second);
+        if (dt && dt->is_foreign && !dt->is_opaque) {
+            return cgForeignFieldAccess(e, dt);
+        }
+    }
+
     return callRtByName("__ang_record_get", {obj, builder->CreateGlobalString(e.name.lexeme)});
 }
 
@@ -988,7 +996,6 @@ llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {
     return phi;
 }
 
-llvm::Value* LLVMBackend::cgRetype(const RetypeExpr& e) { return cg(e.expression); }
 
 llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     std::string lambda_fn_name = "__ang_lambda_" + std::to_string(m_lambda_counter++);

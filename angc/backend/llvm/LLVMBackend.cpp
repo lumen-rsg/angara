@@ -207,4 +207,168 @@ llvm::Value* LLVMBackend::truncateForType(llvm::Value* val, const std::shared_pt
     return makeI64(masked);
 }
 
+llvm::Type* LLVMBackend::resolveCFieldType(const std::shared_ptr<Type>& type) {
+    if (!type) return llvm::Type::getInt64Ty(*ctx);
+
+    if (type->kind == TypeKind::PRIMITIVE) {
+        const auto& n = type->toString();
+        if (n == "bool")   return llvm::Type::getInt1Ty(*ctx);
+        if (n == "i8"  || n == "u8")  return llvm::Type::getInt8Ty(*ctx);
+        if (n == "i16" || n == "u16") return llvm::Type::getInt16Ty(*ctx);
+        if (n == "i32" || n == "u32") return llvm::Type::getInt32Ty(*ctx);
+        if (n == "i64" || n == "u64") return llvm::Type::getInt64Ty(*ctx);
+        if (n == "f32")    return llvm::Type::getFloatTy(*ctx);
+        if (n == "f64")    return llvm::Type::getDoubleTy(*ctx);
+        if (n == "string") return llvm::PointerType::get(*ctx, 0);  // char*
+    }
+    if (type->kind == TypeKind::FIXED_ARRAY) {
+        auto arr = std::dynamic_pointer_cast<FixedArrayType>(type);
+        return llvm::ArrayType::get(resolveCFieldType(arr->element_type), arr->size);
+    }
+    if (type->kind == TypeKind::DATA) {
+        // Foreign data struct pointer
+        return llvm::PointerType::get(*ctx, 0);
+    }
+    return llvm::Type::getInt64Ty(*ctx);
+}
+
+llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_ptr<Type>& type) {
+    if (!type) return getI64(obj);
+
+    if (type->kind == TypeKind::PRIMITIVE) {
+        const auto& n = type->toString();
+        if (n == "bool")   return getBool(obj);
+        if (n == "string") {
+            // Extract char* from AngaraString: payload -> AngaraString* -> GEP(field 2) -> load char*
+            auto* str_ptr = builder->CreateIntToPtr(getI64(obj), llvm::PointerType::get(*ctx, 0));
+            auto* string_type = rt->getStringType();
+            auto* chars_ptr = builder->CreateStructGEP(string_type, str_ptr, 2);
+            return builder->CreateLoad(llvm::PointerType::get(*ctx, 0), chars_ptr);
+        }
+        auto* cty = resolveCFieldType(type);
+        if (n == "f64")    return getF64(obj);
+        if (n == "f32")    return builder->CreateFPTrunc(getF64(obj), llvm::Type::getFloatTy(*ctx));
+        // Integer types: extract i64 then truncate
+        if (cty->getIntegerBitWidth() < 64) {
+            return builder->CreateTrunc(getI64(obj), cty);
+        }
+        return getI64(obj);
+    }
+    if (type->kind == TypeKind::DATA) {
+        auto dt = std::dynamic_pointer_cast<DataType>(type);
+        if (dt && dt->is_foreign) {
+            // Extract data pointer from NativeInstance
+            auto* data_ptr = callRtByName("__ang_api_native_instance_data", {obj});
+            if (!dt->is_opaque) {
+                // Bitcast to the struct pointer type
+                auto it = m_foreign_struct_types.find(dt->name);
+                if (it != m_foreign_struct_types.end()) {
+                    return builder->CreateBitCast(data_ptr, llvm::PointerType::get(it->second, 0));
+                }
+            }
+            return data_ptr; // opaque: return void*
+        }
+    }
+
+    return getI64(obj);
+}
+
+llvm::Value* LLVMBackend::marshalCToAngara(llvm::Value* c_val, const std::shared_ptr<Type>& type) {
+    if (!type) return makeI64(c_val);
+
+    if (type->kind == TypeKind::PRIMITIVE) {
+        const auto& n = type->toString();
+        if (n == "bool") return makeBool(c_val);
+        if (n == "f64")  return makeF64(c_val);
+        if (n == "f32")  return makeF64(builder->CreateFPExt(c_val, llvm::Type::getDoubleTy(*ctx)));
+        if (n == "string") return callRtByName("__ang_string_from_c", {c_val});
+        // Integer types: zext/sext to i64
+        auto* cty = resolveCFieldType(type);
+        if (cty->getIntegerBitWidth() < 64) {
+            return makeI64(builder->CreateZExt(c_val, llvm::Type::getInt64Ty(*ctx)));
+        }
+        return makeI64(c_val);
+    }
+    if (type->kind == TypeKind::DATA) {
+        auto dt = std::dynamic_pointer_cast<DataType>(type);
+        if (dt && dt->is_foreign) {
+            // Wrap the C pointer in a NativeInstance; if NULL, return nil
+            auto* fn = builder->GetInsertBlock()->getParent();
+            auto* entry_bb = builder->GetInsertBlock();
+            auto* wrap_bb = llvm::BasicBlock::Create(*ctx, "ffi_wrap", fn);
+            auto* merge_bb = llvm::BasicBlock::Create(*ctx, "ffi_merge", fn);
+
+            auto* is_null = builder->CreateICmpEQ(c_val,
+                llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)));
+            builder->CreateCondBr(is_null, merge_bb, wrap_bb);
+
+            builder->SetInsertPoint(wrap_bb);
+            auto* name_str = builder->CreateGlobalString(dt->name);
+            auto* null_finalizer = llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
+            auto* native_obj = callRtByName("__ang_api_native_instance_new",
+                                             {c_val, null_finalizer, name_str});
+            auto* wrap_end_bb = builder->GetInsertBlock();
+            builder->CreateBr(merge_bb);
+
+            builder->SetInsertPoint(merge_bb);
+            auto* phi = builder->CreatePHI(objType, 2);
+            phi->addIncoming(makeNil(), entry_bb);
+            phi->addIncoming(native_obj, wrap_end_bb);
+            return phi;
+        }
+    }
+
+    return makeI64(c_val);
+}
+
+llvm::Value* LLVMBackend::cgForeignFieldAccess(const GetExpr& e, std::shared_ptr<DataType> data_type) {
+    auto* obj = cg(e.object);
+
+    // Extract the raw data pointer from the NativeInstance
+    auto* data_ptr = callRtByName("__ang_api_native_instance_data", {obj});
+
+    // Get the LLVM struct type for this foreign data
+    auto it = m_foreign_struct_types.find(data_type->name);
+    if (it == m_foreign_struct_types.end()) return makeNil();
+
+    auto* struct_type = it->second;
+    auto* struct_ptr = builder->CreateBitCast(data_ptr, llvm::PointerType::get(*ctx, 0));
+
+    // Find the field index using declaration order (matching C struct layout)
+    auto order_it = m_foreign_field_order.find(data_type->name);
+    if (order_it == m_foreign_field_order.end()) return makeNil();
+
+    unsigned field_index = 0;
+    bool found = false;
+    for (const auto& fname : order_it->second) {
+        if (fname == e.name.lexeme) { found = true; break; }
+        field_index++;
+    }
+    if (!found) return makeNil();
+
+    // GEP to get a pointer to the field
+    auto* field_ptr = builder->CreateStructGEP(struct_type, struct_ptr, field_index);
+
+    // Determine the field type and load + marshal
+    auto field_it = data_type->fields.find(e.name.lexeme);
+    if (field_it == data_type->fields.end()) return makeNil();
+    auto& field_type = field_it->second.type;
+
+    if (field_type->kind == TypeKind::FIXED_ARRAY) {
+        // i8[N] field: get pointer to first element and create Angara string from it
+        auto arr_type = std::dynamic_pointer_cast<FixedArrayType>(field_type);
+        auto* llvm_arr_type = llvm::ArrayType::get(resolveCFieldType(arr_type->element_type), arr_type->size);
+        // GEP: field_ptr is a pointer to the array field; get pointer to first element
+        auto* elem_ptr = builder->CreateGEP(llvm_arr_type, field_ptr,
+            {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
+             llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
+        auto* char_ptr = builder->CreateBitCast(elem_ptr, llvm::PointerType::get(*ctx, 0));
+        return callRtByName("__ang_string_from_c", {char_ptr});
+    }
+
+    // Load the raw C value
+    auto* c_val = builder->CreateLoad(resolveCFieldType(field_type), field_ptr);
+    return marshalCToAngara(c_val, field_type);
+}
+
 } // namespace angara

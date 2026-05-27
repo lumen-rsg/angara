@@ -75,8 +75,6 @@ namespace angara {
         std::any visit(const SuperExpr& expr) override;
         std::any visit(const IsExpr& expr) override;
         std::any visit(const MatchExpr& expr) override;
-        std::any visit(const SizeofExpr& expr) override;
-        std::any visit(const RetypeExpr& expr) override;
         std::any visit(const LambdaExpr& expr) override;
 
         // --- Statement visitors ---
@@ -101,7 +99,6 @@ namespace angara {
         void visit(std::shared_ptr<const ContinueStmt> stmt) override;
         void visit(std::shared_ptr<const DataStmt> stmt) override;
         void visit(std::shared_ptr<const EnumStmt> stmt) override;
-        void visit(std::shared_ptr<const ForeignHeaderStmt> stmt) override;
         void visit(std::shared_ptr<const UnsafeBlockStmt> stmt) override;
     };
 

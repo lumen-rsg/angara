@@ -248,17 +248,6 @@ namespace angara {
         return {};
     }
 
-    std::any ASTPrinter::visit(const SizeofExpr& expr) {
-        printHeader("SizeofExpr");
-        return {};
-    }
-
-    std::any ASTPrinter::visit(const RetypeExpr& expr) {
-        printHeader("RetypeExpr");
-        printChild("expr", expr.expression, true);
-        return {};
-    }
-
     void ASTPrinter::visit(std::shared_ptr<const ExpressionStmt> stmt) {
         printHeader("ExpressionStmt");
         printChild("", stmt->expression, true);
@@ -401,10 +390,6 @@ namespace angara {
 
     void ASTPrinter::visit(std::shared_ptr<const EnumStmt> stmt) {
         printHeader("EnumStmt", stmt->name.lexeme);
-    }
-
-    void ASTPrinter::visit(std::shared_ptr<const ForeignHeaderStmt> stmt) {
-        printHeader("ForeignHeader", stmt->header.lexeme);
     }
 
     void ASTPrinter::visit(std::shared_ptr<const UnsafeBlockStmt> stmt) {
