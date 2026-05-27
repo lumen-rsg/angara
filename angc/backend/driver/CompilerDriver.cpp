@@ -376,7 +376,6 @@ namespace angara {
         }
 
         auto mod = typeChecker.getModuleType();
-        m_angara_module_names.push_back(module_name);
 
         if (m_check_only) {
             m_modules_compiled++;
@@ -392,6 +391,7 @@ namespace angara {
                 return nullptr;
             }
             m_generated_object_files.insert(llvmBackend.get_object_file_path());
+            m_angara_module_names.push_back(module_name);
         } catch (const std::exception& e) {
             std::cerr << "\n" << CLR_RED << "[ERROR] LLVM backend threw an exception while generating code for '" << path << "'.\n"
                       << "         " << e.what() << CLR_RESET << "\n";
