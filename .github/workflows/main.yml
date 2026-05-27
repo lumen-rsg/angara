@@ -8,25 +8,36 @@ on:
       - stable
 
 jobs:
-  build-and-release:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: angara-linux-x64
+            ext: so
+          - os: macos-latest
+            artifact: angara-macos-arm64
+            ext: dylib
 
-    permissions:
-      contents: write
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Install core dependencies (LLVM, curl, websockets, rabbitmq-c)
-      - name: Install System Dependencies
+      # ── Linux dependencies ──
+      - name: Install System Dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config git clang cmake \
-                                  llvm-dev libcurl4-openssl-dev libwebsockets-dev libssl-dev
+                                  llvm-dev libcurl4-openssl-dev libwebsockets-dev libssl-dev \
+                                  libmosquitto-dev libcjson-dev libarchive-dev zlib1g-dev \
+                                  libsqlite3-dev
 
-      # Build & Install rabbitmq-c v0.14.0 from source
-      - name: Install rabbitmq-c (v0.14.0)
+      # Build & Install rabbitmq-c v0.14.0 from source (Linux)
+      - name: Install rabbitmq-c v0.14.0 (Linux)
+        if: runner.os == 'Linux'
         run: |
           git clone --branch v0.14.0 https://github.com/alanxz/rabbitmq-c.git
           cd rabbitmq-c
@@ -35,45 +46,80 @@ jobs:
           cmake --build build -j$(nproc)
           sudo cmake --install build
 
-      # Build the Angara compiler (LLVM backend, self-contained, no C runtime)
+      # ── macOS dependencies ──
+      - name: Install System Dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm pkg-config curl websockets openssl mosquitto cjson libarchive sqlite3 glfw
+
+      # Build & Install rabbitmq-c v0.14.0 from source (macOS)
+      - name: Install rabbitmq-c v0.14.0 (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          git clone --branch v0.14.0 https://github.com/alanxz/rabbitmq-c.git
+          cd rabbitmq-c
+          cmake -B build -DCMAKE_INSTALL_PREFIX=/usr/local -DBUILD_SHARED_LIBS=ON \
+                         -DRABBITMQ_C_BUILD_TESTS=OFF -DRABBITMQ_C_BUILD_EXAMPLES=OFF
+          cmake --build build -j$(sysctl -n hw.ncpu)
+          sudo cmake --install build
+
+      # ── Build ──
       - name: Build Compiler
         env:
           CC: clang
           CXX: clang++
-        run: make -j$(nproc) all
+        run: make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu) all
 
-      # Build all native modules (io, fs, json, http, websocket, amqp, etc.)
       - name: Build Modules
         env:
           CC: clang
           CXX: clang++
-        run: make -j$(nproc) modules
+        run: make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu) modules
 
-      # Run language test suite (positive + negative tests)
-      - name: Run Tests
+      # ── Test ──
+      - name: Run C++ Unit Tests
+        run: make test-cpp
+
+      - name: Run Language Tests
         run: bash tests/lang/run_tests.sh
 
-      # Stage all release artifacts
+      # ── Stage artifacts ──
       - name: Stage Artifacts
         run: |
           mkdir -p release_artifacts/modules
-
-          # Main compiler executable
           cp build/angc release_artifacts/
+          cp build/modules/*.${{ matrix.ext }} release_artifacts/modules/ 2>/dev/null || true
 
-          # All native module shared libraries
-          cp build/modules/*.so release_artifacts/modules/
-
-      # Archive the staged artifacts
       - name: Archive Release
-        run: tar -czvf angara-linux-x64.tar.gz -C release_artifacts .
+        run: tar -czvf ${{ matrix.artifact }}.tar.gz -C release_artifacts .
 
-      # Generate a date-based tag
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: angara-linux-x64
+
+      - name: Download macOS Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: angara-macos-arm64
+
       - name: Generate Release Tag
-        id: generate_tag
         run: echo "TAG_NAME=v$(date +'%Y.%m.%d')-${{ github.sha }}" >> $GITHUB_ENV
 
-      # Create GitHub Release with the tarball
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -84,9 +130,15 @@ jobs:
 
             **Includes:**
             - `angc` — Angara compiler (LLVM backend, self-contained)
-            - `modules/*.so` — 12 native modules (io, fs, os, path, time, uuid, assert, adv_string, json, http, websocket, amqp)
+            - `modules/` — Native modules (io, fs, os, path, time, json, http, websocket, amqp, mqtt, and more)
+
+            **Platforms:**
+            - `angara-linux-x64.tar.gz` — Linux x86_64
+            - `angara-macos-arm64.tar.gz` — macOS Apple Silicon
 
             This is an unstable development build.
           draft: false
           prerelease: true
-          files: angara-linux-x64.tar.gz
+          files: |
+            angara-linux-x64.tar.gz
+            angara-macos-arm64.tar.gz

@@ -85,7 +85,7 @@ ANGC_SRCS := $(shell find angc -name "*.cpp")
 ANGC_OBJS := $(patsubst %.cpp,build/obj/%.o,$(ANGC_SRCS))
 ANGC_OUT  := build/angc
 
-.PHONY: all logo clean install install_vim uninstall_vim
+.PHONY: all logo clean install install_vim uninstall_vim test-cpp
 
 all: logo $(ANGC_OUT)
 	@printf "$(BOLD)$(GREEN)>>> Build Completed Successfully <<<$(RESET)\n"
@@ -405,6 +405,19 @@ else
 	@printf "$(YELLOW)Usage: make uninstall_vim VIM_EDITOR=vim|nvim$(RESET)\n"
 	@exit 1
 endif
+
+# C++ unit tests for compiler components (lexer, parser, type checker)
+TEST_CPP_SRCS := $(shell find tests/cpp -name "*.cpp")
+TEST_CPP_OUT  := build/test-runner
+
+test-cpp: $(ANGC_OBJS) $(TEST_CPP_SRCS)
+	@mkdir -p $(@D)
+	@printf "$(CYAN)[TS] $(RESET) Building C++ test runner\n"
+	@$(CXX) $(CXXFLAGS) $(LLVM_CXXFLAGS) -Iangc/includes \
+		$(filter-out build/obj/angc/src/main.o,$(ANGC_OBJS)) \
+		$(TEST_CPP_SRCS) $(LDFLAGS_BIN) -o $(TEST_CPP_OUT)
+	@printf "$(CYAN)[TS] $(RESET) Running C++ unit tests\n"
+	@./$(TEST_CPP_OUT)
 
 clean:
 	@printf "$(RED)[CL] $(RESET) Cleaning build directory...\n"
