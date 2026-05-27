@@ -3,13 +3,14 @@ namespace angara {
 
     bool Parser::isSelectiveAttach() {
         int current = m_current;
-        while (m_tokens[current].type != TokenType::SEMICOLON &&
+        while (current < static_cast<int>(m_tokens.size()) &&
+               m_tokens[current].type != TokenType::SEMICOLON &&
                m_tokens[current].type != TokenType::EOF_TOKEN) {
             if (m_tokens[current].type == TokenType::FROM) {
                 return true;
             }
             current++;
-               }
+        }
         return false;
     }
 
