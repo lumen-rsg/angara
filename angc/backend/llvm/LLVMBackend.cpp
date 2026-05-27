@@ -226,7 +226,15 @@ llvm::Type* LLVMBackend::resolveCFieldType(const std::shared_ptr<Type>& type) {
         return llvm::ArrayType::get(resolveCFieldType(arr->element_type), arr->size);
     }
     if (type->kind == TypeKind::DATA) {
-        // Foreign data struct pointer
+        auto dt = std::dynamic_pointer_cast<DataType>(type);
+        if (dt && dt->is_foreign && !dt->is_opaque) {
+            // Inline struct type (for struct fields embedded by value)
+            auto it = m_foreign_struct_types.find(dt->name);
+            if (it != m_foreign_struct_types.end()) {
+                return it->second;
+            }
+        }
+        // Opaque or unresolved: void pointer
         return llvm::PointerType::get(*ctx, 0);
     }
     return llvm::Type::getInt64Ty(*ctx);
@@ -364,6 +372,18 @@ llvm::Value* LLVMBackend::cgForeignFieldAccess(const GetExpr& e, std::shared_ptr
              llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
         auto* char_ptr = builder->CreateBitCast(elem_ptr, llvm::PointerType::get(*ctx, 0));
         return callRtByName("__ang_string_from_c", {char_ptr});
+    }
+
+    if (field_type->kind == TypeKind::DATA) {
+        // Nested foreign struct: wrap the embedded struct pointer in a NativeInstance
+        auto nested_dt = std::dynamic_pointer_cast<DataType>(field_type);
+        if (nested_dt && nested_dt->is_foreign && !nested_dt->is_opaque) {
+            auto* field_void_ptr = builder->CreateBitCast(field_ptr, llvm::PointerType::get(*ctx, 0));
+            auto* name_str = builder->CreateGlobalString(nested_dt->name);
+            auto* null_finalizer = llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
+            return callRtByName("__ang_api_native_instance_new",
+                {field_void_ptr, null_finalizer, name_str});
+        }
     }
 
     // Load the raw C value
