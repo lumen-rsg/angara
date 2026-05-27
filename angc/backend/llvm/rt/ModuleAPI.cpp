@@ -21,7 +21,7 @@ void RuntimeBuilder::generateModuleAPIVTable() {
     auto* strlen_fn = m_module.getFunction("strlen");
 
     auto mkExt = [&](const std::string& name, FunctionType* type) -> Function* {
-        auto* fn = Function::Create(type, Function::ExternalLinkage, name, m_module);
+        auto* fn = Function::Create(type, Function::InternalLinkage, name, m_module);
         fn->setDSOLocal(true);
         return fn;
     };
