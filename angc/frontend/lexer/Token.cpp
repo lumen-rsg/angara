@@ -2,6 +2,7 @@
 // Created by cv2 on 8/27/25.
 //
 #include "Token.h"
+#include <iostream>
 namespace angara {
 
     std::string to_string(const TokenType &type) {
@@ -136,5 +137,16 @@ namespace angara {
 
     Token::Token() {
 
+    }
+
+    void Token::print() const {
+        std::cout << "Token(" << to_string(type)
+                  << ", Lexeme: '" << lexeme
+                  << "', Line: " << line
+                  << ", Col: " << column;
+        if (file) {
+            std::cout << ", File: " << *file;
+        }
+        std::cout << ")\n";
     }
 }

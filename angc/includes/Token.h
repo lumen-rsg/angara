@@ -1,8 +1,8 @@
 #pragma once
 
 #include <string>
-#include <iostream>
 #include <memory>
+#include <iosfwd>
 
 namespace angara {
 
@@ -75,16 +75,7 @@ namespace angara {
         Token(TokenType type, std::string lexeme, int line, int column, std::shared_ptr<std::string> file = nullptr)
                 : type(type), lexeme(std::move(lexeme)), line(line), column(column), file(std::move(file)) {}
 
-        void print() const {
-            std::cout << "Token(" << to_string(type)
-                      << ", Lexeme: '" << lexeme
-                      << "', Line: " << line
-                      << ", Col: " << column;
-            if (file) {
-                std::cout << ", File: " << *file;
-            }
-            std::cout << ")\n";
-        }
+        void print() const;
     };
 
 }
