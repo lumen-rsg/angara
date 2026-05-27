@@ -19,10 +19,10 @@ void json_bridge_free_string(char* str) {
 
 
 JsonHandle json_bridge_parse(const char* json_string, char** error_message) {
-    *error_message = nullptr;
+    if (error_message) *error_message = nullptr;
 
     if (json_string == nullptr) {
-        *error_message = strdup("Error: Cannot parse a null JSON string.");
+        if (error_message) *error_message = strdup("Error: Cannot parse a null JSON string.");
         return nullptr;
     }
 
@@ -36,16 +36,16 @@ JsonHandle json_bridge_parse(const char* json_string, char** error_message) {
         std::stringstream ss;
         ss << "JSON Parse Error: " << what_str;
 
-        *error_message = strdup(ss.str().c_str());
+        if (error_message) *error_message = strdup(ss.str().c_str());
         return nullptr;
     }
     catch (const std::exception& e) {
         std::string what_str = e.what();
-        *error_message = strdup(("Caught C++ exception: " + what_str).c_str());
+        if (error_message) *error_message = strdup(("Caught C++ exception: " + what_str).c_str());
         return nullptr;
     }
     catch (...) {
-        *error_message = strdup("An unknown, non-standard C++ exception occurred during JSON parsing.");
+        if (error_message) *error_message = strdup("An unknown, non-standard C++ exception occurred during JSON parsing.");
         return nullptr;
     }
 }
@@ -56,22 +56,23 @@ void json_bridge_free(JsonHandle handle) {
     }
 }
 
-int json_bridge_is_object(JsonHandle h) { return static_cast<json*>(h)->is_object(); }
-int json_bridge_is_array(JsonHandle h) { return static_cast<json*>(h)->is_array(); }
-int json_bridge_is_string(JsonHandle h) { return static_cast<json*>(h)->is_string(); }
-int json_bridge_is_number(JsonHandle h) { return static_cast<json*>(h)->is_number(); }
-int json_bridge_is_boolean(JsonHandle h) { return static_cast<json*>(h)->is_boolean(); }
-int json_bridge_is_null(JsonHandle h) { return static_cast<json*>(h)->is_null(); }
+int json_bridge_is_object(JsonHandle h) { return h ? static_cast<json*>(h)->is_object() : 0; }
+int json_bridge_is_array(JsonHandle h) { return h ? static_cast<json*>(h)->is_array() : 0; }
+int json_bridge_is_string(JsonHandle h) { return h ? static_cast<json*>(h)->is_string() : 0; }
+int json_bridge_is_number(JsonHandle h) { return h ? static_cast<json*>(h)->is_number() : 0; }
+int json_bridge_is_boolean(JsonHandle h) { return h ? static_cast<json*>(h)->is_boolean() : 0; }
+int json_bridge_is_null(JsonHandle h) { return h ? static_cast<json*>(h)->is_null() : 0; }
 
 const char* json_bridge_get_string(JsonHandle h) {
+    if (!h) return strdup("");
     std::string s = static_cast<json*>(h)->get<std::string>();
     return strdup(s.c_str());
 }
-double json_bridge_get_number(JsonHandle h) { return static_cast<json*>(h)->get<double>(); }
-int json_bridge_get_boolean(JsonHandle h) { return static_cast<json*>(h)->get<bool>(); }
+double json_bridge_get_number(JsonHandle h) { return h ? static_cast<json*>(h)->get<double>() : 0.0; }
+int json_bridge_get_boolean(JsonHandle h) { return h ? static_cast<json*>(h)->get<bool>() : 0; }
 
 size_t json_bridge_array_size(JsonHandle h) {
-    return static_cast<json*>(h)->size();
+    return h ? static_cast<json*>(h)->size() : 0;
 }
 JsonHandle json_bridge_array_get_element(JsonHandle h, size_t index) {
     json* j = static_cast<json*>(h);
