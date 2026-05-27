@@ -271,9 +271,11 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
             if (n == "i16")    return llvm::Type::getInt16Ty(*ctx);
             if (n == "i32")    return llvm::Type::getInt32Ty(*ctx);
             if (n == "i64")    return llvm::Type::getInt64Ty(*ctx);
+            if (n == "u64")    return llvm::Type::getInt64Ty(*ctx);
             if (n == "f32")    return llvm::Type::getFloatTy(*ctx);
             if (n == "f64")    return llvm::Type::getDoubleTy(*ctx);
             if (n == "string") return llvm::PointerType::get(*ctx, 0);
+            if (n == "c_ptr")  return llvm::PointerType::get(*ctx, 0);
         }
         return llvm::Type::getInt64Ty(*ctx);
     };
@@ -297,7 +299,10 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
 
     std::string cFuncName = stmt.name.lexeme;
     auto* cFnType = llvm::FunctionType::get(cRetType, cParamTypes, false);
-    auto* cFunc = llvm::Function::Create(cFnType, llvm::Function::ExternalLinkage, cFuncName, mod.get());
+    auto* cFunc = mod->getFunction(cFuncName);
+    if (!cFunc) {
+        cFunc = llvm::Function::Create(cFnType, llvm::Function::ExternalLinkage, cFuncName, mod.get());
+    }
 
     std::string wrapperName = mangle(moduleName, stmt.name.lexeme);
     std::vector<llvm::Type*> wrapperParamTypes(stmt.params.size(), objType);
@@ -334,6 +339,8 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
             cArgs.push_back(builder->CreateFPTrunc(getF64(&arg), llvm::Type::getFloatTy(*ctx)));
         } else if (typeName == "string") {
             cArgs.push_back(builder->CreateIntToPtr(getI64(&arg), llvm::PointerType::get(*ctx, 0)));
+        } else if (typeName == "c_ptr") {
+            cArgs.push_back(builder->CreateIntToPtr(getI64(&arg), llvm::PointerType::get(*ctx, 0)));
         } else {
             cArgs.push_back(getI64(&arg));
         }
@@ -358,6 +365,8 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
             builder->CreateRet(makeF64(builder->CreateFPExt(cResult, llvm::Type::getDoubleTy(*ctx))));
         } else if (retTypeName == "string") {
             builder->CreateRet(callRtByName("__ang_string_from_c", {cResult}));
+        } else if (retTypeName == "c_ptr") {
+            builder->CreateRet(makeI64(builder->CreatePtrToInt(cResult, llvm::Type::getInt64Ty(*ctx))));
         } else {
             builder->CreateRet(makeI64(cResult));
         }
