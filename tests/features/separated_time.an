@@ -3,7 +3,7 @@ attach time;
 attach io;
 
 // This function will be executed in the new thread.
-func sleepy_worker() -> void {
+func sleepy_worker() -> nil {
   io.println(1, "[WORKER] Worker thread has started.");
   io.println(1, "[WORKER] Now sleeping for 1.5 seconds...");
 

@@ -11,7 +11,7 @@ export class User signs Identifiable, Loggable {
     let name as string;
 
     // The constructor
-    func init(this, id_val as i64, name_val as string) -> void {
+    func init(this, id_val as i64, name_val as string) -> nil {
       this.id = id_val;
       this.name = name_val;
     }

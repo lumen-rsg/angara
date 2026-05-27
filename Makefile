@@ -229,90 +229,90 @@ build/obj/imgui/%.o: $(IMGUI_DIR)/%.cpp
 build/modules/http.$(SO_EXT): build/obj/modules/net/http.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< -shared $(CURL_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(CURL_LIBS) -o $@
 
 build/modules/websocket.$(SO_EXT): build/obj/modules/net/websocket.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< -shared $(LWS_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(LWS_LIBS) -o $@
 
 build/modules/time.$(SO_EXT): build/obj/modules/system/time.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 ifeq ($(UNAME_S),Darwin)
-	@$(CC) $< -shared -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
 else
-	@$(CC) $< -shared -lrt -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lrt -o $@
 endif
 
 build/modules/amqp.$(SO_EXT): build/obj/modules/net/amqp.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< -shared $(AMQP_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(AMQP_LIBS) -o $@
 
 build/modules/mqtt.$(SO_EXT): build/obj/modules/net/mqtt.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< -shared $(MQTT_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(MQTT_LIBS) -o $@
 
 build/modules/matter.$(SO_EXT): build/obj/modules/embedded/matter.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< -shared $(CURL_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(CURL_LIBS) -o $@
 
 build/modules/math.$(SO_EXT): build/obj/modules/math/math.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 ifeq ($(UNAME_S),Darwin)
-	@$(CC) $< -shared -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
 else
-	@$(CC) $< -shared -lm -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lm -o $@
 endif
 
 build/modules/sys.$(SO_EXT): build/obj/modules/system/sys.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 ifeq ($(UNAME_S),Darwin)
-	@$(CC) $< -shared -lproc -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lproc -o $@
 else
-	@$(CC) $< -shared -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
 endif
 
 build/modules/json.$(SO_EXT): build/obj/modules/data/json.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CXX) $^ -shared -o $@
+	@$(CXX) $^ -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
 
 build/modules/rpc.$(SO_EXT): build/obj/modules/net/rpc.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (RPC+JSON)\n" "$@"
-	@$(CXX) $^ -shared -o $@
+	@$(CXX) $^ -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
 
 build/modules/archive.$(SO_EXT): build/obj/modules/fs/archive.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (ARCHIVE+ZLIB)\n" "$@"
-	@$(CC) $< -shared $(ARCHIVE_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(ARCHIVE_LIBS) -o $@
 
 build/modules/sqlite.$(SO_EXT): build/obj/modules/data/sqlite.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (SQLITE3)\n" "$@"
-	@$(CC) $< -shared $(SQLITE_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(SQLITE_LIBS) -o $@
 
 build/modules/jwt.$(SO_EXT): build/obj/modules/crypto/jwt.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (JWT+JSON)\n" "$@"
-	@$(CXX) $^ -shared -o $@
+	@$(CXX) $^ -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
 
 build/modules/net.$(SO_EXT): build/obj/modules/net/net.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (NET)\n" "$@"
-	@$(CC) $< -shared -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
 
 build/modules/imgui.$(SO_EXT): build/obj/modules/gui/imgui.o $(IMGUI_OBJS)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (ImGui+GLFW+OpenGL)\n" "$@"
 	@$(CXX) -shared $^ $(GLFW_LIBS) $(IMGUI_FRAMEWORKS) \
-		$(SONAME_FLAG),libimgui.$(SO_EXT) \
+		$(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) \
 		-o $@
 
 build/modules/io.$(SO_EXT): build/obj/modules/io/io.o

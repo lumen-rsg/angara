@@ -1,15 +1,20 @@
-// Test LLVM backend with IO intrinsics
+// Test LLVM backend with functions and io module
 attach io;
 
-func main() {
-    io.println(1, "Hello from LLVM!");
-    io.println(1, "Testing arithmetic:");
-    let x = 3 + 4;
-    io.println(1, "3 + 4 = ");
-    io.println(1, x);
+func add(a as i64, b as i64) -> i64 {
+    return a + b;
+}
 
-    io.println(1, "Testing strings:");
-    let s = "world";
-    io.println(1, "Hello, ");
-    io.println(1, s);
+func factorial(n as i64) -> i64 {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+export func main() -> i64 {
+    io.println(1, "Hello from Angara LLVM backend!");
+    io.println(1, "42 + 8 = " + string(add(42, 8)));
+    io.println(1, "factorial(10) = " + string(factorial(10)));
+    return 0;
 }
