@@ -108,8 +108,6 @@ namespace angara {
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "Exception", 0, 0), exception_constructor_type, true);
 
-        m_module_type = std::make_shared<ModuleType>(module_name);
-
     }
 
     void TypeChecker::pushAndSave(const Expr* expr, const std::shared_ptr<Type>& type) {
