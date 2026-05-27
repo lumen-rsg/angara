@@ -1,9 +1,7 @@
 //
 // Created by cv2 on 9/20/25.
 //
-
-#ifndef ANGARA_STRINGUTILS_H
-#define ANGARA_STRINGUTILS_H
+#pragma once
 
 #include <string>
 
@@ -19,7 +17,3 @@ namespace angara {
     std::string shell_escape(const std::string& arg);
 
 } // namespace angara
-
-#endif // ANGARA_STRINGUTILS_H
-
-

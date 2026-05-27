@@ -19,9 +19,7 @@
 //   5. Use ANGARA_MODULE_INIT(name) to define your module entry point
 //
 // =============================================================================
-
-#ifndef ANGARA_H
-#define ANGARA_H
+#pragma once
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -247,5 +245,3 @@ static const AngaraAPI* ang_api;
 #ifdef __cplusplus
 }
 #endif
-
-#endif // ANGARA_H
