@@ -2,7 +2,7 @@
 
 #include <string>
 #include <memory>
-#include <iosfwd>
+#include <ostream>
 
 namespace angara {
 

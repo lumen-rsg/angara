@@ -124,8 +124,6 @@ namespace angara {
     }
 
     bool TypeChecker::isTruthy(const std::shared_ptr<Type>& type) {
-
-    bool TypeChecker::isTruthy(const std::shared_ptr<Type>& type) {
         if (type->kind == TypeKind::ERROR) {
             return false;
         }

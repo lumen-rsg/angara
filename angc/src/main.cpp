@@ -134,6 +134,7 @@ static std::string find_local_project_file() {
     } catch (...) {
         verbose("find_local_project_file: unknown exception");
     }
+    return "";
 }
 
 static bool is_an_file(const std::string& s) {
