@@ -47,6 +47,16 @@ namespace angara {
     }
 
     void ErrorHandler::warning(const Token &token, const std::string &message, const std::string &code) {
+        // Check if this warning is suppressed
+        if (m_suppress_all) return;
+        if (!code.empty() && m_suppressed_codes.count(code)) return;
+
+        // Promote to error if -Werror is set
+        if (m_warnings_as_errors) {
+            report(token, message, code);
+            return;
+        }
+
         m_hadWarning = true;
         m_warningCount++;
 

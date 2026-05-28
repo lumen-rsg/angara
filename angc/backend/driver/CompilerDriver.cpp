@@ -356,6 +356,10 @@ namespace angara {
         auto filename_ptr = std::make_shared<std::string>(path);
 
         ErrorHandler errorHandler(source);
+        errorHandler.set_warnings_as_errors(m_werror);
+        for (const auto& code : m_suppressed_warnings) {
+            errorHandler.suppress_warning(code);
+        }
 
         Lexer lexer(source, filename_ptr, errorHandler);
         auto tokens = lexer.scanTokens();

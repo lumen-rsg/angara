@@ -66,6 +66,11 @@ namespace angara {
         void set_debug(bool val) { m_debug = val; }
         bool is_debug() const { return m_debug; }
 
+        /// Configures warning control flags.
+        void set_warnings_as_errors(bool val) { m_werror = val; }
+        void set_wall(bool val) { m_wall = val; }
+        void suppress_warning(const std::string& code) { m_suppressed_warnings.insert(code); }
+
         /// Compiles a root source file and all its transitive imports.
         /// Runs Lex -> Parse -> TypeCheck -> LLVM codegen for each module.
         /// @param project         The project configuration.
@@ -140,6 +145,9 @@ namespace angara {
         bool m_check_only = false;
         bool m_dump_ir = false;
         bool m_debug = false;
+        bool m_werror = false;
+        bool m_wall = false;
+        std::set<std::string> m_suppressed_warnings;
 
         std::set<std::string> m_generated_object_files;
         std::vector<std::string> m_angara_module_names;

@@ -48,6 +48,9 @@ struct CliFlags {
     bool release = false;
     bool debug = false;
     bool verbose_flag = false;
+    bool wall = false;
+    bool werror = false;
+    std::vector<std::string> suppress_warnings;
 
     static CliFlags parse(std::vector<std::string>& args) {
         CliFlags flags;
@@ -85,6 +88,15 @@ struct CliFlags {
                 args.erase(args.begin() + i);
             } else if (args[i] == "--debug") {
                 flags.debug = true;
+                args.erase(args.begin() + i);
+            } else if (args[i] == "-Wall") {
+                flags.wall = true;
+                args.erase(args.begin() + i);
+            } else if (args[i] == "-Werror") {
+                flags.werror = true;
+                args.erase(args.begin() + i);
+            } else if (args[i].substr(0, 5) == "-Wno-") {
+                flags.suppress_warnings.push_back(args[i].substr(5));
                 args.erase(args.begin() + i);
             } else {
                 ++i;
@@ -177,6 +189,9 @@ static void print_help() {
     std::cout << "  -l, --link <file>           Link additional object or library file\n";
     std::cout << "  --release                   Build in release mode (opt level 2)\n";
     std::cout << "  --debug                     Build in debug mode (default, opt level 0)\n";
+    std::cout << "  -Wall                       Enable all warnings\n";
+    std::cout << "  -Werror                     Treat warnings as errors\n";
+    std::cout << "  -Wno-XXX                    Suppress specific warning (e.g., -Wno-W003)\n";
     std::cout << "  --dump-ast                  Debug: Print Abstract Syntax Tree\n";
     std::cout << "  --dump-ir                   Debug: Emit unoptimized LLVM IR (.ll)\n";
     std::cout << "  --target <triple>           Cross-compile for target triple\n";
@@ -251,6 +266,8 @@ static int cmd_check(const std::string& file, const CliFlags& flags) {
     if (!flags.target.empty()) driver.set_target(resolve_target_triple(flags.target));
     if (!flags.sysroot.empty()) driver.set_sysroot(flags.sysroot);
     driver.set_check_only(true);
+    if (flags.werror) driver.set_warnings_as_errors(true);
+    for (const auto& w : flags.suppress_warnings) driver.suppress_warning(w);
 
     std::string native_mod_path = "/opt/angara/modules";
     if (fs::exists("build/modules")) {
@@ -328,6 +345,8 @@ static int cmd_compile_single_file(const std::string& source_file, const CliFlag
     if (flags.nostdlib) driver.set_nostdlib(true);
     if (flags.dump_ir) driver.set_dump_ir(true);
     if (flags.debug) driver.set_debug(true);
+    if (flags.werror) driver.set_warnings_as_errors(true);
+    for (const auto& w : flags.suppress_warnings) driver.suppress_warning(w);
 
     std::string native_mod_path = "/opt/angara/modules";
     if (fs::exists("build/modules")) {
