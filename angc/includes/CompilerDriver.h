@@ -62,6 +62,10 @@ namespace angara {
         void set_dump_ir(bool val) { m_dump_ir = val; }
         bool is_dump_ir() const { return m_dump_ir; }
 
+        /// Enables or disables debug mode (O0 optimization + DWARF debug info).
+        void set_debug(bool val) { m_debug = val; }
+        bool is_debug() const { return m_debug; }
+
         /// Compiles a root source file and all its transitive imports.
         /// Runs Lex -> Parse -> TypeCheck -> LLVM codegen for each module.
         /// @param project         The project configuration.
@@ -135,6 +139,7 @@ namespace angara {
         bool m_nostdlib = false;
         bool m_check_only = false;
         bool m_dump_ir = false;
+        bool m_debug = false;
 
         std::set<std::string> m_generated_object_files;
         std::vector<std::string> m_angara_module_names;

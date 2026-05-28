@@ -15,6 +15,8 @@ namespace angara { class RuntimeBuilder; }
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/DIBuilder.h>
+#include <llvm/IR/DebugInfoMetadata.h>
 #include <string>
 #include <vector>
 #include <map>
@@ -37,7 +39,8 @@ namespace angara {
         LLVMBackend(TypeChecker& type_checker, ErrorHandler& errorHandler,
                     const std::string& target_triple = "",
                     bool freestanding = false,
-                    bool dump_ir = false);
+                    bool dump_ir = false,
+                    bool debug = false);
 
         /// Releases LLVM objects (cleanup at process exit).
         ~LLVMBackend();
@@ -232,6 +235,13 @@ namespace angara {
 
         bool m_freestanding = false;
         bool m_dump_ir = false;
+        bool m_debug = false;
+
+        // Debug info (DWARF) generation
+        std::unique_ptr<llvm::DIBuilder> m_di_builder;
+        llvm::DIFile* m_di_file = nullptr;
+        llvm::DICompileUnit* m_di_cu = nullptr;
+        std::map<std::string, llvm::DISubprogram*> m_di_functions;
 
         int m_lambda_counter = 0;
 

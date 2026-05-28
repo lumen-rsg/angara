@@ -9,14 +9,16 @@
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Passes/PassBuilder.h>
+#include <llvm/IR/DebugInfoMetadata.h>
+#include <llvm/IR/DIBuilder.h>
 #include <iostream>
 
 namespace angara {
 
 LLVMBackend::~LLVMBackend() = default;
 
-LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir)
-    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_dump_ir(dump_ir) {
+LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir, bool debug)
+    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_dump_ir(dump_ir), m_debug(debug) {
     ctx = std::make_unique<llvm::LLVMContext>();
     mod = std::make_unique<llvm::Module>("angara_module", *ctx);
     builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
@@ -33,6 +35,23 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
         if (auto tm = std::unique_ptr<llvm::TargetMachine>(t->createTargetMachine(targetTriple,"generic","",opt,std::nullopt)))
             mod->setDataLayout(tm->createDataLayout());
     }
+
+    // Set up DWARF debug info in debug mode
+    if (m_debug) {
+        mod->addModuleFlag(llvm::Module::Warning, "Debug Info Version", llvm::DEBUG_METADATA_VERSION);
+#ifdef __APPLE__
+        mod->addModuleFlag(llvm::Module::Warning, "Dwarf Version", 2);
+#else
+        mod->addModuleFlag(llvm::Module::Warning, "Dwarf Version", 5);
+#endif
+        auto diBuilder = std::make_unique<llvm::DIBuilder>(*mod);
+        auto diFile = diBuilder->createFile("angara", ".");
+        auto diCU = diBuilder->createCompileUnit(llvm::dwarf::DW_LANG_C, diFile, "angc", false, "", 0);
+        m_di_builder = std::move(diBuilder);
+        m_di_file = diFile;
+        m_di_cu = diCU;
+    }
+
     rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding);
     rt->generateRuntime();
     objType = rt->getAngaraObjType();
@@ -76,8 +95,14 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
         pb.registerFunctionAnalyses(fam);
         pb.registerLoopAnalyses(lam);
         pb.crossRegisterProxies(lam, fam, cgam, mam);
-        llvm::ModulePassManager mpm = pb.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
+        llvm::ModulePassManager mpm = pb.buildPerModuleDefaultPipeline(
+            m_debug ? llvm::OptimizationLevel::O0 : llvm::OptimizationLevel::O2);
         mpm.run(*mod, mam);
+    }
+
+    // Finalize debug info before object emission
+    if (m_debug && m_di_builder) {
+        m_di_builder->finalize();
     }
 
     {

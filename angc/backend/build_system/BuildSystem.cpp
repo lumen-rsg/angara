@@ -379,6 +379,7 @@ namespace angara {
         if (!m_sysroot.empty()) driver.set_sysroot(m_sysroot);
         if (config.freestanding) driver.set_freestanding(true);
         if (config.nostdlib) driver.set_nostdlib(true);
+        if (m_build_mode == BuildMode::DEBUG) driver.set_debug(true);
 
         const std::string& entry_file = project_entries.at(config.name);
 
@@ -530,6 +531,8 @@ namespace angara {
         if (!m_sysroot.empty()) cmd << " --sysroot " << angara::shell_escape(m_sysroot);
 
         cmd << " " << resolve_opt_flags(config.profile);
+
+        if (m_build_mode == BuildMode::DEBUG) cmd << " -g";
 
         cmd << " -o " << angara::shell_escape(bin_path.string());
 

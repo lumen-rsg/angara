@@ -385,7 +385,7 @@ namespace angara {
         }
 
         try {
-            LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding, m_dump_ir);
+            LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding, m_dump_ir, m_debug);
             if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
                 m_had_error = true;
                 return nullptr;

@@ -46,6 +46,7 @@ struct CliFlags {
     bool freestanding = false;
     bool nostdlib = false;
     bool release = false;
+    bool debug = false;
     bool verbose_flag = false;
 
     static CliFlags parse(std::vector<std::string>& args) {
@@ -83,6 +84,7 @@ struct CliFlags {
                 g_verbose = true;
                 args.erase(args.begin() + i);
             } else if (args[i] == "--debug") {
+                flags.debug = true;
                 args.erase(args.begin() + i);
             } else {
                 ++i;
@@ -325,6 +327,7 @@ static int cmd_compile_single_file(const std::string& source_file, const CliFlag
     if (flags.freestanding) driver.set_freestanding(true);
     if (flags.nostdlib) driver.set_nostdlib(true);
     if (flags.dump_ir) driver.set_dump_ir(true);
+    if (flags.debug) driver.set_debug(true);
 
     std::string native_mod_path = "/opt/angara/modules";
     if (fs::exists("build/modules")) {
@@ -371,6 +374,8 @@ static int cmd_compile_single_file(const std::string& source_file, const CliFlag
 
     if (flags.release) cmd_link << " -O2";
     else cmd_link << " -O0";
+
+    if (flags.debug) cmd_link << " -g";
 
     cmd_link << " -o " << angara::shell_escape(binary_name);
 

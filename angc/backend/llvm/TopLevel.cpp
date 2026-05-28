@@ -62,6 +62,19 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
                                      func_name, mod.get());
     }
 
+    // Attach DWARF debug info to this function in debug mode
+    if (m_debug && m_di_builder && m_di_file) {
+        auto diFuncType = m_di_builder->createSubroutineType(
+            m_di_builder->getOrCreateTypeArray({}));
+        std::string src_file = stmt.name.file ? *stmt.name.file : "unknown";
+        auto diFile = m_di_builder->createFile(src_file, ".");
+        auto sp = m_di_builder->createFunction(
+            diFile, stmt.name.lexeme, func_name, diFile,
+            stmt.name.line, diFuncType, stmt.name.column,
+            llvm::DINode::FlagZero, llvm::DISubprogram::SPFlagDefinition);
+        fn->setSubprogram(sp);
+    }
+
     size_t idx = 0;
     for (auto& arg : fn->args()) {
         arg.setName(sanitize(stmt.params[idx].name.lexeme));
@@ -629,6 +642,17 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
         m_freestanding ? llvm::Type::getVoidTy(*ctx) : llvm::Type::getInt32Ty(*ctx), false);
     auto* main_fn = llvm::Function::Create(main_type, llvm::Function::ExternalLinkage,
                                             entry_name, mod.get());
+
+    // Attach DWARF debug info to main in debug mode
+    if (m_debug && m_di_builder && m_di_file) {
+        auto diFuncType = m_di_builder->createSubroutineType(
+            m_di_builder->getOrCreateTypeArray({}));
+        auto sp = m_di_builder->createFunction(
+            m_di_file, entry_name, entry_name, m_di_file,
+            1, diFuncType, 0,
+            llvm::DINode::FlagZero, llvm::DISubprogram::SPFlagDefinition);
+        main_fn->setSubprogram(sp);
+    }
 
     auto* entry = llvm::BasicBlock::Create(*ctx, "entry", main_fn);
     builder->SetInsertPoint(entry);
