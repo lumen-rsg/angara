@@ -18,6 +18,13 @@ namespace angara {
         virtual void warning(const Token &token, const std::string &message, const std::string &code = "");
         virtual void note(const Token &token, const std::string &message);
 
+        /// Reports an error spanning from start_token to end_token.
+        virtual void report(const Token &start_token, const Token &end_token,
+                           const std::string &message, const std::string &code = "");
+        /// Reports a warning spanning from start_token to end_token.
+        virtual void warning(const Token &start_token, const Token &end_token,
+                           const std::string &message, const std::string &code = "");
+
         bool hadError() const;
         bool hadWarning() const;
         int errorCount() const;
