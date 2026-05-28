@@ -6,12 +6,14 @@
 #include <chrono>
 #include <set>
 #include <sstream>
+#include <fstream>
 
 #include "CompilerDriver.h"
 #include "BuildSystem.h"
 #include "ProjectInitializer.h"
 #include "EasterEgg.h"
 #include "../analyzer/printer/ASTPrinter.h"
+#include "../includes/Formatter.h"
 #include "Lexer.h"
 #include "Parser.h"
 #include "ErrorHandler.h"
@@ -185,6 +187,7 @@ static void print_help() {
     std::cout << "  publish   Build and copy artifacts to a publish folder\n";
     std::cout << "  init      Create a new project interactively\n";
     std::cout << "  modules   List installed native modules\n";
+    std::cout << "  fmt       Format source files (-w to write in place)\n";
     std::cout << "\n" << CLR_BOLD << "Options:" << CLR_RESET << "\n";
     std::cout << "  -v, --version               Show version information\n";
     std::cout << "  -h, --help                  Show this help message\n";
@@ -570,6 +573,60 @@ static int handle_check(std::vector<std::string> args) {
     return cmd_check(args[0], flags);
 }
 
+static int handle_fmt(std::vector<std::string> args) {
+    args.erase(args.begin());
+    bool write_in_place = false;
+    std::vector<std::string> files;
+    for (auto& arg : args) {
+        if (arg == "-w" || arg == "--write") {
+            write_in_place = true;
+        } else {
+            files.push_back(arg);
+        }
+    }
+
+    if (files.empty()) {
+        std::cerr << CLR_RED << "[ERROR] 'fmt' requires at least one .an source file." << CLR_RESET << "\n";
+        std::cerr << "Usage: angc fmt [-w|--write] <file.an> [file2.an ...]\n";
+        return 1;
+    }
+
+    int errors = 0;
+    for (auto& file : files) {
+        std::ifstream ifs(file);
+        if (!ifs.is_open()) {
+            std::cerr << CLR_RED << "[ERROR] Cannot open file: " << file << CLR_RESET << "\n";
+            errors++;
+            continue;
+        }
+        std::string source((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+        ifs.close();
+
+        auto filename_ptr = std::make_shared<std::string>(file);
+        angara::ErrorHandler errorHandler(source);
+        angara::Lexer lexer(source, filename_ptr, errorHandler);
+        auto tokens = lexer.scanTokens();
+        if (errorHandler.hadError()) { errors++; continue; }
+
+        angara::Parser parser(tokens, errorHandler);
+        auto statements = parser.parseStmts();
+        if (errorHandler.hadError()) { errors++; continue; }
+
+        angara::Formatter formatter;
+        std::string formatted = formatter.format(statements);
+
+        if (write_in_place) {
+            std::ofstream ofs(file);
+            ofs << formatted;
+            ofs.close();
+            std::cout << CLR_BOLD << CLR_GREEN << "[OK] " << CLR_RESET << "Formatted: " << file << "\n";
+        } else {
+            std::cout << formatted;
+        }
+    }
+    return errors > 0 ? 1 : 0;
+}
+
 static int handle_test(std::vector<std::string> args) {
     args.erase(args.begin());
     CliFlags flags = CliFlags::parse(args);
@@ -772,6 +829,7 @@ int main(int argc, char* argv[]) {
     if (cmd == "publish") return handle_publish(args);
     if (cmd == "modules") { list_modules(); return 0; }
     if (cmd == "check")   return handle_check(args);
+    if (cmd == "fmt")     return handle_fmt(args);
     if (cmd == "-v" || cmd == "--version") { print_version(); return 0; }
     if (cmd == "-h" || cmd == "--help")    { print_help(); return 0; }
     if (cmd == "--make-perfect") { angara::run_easter_egg(); return 0; }
