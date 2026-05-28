@@ -436,6 +436,19 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         return std::make_shared<PointerType>(pointee, ptr_expr->depth);
     }
 
+    if (auto owned = std::dynamic_pointer_cast<const OwnedTypeNode>(ast_type)) {
+        auto inner = resolveType(owned->inner_type);
+        if (inner->kind == TypeKind::ERROR) return m_type_error;
+        if (inner->kind != TypeKind::PRIMITIVE) {
+            // Only string makes sense for @own
+            return inner;
+        }
+        auto prim = std::make_shared<PrimitiveType>(
+            std::dynamic_pointer_cast<PrimitiveType>(inner)->name);
+        prim->is_owned = true;
+        return prim;
+    }
+
     return m_type_error;
 }
 

@@ -58,6 +58,39 @@ void RuntimeBuilder::generateStringOps() {
         b.CreateRet(pack_obj(b, str_ptr));
     }
 
+    // __ang_string_take_c: adopts a C char* into an AngaraString WITHOUT copying.
+    // The runtime takes ownership of the pointer and will free() it on deallocation.
+    {
+        auto* fn_ty = FunctionType::get(obj_ty, {i8_ptr}, false);
+        auto* fn = createRuntimeFunc("__ang_string_take_c", fn_ty);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+        auto* chars = fn->arg_begin();
+
+        auto* len = b.CreateCall(strlen_fn, {chars}, "len");
+
+        auto* str_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_string_type));
+        auto* mem = b.CreateCall(malloc_fn, {str_size}, "mem");
+        auto* str_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0), "str_ptr");
+
+        auto* header_ptr = b.CreateStructGEP(m_string_type, str_ptr, 0);
+        auto* type_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 0);
+        b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING), type_addr);
+        auto* rc_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 1);
+        b.CreateStore(ConstantInt::get(i64_ty, 1), rc_addr);
+
+        auto* len_addr = b.CreateStructGEP(m_string_type, str_ptr, 1);
+        b.CreateStore(len, len_addr);
+
+        // Store the pointer directly (no strdup) — we own it now
+        auto* chars_addr = b.CreateStructGEP(m_string_type, str_ptr, 2);
+        b.CreateStore(chars, chars_addr);
+
+        b.CreateRet(pack_obj(b, str_ptr));
+    }
+
     {
         auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_string_concat", fn_ty);

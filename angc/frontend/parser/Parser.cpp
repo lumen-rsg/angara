@@ -6,6 +6,16 @@ namespace angara {
 
 
     std::shared_ptr<ASTType> Parser::type() {
+        // Parse @own prefix for owned string types (FFI only)
+        if (match({TokenType::AT_SIGN})) {
+            Token own_kw = consume(TokenType::IDENTIFIER, "Expected 'own' after '@' in type annotation.");
+            if (own_kw.lexeme != "own") {
+                throw error(own_kw, "Only '@own' type modifier is supported.");
+            }
+            auto inner = type();
+            return std::make_shared<OwnedTypeNode>(inner);
+        }
+
         // Parse pointer prefix: *i8, **i8, *void
         int ptr_depth = 0;
         while (match({TokenType::STAR})) {

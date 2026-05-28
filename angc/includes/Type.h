@@ -57,6 +57,7 @@ namespace angara {
     // --- PRIMITIVE TYPES ---
     struct PrimitiveType : Type {
         const std::string name;
+        bool is_owned = false; // @own annotation for zero-copy string adoption
         explicit PrimitiveType(std::string name)
                 : Type(TypeKind::PRIMITIVE), name(std::move(name)) {}
         [[nodiscard]] std::string toString() const override { return name; }

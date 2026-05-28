@@ -389,7 +389,14 @@ llvm::Value* LLVMBackend::marshalCToAngara(llvm::Value* c_val, const std::shared
         if (n == "bool") return makeBool(c_val);
         if (n == "f64")  return makeF64(c_val);
         if (n == "f32")  return makeF64(builder->CreateFPExt(c_val, llvm::Type::getDoubleTy(*ctx)));
-        if (n == "string") return callRtByName("__ang_string_from_c", {c_val});
+        if (n == "string") {
+            // Check if @own — zero-copy adoption vs strdup
+            auto prim = std::dynamic_pointer_cast<PrimitiveType>(type);
+            if (prim && prim->is_owned) {
+                return callRtByName("__ang_string_take_c", {c_val});
+            }
+            return callRtByName("__ang_string_from_c", {c_val});
+        }
         // Integer types: zext for unsigned, sext for signed, then store in i64
         auto* cty = resolveCFieldType(type);
         if (cty->getIntegerBitWidth() < 64) {
