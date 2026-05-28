@@ -1,0 +1,111 @@
+attach io;
+attach math from "math";
+attach println, print from io;
+
+// Enum with variants
+enum Color {
+    Red,
+    Green,
+    Blue(i32, i32, i32),
+}
+
+// Class with inheritance
+class Animal {
+    let name as string;
+    let age as i32;
+
+    func greet(this) -> string {
+        return "Hello";
+    }
+}
+
+class Dog inherits Animal {
+    private:
+    let breed as string;
+
+    public:
+    func bark(this) -> nil {
+        io.println(1, "Woof!");
+    }
+}
+
+// Trait
+trait Serializable {
+    func serialize(this) -> string;
+}
+
+// Data
+data Point {
+    let x as i32;
+    let y as i32;
+}
+
+// Function with params
+func map(items as list<any>, fn as function(any) -> any) -> list<any> {
+    let result = [];
+    for (let i = 0; i < items.length(); i++) {
+        result.push(fn(items[i]));
+    }
+    return result;
+}
+
+// Pattern matching
+func describe(color as Color) -> string {
+    match (color) {
+        case Color.Red: "red",
+        case Color.Green: "green",
+        case Color.Blue(r, g, b): "blue",
+    }
+}
+
+// Lambda
+let double = func(x as i32) -> i32 { return x * 2; };
+
+// If-let, orif, ternary
+func test(x) {
+    if (x > 0) {
+        io.println(1, "positive");
+    } orif (x == 0) {
+        io.println(1, "zero");
+    } else {
+        io.println(1, "negative");
+    }
+
+    let result = x > 0 ? "pos" : "non-pos";
+
+    // Try-catch
+    try {
+        riskyOperation();
+    } catch (e as string) {
+        io.println(1, "caught");
+    }
+}
+
+// List operations
+let numbers = [1, 2, 3, 4, 5];
+let first = numbers[0];
+let sum = 0;
+for (let n in numbers) {
+    sum = sum + n;
+}
+
+// While loop
+while (sum > 100) {
+    sum = sum - 10;
+}
+
+// FFI types
+foreign data FILE;
+foreign func fopen(path: string, mode: string) -> *FILE;
+foreign func fclose(f: *FILE) -> i32;
+
+// Unsafe block
+@unsafe {
+    let f = fopen("test.txt", "r");
+    fclose(f);
+}
+
+func main() {
+    io.println(1, describe(Color.Red));
+    test(42);
+}

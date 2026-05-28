@@ -1,0 +1,6 @@
+attach io;
+
+// A simple hello world
+func main() {
+    io.println(1, "Hello, world!");
+}
