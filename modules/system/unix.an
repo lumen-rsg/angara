@@ -76,6 +76,11 @@ foreign func execvp(file as string, argv as *void) -> i32;
 foreign func waitpid(pid as i64, status as *i32, options as i32) -> i64;
 foreign func kill(pid as i64, sig as i32) -> i32;
 foreign func _exit(code as i32) -> nil;
+foreign func setuid(uid as i32) -> i32;
+foreign func setgid(gid as i32) -> i32;
+foreign func seteuid(uid as i32) -> i32;
+foreign func setegid(gid as i32) -> i32;
+foreign func system(cmd as string) -> i32;
 
 // =============================================================
 // File Descriptor Operations

@@ -1,0 +1,114 @@
+// =============================================================
+// asu.an — Angara Super User (simple sudo clone)
+// =============================================================
+// Demonstrates Angara's zero-cost FFI for building system tools.
+//
+// Usage:
+//   $ angc asu.an -o asu
+//   $ sudo chown root asu
+//   $ sudo chmod u+s asu
+//   $ ./asu
+//   asu# whoami
+//   root
+//   asu# exit
+//   $
+// =============================================================
+
+attach io;
+
+// --- FFI declarations (zero-cost C interop) ---
+
+// Process identity
+foreign func getuid()  -> i64;
+foreign func geteuid() -> i64;
+
+// Privilege escalation
+foreign func setuid(uid as i32) -> i32;
+foreign func setgid(gid as i32) -> i32;
+
+// Process management
+foreign func fork() -> i64;
+foreign func system(cmd as string) -> i32;
+foreign func waitpid(pid as i64, status as *i32, options as i32) -> i64;
+foreign func _exit(code as i32) -> nil;
+
+// Status word decoding (from wait(2))
+func WIFEXITED(status as i64) -> bool {
+    return (status & 0x7f) == 0;
+}
+
+func WEXITSTATUS(status as i64) -> i64 {
+    return (status >> 8) & 0xff;
+}
+
+func WTERMSIG(status as i64) -> i64 {
+    return status & 0x7f;
+}
+
+func WIFSIGNALED(status as i64) -> bool {
+    return WTERMSIG(status) != 0;
+}
+
+// --- Main ---
+
+func main() -> i64 {
+    let euid = geteuid();
+
+    if (euid != 0) {
+        io.println(2, "asu: not running as root.");
+        io.println(2, "  Fix: sudo chown root asu && sudo chmod u+s asu");
+        return 1;
+    }
+
+    // Escalate: set real UID/GID to root.
+    // This works because our effective UID is 0 (setuid bit).
+    setgid(0);
+    let uid_rc = setuid(0);
+
+    if (uid_rc != 0) {
+        io.println(2, "asu: setuid(0) failed.");
+        return 1;
+    }
+
+    io.println(1, "asu — Angara Super User");
+    io.println(1, "Running as UID " + string(getuid()));
+    io.println(1, "Type 'exit' to quit.");
+    io.println(1, "");
+
+    let last_rc = 0;
+
+    while (true) {
+        io.write(1, "asu# ");
+        io.flush(1);
+
+        let cmd = io.read_line();
+
+        if (cmd == nil) {
+            io.println(1, "");
+            break;
+        }
+
+        if (cmd == "exit" || cmd == "quit") {
+            break;
+        }
+
+        if (cmd == "") {
+            continue;
+        }
+
+        // Execute the command via /bin/sh
+        let status = system(cmd);
+
+        if (WIFEXITED(status)) {
+            last_rc = WEXITSTATUS(status);
+            if (last_rc != 0) {
+                io.println(2, "asu: exited with code " + string(last_rc));
+            }
+        } else if (WIFSIGNALED(status)) {
+            last_rc = 128 + WTERMSIG(status);
+            io.println(2, "asu: killed by signal " + string(WTERMSIG(status)));
+        }
+    }
+
+    return last_rc;
+}
