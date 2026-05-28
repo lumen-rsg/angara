@@ -211,6 +211,10 @@ namespace angara {
         std::map<std::string, std::string> methodLookup;
         std::string m_current_superclass;
 
+        // Inlined main: when set, cgReturn emits branch+store instead of ret
+        llvm::AllocaInst* m_inlined_main_ret_alloca = nullptr;
+        llvm::BasicBlock* m_inlined_main_cleanup_bb = nullptr;
+
         // Foreign data: maps data name -> LLVM struct type and semantic DataType
         std::map<std::string, llvm::StructType*> m_foreign_struct_types;
         std::map<std::string, std::shared_ptr<DataType>> m_foreign_data_types;

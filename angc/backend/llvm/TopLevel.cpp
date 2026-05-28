@@ -11,6 +11,7 @@ void LLVMBackend::codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>&
         else if (auto s = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
             if (s->is_intrinsic) continue;
             if (s->is_foreign) { codegenForeignFuncDecl(*s); continue; }
+            if (s->name.lexeme == "main") continue;  // inlined into C main
             codegenFunctionDecl(*s, moduleName);
         }
         else if (auto s = std::dynamic_pointer_cast<const ClassStmt>(stmt))
@@ -711,17 +712,71 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
         }
     }
 
-    std::string main_func_name = mangle(module_name, "main");
-    auto* user_main = mod->getFunction(main_func_name);
-    if (user_main) {
-        builder->CreateCall(user_main, {});
+    llvm::Value* exit_code = llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0);
+
+    // Inline the user's main body directly — no wrapper function needed
+    for (const auto& stmt : statements) {
+        auto func = std::dynamic_pointer_cast<const FuncStmt>(stmt);
+        if (func && func->name.lexeme == "main" && func->body) {
+            // Save/restore namedVals so top-level vars remain accessible
+            auto saved_values = std::move(namedVals);
+            auto saved_types = std::move(namedTypes);
+            namedVals.clear();
+            namedTypes.clear();
+
+            // Create a return-value alloca and a cleanup block
+            auto* ret_alloca = builder->CreateAlloca(llvm::Type::getInt32Ty(*ctx));
+            builder->CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0), ret_alloca);
+            auto* cleanup_bb = llvm::BasicBlock::Create(*ctx, "main_cleanup", main_fn);
+            auto* exit_bb = llvm::BasicBlock::Create(*ctx, "main_exit", main_fn);
+
+            // Set the inlined-main context so cgReturn can emit branch instead of ret
+            m_inlined_main_ret_alloca = ret_alloca;
+            m_inlined_main_cleanup_bb = cleanup_bb;
+
+            for (const auto& s : *func->body) {
+                if (builder->GetInsertBlock()->getTerminator()) break;
+                cgStmt(s);
+            }
+
+            // Fall-through: branch to cleanup
+            if (!builder->GetInsertBlock()->getTerminator()) {
+                builder->CreateBr(cleanup_bb);
+            }
+
+            // Cleanup block: decref locals, branch to exit
+            builder->SetInsertPoint(cleanup_bb);
+            if (!m_freestanding) {
+                for (const auto& [name, alloca] : namedVals) {
+                    llvm::Value* val = builder->CreateLoad(objType, alloca);
+                    callRtByName("__ang_decref", {val});
+                }
+            }
+            // Also decref top-level saved values
+            for (const auto& [name, alloca] : saved_values) {
+                llvm::Value* val = builder->CreateLoad(objType, alloca);
+                callRtByName("__ang_decref", {val});
+            }
+            builder->CreateBr(exit_bb);
+
+            // Exit block: load return value and return
+            builder->SetInsertPoint(exit_bb);
+            exit_code = builder->CreateLoad(llvm::Type::getInt32Ty(*ctx), ret_alloca);
+
+            m_inlined_main_ret_alloca = nullptr;
+            m_inlined_main_cleanup_bb = nullptr;
+
+            namedVals = std::move(saved_values);
+            namedTypes = std::move(saved_types);
+            break;
+        }
     }
 
     if (!m_freestanding) {
-    for (const auto& [name, alloca] : namedVals) {
-        llvm::Value* val = builder->CreateLoad(objType, alloca);
-        callRtByName("__ang_decref", {val});
-    }
+        for (const auto& [name, alloca] : namedVals) {
+            llvm::Value* val = builder->CreateLoad(objType, alloca);
+            callRtByName("__ang_decref", {val});
+        }
     }
 
     if (m_freestanding) {
@@ -730,7 +785,7 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
         builder->SetInsertPoint(halt_bb);
         builder->CreateBr(halt_bb);
     } else {
-        builder->CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0));
+        builder->CreateRet(exit_code);
     }
 }
 

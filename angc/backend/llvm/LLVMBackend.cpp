@@ -42,8 +42,12 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     const std::shared_ptr<ModuleType>& moduleType, std::vector<std::string>& allMods) {
     moduleName = moduleType ? moduleType->name : "main";
     codegenTopLevelDecls(stmts);
-    std::string user_main_name = mangle(moduleName, "main");
-    if (mod->getFunction(user_main_name)) {
+    bool has_user_main = false;
+    for (const auto& stmt : stmts) {
+        auto func = std::dynamic_pointer_cast<const FuncStmt>(stmt);
+        if (func && func->name.lexeme == "main") { has_user_main = true; break; }
+    }
+    if (has_user_main) {
         codegenMainFunction(stmts, moduleName, allMods);
     }
     std::string base = "ang_" + moduleName;

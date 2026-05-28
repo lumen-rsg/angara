@@ -164,7 +164,16 @@ void LLVMBackend::cgForIn(const ForInStmt& s) {
 }
 
 void LLVMBackend::cgReturn(const ReturnStmt& s) {
-    builder->CreateRet(s.value ? cg(s.value) : makeNil());
+    if (m_inlined_main_ret_alloca) {
+        // Inlined main: extract i32 exit code from return value, branch to cleanup
+        auto* result = s.value ? cg(s.value) : makeNil();
+        auto* raw_i64 = builder->CreateExtractValue(result, {1});
+        auto* exit_code = builder->CreateTrunc(raw_i64, llvm::Type::getInt32Ty(*ctx));
+        builder->CreateStore(exit_code, m_inlined_main_ret_alloca);
+        builder->CreateBr(m_inlined_main_cleanup_bb);
+    } else {
+        builder->CreateRet(s.value ? cg(s.value) : makeNil());
+    }
 }
 
 void LLVMBackend::cgThrow(const ThrowStmt& s) {

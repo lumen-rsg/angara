@@ -1143,6 +1143,10 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
 
     auto saved_values = std::move(namedVals);
     auto saved_types = std::move(namedTypes);
+    auto* saved_ret_alloca = m_inlined_main_ret_alloca;
+    auto* saved_cleanup_bb = m_inlined_main_cleanup_bb;
+    m_inlined_main_ret_alloca = nullptr;
+    m_inlined_main_cleanup_bb = nullptr;
     namedVals.clear();
     namedTypes.clear();
 
@@ -1180,6 +1184,8 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
 
     namedVals = std::move(saved_values);
     namedTypes = std::move(saved_types);
+    m_inlined_main_ret_alloca = saved_ret_alloca;
+    m_inlined_main_cleanup_bb = saved_cleanup_bb;
 
     if (saved_insert_block) {
         builder->SetInsertPoint(saved_insert_block);
