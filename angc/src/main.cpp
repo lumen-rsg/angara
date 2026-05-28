@@ -51,6 +51,7 @@ struct CliFlags {
     bool wall = false;
     bool werror = false;
     std::vector<std::string> suppress_warnings;
+    std::string error_format = "text";
 
     static CliFlags parse(std::vector<std::string>& args) {
         CliFlags flags;
@@ -98,6 +99,9 @@ struct CliFlags {
             } else if (args[i].substr(0, 5) == "-Wno-") {
                 flags.suppress_warnings.push_back(args[i].substr(5));
                 args.erase(args.begin() + i);
+            } else if (args[i] == "--error-format" && i + 1 < args.size()) {
+                flags.error_format = args[i + 1];
+                args.erase(args.begin() + i, args.begin() + i + 2);
             } else {
                 ++i;
             }
@@ -192,6 +196,7 @@ static void print_help() {
     std::cout << "  -Wall                       Enable all warnings\n";
     std::cout << "  -Werror                     Treat warnings as errors\n";
     std::cout << "  -Wno-XXX                    Suppress specific warning (e.g., -Wno-W003)\n";
+    std::cout << "  --error-format <text|json>  Set diagnostic output format (default: text)\n";
     std::cout << "  --dump-ast                  Debug: Print Abstract Syntax Tree\n";
     std::cout << "  --dump-ir                   Debug: Emit unoptimized LLVM IR (.ll)\n";
     std::cout << "  --target <triple>           Cross-compile for target triple\n";
@@ -353,6 +358,8 @@ static int cmd_compile_single_file(const std::string& source_file, const CliFlag
         native_mod_path = fs::absolute("build/modules").string();
     }
     driver.set_paths("/opt/angara/src/modules", native_mod_path);
+
+    if (!flags.error_format.empty()) driver.set_error_format(flags.error_format);
 
     verbose("Compiling '" + source_file + "'...");
     for (const auto& o : driver.get_generated_object_files()) {

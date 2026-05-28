@@ -35,7 +35,13 @@ namespace angara {
         /// Suppresses all warnings.
         void suppress_all_warnings(bool val) { m_suppress_all = val; }
 
+        /// Sets the error output format ("text" or "json").
+        void set_error_format(const std::string &fmt) { m_error_format = fmt; }
+
     private:
+        /// Emits a diagnostic in JSON format.
+        void emit_json(const std::string &severity, const Token &token,
+                       const std::string &message, const std::string &code) const;
         std::vector<std::string> m_lines;
         bool m_hadError = false;
         bool m_hadWarning = false;
@@ -45,5 +51,6 @@ namespace angara {
         bool m_warnings_as_errors = false;
         bool m_suppress_all = false;
         std::set<std::string> m_suppressed_codes;
+        std::string m_error_format = "text";
     };
 }

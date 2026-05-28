@@ -6,6 +6,7 @@
 #include "Colors.h"
 #include <iostream>
 #include <sstream>
+#include <algorithm>
 
 namespace angara {
 
@@ -17,9 +18,42 @@ namespace angara {
         }
     }
 
+    static std::string json_escape(const std::string &s) {
+        std::string out;
+        out.reserve(s.size());
+        for (char c : s) {
+            switch (c) {
+                case '"':  out += "\\\""; break;
+                case '\\': out += "\\\\"; break;
+                case '\n': out += "\\n"; break;
+                case '\r': out += "\\r"; break;
+                case '\t': out += "\\t"; break;
+                default:   out += c; break;
+            }
+        }
+        return out;
+    }
+
+    void ErrorHandler::emit_json(const std::string &severity, const Token &token,
+                                  const std::string &message, const std::string &code) const {
+        std::string file = token.file ? *token.file : "";
+        std::cerr << "{\"severity\":\"" << severity << "\"";
+        if (!code.empty()) std::cerr << ",\"code\":\"" << code << "\"";
+        std::cerr << ",\"message\":\"" << json_escape(message) << "\"";
+        std::cerr << ",\"file\":\"" << json_escape(file) << "\"";
+        std::cerr << ",\"line\":" << token.line;
+        std::cerr << ",\"column\":" << token.column;
+        std::cerr << "}" << std::endl;
+    }
+
     void ErrorHandler::report(const Token &token, const std::string &message, const std::string &code) {
         m_hadError = true;
         m_errorCount++;
+
+        if (m_error_format == "json") {
+            emit_json("error", token, message, code);
+            return;
+        }
 
         // Standard error header (red)
         std::cerr << CLR_BOLD << CLR_RED << "[Line " << token.line << "] Error";
@@ -59,6 +93,11 @@ namespace angara {
 
         m_hadWarning = true;
         m_warningCount++;
+
+        if (m_error_format == "json") {
+            emit_json("warning", token, message, code);
+            return;
+        }
 
         // Warning header (yellow)
         std::cerr << CLR_BOLD << CLR_YELLOW << "[Line " << token.line << "] Warning";
@@ -127,6 +166,7 @@ namespace angara {
     }
 
     void ErrorHandler::printSummary() const {
+        if (m_error_format == "json") return;
         if (m_errorCount == 0 && m_warningCount == 0) return;
 
         std::cerr << CLR_BOLD;

@@ -357,6 +357,7 @@ namespace angara {
 
         ErrorHandler errorHandler(source);
         errorHandler.set_warnings_as_errors(m_werror);
+        errorHandler.set_error_format(m_error_format);
         for (const auto& code : m_suppressed_warnings) {
             errorHandler.suppress_warning(code);
         }
