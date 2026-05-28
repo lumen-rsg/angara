@@ -220,6 +220,9 @@ namespace angara {
         // Variadic foreign functions: maps C function name -> semantic FunctionType
         std::map<std::string, std::shared_ptr<FunctionType>> m_variadic_foreign_funcs;
 
+        // Callback context: set by marshalAngaraToC for FUNCTION params (heap-allocated closure)
+        llvm::Value* m_pending_callback_context = nullptr;
+
         bool m_freestanding = false;
         bool m_dump_ir = false;
 

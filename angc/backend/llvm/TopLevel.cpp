@@ -437,9 +437,25 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
         return;
     }
 
-    // Create the Angara wrapper function
+    // Identify which *void params are userdata slots for FUNCTION callbacks.
+    // Convention: the next *void param after a FUNCTION param is its userdata slot.
+    // These are stripped from the Angara wrapper signature — the user doesn't see them.
+    std::set<size_t> userdata_slots;
+    for (size_t i = 0; i < func_type->param_types.size(); i++) {
+        if (func_type->param_types[i]->kind == TypeKind::FUNCTION) {
+            for (size_t j = i + 1; j < func_type->param_types.size(); j++) {
+                if (func_type->param_types[j]->kind == TypeKind::POINTER) {
+                    userdata_slots.insert(j);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Create the Angara wrapper function — exclude userdata slots from the signature
     std::string wrapperName = mangle(moduleName, stmt.name.lexeme);
-    std::vector<llvm::Type*> wrapperParamTypes(stmt.params.size(), objType);
+    size_t wrapper_param_count = func_type->param_types.size() - userdata_slots.size();
+    std::vector<llvm::Type*> wrapperParamTypes(wrapper_param_count, objType);
     auto* wrapperFnType = llvm::FunctionType::get(objType, wrapperParamTypes, false);
     auto* wrapperFn = llvm::Function::Create(wrapperFnType, llvm::Function::ExternalLinkage,
                                                wrapperName, mod.get());
@@ -450,18 +466,64 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
     auto saved_values = std::move(namedVals);
     namedVals.clear();
 
-    // Unpack AngaraObject args -> C args
-    std::vector<llvm::Value*> cArgs;
-    size_t idx = 0;
-    for (auto& arg : wrapperFn->args()) {
-        std::string pname = sanitize(stmt.params[idx].name.lexeme);
-        auto* alloca = allocLocal(wrapperFn, pname);
-        builder->CreateStore(&arg, alloca);
-        namedVals[pname] = alloca;
+    // Build a mapping: wrapper_arg_index -> c_param_index
+    std::vector<size_t> wrapper_to_c;  // wrapper arg index -> C param index
+    size_t widx = 0;
+    for (size_t i = 0; i < func_type->param_types.size(); i++) {
+        if (userdata_slots.count(i)) continue;
+        wrapper_to_c.push_back(i);
+        widx++;
+    }
 
-        auto& ptype = func_type->param_types[idx];
-        cArgs.push_back(marshalAngaraToC(&arg, ptype));
-        idx++;
+    // Allocate locals for all non-userdata wrapper params
+    for (size_t wi = 0; wi < wrapper_to_c.size(); wi++) {
+        size_t ci = wrapper_to_c[wi];
+        std::string pname = sanitize(stmt.params[ci].name.lexeme);
+        auto* alloca = allocLocal(wrapperFn, pname);
+        auto* arg_val = wrapperFn->arg_begin() + wi;
+        builder->CreateStore(arg_val, alloca);
+        namedVals[pname] = alloca;
+    }
+
+    // Marshal all C params. For userdata slots, auto-fill with callback context.
+    std::vector<llvm::Value*> cArgs(func_type->param_types.size(), nullptr);
+    std::vector<bool> filled(func_type->param_types.size(), false);
+
+    // First pass: marshal wrapper params (non-userdata)
+    for (size_t wi = 0; wi < wrapper_to_c.size(); wi++) {
+        size_t ci = wrapper_to_c[wi];
+        auto& ptype = func_type->param_types[ci];
+        m_pending_callback_context = nullptr;
+        auto* arg_val = wrapperFn->arg_begin() + wi;
+        cArgs[ci] = marshalAngaraToC(arg_val, ptype);
+        filled[ci] = true;
+
+        if (m_pending_callback_context) {
+            // This was a FUNCTION param — fill its paired userdata slot with context
+            bool found = false;
+            for (size_t j = ci + 1; j < func_type->param_types.size(); j++) {
+                if (userdata_slots.count(j) && !filled[j]) {
+                    cArgs[j] = m_pending_callback_context;
+                    filled[j] = true;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                m_errorHandler.warning(stmt.name,
+                    "Callback parameter '" + stmt.params[ci].name.lexeme
+                    + "' has no matching *void userdata parameter — "
+                    + "callback context will be leaked");
+            }
+            m_pending_callback_context = nullptr;
+        }
+    }
+
+    // Fill any remaining userdata slots with null (shouldn't happen if paired correctly)
+    for (size_t i = 0; i < func_type->param_types.size(); i++) {
+        if (!filled[i]) {
+            cArgs[i] = llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
+        }
     }
 
     llvm::CallInst* cResult = builder->CreateCall(cFunc, cArgs);

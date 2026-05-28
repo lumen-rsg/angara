@@ -100,6 +100,11 @@ namespace angara {
         bool is_foreign = false;
         bool is_intrinsic = false;
 
+        // For foreign functions: indices of *void params that are userdata slots
+        // for callback FUNCTION params. These are auto-filled by the FFI layer
+        // and hidden from the user at call sites.
+        std::vector<size_t> userdata_param_indices;
+
         // Update constructor to accept the flag, defaulting to false.
         FunctionType(std::vector<std::shared_ptr<Type>> params, std::shared_ptr<Type> ret, bool is_variadic = false)
                 : Type(TypeKind::FUNCTION),

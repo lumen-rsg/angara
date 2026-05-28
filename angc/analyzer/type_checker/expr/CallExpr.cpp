@@ -1,4 +1,5 @@
 #include "TypeChecker.h"
+#include <set>
 namespace angara {
 
     std::any TypeChecker::visit(const CallExpr& expr) {
@@ -121,7 +122,20 @@ namespace angara {
             const std::shared_ptr<FunctionType>& func_type,
             const std::vector<std::shared_ptr<Type>>& arg_types
     ) {
-        size_t num_expected = func_type->param_types.size();
+        // For foreign functions with callback userdata, skip hidden userdata params
+        std::set<size_t> hidden_params(func_type->userdata_param_indices.begin(),
+                                        func_type->userdata_param_indices.end());
+        size_t num_visible = func_type->param_types.size() - hidden_params.size();
+
+        // Build a mapping: visible_arg_index -> param_types_index
+        std::vector<size_t> visible_to_param;
+        for (size_t i = 0; i < func_type->param_types.size(); i++) {
+            if (!hidden_params.count(i)) {
+                visible_to_param.push_back(i);
+            }
+        }
+
+        size_t num_expected = func_type->is_foreign ? num_visible : func_type->param_types.size();
         size_t num_actual = arg_types.size();
         bool arity_ok = true;
 
@@ -163,7 +177,10 @@ namespace angara {
         }
 
         for (size_t i = 0; i < check_limit; ++i) {
-            const auto& expected_type = func_type->param_types[i];
+            // Map visible arg index to actual param index
+            size_t param_idx = func_type->is_foreign && !visible_to_param.empty()
+                               ? visible_to_param[i] : i;
+            const auto& expected_type = func_type->param_types[param_idx];
             const auto& actual_type = arg_types[i];
             const auto& arg_expr = call.arguments[i];
 

@@ -37,6 +37,20 @@ namespace angara {
 
         if (stmt.is_foreign) {
             function_type->is_foreign = true;
+
+            // Identify userdata *void params that pair with FUNCTION callback params.
+            // Convention: the next *void param after a FUNCTION param is its userdata slot.
+            // These are auto-filled by the FFI layer and hidden from callers.
+            for (size_t i = 0; i < param_types.size(); i++) {
+                if (param_types[i]->kind == TypeKind::FUNCTION) {
+                    for (size_t j = i + 1; j < param_types.size(); j++) {
+                        if (param_types[j]->kind == TypeKind::POINTER) {
+                            function_type->userdata_param_indices.push_back(j);
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         if (stmt.is_intrinsic) {

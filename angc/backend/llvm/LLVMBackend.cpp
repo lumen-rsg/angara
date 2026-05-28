@@ -293,32 +293,44 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
         return callRtByName("__ang_api_native_instance_data", {obj});
     }
     if (type->kind == TypeKind::FUNCTION) {
-        // Angara closure → C function pointer via trampoline
+        // Angara closure → C function pointer via trampoline + context
         auto func_type = std::dynamic_pointer_cast<FunctionType>(type);
 
-        // Generate a unique key for this callback signature
         static int trampoline_counter = 0;
         std::string key = "ffi_trampoline_" + std::to_string(trampoline_counter++);
 
-        // Create a global to hold the closure AngaraObject (for the trampoline to load)
-        auto* closure_global = new llvm::GlobalVariable(
-            *mod, objType, false,
-            llvm::GlobalValue::InternalLinkage,
-            llvm::ConstantStruct::get(objType,
-                {llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0),
-                 llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)}),
-            "Angara_" + key + "_closure");
+        // Allocate a context struct (just an AngaraObject) on the heap to hold the closure.
+        // The trampoline will receive this pointer through the last parameter (userdata convention).
+        auto* malloc_fn = mod->getFunction("malloc");
+        if (!malloc_fn) {
+            auto* malloc_type = llvm::FunctionType::get(llvm::PointerType::get(*ctx, 0),
+                {llvm::Type::getInt64Ty(*ctx)}, false);
+            malloc_fn = llvm::Function::Create(malloc_type, llvm::Function::ExternalLinkage,
+                                               "malloc", mod.get());
+        }
+        auto* ctx_size = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),
+            mod->getDataLayout().getTypeAllocSize(objType).getFixedValue());
+        auto* ctx_mem = builder->CreateCall(malloc_fn, {ctx_size});
+        auto* ctx_ptr = builder->CreateBitCast(ctx_mem, llvm::PointerType::get(objType, 0));
 
-        // Store the closure into the global
-        builder->CreateStore(obj, closure_global);
+        // Store the closure into the context
+        builder->CreateStore(obj, ctx_ptr);
 
-        // Generate the trampoline function with C calling convention
-        std::vector<llvm::Type*> c_param_types;
+        // Expose the raw void* context pointer for the wrapper to pass as userdata
+        m_pending_callback_context = ctx_mem;
+
+        // Generate the trampoline. Convention: the LAST parameter is void* userdata
+        // pointing to the context struct. All preceding params are the actual C callback args.
+        int total_params = func_type->param_types.size();
+        int callback_arg_count = total_params - 1; // last param is userdata
+
+        // Build C param types for the trampoline (all params including userdata)
+        std::vector<llvm::Type*> tram_param_types;
         for (const auto& pt : func_type->param_types) {
-            c_param_types.push_back(resolveCFieldType(pt));
+            tram_param_types.push_back(resolveCFieldType(pt));
         }
         auto* c_return_type = resolveCFieldType(func_type->return_type);
-        auto* trampoline_type = llvm::FunctionType::get(c_return_type, c_param_types, false);
+        auto* trampoline_type = llvm::FunctionType::get(c_return_type, tram_param_types, false);
         auto* trampoline = llvm::Function::Create(trampoline_type,
             llvm::Function::InternalLinkage, "Angara_" + key, mod.get());
 
@@ -327,15 +339,16 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
         auto saved_insert_point = builder->saveIP();
         builder->SetInsertPoint(tram_entry);
 
-        // 1. Load the closure from the global
-        auto* closure = builder->CreateLoad(objType, closure_global, "closure");
+        // 1. Load the closure from the userdata (last parameter)
+        auto* userdata_arg = trampoline->arg_begin() + (total_params - 1);
+        auto* ctx_loaded = builder->CreateBitCast(userdata_arg, llvm::PointerType::get(objType, 0));
+        auto* closure = builder->CreateLoad(objType, ctx_loaded, "closure");
 
-        // 2. Marshal each C arg to AngaraObject and pack into array
-        int argc = func_type->param_types.size();
+        // 2. Marshal each C callback arg (all except last) to AngaraObject
         auto* args_array = builder->CreateAlloca(objType,
-            llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), std::max(argc, 1)),
+            llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), std::max(callback_arg_count, 1)),
             "args");
-        for (int i = 0; i < argc; i++) {
+        for (int i = 0; i < callback_arg_count; i++) {
             auto* arg_val = trampoline->arg_begin() + i;
             auto* angara_val = marshalCToAngara(arg_val, func_type->param_types[i]);
             auto* slot = builder->CreateGEP(objType, args_array,
@@ -346,24 +359,22 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
         // 3. Call __ang_call(closure, argc, args_array)
         auto* call_result = callRtByName("__ang_call", {
             closure,
-            llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), argc),
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), callback_arg_count),
             builder->CreateBitCast(args_array, llvm::PointerType::get(*ctx, 0))
         });
 
         // 4. Marshal the result back to C
         auto* c_result = marshalAngaraToC(call_result, func_type->return_type);
 
-        // Handle void return
         if (func_type->return_type->kind == TypeKind::VOID) {
             builder->CreateRetVoid();
         } else {
             builder->CreateRet(c_result);
         }
 
-        // Restore the original insert point
         builder->restoreIP(saved_insert_point);
 
-        // Return the trampoline function pointer as the C value
+        // Return the trampoline function pointer
         return trampoline;
     }
 
