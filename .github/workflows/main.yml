@@ -53,7 +53,7 @@ jobs:
       - name: Install System Dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install llvm pkg-config curl websockets openssl mosquitto cjson libarchive sqlite3 glfw
+          brew install llvm pkg-config curl websockets openssl mosquitto cjson libarchive sqlite3
 
       # Build & Install rabbitmq-c v0.14.0 from source (macOS)
       - name: Install rabbitmq-c v0.14.0 (macOS)

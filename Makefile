@@ -57,16 +57,6 @@ ARCHIVE_LIBS  := $(shell pkg-config --libs libarchive zlib 2>/dev/null)
 SQLITE_CFLAGS := $(shell pkg-config --cflags sqlite3 2>/dev/null)
 SQLITE_LIBS   := $(shell pkg-config --libs sqlite3 2>/dev/null)
 
-IMGUI_DIR   := vendor/imgui
-IMGUI_SRCS  := $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
-IMGUI_OBJS  := $(patsubst $(IMGUI_DIR)/%.cpp,build/obj/imgui/%.o,$(IMGUI_SRCS))
-GLFW_CFLAGS := $(shell pkg-config --cflags glfw3 2>/dev/null)
-GLFW_LIBS   := $(shell pkg-config --libs glfw3 2>/dev/null)
-IMGUI_FRAMEWORKS :=
-ifeq ($(UNAME_S),Darwin)
-    IMGUI_FRAMEWORKS := -framework OpenGL -framework Cocoa -framework IOKit -framework CoreVideo
-endif
-
 ifeq ($(UNAME_S),Darwin)
     ifeq ($(LWS_CFLAGS),)
         LWS_CFLAGS := -I$(BREW_DIR)/opt/libwebsockets/include -I$(BREW_DIR)/include
@@ -92,7 +82,6 @@ all: logo $(ANGC_OUT)
 
 MINIMAL_MODS := $(filter-out \
 	build/modules/websocket.$(SO_EXT) \
-	build/modules/imgui.$(SO_EXT) \
 	build/modules/amqp.$(SO_EXT) \
 	build/modules/mqtt.$(SO_EXT) \
 	build/modules/http.$(SO_EXT) \
@@ -106,9 +95,9 @@ MINIMAL_MODS := $(filter-out \
 	build/modules/process.$(SO_EXT) \
 	,$(MOD_OUTS))
 
-modules: logo $(MOD_OUTS) build/modules/imgui.$(SO_EXT)
+modules: logo $(MOD_OUTS)
 	@FAILED=0; \
-	for mod in $(MOD_OUTS) build/modules/imgui.$(SO_EXT); do \
+	for mod in $(MOD_OUTS); do \
 		if [ ! -f "$$mod" ]; then \
 			printf "  $(RED)[FAIL]$(RESET) %s\n" "$$(basename $$mod)"; \
 			FAILED=$$((FAILED + 1)); \
@@ -135,9 +124,6 @@ modules-minimal: logo $(MINIMAL_MODS)
 	else \
 		printf "$(BOLD)$(GREEN)>>> Minimal Modules Built Successfully <<<$(RESET)\n"; \
 	fi
-
-imgui: logo build/modules/imgui.$(SO_EXT)
-	@printf "$(BOLD)$(GREEN)>>> ImGui Module Built Successfully <<<$(RESET)\n"
 
 logo:
 	@printf "\n"
@@ -213,18 +199,6 @@ build/obj/modules/data/json_bridge.o: modules/data/json_bridge.cpp
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CX] $(RESET) %s (JSON Bridge)\n" "$<"
 	@$(CXX) $(CXXFLAGS) -Iangc-ls/vendor -c $< -o $@
-
-build/obj/modules/gui/imgui.o: modules/gui/imgui.cpp
-	@mkdir -p $(@D)
-	@printf "$(GREEN)[CX] $(RESET) %s (ImGui Module)\n" "$<"
-	@$(CXX) $(CXXFLAGS) -DGL_SILENCE_DEPRECATION=1 \
-		-I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends $(GLFW_CFLAGS) -c $< -o $@
-
-build/obj/imgui/%.o: $(IMGUI_DIR)/%.cpp
-	@mkdir -p $(@D)
-	@printf "$(GREEN)[CX] $(RESET) %s (Dear ImGui)\n" "$<"
-	@$(CXX) $(CXXFLAGS) -DGL_SILENCE_DEPRECATION=1 \
-		-I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends $(GLFW_CFLAGS) -c $< -o $@
 
 build/modules/http.$(SO_EXT): build/obj/modules/net/http.o
 	@mkdir -p $(@D)
@@ -307,13 +281,6 @@ build/modules/net.$(SO_EXT): build/obj/modules/net/net.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (NET)\n" "$@"
 	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
-
-build/modules/imgui.$(SO_EXT): build/obj/modules/gui/imgui.o $(IMGUI_OBJS)
-	@mkdir -p $(@D)
-	@printf "$(MAGENTA)[MD] $(RESET) %s (ImGui+GLFW+OpenGL)\n" "$@"
-	@$(CXX) -shared $^ $(GLFW_LIBS) $(IMGUI_FRAMEWORKS) \
-		$(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) \
-		-o $@
 
 build/modules/io.$(SO_EXT): build/obj/modules/io/io.o
 build/modules/term.$(SO_EXT): build/obj/modules/io/term.o
