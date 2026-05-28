@@ -39,6 +39,8 @@ static void verbose(const std::string& msg) {
 struct CliFlags {
     std::string target;
     std::string sysroot;
+    std::string output_name;
+    std::vector<std::string> link_files;
     bool dump_ast = false;
     bool dump_ir = false;
     bool freestanding = false;
@@ -54,6 +56,12 @@ struct CliFlags {
                 args.erase(args.begin() + i, args.begin() + i + 2);
             } else if (args[i] == "--sysroot" && i + 1 < args.size()) {
                 flags.sysroot = args[i + 1];
+                args.erase(args.begin() + i, args.begin() + i + 2);
+            } else if ((args[i] == "-o" || args[i] == "--output") && i + 1 < args.size()) {
+                flags.output_name = args[i + 1];
+                args.erase(args.begin() + i, args.begin() + i + 2);
+            } else if ((args[i] == "-l" || args[i] == "--link") && i + 1 < args.size()) {
+                flags.link_files.push_back(args[i + 1]);
                 args.erase(args.begin() + i, args.begin() + i + 2);
             } else if (args[i] == "--dump-ast") {
                 flags.dump_ast = true;
@@ -163,7 +171,8 @@ static void print_help() {
     std::cout << "  -h, --help                  Show this help message\n";
     std::cout << "  -V, --verbose               Show extra diagnostic output\n";
     std::cout << "  --path <project.abs>        Build a specific project configuration\n";
-    std::cout << "  -o, --output <dir>          Output directory for publish command\n";
+    std::cout << "  -o, --output <path>         Output binary name or publish directory\n";
+    std::cout << "  -l, --link <file>           Link additional object or library file\n";
     std::cout << "  --release                   Build in release mode (opt level 2)\n";
     std::cout << "  --debug                     Build in debug mode (default, opt level 0)\n";
     std::cout << "  --dump-ast                  Debug: Print Abstract Syntax Tree\n";
@@ -351,7 +360,9 @@ static int cmd_compile_single_file(const std::string& source_file, const CliFlag
         return 0;
     }
 
-    std::cout << CLR_BOLD << CLR_CYAN << "[LK] " << CLR_RESET << "Linking " << base_name << std::endl;
+    std::string binary_name = flags.output_name.empty() ? base_name : flags.output_name;
+
+    std::cout << CLR_BOLD << CLR_CYAN << "[LK] " << CLR_RESET << "Linking " << binary_name << std::endl;
 
     std::stringstream cmd_link;
     cmd_link << "clang";
@@ -361,10 +372,14 @@ static int cmd_compile_single_file(const std::string& source_file, const CliFlag
     if (flags.release) cmd_link << " -O2";
     else cmd_link << " -O0";
 
-    cmd_link << " -o " << angara::shell_escape(base_name);
+    cmd_link << " -o " << angara::shell_escape(binary_name);
 
     for (const auto& o_file : driver.get_generated_object_files()) {
         cmd_link << " " << angara::shell_escape(o_file);
+    }
+
+    for (const auto& link_file : flags.link_files) {
+        cmd_link << " " << angara::shell_escape(link_file);
     }
 
     std::set<std::string> libs;
@@ -407,10 +422,10 @@ static int cmd_compile_single_file(const std::string& source_file, const CliFlag
         for (const auto& o_file : driver.get_generated_object_files()) {
             remove(o_file.c_str());
         }
-        std::cout << CLR_BOLD << CLR_GREEN << "[OK] " << CLR_RESET << "Built " << base_name << CLR_DIM << " in " << total_time << "s" << CLR_RESET << "\n";
+        std::cout << CLR_BOLD << CLR_GREEN << "[OK] " << CLR_RESET << "Built " << binary_name << CLR_DIM << " in " << total_time << "s" << CLR_RESET << "\n";
         return 0;
     } else {
-        std::cerr << CLR_RED << "[ERROR] Linker failed for '" << base_name << "'.\n"
+        std::cerr << CLR_RED << "[ERROR] Linker failed for '" << binary_name << "'.\n"
                   << "         Check that all libraries are installed." << CLR_RESET << "\n";
         return 1;
     }
