@@ -417,6 +417,21 @@ llvm::Value* LLVMBackend::cgUnary(const Unary& e) {
 llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
     auto* v = cg(e.value);
     if (auto* var = dynamic_cast<const VarExpr*>(e.target.get())) {
+        // Decref old value to prevent memory leak on reassignment.
+        // Skip for simple self-assignment (x = x) to avoid double-free.
+        auto sname = sanitize(var->name.lexeme);
+        if (namedVals.find(sname) != namedVals.end()) {
+            bool is_self_assign = false;
+            if (auto* rhs_var = dynamic_cast<const VarExpr*>(e.value.get())) {
+                if (sanitize(rhs_var->name.lexeme) == sname) {
+                    is_self_assign = true;
+                }
+            }
+            if (!is_self_assign) {
+                auto* old = loadVar(var->name.lexeme);
+                callRtByName("__ang_decref", {old});
+            }
+        }
         auto type_it = namedTypes.find(var->name.lexeme);
         if (type_it != namedTypes.end() && isSizedIntType(type_it->second)) {
             v = truncateForType(v, type_it->second);
