@@ -173,6 +173,9 @@ namespace angara {
         /// @return The parsed expression node.
         std::shared_ptr<Expr> bitwise();
 
+        /// Parses shift `<<`, `>>` expressions.
+        std::shared_ptr<Expr> shift();
+
         /// Parses `+`, `-` expressions.
         /// @return The parsed expression node.
         std::shared_ptr<Expr> term();

@@ -1,0 +1,97 @@
+// =============================================================
+// posix.an — Tests for the unix.an FFI POSIX bindings
+// =============================================================
+attach io;
+
+// Pull in the FFI declarations we need (inline for single-file test)
+foreign func malloc(size as i64) -> *void;
+foreign func free(ptr as *void) -> nil;
+
+foreign func getpid() -> i64;
+foreign func getppid() -> i64;
+foreign func getuid() -> i64;
+
+foreign func fork() -> i64;
+
+foreign func isatty(fd as i32) -> i32;
+foreign func ttyname(fd as i32) -> string;
+
+foreign func close(fd as i32) -> i32;
+
+foreign func access(path as string, mode as i32) -> i32;
+foreign func chdir(path as string) -> i32;
+
+foreign func getcwd(buf as *void, size as i64) -> string;
+foreign func uname(buf as utsname) -> i32;
+foreign func gethostname(buf as *void, size as i32) -> i32;
+
+foreign const errno as i32;
+
+foreign func sysconf(name as i32) -> i64;
+
+foreign data utsname {
+    sysname  as i8[256];
+    nodename as i8[256];
+    release  as i8[256];
+    version  as i8[256];
+    machine  as i8[256];
+}
+
+// Constants
+const F_OK = 0;
+const R_OK = 4;
+const W_OK = 2;
+const X_OK = 1;
+const _SC_PAGESIZE = 29;
+
+// Helpers from unix.an (replicated for single-file test)
+func cwd() -> string {
+    let buf = malloc(4096);
+    let result = getcwd(buf, 4096);
+    free(buf);
+    return result;
+}
+
+func exists(path as string) -> bool {
+    return access(path, F_OK) == 0;
+}
+
+func pagesize() -> i64 {
+    return sysconf(_SC_PAGESIZE);
+}
+
+// --- Tests ---
+
+func main() -> i64 {
+    // Process identity
+    let pid = getpid();
+    io.println(1, "PID: " + string(pid));
+    io.println(1, "PPID: " + string(getppid()));
+    io.println(1, "UID: " + string(getuid()));
+
+    // Current directory
+    let dir = cwd();
+    io.println(1, "CWD: " + dir);
+
+    // Hostname via uname
+    let info = utsname();
+    uname(info);
+    io.println(1, "Hostname: " + info.nodename);
+    io.println(1, "  OS: " + info.sysname);
+    io.println(1, "  Release: " + info.release);
+    io.println(1, "  Machine: " + info.machine);
+
+    // File access checks
+    io.println(1, "/tmp exists: " + string(exists("/tmp")));
+    io.println(1, "/etc/passwd readable: " + string(access("/etc/passwd", R_OK) == 0));
+
+    // isatty — stdin is a tty when run interactively
+    let tty = isatty(0);
+    io.println(1, "stdin isatty: " + string(tty));
+
+    // Page size
+    io.println(1, "Page size: " + string(pagesize()));
+
+    io.println(1, "All POSIX tests passed!");
+    return 0;
+}

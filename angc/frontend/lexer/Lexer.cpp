@@ -465,10 +465,12 @@ namespace angara {
                 addToken(match('=') ? TokenType::EQUAL_EQUAL : TokenType::EQUAL);
                 break;
             case '<':
-                addToken(match('=') ? TokenType::LESS_EQUAL : TokenType::LESS);
+                if (match('<')) addToken(TokenType::LSHIFT);
+                else addToken(match('=') ? TokenType::LESS_EQUAL : TokenType::LESS);
                 break;
             case '>':
-                addToken(match('=') ? TokenType::GREATER_EQUAL : TokenType::GREATER);
+                if (match('>')) addToken(TokenType::RSHIFT);
+                else addToken(match('=') ? TokenType::GREATER_EQUAL : TokenType::GREATER);
                 break;
             case '+':
                 if (match('+')) addToken(TokenType::PLUS_PLUS);

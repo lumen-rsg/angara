@@ -262,6 +262,8 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
         case TokenType::AMPERSAND: return makeI64(builder->CreateAnd(getI64(l),getI64(r)));
         case TokenType::PIPE:      return makeI64(builder->CreateOr(getI64(l),getI64(r)));
         case TokenType::CARET:     return makeI64(builder->CreateXor(getI64(l),getI64(r)));
+        case TokenType::LSHIFT:    return makeI64(builder->CreateShl(getI64(l),getI64(r)));
+        case TokenType::RSHIFT:    return makeI64(builder->CreateAShr(getI64(l),getI64(r)));
         case TokenType::LESS: {
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);

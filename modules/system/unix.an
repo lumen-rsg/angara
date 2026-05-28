@@ -1,0 +1,198 @@
+// =============================================================
+// unix.an — Pure FFI POSIX Bindings for Angara
+// =============================================================
+// Zero-cost wrappers around POSIX system calls.
+// No native module overhead — compiles to direct C calls.
+// =============================================================
+
+// --- File Descriptor Constants ---
+const STDIN  = 0;
+const STDOUT = 1;
+const STDERR = 2;
+
+// --- seek(2) Whence ---
+const SEEK_SET = 0;
+const SEEK_CUR = 1;
+const SEEK_END = 2;
+
+// --- access(2) Mode ---
+const F_OK = 0;
+const R_OK = 4;
+const W_OK = 2;
+const X_OK = 1;
+
+// --- waitpid(2) Options ---
+const WNOHANG   = 1;
+const WUNTRACED = 2;
+
+// --- sysconf(2) Names ---
+const _SC_PAGESIZE       = 29;
+const _SC_PHYS_PAGES     = 200;
+const _SC_OPEN_MAX       = 4;
+const _SC_NPROCESSORS_ONLN = 84;
+
+// =============================================================
+// Foreign Data Structs
+// =============================================================
+
+// For pipe() — two contiguous file descriptors
+foreign data int_pair { a as i32; b as i32; }
+
+// For uname() — matches struct utsname layout
+foreign data utsname {
+    sysname  as i8[256];
+    nodename as i8[256];
+    release  as i8[256];
+    version  as i8[256];
+    machine  as i8[256];
+}
+
+// =============================================================
+// Memory Management
+// =============================================================
+
+foreign func malloc(size as i64) -> *void;
+foreign func free(ptr as *void) -> nil;
+foreign func memset(ptr as *void, val as i32, size as i64) -> *void;
+foreign func memcpy(dst as *void, src as *void, size as i64) -> *void;
+
+// =============================================================
+// Process Identity
+// =============================================================
+
+foreign func getpid()  -> i64;
+foreign func getppid() -> i64;
+foreign func getuid()  -> i64;
+foreign func geteuid() -> i64;
+foreign func getgid()  -> i64;
+foreign func getegid() -> i64;
+
+// =============================================================
+// Process Control
+// =============================================================
+
+foreign func fork() -> i64;
+foreign func execvp(file as string, argv as *void) -> i32;
+foreign func waitpid(pid as i64, status as *i32, options as i32) -> i64;
+foreign func kill(pid as i64, sig as i32) -> i32;
+foreign func _exit(code as i32) -> nil;
+
+// =============================================================
+// File Descriptor Operations
+// =============================================================
+
+foreign func close(fd as i32) -> i32;
+foreign func dup(fd as i32) -> i32;
+foreign func dup2(oldfd as i32, newfd as i32) -> i32;
+foreign func read(fd as i32, buf as *void, count as i64) -> i64;
+foreign func write(fd as i32, buf as *void, count as i64) -> i64;
+foreign func lseek(fd as i32, offset as i64, whence as i32) -> i64;
+foreign func isatty(fd as i32) -> i32;
+
+// ttyname returns a pointer to static storage — safe to copy
+foreign func ttyname(fd as i32) -> string;
+
+// pipe writes two fds into the int_pair struct
+foreign func pipe(fds as int_pair) -> i32;
+
+// =============================================================
+// File System
+// =============================================================
+
+foreign func unlink(path as string) -> i32;
+foreign func symlink(target as string, linkpath as string) -> i32;
+foreign func readlink(path as string, buf as *void, size as i64) -> i64;
+foreign func access(path as string, mode as i32) -> i32;
+foreign func chmod(path as string, mode as i32) -> i32;
+foreign func chown(path as string, uid as i32, gid as i32) -> i32;
+
+// =============================================================
+// Directory
+// =============================================================
+
+foreign func getcwd(buf as *void, size as i64) -> string;
+foreign func chdir(path as string) -> i32;
+
+// =============================================================
+// Miscellaneous
+// =============================================================
+
+foreign func usleep(usec as i32) -> i32;
+foreign func alarm(seconds as i32) -> i32;
+foreign func sysconf(name as i32) -> i64;
+foreign func gethostname(buf as *void, size as i32) -> i32;
+foreign func uname(buf as utsname) -> i32;
+
+// C errno — the linker resolves this to the thread-local symbol
+foreign const errno as i32;
+
+// =============================================================
+// Angara-Side Helpers
+// =============================================================
+
+// waitpid status word decoding
+func WIFEXITED(status as i64) -> bool {
+    return (status & 0x7f) == 0;
+}
+
+func WEXITSTATUS(status as i64) -> i64 {
+    return (status >> 8) & 0xff;
+}
+
+func WTERMSIG(status as i64) -> i64 {
+    return status & 0x7f;
+}
+
+func WIFSIGNALED(status as i64) -> bool {
+    return WTERMSIG(status) != 0;
+}
+
+// Convenience: get current working directory
+func cwd() -> string {
+    let buf = malloc(4096);
+    let result = getcwd(buf, 4096);
+    free(buf);
+    return result;
+}
+
+// Note: gethostname writes into a buffer and returns i32.
+// There's no built-in way to convert *void to string in Angara.
+// Use uname().nodename for a convenient hostname.
+
+// Convenience: create a pipe, returns (read_fd, write_fd)
+func make_pipe() -> record {
+    let fds = int_pair();
+    pipe(fds);
+    return { read: fds.a as i64, write: fds.b as i64 };
+}
+
+// Convenience: readlink returns the target of a symlink
+func readlink_str(path as string) -> string {
+    let buf = malloc(4096);
+    readlink(path, buf, 4095);
+    let target = string(buf);
+    free(buf);
+    return target;
+}
+
+// Convenience: check if a path is accessible
+func exists(path as string) -> bool {
+    return access(path, F_OK) == 0;
+}
+
+func readable(path as string) -> bool {
+    return access(path, R_OK) == 0;
+}
+
+func writable(path as string) -> bool {
+    return access(path, W_OK) == 0;
+}
+
+func executable(path as string) -> bool {
+    return access(path, X_OK) == 0;
+}
+
+// Convenience: get page size
+func pagesize() -> i64 {
+    return sysconf(_SC_PAGESIZE);
+}

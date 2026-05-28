@@ -28,6 +28,9 @@ bool TypeChecker::check_type_compatibility(
 
     if (expected->kind == TypeKind::TYPE_PARAM || actual->kind == TypeKind::TYPE_PARAM) return true;
 
+    // Integer types are intercompatible — the marshaller handles truncation/extension
+    if (isInteger(expected) && isInteger(actual)) return true;
+
     if (expected->kind == TypeKind::OPTIONAL) {
         auto optional_type = std::dynamic_pointer_cast<OptionalType>(expected);
         if (check_type_compatibility(optional_type->wrapped_type, actual) || actual->kind == TypeKind::NIL) {

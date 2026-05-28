@@ -46,6 +46,8 @@ namespace angara {
             case TokenType::GREATER_EQUAL: return "GREATER_EQUAL";
             case TokenType::LESS: return "LESS";
             case TokenType::LESS_EQUAL: return "LESS_EQUAL";
+            case TokenType::LSHIFT: return "LSHIFT";
+            case TokenType::RSHIFT: return "RSHIFT";
             case TokenType::PIPE: return "PIPE";
             case TokenType::AMPERSAND: return "AMPERSAND";
             case TokenType::CARET: return "CARET";

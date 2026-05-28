@@ -21,6 +21,8 @@ namespace angara {
             case TokenType::AMPERSAND:
             case TokenType::PIPE:
             case TokenType::CARET:
+            case TokenType::LSHIFT:
+            case TokenType::RSHIFT:
                 if (m_is_in_unsafe_context && (left_type->kind == TypeKind::ANY || right_type->kind == TypeKind::ANY)) {
                     result_type = m_type_any;
                 } else if (isNumeric(left_type) && isNumeric(right_type)) {
