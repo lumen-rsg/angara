@@ -207,6 +207,9 @@ namespace angara {
         std::map<std::string, std::shared_ptr<Type>> namedTypes;
         std::map<std::string, llvm::GlobalVariable*> globals;
 
+        // String literal intern cache: maps literal text -> module-level global
+        std::map<std::string, llvm::GlobalVariable*> m_string_literal_cache;
+
         std::map<std::string, std::string> constructorLookup;
         std::map<std::string, std::string> methodLookup;
         std::string m_current_superclass;

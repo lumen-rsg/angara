@@ -134,7 +134,34 @@ llvm::Value* LLVMBackend::makeF64(llvm::Value* v) {
     return r;
 }
 llvm::Value* LLVMBackend::makeStr(const std::string& s) {
-    return callRtByName("__ang_string_from_c", {builder->CreateGlobalString(s)});
+    // Intern string literals: each unique literal is allocated once per module
+    // and reused across all references. The global holds a permanent reference
+    // (never decref'd), so the string lives for the program's lifetime.
+    auto it = m_string_literal_cache.find(s);
+    if (it != m_string_literal_cache.end()) {
+        auto* cached = builder->CreateLoad(objType, it->second, "strlit");
+        callRtByName("__ang_incref", {cached});
+        return cached;
+    }
+
+    // First occurrence: create a global variable and initialize it eagerly.
+    // The __ang_string_from_c call is emitted in the current block, then
+    // stored to the global for all future references to reuse.
+    auto* gsptr = builder->CreateGlobalString(s);
+    auto* new_str = callRtByName("__ang_string_from_c", {gsptr});
+
+    auto* global = new llvm::GlobalVariable(
+        *mod, objType, false,
+        llvm::GlobalValue::InternalLinkage,
+        llvm::ConstantAggregateZero::get(objType),
+        "__ang_strlit_" + std::to_string(m_string_literal_cache.size()));
+    global->setDSOLocal(true);
+    builder->CreateStore(new_str, global);
+    m_string_literal_cache[s] = global;
+
+    // Incref for the caller's reference (global holds the base ref)
+    callRtByName("__ang_incref", {new_str});
+    return new_str;
 }
 
 llvm::Value* LLVMBackend::getI64(llvm::Value* o) { return builder->CreateExtractValue(o,{1}); }
