@@ -115,6 +115,22 @@ namespace angara {
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "Exception", 0, 0), exception_constructor_type, true);
 
+        // Global println/print builtins — variadic, any args, returns nil.
+        // Codegen rewrites these to __ang_io_println/__ang_io_print with stdout.
+        const auto println_type = std::make_shared<FunctionType>(
+            std::vector<std::shared_ptr<Type>>{m_type_any},
+            m_type_nil,
+            true  // variadic
+        );
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "println", 0, 0), println_type, true);
+
+        const auto print_type = std::make_shared<FunctionType>(
+            std::vector<std::shared_ptr<Type>>{m_type_any},
+            m_type_nil,
+            true  // variadic
+        );
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "print", 0, 0), print_type, true);
+
     }
 
     void TypeChecker::pushAndSave(const Expr* expr, const std::shared_ptr<Type>& type) {

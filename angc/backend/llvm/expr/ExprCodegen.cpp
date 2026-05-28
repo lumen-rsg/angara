@@ -805,6 +805,30 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             if (!expr.arguments.empty()) return callRtByName("__ang_to_bool",{cg(expr.arguments[0])});
             return makeBool(false);
         }
+
+        // Global println/print — rewrite to __ang_io_println/__ang_io_print with stdout
+        if (fn=="println" || fn=="print") {
+            const char* rt = (fn=="println") ? "__ang_io_println" : "__ang_io_print";
+            if (!expr.arguments.empty()) {
+                // Build a string by concatenating all arguments
+                auto* to_str_fn = this->mod->getFunction("__ang_to_string");
+                auto* concat_fn = this->mod->getFunction("__ang_string_concat");
+                llvm::Value* result = nullptr;
+                for (auto& a : expr.arguments) {
+                    auto* val = cg(a);
+                    auto* str_val = builder->CreateCall(to_str_fn, {val}, "str");
+                    if (!result) {
+                        result = str_val;
+                    } else {
+                        result = builder->CreateCall(concat_fn, {result, str_val}, "cat");
+                    }
+                }
+                // Call with stdout stream ID (1)
+                auto* stream_id = makeI64(1);
+                callRtByName(rt, {stream_id, result});
+            }
+            return makeNil();
+        }
         if (namedVals.find(sanitize(fn)) != namedVals.end()) {
             auto type_it = m_type_checker.getExpressionTypes().find(expr.callee.get());
             bool is_callable = false;
