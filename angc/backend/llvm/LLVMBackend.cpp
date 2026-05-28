@@ -273,7 +273,14 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
             auto* str_ptr = builder->CreateIntToPtr(getI64(obj), llvm::PointerType::get(*ctx, 0));
             auto* string_type = rt->getStringType();
             auto* chars_ptr = builder->CreateStructGEP(string_type, str_ptr, 2);
-            return builder->CreateLoad(llvm::PointerType::get(*ctx, 0), chars_ptr);
+            auto* raw = builder->CreateLoad(llvm::PointerType::get(*ctx, 0), chars_ptr);
+            auto prim = std::dynamic_pointer_cast<PrimitiveType>(type);
+            if (prim && prim->is_owned) {
+                // @own param: strdup so C gets its own copy to free
+                auto* strdup_fn = mod->getFunction("strdup");
+                return builder->CreateCall(strdup_fn, {raw}, "owned_str");
+            }
+            return raw;
         }
         auto* cty = resolveCFieldType(type);
         if (n == "f64")    return getF64(obj);
