@@ -299,8 +299,8 @@ void RuntimeBuilder::generateEquality() {
             IRBuilder<> bse(is_string_bb);
             auto* str_a = bse.CreateIntToPtr(pa, PointerType::get(m_ctx, 0));
             auto* str_b = bse.CreateIntToPtr(pb, PointerType::get(m_ctx, 0));
-            auto* chars_a = bse.CreateLoad(i8_ptr, bse.CreateStructGEP(m_string_type, str_a, 2));
-            auto* chars_b = bse.CreateLoad(i8_ptr, bse.CreateStructGEP(m_string_type, str_b, 2));
+            auto* chars_a = bse.CreateLoad(i8_ptr, bse.CreateStructGEP(m_string_type, str_a, 3));
+            auto* chars_b = bse.CreateLoad(i8_ptr, bse.CreateStructGEP(m_string_type, str_b, 3));
             auto* strcmp_fn = m_module.getFunction("strcmp");
             auto* cmp = bse.CreateCall(strcmp_fn, {chars_a, chars_b});
             auto* eq = bse.CreateICmpEQ(cmp, ConstantInt::get(i32_ty, 0));

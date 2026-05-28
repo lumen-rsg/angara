@@ -55,6 +55,7 @@ void RuntimeBuilder::generateTypes() {
     m_string_type = StructType::create(m_ctx, {
         m_obj_header_type,
         Type::getInt64Ty(m_ctx),
+        Type::getInt64Ty(m_ctx),
         PointerType::get(m_ctx, 0)
     }, "AngaraString");
 

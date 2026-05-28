@@ -57,7 +57,7 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         IRBuilder<> b(bb);
         auto* val = fn_as_cstr->arg_begin();
         auto* ptr = unpackPtr(b, val);
-        auto* chars = b.CreateLoad(i8_ptr, b.CreateStructGEP(m_string_type, ptr, 2));
+        auto* chars = b.CreateLoad(i8_ptr, b.CreateStructGEP(m_string_type, ptr, 3));
         b.CreateRet(chars);
     }
 
@@ -314,7 +314,8 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateStore(ConstantInt::get(i64_ty, 1),
                       b.CreateStructGEP(m_obj_header_type, hdr, 1));
         b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 1));
-        b.CreateStore(buf, b.CreateStructGEP(m_string_type, str_ptr, 2));
+        b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 2));
+        b.CreateStore(buf, b.CreateStructGEP(m_string_type, str_ptr, 3));
 
         b.CreateRet(packObj(b, str_ptr));
     }
@@ -338,7 +339,8 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateStore(ConstantInt::get(i64_ty, 1),
                       b.CreateStructGEP(m_obj_header_type, hdr, 1));
         b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 1));
-        b.CreateStore(src, b.CreateStructGEP(m_string_type, str_ptr, 2));
+        b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 2));
+        b.CreateStore(src, b.CreateStructGEP(m_string_type, str_ptr, 3));
 
         b.CreateRet(packObj(b, str_ptr));
     }
@@ -375,7 +377,7 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* val_obj = bb.CreateLoad(obj_ty, val_ptr);
         auto* key_payload = bb.CreateExtractValue(key_obj, {1});
         auto* key_raw = bb.CreateIntToPtr(key_payload, ptr_ty);
-        auto* key_chars = bb.CreateLoad(i8_ptr, bb.CreateStructGEP(m_string_type, key_raw, 2));
+        auto* key_chars = bb.CreateLoad(i8_ptr, bb.CreateStructGEP(m_string_type, key_raw, 3));
         bb.CreateCall(m_module.getFunction("__ang_record_set"), {rec, key_chars, val_obj});
         auto* next = bb.CreateAdd(i, ConstantInt::get(i64_ty, 1));
         bb.CreateBr(loop_bb);

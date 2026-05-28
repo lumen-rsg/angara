@@ -99,7 +99,7 @@ void RuntimeBuilder::generateIOOps() {
         auto* payload = b.CreateExtractValue(str_obj, {1});
         auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
         auto* str_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
-        auto* chars_ptr = b.CreateStructGEP(m_string_type, str_ptr, 2);
+        auto* chars_ptr = b.CreateStructGEP(m_string_type, str_ptr, 3);
         return b.CreateLoad(i8_ptr, chars_ptr, "cstr");
     };
 

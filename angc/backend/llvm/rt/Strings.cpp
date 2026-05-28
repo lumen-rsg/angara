@@ -12,6 +12,7 @@ void RuntimeBuilder::generateStringOps() {
     auto* obj_ty = m_angara_obj_type;
 
     auto* malloc_fn = m_module.getFunction("malloc");
+    auto* realloc_fn = m_module.getFunction("realloc");
     auto* strlen_fn = m_module.getFunction("strlen");
     auto* strdup_fn = m_module.getFunction("strdup");
     auto* memcpy_fn = m_module.getFunction("memcpy");
@@ -26,6 +27,19 @@ void RuntimeBuilder::generateStringOps() {
         return result;
     };
 
+    // Helper: initialize a newly allocated AngaraString struct
+    auto init_string_struct = [&](IRBuilder<>& b, Value* str_ptr, Value* len, Value* chars) {
+        auto* header_ptr = b.CreateStructGEP(m_string_type, str_ptr, 0);
+        auto* type_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 0);
+        b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING), type_addr);
+        auto* rc_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 1);
+        b.CreateStore(ConstantInt::get(i64_ty, 1), rc_addr);
+        b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 1));
+        b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 2)); // capacity = length
+        b.CreateStore(chars, b.CreateStructGEP(m_string_type, str_ptr, 3));
+    };
+
+    // __ang_string_from_c: create an AngaraString from a C string (copies the data)
     {
         auto* fn_ty = FunctionType::get(obj_ty, {i8_ptr}, false);
         auto* fn = createRuntimeFunc("__ang_string_from_c", fn_ty);
@@ -36,30 +50,17 @@ void RuntimeBuilder::generateStringOps() {
         auto* chars = fn->arg_begin();
 
         auto* len = b.CreateCall(strlen_fn, {chars}, "len");
-
         auto* str_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_string_type));
         auto* mem = b.CreateCall(malloc_fn, {str_size}, "mem");
         auto* str_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0), "str_ptr");
 
-        auto* header_ptr = b.CreateStructGEP(m_string_type, str_ptr, 0);
-        auto* type_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 0);
-        b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING), type_addr);
-        auto* rc_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 1);
-        b.CreateStore(ConstantInt::get(i64_ty, 1), rc_addr);
-
-        auto* len_addr = b.CreateStructGEP(m_string_type, str_ptr, 1);
-        b.CreateStore(len, len_addr);
-
-        auto* copied = b.CreateCall(strdup_fn, {chars}, "copied");
-        auto* chars_addr = b.CreateStructGEP(m_string_type, str_ptr, 2);
-        b.CreateStore(copied, chars_addr);
+        init_string_struct(b, str_ptr, len, b.CreateCall(strdup_fn, {chars}, "copied"));
 
         b.CreateRet(pack_obj(b, str_ptr));
     }
 
     // __ang_string_take_c: adopts a C char* into an AngaraString WITHOUT copying.
-    // The runtime takes ownership of the pointer and will free() it on deallocation.
     {
         auto* fn_ty = FunctionType::get(obj_ty, {i8_ptr}, false);
         auto* fn = createRuntimeFunc("__ang_string_take_c", fn_ty);
@@ -69,82 +70,179 @@ void RuntimeBuilder::generateStringOps() {
         auto* chars = fn->arg_begin();
 
         auto* len = b.CreateCall(strlen_fn, {chars}, "len");
-
         auto* str_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_string_type));
         auto* mem = b.CreateCall(malloc_fn, {str_size}, "mem");
         auto* str_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0), "str_ptr");
 
-        auto* header_ptr = b.CreateStructGEP(m_string_type, str_ptr, 0);
-        auto* type_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 0);
-        b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING), type_addr);
-        auto* rc_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 1);
-        b.CreateStore(ConstantInt::get(i64_ty, 1), rc_addr);
-
-        auto* len_addr = b.CreateStructGEP(m_string_type, str_ptr, 1);
-        b.CreateStore(len, len_addr);
-
-        // Store the pointer directly (no strdup) — we own it now
-        auto* chars_addr = b.CreateStructGEP(m_string_type, str_ptr, 2);
-        b.CreateStore(chars, chars_addr);
+        init_string_struct(b, str_ptr, len, chars);
 
         b.CreateRet(pack_obj(b, str_ptr));
     }
 
+    // Pre-declare __ang_to_string so the concat slow-path can reference it.
+    // The body will be filled in by generateConversions() later.
+    {
+        auto* to_str_ty = FunctionType::get(obj_ty, {obj_ty}, false);
+        m_module.getOrInsertFunction("__ang_to_string", to_str_ty);
+    }
+
+    // __ang_string_concat: concatenate two strings.
+    // When the left operand has ref_count == 1 (unique ownership), performs an
+    // in-place realloc + append instead of allocate + copy.
+    // Safely handles non-string operands by converting via __ang_to_string.
     {
         auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_string_concat", fn_ty);
         m_fn_string_concat = FunctionCallee(fn);
 
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* slow_bb = BasicBlock::Create(m_ctx, "slow", fn);
+        auto* check_unique_bb = BasicBlock::Create(m_ctx, "check_unique", fn);
+        auto* inplace_bb = BasicBlock::Create(m_ctx, "inplace", fn);
+        auto* inplace_grow_bb = BasicBlock::Create(m_ctx, "inplace_grow", fn);
+        auto* inplace_append_bb = BasicBlock::Create(m_ctx, "inplace_append", fn);
+        auto* copy_bb = BasicBlock::Create(m_ctx, "copy", fn);
+
         IRBuilder<> b(entry);
         auto* a = fn->arg_begin();
         auto* b_arg = fn->arg_begin() + 1;
 
+        // Verify both operands are tagged OBJ with OBJ_STRING type before
+        // accessing any string-specific fields.
+        auto* a_tag = b.CreateExtractValue(a, {0}, "a_tag");
+        auto* b_tag = b.CreateExtractValue(b_arg, {0}, "b_tag");
+        auto* both_obj = b.CreateAnd(
+            b.CreateICmpEQ(a_tag, ConstantInt::get(i32_ty, TAG_OBJ)),
+            b.CreateICmpEQ(b_tag, ConstantInt::get(i32_ty, TAG_OBJ)));
+
         auto* a_payload = b.CreateExtractValue(a, {1});
-        auto* a_ptr_i64 = b.CreateBitCast(a_payload, i64_ty);
-        auto* a_str = b.CreateIntToPtr(a_ptr_i64, PointerType::get(m_ctx, 0));
-        auto* a_chars_ptr = b.CreateStructGEP(m_string_type, a_str, 2);
-        auto* a_chars = b.CreateLoad(i8_ptr, a_chars_ptr);
-        auto* a_len_ptr = b.CreateStructGEP(m_string_type, a_str, 1);
-        auto* a_len = b.CreateLoad(i64_ty, a_len_ptr);
-
+        auto* a_str = b.CreateIntToPtr(b.CreateBitCast(a_payload, i64_ty),
+                                        PointerType::get(m_ctx, 0));
         auto* b_payload = b.CreateExtractValue(b_arg, {1});
-        auto* b_ptr_i64 = b.CreateBitCast(b_payload, i64_ty);
-        auto* b_str = b.CreateIntToPtr(b_ptr_i64, PointerType::get(m_ctx, 0));
-        auto* b_chars_ptr = b.CreateStructGEP(m_string_type, b_str, 2);
-        auto* b_chars = b.CreateLoad(i8_ptr, b_chars_ptr);
-        auto* b_len_ptr = b.CreateStructGEP(m_string_type, b_str, 1);
-        auto* b_len = b.CreateLoad(i64_ty, b_len_ptr);
+        auto* b_str = b.CreateIntToPtr(b.CreateBitCast(b_payload, i64_ty),
+                                        PointerType::get(m_ctx, 0));
 
-        auto* new_len = b.CreateAdd(a_len, b_len, "new_len");
-        auto* buf_size = b.CreateAdd(new_len, ConstantInt::get(i64_ty, 1));
-        auto* buf = b.CreateCall(malloc_fn, {buf_size}, "buf");
-        b.CreateCall(memcpy_fn, {buf, a_chars, a_len});
-        auto* dest = b.CreateGEP(i8_ty, buf, {a_len});
-        b.CreateCall(memcpy_fn, {dest, b_chars, b_len});
-        auto* null_pos = b.CreateGEP(i8_ty, buf, {new_len});
-        b.CreateStore(ConstantInt::get(i8_ty, 0), null_pos);
+        auto* a_obj_type = b.CreateLoad(i32_ty,
+            b.CreateStructGEP(m_obj_header_type, a_str, 0), "a_obj_type");
+        auto* b_obj_type = b.CreateLoad(i32_ty,
+            b.CreateStructGEP(m_obj_header_type, b_str, 0), "b_obj_type");
+        auto* both_string = b.CreateAnd(
+            b.CreateICmpEQ(a_obj_type, ConstantInt::get(i32_ty, OBJ_STRING)),
+            b.CreateICmpEQ(b_obj_type, ConstantInt::get(i32_ty, OBJ_STRING)));
+        auto* both_valid = b.CreateAnd(both_obj, both_string);
+        b.CreateCondBr(both_valid, check_unique_bb, slow_bb);
 
-        auto* str_size = ConstantInt::get(i64_ty,
-            m_module.getDataLayout().getTypeAllocSize(m_string_type));
-        auto* mem = b.CreateCall(malloc_fn, {str_size}, "mem");
-        auto* str_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
+        // --- Slow path: convert non-string operands via __ang_to_string ---
+        {
+            IRBuilder<> bs(slow_bb);
+            auto* to_str_fn = m_module.getFunction("__ang_to_string");
+            auto* a_str_obj = bs.CreateCall(to_str_fn, {a}, "a_str");
+            auto* b_str_obj = bs.CreateCall(to_str_fn, {b_arg}, "b_str");
+            auto* result = bs.CreateCall(fn, {a_str_obj, b_str_obj}, "result");
+            bs.CreateCall(m_module.getFunction("__ang_decref"), {a_str_obj});
+            bs.CreateCall(m_module.getFunction("__ang_decref"), {b_str_obj});
+            bs.CreateRet(result);
+        }
 
-        auto* header_ptr = b.CreateStructGEP(m_string_type, str_ptr, 0);
-        auto* type_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 0);
-        b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING), type_addr);
-        auto* rc_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 1);
-        b.CreateStore(ConstantInt::get(i64_ty, 1), rc_addr);
+        // --- Both confirmed as strings: check refcount for in-place ---
+        {
+            IRBuilder<> bu(check_unique_bb);
+            auto* b_chars = bu.CreateLoad(i8_ptr,
+                bu.CreateStructGEP(m_string_type, b_str, 3), "b_chars");
+            auto* b_len = bu.CreateLoad(i64_ty,
+                bu.CreateStructGEP(m_string_type, b_str, 1), "b_len");
 
-        auto* len_addr = b.CreateStructGEP(m_string_type, str_ptr, 1);
-        b.CreateStore(new_len, len_addr);
-        auto* chars_addr = b.CreateStructGEP(m_string_type, str_ptr, 2);
-        b.CreateStore(buf, chars_addr);
+            auto* a_rc = bu.CreateLoad(i64_ty,
+                bu.CreateStructGEP(m_obj_header_type, a_str, 1), "a_rc");
+            auto* is_unique = bu.CreateICmpEQ(a_rc, ConstantInt::get(i64_ty, 1));
+            bu.CreateCondBr(is_unique, inplace_bb, copy_bb);
 
-        b.CreateRet(pack_obj(b, str_ptr));
+            // --- In-place: check if buffer needs growth ---
+            {
+                IRBuilder<> bi(inplace_bb);
+                auto* a_len = bi.CreateLoad(i64_ty,
+                    bi.CreateStructGEP(m_string_type, a_str, 1), "a_len");
+                auto* a_cap = bi.CreateLoad(i64_ty,
+                    bi.CreateStructGEP(m_string_type, a_str, 2), "a_cap");
+                auto* new_len = bi.CreateAdd(a_len, b_len, "new_len");
+                bi.CreateCondBr(
+                    bi.CreateICmpULE(new_len, a_cap),
+                    inplace_append_bb, inplace_grow_bb);
+            }
+
+            // --- In-place: grow buffer with exponential strategy ---
+            {
+                IRBuilder<> bg(inplace_grow_bb);
+                auto* a_len = bg.CreateLoad(i64_ty,
+                    bg.CreateStructGEP(m_string_type, a_str, 1));
+                auto* a_cap = bg.CreateLoad(i64_ty,
+                    bg.CreateStructGEP(m_string_type, a_str, 2));
+                auto* a_chars_ptr = bg.CreateStructGEP(m_string_type, a_str, 3);
+                auto* a_chars = bg.CreateLoad(i8_ptr, a_chars_ptr);
+
+                auto* new_len = bg.CreateAdd(a_len, b_len);
+                auto* doubled = bg.CreateShl(a_cap, 1, "doubled");
+                auto* new_cap = bg.CreateSelect(
+                    bg.CreateICmpUGT(doubled, new_len), doubled, new_len);
+                auto* new_buf = bg.CreateCall(realloc_fn,
+                    {a_chars, bg.CreateAdd(new_cap, ConstantInt::get(i64_ty, 1))}, "grown_buf");
+                bg.CreateStore(new_buf, a_chars_ptr);
+                bg.CreateStore(new_cap, bg.CreateStructGEP(m_string_type, a_str, 2));
+                bg.CreateBr(inplace_append_bb);
+            }
+
+            // --- In-place: append data ---
+            {
+                IRBuilder<> ba(inplace_append_bb);
+                auto* a_len = ba.CreateLoad(i64_ty,
+                    ba.CreateStructGEP(m_string_type, a_str, 1));
+                auto* a_chars = ba.CreateLoad(i8_ptr,
+                    ba.CreateStructGEP(m_string_type, a_str, 3), "cur_chars");
+
+                auto* final_len = ba.CreateAdd(a_len, b_len, "final_len");
+                ba.CreateCall(memcpy_fn,
+                    {ba.CreateGEP(i8_ty, a_chars, {a_len}), b_chars, b_len});
+                ba.CreateStore(final_len, ba.CreateStructGEP(m_string_type, a_str, 1));
+                ba.CreateStore(ConstantInt::get(i8_ty, 0),
+                    ba.CreateGEP(i8_ty, a_chars, {final_len}));
+
+                // Incref to compensate for caller's assignment decref
+                ba.CreateCall(m_module.getFunction("__ang_incref"), {a});
+                ba.CreateRet(a);
+            }
+
+            // --- Copy path: traditional allocate + copy ---
+            {
+                IRBuilder<> bc(copy_bb);
+                auto* a_len = bc.CreateLoad(i64_ty,
+                    bc.CreateStructGEP(m_string_type, a_str, 1), "a_len");
+                auto* a_chars = bc.CreateLoad(i8_ptr,
+                    bc.CreateStructGEP(m_string_type, a_str, 3), "a_chars");
+
+                auto* new_len = bc.CreateAdd(a_len, b_len, "new_len");
+                auto* buf = bc.CreateCall(malloc_fn,
+                    {bc.CreateAdd(new_len, ConstantInt::get(i64_ty, 1))}, "buf");
+                bc.CreateCall(memcpy_fn, {buf, a_chars, a_len});
+                bc.CreateCall(memcpy_fn,
+                    {bc.CreateGEP(i8_ty, buf, {a_len}), b_chars, b_len});
+                bc.CreateStore(ConstantInt::get(i8_ty, 0),
+                    bc.CreateGEP(i8_ty, buf, {new_len}));
+
+                auto* str_size = ConstantInt::get(i64_ty,
+                    m_module.getDataLayout().getTypeAllocSize(m_string_type));
+                auto* str_ptr = bc.CreateBitCast(
+                    bc.CreateCall(malloc_fn, {str_size}, "mem"),
+                    PointerType::get(m_ctx, 0));
+
+                init_string_struct(bc, str_ptr, new_len, buf);
+
+                bc.CreateRet(pack_obj(bc, str_ptr));
+            }
+        }
     }
 
+    // __ang_string_repeat
     {
         auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_string_repeat", fn_ty);
@@ -178,10 +276,10 @@ void RuntimeBuilder::generateStringOps() {
         auto* payload = bp.CreateExtractValue(str_arg, {1});
         auto* ptr_i64 = bp.CreateBitCast(payload, i64_ty);
         auto* str_ptr = bp.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
-        auto* chars_ptr = bp.CreateStructGEP(m_string_type, str_ptr, 2);
-        auto* src_chars = bp.CreateLoad(i8_ptr, chars_ptr, "src_chars");
-        auto* len_ptr = bp.CreateStructGEP(m_string_type, str_ptr, 1);
-        auto* src_len = bp.CreateLoad(i64_ty, len_ptr, "src_len");
+        auto* src_chars = bp.CreateLoad(i8_ptr,
+            bp.CreateStructGEP(m_string_type, str_ptr, 3), "src_chars");
+        auto* src_len = bp.CreateLoad(i64_ty,
+            bp.CreateStructGEP(m_string_type, str_ptr, 1), "src_len");
 
         auto* new_len = bp.CreateMul(src_len, count_val, "new_len");
         auto* buf_size = bp.CreateAdd(new_len, ConstantInt::get(i64_ty, 1));
@@ -211,24 +309,17 @@ void RuntimeBuilder::generateStringOps() {
 
             auto* str_size = ConstantInt::get(i64_ty,
                 m_module.getDataLayout().getTypeAllocSize(m_string_type));
-            auto* mem = bd.CreateCall(malloc_fn, {str_size}, "mem");
-            auto* new_str_ptr = bd.CreateBitCast(mem, PointerType::get(m_ctx, 0));
+            auto* new_str_ptr = bd.CreateBitCast(
+                bd.CreateCall(malloc_fn, {str_size}, "mem"),
+                PointerType::get(m_ctx, 0));
 
-            auto* header_ptr = bd.CreateStructGEP(m_string_type, new_str_ptr, 0);
-            auto* type_addr = bd.CreateStructGEP(m_obj_header_type, header_ptr, 0);
-            bd.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING), type_addr);
-            auto* rc_addr = bd.CreateStructGEP(m_obj_header_type, header_ptr, 1);
-            bd.CreateStore(ConstantInt::get(i64_ty, 1), rc_addr);
-
-            auto* len_addr = bd.CreateStructGEP(m_string_type, new_str_ptr, 1);
-            bd.CreateStore(new_len, len_addr);
-            auto* chars_addr = bd.CreateStructGEP(m_string_type, new_str_ptr, 2);
-            bd.CreateStore(buf, chars_addr);
+            init_string_struct(bd, new_str_ptr, new_len, buf);
 
             bd.CreateRet(pack_obj(bd, new_str_ptr));
         }
     }
 
+    // __ang_to_string
     {
         auto* fn_ty = FunctionType::get(obj_ty, {obj_ty}, false);
         auto* fn = createRuntimeFunc("__ang_to_string", fn_ty);
@@ -245,7 +336,6 @@ void RuntimeBuilder::generateStringOps() {
         auto* f64_bb = BasicBlock::Create(m_ctx, "f64", fn);
         auto* obj_bb = BasicBlock::Create(m_ctx, "obj", fn);
         auto* str_bb = BasicBlock::Create(m_ctx, "is_string", fn);
-        auto* merge_bb = BasicBlock::Create(m_ctx, "merge", fn);
 
         auto* sw = b.CreateSwitch(tag, nil_bb, 5);
         sw->addCase(ConstantInt::get(i32_ty, TAG_NIL), nil_bb);
@@ -258,8 +348,7 @@ void RuntimeBuilder::generateStringOps() {
             IRBuilder<> bn(nil_bb);
             auto* gsptr = bn.CreateGlobalString("nil");
             auto* str_from_c = m_module.getFunction("__ang_string_from_c");
-            auto* result = bn.CreateCall(str_from_c, {gsptr});
-            bn.CreateRet(result);
+            bn.CreateRet(bn.CreateCall(str_from_c, {gsptr}));
         }
 
         {
@@ -326,11 +415,6 @@ void RuntimeBuilder::generateStringOps() {
             auto* gsptr = bns.CreateGlobalString("<object>");
             auto* str_from_c = m_module.getFunction("__ang_string_from_c");
             bns.CreateRet(bns.CreateCall(str_from_c, {gsptr}));
-        }
-
-        {
-            IRBuilder<> bm(merge_bb);
-            bm.CreateRet(UndefValue::get(obj_ty));
         }
     }
 }

@@ -43,7 +43,7 @@ void RuntimeBuilder::generateMemoryManagement() {
         {
             IRBuilder<> bs(is_string_bb);
             auto* str_ptr = b.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
-            auto* chars_ptr = bs.CreateStructGEP(m_string_type, str_ptr, 2);
+            auto* chars_ptr = bs.CreateStructGEP(m_string_type, str_ptr, 3);
             auto* chars = bs.CreateLoad(PointerType::get(m_ctx, 0), chars_ptr, "chars");
             auto* free_fn = m_module.getFunction("free");
             bs.CreateCall(free_fn, {chars});
