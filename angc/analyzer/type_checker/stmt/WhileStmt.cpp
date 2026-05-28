@@ -7,7 +7,7 @@ namespace angara {
 
         if (!isTruthy(condition_type)) {
             error(Token(), "While loop condition must be a truthy type (bool or number), but got '" +
-                           condition_type->toString() + "'.");
+                           condition_type->toString() + "'.", "E260");
         }
 
         m_loop_depth++;

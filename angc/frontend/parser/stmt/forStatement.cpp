@@ -1,11 +1,11 @@
 #include "Parser.h"
 namespace angara {
     std::shared_ptr<Stmt> Parser::parseForInLoop(const Token& keyword) {
-        Token name = consume(TokenType::IDENTIFIER, "Expected iteration variable name in 'for-in' loop.");
-        consume(TokenType::IN, "Expected 'in' after iteration variable in 'for-in' loop.");
+        Token name = consume(TokenType::IDENTIFIER, "Expected iteration variable name in 'for-in' loop.", "E179");
+        consume(TokenType::IN, "Expected 'in' after iteration variable in 'for-in' loop.", "E180");
         std::shared_ptr<Expr> collection = expression();
-        consume(TokenType::RIGHT_PAREN, "Expected ')' after 'for-in' clauses.");
-        consume(TokenType::LEFT_BRACE, "Expected '{' to begin 'for-in' loop body.");
+        consume(TokenType::RIGHT_PAREN, "Expected ')' after 'for-in' clauses.", "E181");
+        consume(TokenType::LEFT_BRACE, "Expected '{' to begin 'for-in' loop body.", "E182");
         std::shared_ptr<Stmt> body = std::make_shared<BlockStmt>(block());
 
         return std::make_shared<ForInStmt>(keyword, std::move(name), std::move(collection), std::move(body));
@@ -42,15 +42,15 @@ namespace angara {
         if (!check(TokenType::SEMICOLON)) {
             condition = expression();
         }
-        consume(TokenType::SEMICOLON, "Expected ';' after loop condition.");
+        consume(TokenType::SEMICOLON, "Expected ';' after loop condition.", "E183");
 
         std::shared_ptr<Expr> increment = nullptr;
         if (!check(TokenType::RIGHT_PAREN)) {
             increment = expression();
         }
-        consume(TokenType::RIGHT_PAREN, "Expected ')' after 'for' clauses.");
+        consume(TokenType::RIGHT_PAREN, "Expected ')' after 'for' clauses.", "E184");
 
-        consume(TokenType::LEFT_BRACE, "Expected '{' to begin 'for' loop body.");
+        consume(TokenType::LEFT_BRACE, "Expected '{' to begin 'for' loop body.", "E185");
         std::shared_ptr<Stmt> body = std::make_shared<BlockStmt>(block());
 
         return std::make_shared<ForStmt>(keyword, std::move(initializer), std::move(condition), std::move(increment), std::move(body));
@@ -59,7 +59,7 @@ namespace angara {
     std::shared_ptr<Stmt> Parser::forStatement() {
         Token keyword = previous();
 
-        consume(TokenType::LEFT_PAREN, "Expected '(' after 'for'.");
+        consume(TokenType::LEFT_PAREN, "Expected '(' after 'for'.", "E186");
 
         if (isForInLoop()) {
             return parseForInLoop(keyword);

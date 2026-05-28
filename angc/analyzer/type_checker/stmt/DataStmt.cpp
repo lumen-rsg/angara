@@ -28,7 +28,7 @@ namespace angara {
             data_type->is_union = stmt.is_union;
             for (const auto& field_decl : stmt.fields) {
                 if (data_type->fields.count(field_decl->name.lexeme)) {
-                    error(field_decl->name, "Duplicate field '" + field_decl->name.lexeme + "' in foreign data block '" + stmt.name.lexeme + "'.");
+                    error(field_decl->name, "Duplicate field '" + field_decl->name.lexeme + "' in foreign data block '" + stmt.name.lexeme + "'.", "E281");
                     continue;
                 }
                 auto field_type = resolveType(field_decl->typeAnnotation);
@@ -47,7 +47,7 @@ namespace angara {
 
         for (const auto& field_decl : stmt.fields) {
             if (data_type->fields.count(field_decl->name.lexeme)) {
-                error(field_decl->name, "Duplicate field '" + field_decl->name.lexeme + "' in data block '" + stmt.name.lexeme + "'.");
+                error(field_decl->name, "Duplicate field '" + field_decl->name.lexeme + "' in data block '" + stmt.name.lexeme + "'.", "E282");
                 continue;
             }
 
@@ -55,12 +55,12 @@ namespace angara {
             if (field_decl->typeAnnotation) {
                 field_type = resolveType(field_decl->typeAnnotation);
             } else {
-                error(field_decl->name, "Data block fields must have an explicit type annotation (e.g., 'let x as i64').");
+                error(field_decl->name, "Data block fields must have an explicit type annotation (e.g., 'let x as i64').", "E283");
                 field_type = m_type_error;
             }
 
             if (field_decl->initializer) {
-                error(field_decl->name, "Data block fields cannot have default initializers — values are provided through the constructor.");
+                error(field_decl->name, "Data block fields cannot have default initializers — values are provided through the constructor.", "E284");
             }
 
             data_type->fields[field_decl->name.lexeme] = {field_type, AccessLevel::PUBLIC, dummy_token, field_decl->is_const};

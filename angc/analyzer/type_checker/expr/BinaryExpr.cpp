@@ -58,7 +58,7 @@ namespace angara {
                     }
                 } else {
                     error(expr.op, "Operator '" + expr.op.lexeme + "' requires numeric operands, but got '" +
-                                   left_type->toString() + "' and '" + right_type->toString() + "'.");
+                                   left_type->toString() + "' and '" + right_type->toString() + "'.", "E352");
                 }
                 break;
 
@@ -74,7 +74,7 @@ namespace angara {
                 } else if (left_type->toString() == "string" && isNumeric(right_type)) {
                     result_type = m_type_string;
                 } else {
-                    error(expr.op, "Operator '*' can only be used with two numbers (arithmetic) or 'string * number' (repetition).");
+                    error(expr.op, "Operator '*' can only be used with two numbers (arithmetic) or 'string * number' (repetition).", "E353");
                 }
                 break;
 
@@ -90,7 +90,7 @@ namespace angara {
                 } else if (left_type->toString() == "string" && right_type->toString() == "string") {
                     result_type = m_type_string;
                 } else {
-                    error(expr.op, "Operator '+' can only be used with two numbers (addition) or two strings (concatenation).");
+                    error(expr.op, "Operator '+' can only be used with two numbers (addition) or two strings (concatenation).", "E354");
                 }
                 break;
 
@@ -104,7 +104,7 @@ namespace angara {
                     result_type = m_type_bool;
                 } else {
                     error(expr.op, "Operator '" + expr.op.lexeme + "' requires numeric operands, but got '" +
-                                   left_type->toString() + "' and '" + right_type->toString() + "'.");
+                                   left_type->toString() + "' and '" + right_type->toString() + "'.", "E355");
                 }
                 break;
 
@@ -115,7 +115,7 @@ namespace angara {
                         result_type = m_type_bool;
                     } else {
                         error(expr.op, "Cannot compare instances of two different data types: '" +
-                                       left_type->toString() + "' and '" + right_type->toString() + "'.");
+                                       left_type->toString() + "' and '" + right_type->toString() + "'.", "E356");
                     }
                 }
                 else if (left_type->toString() == right_type->toString() ||
@@ -126,13 +126,13 @@ namespace angara {
                     result_type = m_type_bool;
                 } else {
                     error(expr.op, "Cannot compare types '" +
-                                   left_type->toString() + "' and '" + right_type->toString() + "'.");
+                                   left_type->toString() + "' and '" + right_type->toString() + "'.", "E357");
                 }
                 break;
             }
 
             default:
-                error(expr.op, "Unknown binary operator '" + expr.op.lexeme + "'.");
+                error(expr.op, "Unknown binary operator '" + expr.op.lexeme + "'.", "E358");
                 break;
         }
 

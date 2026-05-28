@@ -35,7 +35,7 @@ namespace angara {
 
             if (!init_prop) {
                 if (!arg_types.empty()) {
-                    error(expr.paren, "Class '" + class_type->name + "' has no constructor that accepts arguments.");
+                    error(expr.paren, "Class '" + class_type->name + "' has no constructor that accepts arguments.", "E324");
                 }
             } else {
                 auto init_sig = std::dynamic_pointer_cast<FunctionType>(init_prop->type);
@@ -56,11 +56,11 @@ namespace angara {
             if (m_is_in_unsafe_context) {
                 result_type = m_type_any;
             } else {
-                error(expr.paren, "Cannot call a value of type 'any' — this requires an '@unsafe' block.");
+                error(expr.paren, "Cannot call a value of type 'any' — this requires an '@unsafe' block.", "E325");
             }
         }
         else {
-            error(expr.paren, "Expression of type '" + callee_type->toString() + "' is not callable. Only functions, classes, and data types can be called.");
+            error(expr.paren, "Expression of type '" + callee_type->toString() + "' is not callable. Only functions, classes, and data types can be called.", "E326");
         }
 
         pushAndSave(&expr, result_type);
@@ -72,13 +72,13 @@ namespace angara {
             const std::vector<std::shared_ptr<Type>>& arg_types
     ) {
         if (arg_types.empty()) {
-            error(call.paren, "spawn() requires at least one argument — the function to execute in the new thread.");
+            error(call.paren, "spawn() requires at least one argument — the function to execute in the new thread.", "E327");
             return;
         }
 
         auto closure_type = arg_types[0];
         if (closure_type->kind != TypeKind::FUNCTION) {
-            error(call.paren, "The first argument to spawn() must be a function, but got type '" + closure_type->toString() + "'.");
+            error(call.paren, "The first argument to spawn() must be a function, but got type '" + closure_type->toString() + "'.", "E328");
             return;
         }
         auto func_type = std::dynamic_pointer_cast<FunctionType>(closure_type);
@@ -89,7 +89,7 @@ namespace angara {
         if (num_actual_args != num_expected_args) {
             error(call.paren, "Argument count mismatch in spawn(). The function expects " +
                               std::to_string(num_expected_args) + " argument(s), but " +
-                              std::to_string(num_actual_args) + " were provided.");
+                              std::to_string(num_actual_args) + " were provided.", "E329");
 
             if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(call.arguments[0])) {
                 if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
@@ -105,7 +105,7 @@ namespace angara {
 
             if (!check_type_compatibility(expected_type, actual_type)) {
                 error(call.paren, "Type mismatch for argument " + std::to_string(i + 1) + " of spawned function. " +
-                                  "Expected '" + expected_type->toString() + "', but got '" + actual_type->toString() + "'.");
+                                  "Expected '" + expected_type->toString() + "', but got '" + actual_type->toString() + "'.", "E330");
 
                 if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(call.arguments[0])) {
                     if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
@@ -158,7 +158,7 @@ namespace angara {
         if (!arity_ok) {
             error(call.paren, "Incorrect number of arguments. Function expects " +
                               std::to_string(num_expected) + " argument(s), but got " +
-                              std::to_string(num_actual) + ".");
+                              std::to_string(num_actual) + ".", "E331");
 
             if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(call.callee)) {
                 if (auto symbol = m_symbols.resolve(var_expr->name.lexeme)) {
@@ -195,7 +195,7 @@ namespace angara {
             if (!check_type_compatibility(expected_type, actual_type)) {
                 error(call.paren, "Type mismatch for argument " + std::to_string(i + 1) + ". " +
                                   "Expected '" + expected_type->toString() +
-                                  "', but got '" + actual_type->toString() + "'.");
+                                  "', but got '" + actual_type->toString() + "'.", "E332");
                 return;
             }
         }

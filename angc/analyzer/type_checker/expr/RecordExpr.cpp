@@ -10,7 +10,7 @@ namespace angara {
             const auto& value_expr = expr.values[i];
 
             if (inferred_fields.count(key_name)) {
-                error(key_token, "Duplicate field '" + key_name + "' in record literal.");
+                error(key_token, "Duplicate field '" + key_name + "' in record literal.", "E382");
             }
 
             value_expr->accept(*this);

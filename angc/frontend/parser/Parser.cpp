@@ -8,9 +8,9 @@ namespace angara {
     std::shared_ptr<ASTType> Parser::type() {
         // Parse @own prefix for owned string types (FFI only)
         if (match({TokenType::AT_SIGN})) {
-            Token own_kw = consume(TokenType::IDENTIFIER, "Expected 'own' after '@' in type annotation.");
+            Token own_kw = consume(TokenType::IDENTIFIER, "Expected 'own' after '@' in type annotation.", "E100");
             if (own_kw.lexeme != "own") {
-                throw error(own_kw, "Only '@own' type modifier is supported.");
+                throw error(own_kw, "Only '@own' type modifier is supported.", "E101");
             }
             auto inner = type();
             return std::make_shared<OwnedTypeNode>(inner);
@@ -35,27 +35,27 @@ namespace angara {
                     Token field_name;
                     if (match({TokenType::IDENTIFIER})) field_name = previous();
                     else if (match({TokenType::STRING})) field_name = previous();
-                    else throw error(peek(), "Expected a field name (identifier or string) in record type.");
+                    else throw error(peek(), "Expected a field name (identifier or string) in record type.", "E102");
 
-                    consume(TokenType::COLON, "Expected ':' after field name in record type.");
+                    consume(TokenType::COLON, "Expected ':' after field name in record type.", "E103");
                     fields.push_back({field_name, type()});
                 } while (match({TokenType::COMMA}));
             }
-            consume(TokenType::RIGHT_BRACE, "Expected '}' after record type fields.");
+            consume(TokenType::RIGHT_BRACE, "Expected '}' after record type fields.", "E104");
             base_type = std::make_shared<RecordTypeExpr>(keyword, std::move(fields));
 
         }
         else if (match({TokenType::TYPE_FUNCTION})) {
             Token keyword = previous();
-            consume(TokenType::LEFT_PAREN, "Expected '(' after 'function' in type annotation.");
+            consume(TokenType::LEFT_PAREN, "Expected '(' after 'function' in type annotation.", "E105");
             std::vector<std::shared_ptr<ASTType>> params;
             if (!check(TokenType::RIGHT_PAREN)) {
                 do {
                     params.push_back(type());
                 } while (match({TokenType::COMMA}));
             }
-            consume(TokenType::RIGHT_PAREN, "Expected ')' after function type parameters.");
-            consume(TokenType::MINUS_GREATER, "Expected '->' before return type in function type.");
+            consume(TokenType::RIGHT_PAREN, "Expected ')' after function type parameters.", "E106");
+            consume(TokenType::MINUS_GREATER, "Expected '->' before return type in function type.", "E107");
             auto return_type = type();
             base_type = std::make_shared<FunctionTypeExpr>(keyword, std::move(params), return_type);
 
@@ -73,7 +73,7 @@ namespace angara {
                 do {
                     arguments.push_back(type());
                 } while (match({TokenType::COMMA}));
-                consume(TokenType::GREATER, "Expected '>' after generic type arguments.");
+                consume(TokenType::GREATER, "Expected '>' after generic type arguments.", "E108");
                 base_type = std::make_shared<GenericType>(type_name_token, std::move(arguments));
             } else {
                 base_type = std::make_shared<SimpleType>(type_name_token);
@@ -81,14 +81,14 @@ namespace angara {
 
             // Check for fixed-size array: i8[256]
             if (match({TokenType::LEFT_BRACKET})) {
-                Token size_token = consume(TokenType::NUMBER_INT, "Expected array size after '['.");
-                consume(TokenType::RIGHT_BRACKET, "Expected ']' after array size.");
+                Token size_token = consume(TokenType::NUMBER_INT, "Expected array size after '['.", "E109");
+                consume(TokenType::RIGHT_BRACKET, "Expected ']' after array size.", "E110");
                 int arr_size = std::stoi(size_token.lexeme);
                 base_type = std::make_shared<FixedArrayTypeExpr>(base_type, arr_size);
             }
         }
         else {
-            throw error(peek(), "Expected a type annotation (e.g., 'i64', 'string'), a function type ('function(A) -> B'), or a record type ('{ field: Type }').");
+            throw error(peek(), "Expected a type annotation (e.g., 'i64', 'string'), a function type ('function(A) -> B'), or a record type ('{ field: Type }').", "E111");
         }
 
         if (match({TokenType::QUESTION})) {
@@ -128,12 +128,12 @@ namespace angara {
         if (match({TokenType::CONTINUE})) return continueStatement();
         if (match({TokenType::AT_SIGN})) {
             Token at_token = previous();
-            Token annotation = consume(TokenType::IDENTIFIER, "Expected annotation name after '@'.");
+            Token annotation = consume(TokenType::IDENTIFIER, "Expected annotation name after '@'.", "E112");
             if (annotation.lexeme != "unsafe") {
-                throw error(annotation, "Unknown annotation '@" + annotation.lexeme + "'. Only '@unsafe' is supported.");
+                throw error(annotation, "Unknown annotation '@" + annotation.lexeme + "'. Only '@unsafe' is supported.", "E113");
             }
 
-            consume(TokenType::LEFT_BRACE, "Expected '{' to begin '@unsafe' block.");
+            consume(TokenType::LEFT_BRACE, "Expected '{' to begin '@unsafe' block.", "E114");
             auto block_node = std::make_shared<BlockStmt>(block());
             return std::make_shared<UnsafeBlockStmt>(at_token, block_node);
         }
@@ -143,7 +143,7 @@ namespace angara {
 
     std::shared_ptr<Stmt> Parser::expressionStatement() {
         std::shared_ptr<Expr> expr = expression();
-        consume(TokenType::SEMICOLON, "Expected ';' after expression statement.");
+        consume(TokenType::SEMICOLON, "Expected ';' after expression statement.", "E115");
         return std::make_shared<ExpressionStmt>(std::move(expr));
     }
 
@@ -161,9 +161,9 @@ namespace angara {
         return false;
     }
 
-    Token Parser::consume(TokenType type, const std::string &message) {
+    Token Parser::consume(TokenType type, const std::string &message, const std::string &code) {
         if (check(type)) return advance();
-        throw error(peek(), message);
+        throw error(peek(), message, code);
     }
 
     bool Parser::check(TokenType type) {
@@ -188,13 +188,13 @@ namespace angara {
         return m_tokens[m_current - 1];
     }
 
-    Parser::ParseError Parser::error(const Token &token, const std::string &message) {
+    Parser::ParseError Parser::error(const Token &token, const std::string &message, const std::string &code) {
         if (m_panicMode) {
             return ParseError("");
         }
 
         m_panicMode = true;
-        m_errorHandler.report(token, message);
+        m_errorHandler.report(token, message, code);
         return ParseError(message);
     }
 

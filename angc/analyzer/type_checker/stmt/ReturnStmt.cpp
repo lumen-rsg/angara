@@ -69,7 +69,7 @@ bool TypeChecker::check_type_compatibility(
 
     void TypeChecker::visit(std::shared_ptr<const ReturnStmt> stmt) {
         if (m_function_return_types.empty()) {
-            error(stmt->keyword, "'return' can only be used inside a function body.");
+            error(stmt->keyword, "'return' can only be used inside a function body.", "E264");
             return;
         }
 
@@ -83,13 +83,13 @@ bool TypeChecker::check_type_compatibility(
             if (!check_type_compatibility(expected_return_type, actual_return_type)) {
                 error(stmt->keyword, "Type mismatch. This function is declared to return '" +
                                      expected_return_type->toString() + "', but is returning a value of type '" +
-                                     actual_return_type->toString() + "'.");
+                                     actual_return_type->toString() + "'.", "E265");
             }
 
         } else {
             if (!check_type_compatibility(expected_return_type, m_type_nil)) {
                 error(stmt->keyword, "This function must return a value of type '" +
-                                     expected_return_type->toString() + "'. An empty 'return;' is only valid for functions returning 'nil'.");
+                                     expected_return_type->toString() + "'. An empty 'return;' is only valid for functions returning 'nil'.", "E266");
             }
         }
     }

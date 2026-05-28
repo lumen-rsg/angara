@@ -14,19 +14,19 @@ namespace angara {
                 if (match({TokenType::FUNC})) {
                     auto func_decl = std::static_pointer_cast<FuncStmt>(function("function"));
                     if (func_decl->body) {
-                        throw error(func_decl->name, "An intrinsic function cannot have a body — it is replaced by a compiler builtin at compile time.");
+                        throw error(func_decl->name, "An intrinsic function cannot have a body — it is replaced by a compiler builtin at compile time.", "E128");
                     }
                     func_decl->is_intrinsic = true;
                     return func_decl;
                 }
-                throw error(peek(), "Expected 'func' after 'intrinsic'. Only functions can be marked intrinsic.");
+                throw error(peek(), "Expected 'func' after 'intrinsic'. Only functions can be marked intrinsic.", "E129");
             }
 
             if (match({TokenType::FOREIGN})) {
                 if (match({TokenType::FUNC})) {
                     auto func_decl = std::static_pointer_cast<FuncStmt>(function("function"));
                     if (func_decl->body) {
-                        throw error(func_decl->name, "A foreign function cannot have a body — its implementation comes from an external library.");
+                        throw error(func_decl->name, "A foreign function cannot have a body — its implementation comes from an external library.", "E130");
                     }
                     func_decl->is_foreign = true;
                     return func_decl;
@@ -35,7 +35,7 @@ namespace angara {
                 if (match({TokenType::DATA})) {
                     auto data_decl = std::static_pointer_cast<DataStmt>(foreignDataDeclaration());
                     if (data_decl->is_exported) {
-                        throw error(data_decl->name, "A 'foreign data' declaration is an import and cannot be marked 'export'.");
+                        throw error(data_decl->name, "A 'foreign data' declaration is an import and cannot be marked 'export'.", "E131");
                     }
                     return data_decl;
                 }
@@ -44,22 +44,22 @@ namespace angara {
                     auto union_decl = std::static_pointer_cast<DataStmt>(foreignDataDeclaration());
                     union_decl->is_union = true;
                     if (union_decl->is_exported) {
-                        throw error(union_decl->name, "A 'foreign union' declaration is an import and cannot be marked 'export'.");
+                        throw error(union_decl->name, "A 'foreign union' declaration is an import and cannot be marked 'export'.", "E132");
                     }
                     return union_decl;
                 }
 
                 if (match({TokenType::CONST})) {
-                    Token name = consume(TokenType::IDENTIFIER, "Expected constant name.");
-                    consume(TokenType::AS, "A 'foreign const' requires a type annotation ('foreign const NAME as Type;').");
+                    Token name = consume(TokenType::IDENTIFIER, "Expected constant name.", "E133");
+                    consume(TokenType::AS, "A 'foreign const' requires a type annotation ('foreign const NAME as Type;').", "E134");
                     auto typeAnnotation = type();
-                    consume(TokenType::SEMICOLON, "Expected ';' after foreign const declaration.");
+                    consume(TokenType::SEMICOLON, "Expected ';' after foreign const declaration.", "E135");
                     auto var_decl = std::make_shared<VarDeclStmt>(std::move(name), typeAnnotation, nullptr, true);
                     var_decl->is_foreign = true;
                     return var_decl;
                 }
 
-                throw error(peek(), "Expected 'func', 'data', 'union', or 'const' after 'foreign'.");
+                throw error(peek(), "Expected 'func', 'data', 'union', or 'const' after 'foreign'.", "E136");
             }
 
             std::shared_ptr<Stmt> decl_stmt = nullptr;
@@ -80,7 +80,7 @@ namespace angara {
                 std::static_pointer_cast<VarDeclStmt>(decl_stmt)->is_exported = is_exported;
             } else if (match({TokenType::ATTACH})) {
                 if (is_exported) {
-                    throw error(previous(), "'attach' statements import symbols and cannot be marked 'export'.");
+                    throw error(previous(), "'attach' statements import symbols and cannot be marked 'export'.", "E137");
                 }
                 return attachStatement();
             } else if (match({TokenType::DATA})) {
@@ -93,7 +93,7 @@ namespace angara {
                 return enum_decl;
             } else {
                 if (is_exported) {
-                    throw error(peek(), "Expected a declaration after 'export' (function, class, contract, trait, 'let', or 'const').");
+                    throw error(peek(), "Expected a declaration after 'export' (function, class, contract, trait, 'let', or 'const').", "E138");
                 }
                 return statement();
             }

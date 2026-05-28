@@ -9,7 +9,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         final_type = resolveType(stmt->typeAnnotation);
         m_variable_types[stmt.get()] = final_type;
         if (auto conflicting_symbol = m_symbols.declare(stmt->name, final_type, true)) {
-            error(stmt->name, "Symbol '" + stmt->name.lexeme + "' is already declared.");
+            error(stmt->name, "Symbol '" + stmt->name.lexeme + "' is already declared.", "E274");
             note(conflicting_symbol->declaration_token, "Previous declaration was here.");
         }
         return;
@@ -33,7 +33,7 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
             if (!types_match) {
                 error(stmt->name, "Type mismatch. Variable is annotated as '" +
                     final_type->toString() + "' but is initialized with a value of type '" +
-                    initializer_type->toString() + "'.");
+                    initializer_type->toString() + "'.", "E275");
                 final_type = m_type_error;
             }
         }
@@ -50,13 +50,13 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     m_variable_types[stmt.get()] = final_type;
 
     if (auto conflicting_symbol = m_symbols.declare(stmt->name, final_type, stmt->is_const)) {
-        error(stmt->name, "Symbol '" + stmt->name.lexeme + "' is already declared.");
+        error(stmt->name, "Symbol '" + stmt->name.lexeme + "' is already declared.", "E276");
         note(conflicting_symbol->declaration_token, "Previous declaration was here.");
     }
 
     if (stmt->is_exported) {
         if (m_symbols.getScopeDepth() > 0) {
-            error(stmt->name, "'export' can only be used on top-level declarations.");
+            error(stmt->name, "'export' can only be used on top-level declarations.", "E277");
         } else {
             m_module_type->exports[stmt->name.lexeme] = final_type;
         }

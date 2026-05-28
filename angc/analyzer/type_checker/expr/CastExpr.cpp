@@ -24,7 +24,7 @@ namespace angara {
 
         if (!valid) {
             error(expr.keyword, "Cannot cast from '" + source_type->toString() +
-                "' to '" + target_type->toString() + "'.");
+                "' to '" + target_type->toString() + "'.", "E378");
         }
 
         pushAndSave(&expr, target_type);

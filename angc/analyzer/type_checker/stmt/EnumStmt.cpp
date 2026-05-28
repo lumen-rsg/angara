@@ -13,7 +13,7 @@ namespace angara {
             const std::string& variant_name = variant_node->name.lexeme;
 
             if (enum_type->variants.count(variant_name)) {
-                error(variant_node->name, "Duplicate variant '" + variant_name + "' in enum '" + enum_type->name + "'.");
+                error(variant_node->name, "Duplicate variant '" + variant_name + "' in enum '" + enum_type->name + "'.", "E310");
                 continue;
             }
 

@@ -26,7 +26,7 @@ namespace angara {
             auto method_type = std::make_shared<FunctionType>(param_types, return_type);
 
             if (trait_type->methods.count(method_stmt->name.lexeme)) {
-                error(method_stmt->name, "Duplicate method '" + method_stmt->name.lexeme + "' in trait '" + stmt.name.lexeme + "'.");
+                error(method_stmt->name, "Duplicate method '" + method_stmt->name.lexeme + "' in trait '" + stmt.name.lexeme + "'.", "E307");
             } else {
                 trait_type->methods[method_stmt->name.lexeme] = method_type;
             }

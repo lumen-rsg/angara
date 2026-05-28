@@ -153,7 +153,7 @@ namespace angara {
         if (depth > 0) {
             m_errorHandler.report(
                 Token(TokenType::EOF_TOKEN, "*/", m_line, m_column, m_filename),
-                "Unterminated block comment."
+                "Unterminated block comment.", "E001"
             );
         }
     }
@@ -165,7 +165,7 @@ namespace angara {
             if (peek() == '\n') {
                 m_errorHandler.report(
                     Token(TokenType::STRING, m_source.substr(m_start, m_current - m_start), m_line, m_column, m_filename),
-                    "Unterminated string literal."
+                    "Unterminated string literal.", "E002"
                 );
                 return;
             }
@@ -176,7 +176,7 @@ namespace angara {
                 if (isAtEnd()) {
                     m_errorHandler.report(
                         Token(TokenType::STRING, "", m_line, m_column, m_filename),
-                        "Unterminated string literal; ends with '\\'."
+                        "Unterminated string literal; ends with '\\'.", "E003"
                     );
                     return;
                 }
@@ -221,7 +221,7 @@ namespace angara {
                         if (hex_str.empty()) {
                             m_errorHandler.report(
                                 Token(TokenType::STRING, "", m_line, m_column, m_filename),
-                                "Incomplete hex escape sequence '\\x'."
+                                "Incomplete hex escape sequence '\\x'.", "E004"
                             );
                         } else {
                             char hex_char = static_cast<char>(strtol(hex_str.c_str(), nullptr, 16));
@@ -234,7 +234,7 @@ namespace angara {
                     case 'U': {
                         m_errorHandler.report(
                             Token(TokenType::STRING, "", m_line, m_column, m_filename),
-                            "Unicode escape sequences ('\\u', '\\U') are not yet supported."
+                            "Unicode escape sequences ('\\u', '\\U') are not yet supported.", "E005"
                         );
                         int limit = (escaped == 'u' ? 4 : 8);
                         for (int i = 0; i < limit; ++i) { if (isxdigit(peek())) advance(); }
@@ -244,7 +244,7 @@ namespace angara {
                     default:
                         m_errorHandler.report(
                             Token(TokenType::STRING, "", m_line, m_column, m_filename),
-                            "Unknown escape sequence '\\" + std::string(1, escaped) + "'."
+                            "Unknown escape sequence '\\" + std::string(1, escaped) + "'.", "E006"
                         );
                         value << escaped;
                         break;
@@ -257,7 +257,7 @@ namespace angara {
         if (isAtEnd()) {
             m_errorHandler.report(
                 Token(TokenType::STRING, m_source.substr(m_start, m_current - m_start), m_line, m_column, m_filename),
-                "Unterminated string literal."
+                "Unterminated string literal.", "E007"
             );
             return;
         }
@@ -279,7 +279,7 @@ namespace angara {
         if (isAtEnd()) {
             m_errorHandler.report(
                 Token(TokenType::STRING, "\"\"\"", m_line, m_column, m_filename),
-                "Unterminated multi-line string."
+                "Unterminated multi-line string.", "E008"
             );
             return;
         }
@@ -301,7 +301,7 @@ namespace angara {
                 if (!isHexDigit(peek())) {
                     m_errorHandler.report(
                         Token(TokenType::NUMBER_INT, "0x", m_line, m_column - 2, m_filename),
-                        "Expected hexadecimal digits after '0x'."
+                        "Expected hexadecimal digits after '0x'.", "E009"
                     );
                     return;
                 }
@@ -312,7 +312,7 @@ namespace angara {
                         if (!isHexDigit(peek())) {
                             m_errorHandler.report(
                                 Token(TokenType::NUMBER_INT, "_", m_line, m_column - 1, m_filename),
-                                "Numeric separator '_' must be followed by a digit."
+                                "Numeric separator '_' must be followed by a digit.", "E010"
                             );
                             return;
                         }
@@ -331,7 +331,7 @@ namespace angara {
                 if (!isBinaryDigit(peek())) {
                     m_errorHandler.report(
                         Token(TokenType::NUMBER_INT, "0b", m_line, m_column - 2, m_filename),
-                        "Expected binary digits (0 or 1) after '0b'."
+                        "Expected binary digits (0 or 1) after '0b'.", "E011"
                     );
                     return;
                 }
@@ -342,7 +342,7 @@ namespace angara {
                         if (!isBinaryDigit(peek())) {
                             m_errorHandler.report(
                                 Token(TokenType::NUMBER_INT, "_", m_line, m_column - 1, m_filename),
-                                "Numeric separator '_' must be followed by a digit."
+                                "Numeric separator '_' must be followed by a digit.", "E012"
                             );
                             return;
                         }
@@ -362,7 +362,7 @@ namespace angara {
                 if (!isDigit(peek())) {
                     m_errorHandler.report(
                         Token(TokenType::NUMBER_INT, "_", m_line, m_column - 1, m_filename),
-                        "Numeric separator '_' must be followed by a digit."
+                        "Numeric separator '_' must be followed by a digit.", "E013"
                     );
                     return;
                 }
@@ -379,7 +379,7 @@ namespace angara {
                     if (!isDigit(peek())) {
                         m_errorHandler.report(
                             Token(TokenType::NUMBER_FLOAT, "_", m_line, m_column - 1, m_filename),
-                            "Numeric separator '_' must be followed by a digit."
+                            "Numeric separator '_' must be followed by a digit.", "E014"
                         );
                         return;
                     }
@@ -544,7 +544,7 @@ namespace angara {
                 } else {
                     m_errorHandler.report(
                         Token(TokenType::IDENTIFIER, std::string(1, c), m_line, m_column - 1, m_filename),
-                        "Unexpected character '" + std::string(1, c) + "'."
+                        "Unexpected character '" + std::string(1, c) + "'.", "E015"
                     );
                 }
                 break;

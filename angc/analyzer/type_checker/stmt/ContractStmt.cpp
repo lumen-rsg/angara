@@ -18,7 +18,7 @@ namespace angara {
                 auto field_type = resolveType(field_decl->typeAnnotation);
 
                 if (contract_type->fields.count(field_decl->name.lexeme) || contract_type->methods.count(field_decl->name.lexeme)) {
-                    error(field_decl->name, "Duplicate member '" + field_decl->name.lexeme + "' in contract '" + stmt.name.lexeme + "'.");
+                    error(field_decl->name, "Duplicate member '" + field_decl->name.lexeme + "' in contract '" + stmt.name.lexeme + "'.", "E308");
                     continue;
                 }
                 contract_type->fields[field_decl->name.lexeme] = {
@@ -41,7 +41,7 @@ namespace angara {
                 auto method_type = std::make_shared<FunctionType>(param_types, return_type);
 
                 if (contract_type->methods.count(method_decl->name.lexeme) || contract_type->fields.count(method_decl->name.lexeme)) {
-                    error(method_decl->name, "Duplicate member '" + method_decl->name.lexeme + "' in contract '" + stmt.name.lexeme + "'.");
+                    error(method_decl->name, "Duplicate member '" + method_decl->name.lexeme + "' in contract '" + stmt.name.lexeme + "'.", "E309");
                     continue;
                 }
                 contract_type->methods[method_decl->name.lexeme] = {

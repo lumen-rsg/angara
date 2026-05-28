@@ -11,7 +11,7 @@ namespace angara {
 
         if (stmt.has_this) {
             if (m_current_class == nullptr) {
-                error(stmt.name, "'this' can only be used in a method, not in a standalone function.");
+                error(stmt.name, "'this' can only be used in a method, not in a standalone function.", "E268");
             }
         }
 
@@ -19,7 +19,7 @@ namespace angara {
             if (p.type) {
                 param_types.push_back(resolveType(p.type));
             } else {
-                error(p.name, "Parameter '" + p.name.lexeme + "' is missing a type annotation.");
+                error(p.name, "Parameter '" + p.name.lexeme + "' is missing a type annotation.", "E269");
                 param_types.push_back(m_type_error);
             }
         }
@@ -59,23 +59,23 @@ namespace angara {
 
         if (stmt.is_foreign || stmt.is_intrinsic) {
             if (auto conflicting = m_symbols.declare(stmt.name, function_type, true)) {
-                error(stmt.name, "Symbol '" + stmt.name.lexeme + "' is already declared.");
+                error(stmt.name, "Symbol '" + stmt.name.lexeme + "' is already declared.", "E270");
                 note(conflicting->declaration_token, "Previous declaration was here.");
             }
             if (stmt.is_exported) {
-                error(stmt.name, "A 'foreign' function is an import and cannot be exported.");
+                error(stmt.name, "A 'foreign' function is an import and cannot be exported.", "E271");
             }
             return;
         }
 
         if (auto conflicting_symbol = m_symbols.declare(stmt.name, function_type, true)) {
-            error(stmt.name, "Symbol '" + stmt.name.lexeme + "' is already declared.");
+            error(stmt.name, "Symbol '" + stmt.name.lexeme + "' is already declared.", "E272");
             note(conflicting_symbol->declaration_token, "Previous declaration was here.");
         }
 
         if (stmt.is_exported || stmt.name.lexeme == "main") {
             if (m_current_class != nullptr) {
-                error(stmt.name, "'export' can only be used on top-level declarations.");
+                error(stmt.name, "'export' can only be used on top-level declarations.", "E273");
             } else {
                 m_module_type->exports[stmt.name.lexeme] = function_type;
             }

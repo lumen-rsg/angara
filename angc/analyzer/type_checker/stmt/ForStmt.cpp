@@ -13,7 +13,7 @@ namespace angara {
             auto condition_type = popType();
             if (!isTruthy(condition_type)) {
                 error(stmt->keyword, "For loop condition must be a truthy type (bool or number), but got '" +
-                                     condition_type->toString() + "'.");
+                                     condition_type->toString() + "'.", "E259");
             }
         }
 

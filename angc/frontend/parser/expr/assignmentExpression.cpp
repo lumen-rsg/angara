@@ -16,7 +16,7 @@ namespace angara {
                 return std::make_shared<AssignExpr>(std::move(expr), op, std::move(value));
                 }
 
-            error(op, "Cannot assign to this expression. Only variables ('x'), field accesses ('obj.field'), and subscripts ('arr[i]') can be assigned to.");
+            error(op, "Cannot assign to this expression. Only variables ('x'), field accesses ('obj.field'), and subscripts ('arr[i]') can be assigned to.", "E214");
                    }
 
         return expr;

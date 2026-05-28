@@ -145,32 +145,32 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
             if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
                 auto class_type = std::make_shared<ClassType>(class_stmt->name.lexeme);
                 if (auto conflicting_symbol = m_symbols.declare(class_stmt->name, class_type, true)) {
-                    error(class_stmt->name, "Symbol '" + class_stmt->name.lexeme + "' is already declared.");
+                    error(class_stmt->name, "Symbol '" + class_stmt->name.lexeme + "' is already declared.", "E243");
                     note(conflicting_symbol->declaration_token, "previous declaration was here.");
                 }
             } else if (auto trait_stmt = std::dynamic_pointer_cast<const TraitStmt>(stmt)) {
                 auto trait_type = std::make_shared<TraitType>(trait_stmt->name.lexeme);
                 if (auto conflicting_symbol = m_symbols.declare(trait_stmt->name, trait_type, true)) {
-                    error(trait_stmt->name, "Symbol '" + trait_stmt->name.lexeme + "' is already declared.");
+                    error(trait_stmt->name, "Symbol '" + trait_stmt->name.lexeme + "' is already declared.", "E244");
                     note(conflicting_symbol->declaration_token, "previous declaration was here.");
                 }
             } else if (auto contract_stmt = std::dynamic_pointer_cast<const ContractStmt>(stmt)) {
                 auto contract_type = std::make_shared<ContractType>(contract_stmt->name.lexeme);
                 if (auto conflicting_symbol = m_symbols.declare(contract_stmt->name, contract_type, true)) {
-                    error(contract_stmt->name, "Symbol '" + contract_stmt->name.lexeme + "' is already declared.");
+                    error(contract_stmt->name, "Symbol '" + contract_stmt->name.lexeme + "' is already declared.", "E245");
                     note(conflicting_symbol->declaration_token, "previous declaration was here.");
                 }
             }
             else if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
                 auto data_type = std::make_shared<DataType>(data_stmt->name.lexeme);
                 if (auto conflicting = m_symbols.declare(data_stmt->name, data_type, true)) {
-                    error(data_stmt->name, "Symbol '" + data_stmt->name.lexeme + "' is already declared.");
+                    error(data_stmt->name, "Symbol '" + data_stmt->name.lexeme + "' is already declared.", "E246");
                     note(conflicting->declaration_token, "previous declaration was here.");
                 }
             } else if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
                 auto enum_type = std::make_shared<EnumType>(enum_stmt->name.lexeme);
                 if (auto conflicting = m_symbols.declare(enum_stmt->name, enum_type, true)) {
-                    error(enum_stmt->name, "Symbol '" + enum_stmt->name.lexeme + "' is already declared.");
+                    error(enum_stmt->name, "Symbol '" + enum_stmt->name.lexeme + "' is already declared.", "E247");
                     note(conflicting->declaration_token, "previous declaration was here.");
                 }
             }
@@ -321,7 +321,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
     }
         }
 
-        error(simple->name, "Unknown type '" + name + "'.");
+        error(simple->name, "Unknown type '" + name + "'.", "E250");
         std::vector<std::string> candidates;
         for (const auto& scope : m_symbols.getScopes()) {
             for (const auto& [sym_name, sym] : scope) {
@@ -342,7 +342,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
 
         if (base_name == "list") {
             if (generic->arguments.size() != 1) {
-                error(generic->name, "Type 'list' expects exactly one type argument (e.g., 'list<i64>').");
+                error(generic->name, "Type 'list' expects exactly one type argument (e.g., 'list<i64>').", "E251");
                 return m_type_error;
             }
             auto element_type = resolveType(generic->arguments[0]);
@@ -361,7 +361,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
                         error(generic->name, "Generic type '" + base_name + "' expects " +
                               std::to_string(data_type->type_params.size()) +
                               " type argument(s), but got " +
-                              std::to_string(generic->arguments.size()) + ".");
+                              std::to_string(generic->arguments.size()) + ".", "E252");
                         return m_type_error;
                     }
 
@@ -383,7 +383,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
                         error(generic->name, "Generic type '" + base_name + "' expects " +
                               std::to_string(class_type->type_params.size()) +
                               " type argument(s), but got " +
-                              std::to_string(generic->arguments.size()) + ".");
+                              std::to_string(generic->arguments.size()) + ".", "E253");
                         return m_type_error;
                     }
 
@@ -399,7 +399,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
             }
         }
 
-        error(generic->name, "Unknown generic type '" + base_name + "'. Only generic types with a '<...>' suffix are valid here.");
+        error(generic->name, "Unknown generic type '" + base_name + "'. Only generic types with a '<...>' suffix are valid here.", "E254");
         return m_type_error;
     }
 
@@ -408,7 +408,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         for (const auto& field_def : record_type_expr->fields) {
             const std::string& field_name = field_def.name.lexeme;
             if (fields.contains(field_name)) {
-                error(field_def.name, "Duplicate field '" + field_name + "' in record type.");
+                error(field_def.name, "Duplicate field '" + field_name + "' in record type.", "E255");
             }
             fields[field_name] = resolveType(field_def.type);
         }

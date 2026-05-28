@@ -215,7 +215,7 @@ namespace angara {
         /// @param type     Expected token type.
         /// @param message  Error message if the token doesn't match.
         /// @return The consumed token.
-        Token consume(TokenType type, const std::string &message);
+        Token consume(TokenType type, const std::string &message, const std::string &code = "");
 
         /// Checks if the current token is of the given type without consuming it.
         /// @param type  Token type to check.
@@ -253,7 +253,7 @@ namespace angara {
         /// @param token    Token where the error occurred.
         /// @param message  Human-readable error description.
         /// @return A ParseError exception (caller should throw it).
-        ParseError error(const Token &token, const std::string &message);
+        ParseError error(const Token &token, const std::string &message, const std::string &code = "");
 
         /// Reports a non-fatal warning at the given token (does not trigger panic mode).
         /// @param token    Token where the warning occurred.

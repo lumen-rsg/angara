@@ -3,13 +3,13 @@ namespace angara {
 
     std::any TypeChecker::visit(const SuperExpr& expr) {
         if (m_current_class == nullptr) {
-            error(expr.keyword, "Cannot use 'super' outside of a class method.");
+            error(expr.keyword, "Cannot use 'super' outside of a class method.", "E372");
             pushAndSave(&expr, m_type_error);
             return {};
         }
 
         if (m_current_class->superclass == nullptr) {
-            error(expr.keyword, "Class '" + m_current_class->name + "' has no superclass — 'super' requires 'inherits'.");
+            error(expr.keyword, "Class '" + m_current_class->name + "' has no superclass — 'super' requires 'inherits'.", "E373");
             pushAndSave(&expr, m_type_error);
             return {};
         }
@@ -31,13 +31,13 @@ namespace angara {
 
             if (method_info == nullptr || method_info->type->kind != TypeKind::FUNCTION) {
                 error(*expr.method, "Superclass '" + m_current_class->superclass->name +
-                                   "' has no method named '" + method_name + "'.");
+                                   "' has no method named '" + method_name + "'.", "E374");
                 pushAndSave(&expr, m_type_error);
                 return {};
             }
 
             if (method_info->access == AccessLevel::PRIVATE) {
-                error(*expr.method, "Superclass method '" + method_name + "' is private and cannot be accessed from a subclass.");
+                error(*expr.method, "Superclass method '" + method_name + "' is private and cannot be accessed from a subclass.", "E375");
                 pushAndSave(&expr, m_type_error);
                 return {};
             }

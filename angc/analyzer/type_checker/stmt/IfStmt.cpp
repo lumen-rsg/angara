@@ -4,7 +4,7 @@ namespace angara {
     void TypeChecker::visit(std::shared_ptr<const IfStmt> stmt) {
         if (stmt->declaration) {
             if (!stmt->declaration->initializer) {
-                error(stmt->declaration->name, "Compiler error: 'if let' declaration is missing an initializer.");
+                error(stmt->declaration->name, "Compiler error: 'if let' declaration is missing an initializer.", "E256");
                 return;
             }
 
@@ -14,7 +14,7 @@ namespace angara {
             if (initializer_type->kind == TypeKind::ERROR) return;
 
             if (initializer_type->kind != TypeKind::OPTIONAL && initializer_type->kind != TypeKind::ANY) {
-                error(stmt->declaration->name, "'if let' requires an optional type (e.g., 'string?') or 'any', but got a non-optional value of type '" + initializer_type->toString() + "'.");
+                error(stmt->declaration->name, "'if let' requires an optional type (e.g., 'string?') or 'any', but got a non-optional value of type '" + initializer_type->toString() + "'.", "E257");
             } else {
                 m_symbols.enterScope();
 
@@ -70,7 +70,7 @@ namespace angara {
 
         if (!isTruthy(condition_type)) {
             error(stmt->keyword, "If statement condition must be a truthy type (bool or number), but got '" +
-                                 condition_type->toString() + "'.");
+                                 condition_type->toString() + "'.", "E258");
         }
 
         stmt->thenBranch->accept(*this, stmt->thenBranch);

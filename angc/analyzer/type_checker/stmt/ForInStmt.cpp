@@ -14,17 +14,17 @@ namespace angara {
             if (m_is_in_unsafe_context) {
                 item_type = m_type_any;
             } else {
-                error(stmt->name, "Iterating over a value of type 'any' requires an '@unsafe' block.");
+                error(stmt->name, "Iterating over a value of type 'any' requires an '@unsafe' block.", "E261");
             }
         }
         else {
-            error(stmt->name, "Cannot iterate over type '" + collection_type->toString() + "'. Only lists and strings are iterable.");
+            error(stmt->name, "Cannot iterate over type '" + collection_type->toString() + "'. Only lists and strings are iterable.", "E262");
         }
 
         m_symbols.enterScope();
 
         if (auto conflicting_symbol = m_symbols.declare(stmt->name, item_type, true)) {
-            error(stmt->name, "Symbol '" + stmt->name.lexeme + "' is already declared.");
+            error(stmt->name, "Symbol '" + stmt->name.lexeme + "' is already declared.", "E263");
             note(conflicting_symbol->declaration_token, "Previous declaration was here.");
         }
 

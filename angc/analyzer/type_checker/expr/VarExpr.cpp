@@ -5,7 +5,7 @@ namespace angara {
         auto symbol = resolve_and_narrow(expr);
 
         if (!symbol) {
-            error(expr.name, "Undefined variable '" + expr.name.lexeme + "'.");
+            error(expr.name, "Undefined variable '" + expr.name.lexeme + "'.", "E377");
 
             std::vector<std::string> candidates;
             for (const auto& scope : m_symbols.getScopes()) {

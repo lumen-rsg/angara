@@ -17,7 +17,7 @@ namespace angara {
                 auto unwrapped_lhs_type = std::dynamic_pointer_cast<OptionalType>(lhs_type)->wrapped_type;
                 if (!check_type_compatibility(unwrapped_lhs_type, rhs_type)) {
                     error(expr.op, "Type mismatch in '??' operator. The default value has type '" + rhs_type->toString() +
-                                   "', but the unwrapped optional expects type '" + unwrapped_lhs_type->toString() + "'.");
+                                   "', but the unwrapped optional expects type '" + unwrapped_lhs_type->toString() + "'.", "E362");
                     pushAndSave(&expr, m_type_error);
                     return {};
                 }
@@ -30,7 +30,7 @@ namespace angara {
                 return {};
             }
 
-            error(expr.op, "The left-hand side of '??' must be an optional type (e.g., 'string?') or 'any', but got '" + lhs_type->toString() + "'.");
+            error(expr.op, "The left-hand side of '??' must be an optional type (e.g., 'string?') or 'any', but got '" + lhs_type->toString() + "'.", "E363");
             pushAndSave(&expr, m_type_error);
             return {};
         }
@@ -47,7 +47,7 @@ namespace angara {
 
         if (!isTruthy(left_type) || !isTruthy(right_type)) {
             error(expr.op, "Logical operator '" + expr.op.lexeme + "' requires truthy operands, but got '" +
-                           left_type->toString() + "' and '" + right_type->toString() + "'.");
+                           left_type->toString() + "' and '" + right_type->toString() + "'.", "E364");
             pushAndSave(&expr, m_type_error);
             return {};
         }

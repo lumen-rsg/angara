@@ -14,7 +14,7 @@ namespace angara {
         }
 
         if (auto conflicting_symbol = m_symbols.declare(stmt->catchName, exception_var_type, true)) {
-            error(stmt->catchName, "Symbol '" + stmt->catchName.lexeme + "' is already declared.");
+            error(stmt->catchName, "Symbol '" + stmt->catchName.lexeme + "' is already declared.", "E313");
             note(conflicting_symbol->declaration_token, "Previous declaration was here.");
         }
 

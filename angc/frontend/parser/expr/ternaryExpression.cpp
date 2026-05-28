@@ -7,7 +7,7 @@ namespace angara {
 
         if (match({TokenType::QUESTION})) {
             std::shared_ptr<Expr> thenBranch = expression();
-            consume(TokenType::COLON, "Expected ':' between ternary branches (condition ? then : else).");
+            consume(TokenType::COLON, "Expected ':' between ternary branches (condition ? then : else).", "E242");
             std::shared_ptr<Expr> elseBranch = ternary();
             expr = std::make_shared<TernaryExpr>(std::move(expr), std::move(thenBranch), std::move(elseBranch));
         }

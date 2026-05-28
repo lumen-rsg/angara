@@ -19,16 +19,16 @@ namespace angara {
             if (collection_type->kind == TypeKind::LIST) {
                 const auto list_type = std::dynamic_pointer_cast<ListType>(collection_type);
                 if (!isInteger(index_type)) {
-                    error(subscript_target->bracket, "List index must be an integer, but got '" + index_type->toString() + "'.");
+                    error(subscript_target->bracket, "List index must be an integer, but got '" + index_type->toString() + "'.", "E314");
                 }
                 if (list_type->element_type->toString() != rhs_type->toString()) {
-                    error(expr.op, "Cannot assign a value of type '" + rhs_type->toString() + "' to a list element of type '" + list_type->element_type->toString() + "'.");
+                    error(expr.op, "Cannot assign a value of type '" + rhs_type->toString() + "' to a list element of type '" + list_type->element_type->toString() + "'.", "E315");
                 }
             }
             else if (collection_type->kind == TypeKind::RECORD) {
                 auto record_type = std::dynamic_pointer_cast<RecordType>(collection_type);
                 if (index_type->toString() != "string") {
-                    error(subscript_target->bracket, "Record key for assignment must be a string, but got '" + index_type->toString() + "'.");
+                    error(subscript_target->bracket, "Record key for assignment must be a string, but got '" + index_type->toString() + "'.", "E316");
                 } else {
                     if (record_type->fields.empty()) {
                         // Dynamic field addition on generic record — always valid.
@@ -36,9 +36,9 @@ namespace angara {
                         if (auto key_literal = std::dynamic_pointer_cast<const Literal>(subscript_target->index)) {
                             auto field_it = record_type->fields.find(key_literal->token.lexeme);
                             if (field_it == record_type->fields.end()) {
-                                error(key_literal->token, "Record has no field named '" + key_literal->token.lexeme + "'.");
+                                error(key_literal->token, "Record has no field named '" + key_literal->token.lexeme + "'.", "E317");
                             } else if (!check_type_compatibility(field_it->second, rhs_type)) {
-                                error(expr.op, "Cannot assign a value of type '" + rhs_type->toString() + "' to field '" + key_literal->token.lexeme + "' which expects type '" + field_it->second->toString() + "'.");
+                                error(expr.op, "Cannot assign a value of type '" + rhs_type->toString() + "' to field '" + key_literal->token.lexeme + "' which expects type '" + field_it->second->toString() + "'.", "E318");
                             }
                         }
                     }
@@ -70,13 +70,13 @@ namespace angara {
             if (!types_match) {
                 error(expr.op, "Type mismatch. Cannot assign a value of type '" +
                                rhs_type->toString() + "' to a target of type '" +
-                               lhs_type->toString() + "'.");
+                               lhs_type->toString() + "'.", "E319");
             }
         }
 
         if (const auto var_target = std::dynamic_pointer_cast<const VarExpr>(expr.target)) {
             if (const auto symbol = m_symbols.resolve(var_target->name.lexeme); symbol && symbol->is_const) {
-                error(var_target->name, "Cannot assign to 'const' variable '" + symbol->name + "'.");
+                error(var_target->name, "Cannot assign to 'const' variable '" + symbol->name + "'.", "E320");
                 note(symbol->declaration_token, "'" + symbol->name + "' was declared 'const' here.");
             }
         }
@@ -90,13 +90,13 @@ namespace angara {
 
                 if (const ClassType::MemberInfo* field_info = instance_type->class_type->findProperty(field_name); field_info == nullptr) {
                     error(get_target->name, "Class '" + instance_type->toString() +
-                                            "' has no field named '" + field_name + "'.");
+                                            "' has no field named '" + field_name + "'.", "E321");
                 } else {
                     if (instance_type->class_type->methods.contains(field_name)) {
-                        error(get_target->name, "Cannot assign to method '" + field_name + "' — methods are not assignable.");
+                        error(get_target->name, "Cannot assign to method '" + field_name + "' — methods are not assignable.", "E322");
                     } else {
                         if (field_info->is_const) {
-                            error(get_target->name, "Cannot assign to 'const' field '" + field_name + "'.");
+                            error(get_target->name, "Cannot assign to 'const' field '" + field_name + "'.", "E323");
                         }
                     }
                 }

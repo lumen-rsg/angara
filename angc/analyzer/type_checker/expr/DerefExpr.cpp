@@ -8,7 +8,7 @@ namespace angara {
         // Dereference is FFI-only: only allowed on pointer types
         if (ptr_type->kind != TypeKind::POINTER) {
             error(expr.op, "Cannot dereference non-pointer type '" +
-                ptr_type->toString() + "'. Pointer dereference is only valid for FFI pointer types.");
+                ptr_type->toString() + "'. Pointer dereference is only valid for FFI pointer types.", "E379");
             pushAndSave(&expr, m_type_error);
             return {};
         }

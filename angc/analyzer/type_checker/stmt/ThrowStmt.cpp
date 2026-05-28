@@ -6,7 +6,7 @@ namespace angara {
         auto thrown_type = popType();
 
         if (thrown_type->kind != TypeKind::EXCEPTION) {
-            error(stmt->keyword, "Can only throw objects of type 'Exception', but got '" + thrown_type->toString() + "'.");
+            error(stmt->keyword, "Can only throw objects of type 'Exception', but got '" + thrown_type->toString() + "'.", "E267");
         }
     }
 

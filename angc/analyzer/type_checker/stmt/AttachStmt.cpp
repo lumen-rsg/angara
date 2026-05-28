@@ -21,14 +21,14 @@ namespace angara {
                 auto export_it = module_type->exports.find(name_str);
 
                 if (export_it == module_type->exports.end()) {
-                    error(name_token, "Module '" + module_type->name + "' has no exported member named '" + name_str + "'.");
+                    error(name_token, "Module '" + module_type->name + "' has no exported member named '" + name_str + "'.", "E278");
 
                     std::vector<std::string> candidates;
                     for (const auto& [n, t] : module_type->exports) candidates.push_back(n);
                     find_and_report_suggestion(name_token, candidates);
                 } else {
                     if (auto conflicting = m_symbols.declare(name_token, export_it->second, true, module_type)) {
-                        error(name_token, "Symbol '" + name_str + "' is already declared.");
+                        error(name_token, "Symbol '" + name_str + "' is already declared.", "E279");
                         note(conflicting->declaration_token, "Previous declaration was here.");
                     }
                 }
@@ -47,7 +47,7 @@ namespace angara {
             }
 
             if (auto conflicting = m_symbols.declare(name_token, module_type, true)) {
-                 error(name_token, "Symbol '" + symbol_name + "' is already declared.");
+                 error(name_token, "Symbol '" + symbol_name + "' is already declared.", "E280");
                  note(conflicting->declaration_token, "Previous declaration was here.");
             }
         }

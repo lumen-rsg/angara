@@ -35,7 +35,7 @@ namespace angara {
             statements.push_back(stmt);
         }
 
-        consume(TokenType::RIGHT_BRACE, "Expected '}' to close block.");
+        consume(TokenType::RIGHT_BRACE, "Expected '}' to close block.", "E176");
         return statements;
     }
 

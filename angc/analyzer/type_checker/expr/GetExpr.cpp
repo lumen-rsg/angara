@@ -18,7 +18,7 @@ std::any TypeChecker::visit(const GetExpr& expr) {
     }
 
     if (object_type->kind == TypeKind::OPTIONAL && !is_optional_chain) {
-        error(expr.op, "Cannot access property on an optional type '" + object_type->toString() + "' — use '?.' for safe access, or unwrap the value first.");
+        error(expr.op, "Cannot access property on an optional type '" + object_type->toString() + "' — use '?.' for safe access, or unwrap the value first.", "E333");
         pushAndSave(&expr, m_type_error);
         return {};
     }
@@ -43,7 +43,7 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         else {
             auto field_it = data_type->fields.find(property_name);
             if (field_it == data_type->fields.end()) {
-                error(expr.name, "Data type '" + data_type->name + "' has no field named '" + property_name + "'.");
+                error(expr.name, "Data type '" + data_type->name + "' has no field named '" + property_name + "'.", "E334");
             } else {
                 property_type = field_it->second.type;
                 // Foreign data i8[N] fields auto-convert to string at codegen time
@@ -57,7 +57,7 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         auto instance_type = std::dynamic_pointer_cast<InstanceType>(unwrapped_object_type);
         const ClassType::MemberInfo* prop_info = instance_type->class_type->findProperty(property_name);
         if (!prop_info) {
-            error(expr.name, "Class '" + instance_type->toString() + "' has no property or method named '" + property_name + "'.");
+            error(expr.name, "Class '" + instance_type->toString() + "' has no property or method named '" + property_name + "'.", "E335");
 
             std::vector<std::string> candidates;
             for(const auto& [name, member] : instance_type->class_type->fields) candidates.push_back(name);
@@ -65,7 +65,7 @@ std::any TypeChecker::visit(const GetExpr& expr) {
             find_and_report_suggestion(expr.name, candidates);
         } else {
             if (prop_info->access == AccessLevel::PRIVATE && (m_current_class == nullptr || m_current_class->name != instance_type->class_type->name)) {
-                error(expr.name, "Property '" + property_name + "' is private and cannot be accessed from outside the class.");
+                error(expr.name, "Property '" + property_name + "' is private and cannot be accessed from outside the class.", "E336");
             } else {
                 property_type = prop_info->type;
             }
@@ -76,7 +76,7 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         auto variant_it = enum_type->variants.find(property_name);
 
         if (variant_it == enum_type->variants.end()) {
-            error(expr.name, "Enum '" + enum_type->name + "' has no variant named '" + property_name + "'.");
+            error(expr.name, "Enum '" + enum_type->name + "' has no variant named '" + property_name + "'.", "E337");
         } else {
             auto variant_constructor_type = std::dynamic_pointer_cast<FunctionType>(variant_it->second);
 
@@ -91,7 +91,7 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         auto module_type = std::dynamic_pointer_cast<ModuleType>(unwrapped_object_type);
         auto member_it = module_type->exports.find(property_name);
         if (member_it == module_type->exports.end()) {
-            error(expr.name, "Module '" + module_type->name + "' has no exported member named '" + property_name + "'.");
+            error(expr.name, "Module '" + module_type->name + "' has no exported member named '" + property_name + "'.", "E338");
 
             std::vector<std::string> candidates;
             for(const auto& [name, type] : module_type->exports) candidates.push_back(name);
@@ -130,7 +130,7 @@ std::any TypeChecker::visit(const GetExpr& expr) {
             );
         }
         else {
-            error(expr.name, "Type 'list' has no property or method named '" + property_name + "'. Available: push, remove_at, remove, deep_clone, length.");
+            error(expr.name, "Type 'list' has no property or method named '" + property_name + "'. Available: push, remove_at, remove, deep_clone, length.", "E339");
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::RECORD) {
@@ -158,34 +158,34 @@ std::any TypeChecker::visit(const GetExpr& expr) {
            );
         }
         else {
-            error(expr.name, "Type 'record' has no property named '" + property_name + "'. Use subscript '[]' to access fields, or one of: remove, keys, clone, deep_clone.");
+            error(expr.name, "Type 'record' has no property named '" + property_name + "'. Use subscript '[]' to access fields, or one of: remove, keys, clone, deep_clone.", "E340");
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::THREAD) {
         if (property_name == "join") {
             property_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_any);
         } else {
-            error(expr.name, "Type 'Thread' has no property named '" + property_name + "'. Available: join.");
+            error(expr.name, "Type 'Thread' has no property named '" + property_name + "'. Available: join.", "E341");
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::MUTEX) {
         if (property_name == "lock" || property_name == "unlock") {
             property_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_nil);
         } else {
-            error(expr.name, "Type 'Mutex' has no property named '" + property_name + "'. Available: lock, unlock.");
+            error(expr.name, "Type 'Mutex' has no property named '" + property_name + "'. Available: lock, unlock.", "E342");
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::EXCEPTION) {
         auto exception_type = std::dynamic_pointer_cast<ExceptionType>(unwrapped_object_type);
         auto field_it = exception_type->fields.find(property_name);
         if (field_it == exception_type->fields.end()) {
-            error(expr.name, "Type 'Exception' has no property named '" + property_name + "'.");
+            error(expr.name, "Type 'Exception' has no property named '" + property_name + "'.", "E343");
         } else {
             property_type = field_it->second.type;
         }
     }
     else {
-        error(expr.op, "Type '" + object_type->toString() + "' has no accessible properties or methods.");
+        error(expr.op, "Type '" + object_type->toString() + "' has no accessible properties or methods.", "E344");
     }
 
     if (property_type->kind == TypeKind::ERROR) {

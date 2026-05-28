@@ -7,7 +7,7 @@ namespace angara {
         if (!check(TokenType::SEMICOLON)) {
             value = expression();
         }
-        consume(TokenType::SEMICOLON, "Expected ';' after 'return' value.");
+        consume(TokenType::SEMICOLON, "Expected ';' after 'return' value.", "E199");
         return std::make_shared<ReturnStmt>(std::move(keyword), std::move(value));
     }
 
