@@ -110,6 +110,19 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
     if (!l||!r) return makeNil();
     switch (e.op.type) {
         case TokenType::PLUS: {
+            // If the type checker knows either operand is a string, skip the
+            // runtime tag dispatch and call __ang_string_concat directly.
+            {
+                auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+                auto rt = m_type_checker.getExpressionTypes().find(e.right.get());
+                bool left_is_string = (lt != m_type_checker.getExpressionTypes().end() &&
+                                       lt->second->toString() == "string");
+                bool right_is_string = (rt != m_type_checker.getExpressionTypes().end() &&
+                                        rt->second->toString() == "string");
+                if (left_is_string || right_is_string) {
+                    return callRtByName("__ang_string_concat", {l, r});
+                }
+            }
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
             auto* bothI64 = builder->CreateAnd(
