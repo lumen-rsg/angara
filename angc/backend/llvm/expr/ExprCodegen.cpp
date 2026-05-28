@@ -441,8 +441,24 @@ llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
                 }
             }
             if (!is_self_assign) {
-                auto* old = loadVar(var->name.lexeme);
-                callRtByName("__ang_decref", {old});
+                // Use compile-time type info when available to decide
+                // whether a decref is needed at all — skip entirely for
+                // primitive types that can never hold an object reference.
+                auto type_it = namedTypes.find(var->name.lexeme);
+                bool may_be_obj = true;
+                if (type_it != namedTypes.end()) {
+                    auto& t = type_it->second;
+                    auto ts = t->toString();
+                    if (ts == "i64" || ts == "i32" || ts == "i16" || ts == "i8" ||
+                        ts == "u64" || ts == "u32" || ts == "u16" || ts == "u8" ||
+                        ts == "f64" || ts == "f32" || ts == "bool" || ts == "nil") {
+                        may_be_obj = false;
+                    }
+                }
+                if (may_be_obj) {
+                    auto* old = loadVar(var->name.lexeme);
+                    callRtByName("__ang_decref", {old});
+                }
             }
         }
         auto type_it = namedTypes.find(var->name.lexeme);
