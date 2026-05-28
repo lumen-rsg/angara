@@ -233,9 +233,12 @@ llvm::Value* LLVMBackend::truncateForType(llvm::Value* val, const std::shared_pt
     llvm::Value* payload = getI64(val);
     llvm::Type* truncTy = llvm::IntegerType::get(*ctx, bits);
     llvm::Value* truncated = builder->CreateTrunc(payload, truncTy, "narrow");
-    llvm::Value* masked = builder->CreateZExt(truncated, llvm::Type::getInt64Ty(*ctx), "masked");
+    // Sign-extend for signed types, zero-extend for unsigned types
+    llvm::Value* extended = isUnsignedInteger(type)
+        ? builder->CreateZExt(truncated, llvm::Type::getInt64Ty(*ctx), "masked")
+        : builder->CreateSExt(truncated, llvm::Type::getInt64Ty(*ctx), "sign_ext");
 
-    return makeI64(masked);
+    return makeI64(extended);
 }
 
 llvm::Type* LLVMBackend::resolveCFieldType(const std::shared_ptr<Type>& type) {

@@ -108,6 +108,18 @@ llvm::Value* LLVMBackend::cgLiteral(const Literal& e) {
 llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
     auto* l = cg(e.left), *r = cg(e.right);
     if (!l||!r) return makeNil();
+
+    // Helper: convert an AngaraObject to double based on its runtime tag.
+    // If TAG_F64, bitcast payload; if TAG_I64, SIToFP convert.
+    auto* f64_ty = llvm::Type::getDoubleTy(*ctx);
+    auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
+    auto toDouble = [&](llvm::Value* val, llvm::Value* tag) -> llvm::Value* {
+        return builder->CreateSelect(
+            builder->CreateICmpEQ(tag, llvm::ConstantInt::get(i32_ty, TAG_F64)),
+            getF64(val),
+            builder->CreateSIToFP(getI64(val), f64_ty));
+    };
+
     switch (e.op.type) {
         case TokenType::PLUS: {
             // If the type checker knows either operand is a string, skip the
@@ -126,30 +138,27 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
             auto* bothI64 = builder->CreateAnd(
-                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_I64)),
-                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_I64)));
-            auto* bothF64 = builder->CreateAnd(
-                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
-                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(i32_ty, TAG_I64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(i32_ty, TAG_I64)));
+            auto* eitherF64 = builder->CreateOr(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(i32_ty, TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(i32_ty, TAG_F64)));
             auto* fn = builder->GetInsertBlock()->getParent();
             auto* iaddBB = llvm::BasicBlock::Create(*ctx,"iadd",fn);
             auto* faddBB = llvm::BasicBlock::Create(*ctx,"fadd",fn);
             auto* saddBB = llvm::BasicBlock::Create(*ctx,"sadd",fn);
             auto* maddBB = llvm::BasicBlock::Create(*ctx,"madd",fn);
-            builder->CreateCondBr(bothI64, iaddBB, faddBB);
+            auto* checkF64BB = llvm::BasicBlock::Create(*ctx,"chkf",fn);
+            builder->CreateCondBr(bothI64, iaddBB, checkF64BB);
             builder->SetInsertPoint(iaddBB);
             auto* ia = makeI64(builder->CreateAdd(getI64(l),getI64(r)));
             iaddBB = builder->GetInsertBlock();
             builder->CreateBr(maddBB);
+            builder->SetInsertPoint(checkF64BB);
+            builder->CreateCondBr(eitherF64, faddBB, saddBB);
             builder->SetInsertPoint(faddBB);
-            auto* isF64 = builder->CreateAnd(
-                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
-                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
-            auto* faddCont = llvm::BasicBlock::Create(*ctx,"fadd_cont",fn);
-            builder->CreateCondBr(isF64, faddCont, saddBB);
-            builder->SetInsertPoint(faddCont);
-            auto* fa = makeF64(builder->CreateFAdd(getF64(l),getF64(r)));
-            faddCont = builder->GetInsertBlock();
+            auto* fa = makeF64(builder->CreateFAdd(toDouble(l, lTag), toDouble(r, rTag)));
+            faddBB = builder->GetInsertBlock();
             builder->CreateBr(maddBB);
             builder->SetInsertPoint(saddBB);
             auto* sa = callRtByName("__ang_string_concat",{l,r});
@@ -157,22 +166,22 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             builder->CreateBr(maddBB);
             builder->SetInsertPoint(maddBB);
             auto* phi = builder->CreatePHI(objType,3);
-            phi->addIncoming(ia,iaddBB); phi->addIncoming(fa,faddCont); phi->addIncoming(sa,saddBB);
+            phi->addIncoming(ia,iaddBB); phi->addIncoming(fa,faddBB); phi->addIncoming(sa,saddBB);
             return phi;
         }
         case TokenType::MINUS: {
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
-            auto* bothF64 = builder->CreateAnd(
-                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
-                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* eitherF64 = builder->CreateOr(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(i32_ty, TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(i32_ty, TAG_F64)));
             auto* fn = builder->GetInsertBlock()->getParent();
             auto* fsubBB = llvm::BasicBlock::Create(*ctx,"fsub",fn);
             auto* isubBB = llvm::BasicBlock::Create(*ctx,"isub",fn);
             auto* msubBB = llvm::BasicBlock::Create(*ctx,"msub",fn);
-            builder->CreateCondBr(bothF64, fsubBB, isubBB);
+            builder->CreateCondBr(eitherF64, fsubBB, isubBB);
             builder->SetInsertPoint(fsubBB);
-            auto* fa = makeF64(builder->CreateFSub(getF64(l),getF64(r)));
+            auto* fa = makeF64(builder->CreateFSub(toDouble(l, lTag),toDouble(r, rTag)));
             fsubBB = builder->GetInsertBlock();
             builder->CreateBr(msubBB);
             builder->SetInsertPoint(isubBB);
@@ -193,16 +202,16 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             }
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
-            auto* bothF64 = builder->CreateAnd(
-                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
-                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* eitherF64 = builder->CreateOr(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(i32_ty, TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(i32_ty, TAG_F64)));
             auto* fn = builder->GetInsertBlock()->getParent();
             auto* fmulBB = llvm::BasicBlock::Create(*ctx,"fmul",fn);
             auto* imulBB = llvm::BasicBlock::Create(*ctx,"imul",fn);
             auto* mmulBB = llvm::BasicBlock::Create(*ctx,"mmul",fn);
-            builder->CreateCondBr(bothF64, fmulBB, imulBB);
+            builder->CreateCondBr(eitherF64, fmulBB, imulBB);
             builder->SetInsertPoint(fmulBB);
-            auto* fa = makeF64(builder->CreateFMul(getF64(l),getF64(r)));
+            auto* fa = makeF64(builder->CreateFMul(toDouble(l, lTag),toDouble(r, rTag)));
             fmulBB = builder->GetInsertBlock();
             builder->CreateBr(mmulBB);
             builder->SetInsertPoint(imulBB);
@@ -217,16 +226,16 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
         case TokenType::SLASH: {
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
-            auto* bothF64 = builder->CreateAnd(
-                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
-                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* eitherF64 = builder->CreateOr(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(i32_ty, TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(i32_ty, TAG_F64)));
             auto* fn = builder->GetInsertBlock()->getParent();
             auto* fdivBB = llvm::BasicBlock::Create(*ctx,"fdiv",fn);
             auto* idivBB = llvm::BasicBlock::Create(*ctx,"idiv",fn);
             auto* mdivBB = llvm::BasicBlock::Create(*ctx,"mdiv",fn);
-            builder->CreateCondBr(bothF64, fdivBB, idivBB);
+            builder->CreateCondBr(eitherF64, fdivBB, idivBB);
             builder->SetInsertPoint(fdivBB);
-            auto* fa = makeF64(builder->CreateFDiv(getF64(l),getF64(r)));
+            auto* fa = makeF64(builder->CreateFDiv(toDouble(l, lTag),toDouble(r, rTag)));
             fdivBB = builder->GetInsertBlock();
             builder->CreateBr(mdivBB);
             builder->SetInsertPoint(idivBB);
@@ -246,16 +255,16 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
         case TokenType::PERCENT: {
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
-            auto* bothF64 = builder->CreateAnd(
-                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
-                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* eitherF64 = builder->CreateOr(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(i32_ty, TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(i32_ty, TAG_F64)));
             auto* fn = builder->GetInsertBlock()->getParent();
             auto* fmodBB = llvm::BasicBlock::Create(*ctx,"fmod",fn);
             auto* imodBB = llvm::BasicBlock::Create(*ctx,"imod",fn);
             auto* mmodBB = llvm::BasicBlock::Create(*ctx,"mmod",fn);
-            builder->CreateCondBr(bothF64, fmodBB, imodBB);
+            builder->CreateCondBr(eitherF64, fmodBB, imodBB);
             builder->SetInsertPoint(fmodBB);
-            auto* fa = makeF64(builder->CreateFRem(getF64(l),getF64(r)));
+            auto* fa = makeF64(builder->CreateFRem(toDouble(l, lTag),toDouble(r, rTag)));
             fmodBB = builder->GetInsertBlock();
             builder->CreateBr(mmodBB);
             builder->SetInsertPoint(imodBB);
@@ -280,16 +289,16 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
         case TokenType::LESS: {
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
-            auto* bothF64 = builder->CreateAnd(
-                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
-                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* eitherF64 = builder->CreateOr(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(i32_ty, TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(i32_ty, TAG_F64)));
             auto* fn = builder->GetInsertBlock()->getParent();
             auto* fcmpBB = llvm::BasicBlock::Create(*ctx,"flt",fn);
             auto* icmpBB = llvm::BasicBlock::Create(*ctx,"ilt",fn);
             auto* mcmpBB = llvm::BasicBlock::Create(*ctx,"mlt",fn);
-            builder->CreateCondBr(bothF64, fcmpBB, icmpBB);
+            builder->CreateCondBr(eitherF64, fcmpBB, icmpBB);
             builder->SetInsertPoint(fcmpBB);
-            auto* fb = makeBool(builder->CreateFCmpOLT(getF64(l),getF64(r)));
+            auto* fb = makeBool(builder->CreateFCmpOLT(toDouble(l, lTag),toDouble(r, rTag)));
             fcmpBB = builder->GetInsertBlock();
             builder->CreateBr(mcmpBB);
             builder->SetInsertPoint(icmpBB);
@@ -309,16 +318,16 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
         case TokenType::LESS_EQUAL: {
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
-            auto* bothF64 = builder->CreateAnd(
-                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
-                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* eitherF64 = builder->CreateOr(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(i32_ty, TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(i32_ty, TAG_F64)));
             auto* fn = builder->GetInsertBlock()->getParent();
             auto* fcmpBB = llvm::BasicBlock::Create(*ctx,"fle",fn);
             auto* icmpBB = llvm::BasicBlock::Create(*ctx,"ile",fn);
             auto* mcmpBB = llvm::BasicBlock::Create(*ctx,"mle",fn);
-            builder->CreateCondBr(bothF64, fcmpBB, icmpBB);
+            builder->CreateCondBr(eitherF64, fcmpBB, icmpBB);
             builder->SetInsertPoint(fcmpBB);
-            auto* fb = makeBool(builder->CreateFCmpOLE(getF64(l),getF64(r)));
+            auto* fb = makeBool(builder->CreateFCmpOLE(toDouble(l, lTag),toDouble(r, rTag)));
             fcmpBB = builder->GetInsertBlock();
             builder->CreateBr(mcmpBB);
             builder->SetInsertPoint(icmpBB);
@@ -338,16 +347,16 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
         case TokenType::GREATER: {
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
-            auto* bothF64 = builder->CreateAnd(
-                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
-                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* eitherF64 = builder->CreateOr(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(i32_ty, TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(i32_ty, TAG_F64)));
             auto* fn = builder->GetInsertBlock()->getParent();
             auto* fcmpBB = llvm::BasicBlock::Create(*ctx,"fgt",fn);
             auto* icmpBB = llvm::BasicBlock::Create(*ctx,"igt",fn);
             auto* mcmpBB = llvm::BasicBlock::Create(*ctx,"mgt",fn);
-            builder->CreateCondBr(bothF64, fcmpBB, icmpBB);
+            builder->CreateCondBr(eitherF64, fcmpBB, icmpBB);
             builder->SetInsertPoint(fcmpBB);
-            auto* fb = makeBool(builder->CreateFCmpOGT(getF64(l),getF64(r)));
+            auto* fb = makeBool(builder->CreateFCmpOGT(toDouble(l, lTag),toDouble(r, rTag)));
             fcmpBB = builder->GetInsertBlock();
             builder->CreateBr(mcmpBB);
             builder->SetInsertPoint(icmpBB);
@@ -367,16 +376,16 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
         case TokenType::GREATER_EQUAL: {
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
-            auto* bothF64 = builder->CreateAnd(
-                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)),
-                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64)));
+            auto* eitherF64 = builder->CreateOr(
+                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(i32_ty, TAG_F64)),
+                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(i32_ty, TAG_F64)));
             auto* fn = builder->GetInsertBlock()->getParent();
             auto* fcmpBB = llvm::BasicBlock::Create(*ctx,"fge",fn);
             auto* icmpBB = llvm::BasicBlock::Create(*ctx,"ige",fn);
             auto* mcmpBB = llvm::BasicBlock::Create(*ctx,"mge",fn);
-            builder->CreateCondBr(bothF64, fcmpBB, icmpBB);
+            builder->CreateCondBr(eitherF64, fcmpBB, icmpBB);
             builder->SetInsertPoint(fcmpBB);
-            auto* fb = makeBool(builder->CreateFCmpOGE(getF64(l),getF64(r)));
+            auto* fb = makeBool(builder->CreateFCmpOGE(toDouble(l, lTag),toDouble(r, rTag)));
             fcmpBB = builder->GetInsertBlock();
             builder->CreateBr(mcmpBB);
             builder->SetInsertPoint(icmpBB);
