@@ -373,11 +373,13 @@ namespace angara {
     struct PointerType : Type {
         std::shared_ptr<Type> pointee_type;
         int depth; // 1 for *, 2 for **
+        bool byval = false; // ^Type — struct passed/returned by value (FFI only)
 
         PointerType(std::shared_ptr<Type> pointee, int d)
             : Type(TypeKind::POINTER), pointee_type(std::move(pointee)), depth(d) {}
 
         [[nodiscard]] std::string toString() const override {
+            if (byval) return "^" + pointee_type->toString();
             return std::string(depth, '*') + pointee_type->toString();
         }
     };

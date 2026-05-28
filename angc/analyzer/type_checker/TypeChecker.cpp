@@ -433,7 +433,9 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
     if (auto ptr_expr = std::dynamic_pointer_cast<const PointerTypeExpr>(ast_type)) {
         auto pointee = resolveType(ptr_expr->pointee_type);
         if (pointee->kind == TypeKind::ERROR) return m_type_error;
-        return std::make_shared<PointerType>(pointee, ptr_expr->depth);
+        auto ptr_type = std::make_shared<PointerType>(pointee, ptr_expr->depth);
+        ptr_type->byval = ptr_expr->byval;
+        return ptr_type;
     }
 
     if (auto owned = std::dynamic_pointer_cast<const OwnedTypeNode>(ast_type)) {

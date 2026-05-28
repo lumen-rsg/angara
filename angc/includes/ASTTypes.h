@@ -128,9 +128,11 @@ namespace angara {
     };
 
     // Represents a pointer type like *i8, **i8, *void (FFI only)
+    // Also represents byval ^Type when byval=true
     struct PointerTypeExpr : ASTType {
         const std::shared_ptr<ASTType> pointee_type;
         const int depth; // 1 for *, 2 for **
+        bool byval = false; // true for ^Type (struct-by-value)
 
         PointerTypeExpr(std::shared_ptr<ASTType> pointee, int d)
             : pointee_type(std::move(pointee)), depth(d) {}

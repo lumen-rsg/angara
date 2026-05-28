@@ -17,6 +17,8 @@ namespace angara {
         }
 
         // Parse pointer prefix: *i8, **i8, *void
+        // Parse byval prefix: ^Vec2 (struct-by-value for FFI)
+        bool is_byval = match({TokenType::CARET});
         int ptr_depth = 0;
         while (match({TokenType::STAR})) {
             ptr_depth++;
@@ -94,8 +96,10 @@ namespace angara {
         }
 
         // Wrap in pointer type if * prefix was parsed
-        if (ptr_depth > 0) {
-            base_type = std::make_shared<PointerTypeExpr>(base_type, ptr_depth);
+        if (ptr_depth > 0 || is_byval) {
+            auto ptr_type = std::make_shared<PointerTypeExpr>(base_type, ptr_depth);
+            ptr_type->byval = is_byval;
+            base_type = ptr_type;
         }
 
         return base_type;

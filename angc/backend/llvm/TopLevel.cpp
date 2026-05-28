@@ -407,7 +407,7 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
     bool isVariadic = func_type && func_type->is_variadic;
 
     // Build C function signature using resolved semantic types
-    // Foreign data returns are pointers by default (can be opaque handles or struct pointers)
+    // Foreign data returns are pointers by default (^Type for by-value)
     llvm::Type* cRetType;
     if (returnsVoid) {
         cRetType = llvm::Type::getVoidTy(*ctx);
@@ -420,6 +420,14 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
     std::vector<llvm::Type*> cParamTypes;
     for (size_t i = 0; i < func_type->param_types.size(); i++) {
         auto& ptype = func_type->param_types[i];
+        // Check for byval pointer (^Type) — pass struct by value
+        if (ptype->kind == TypeKind::POINTER) {
+            auto ptr_type = std::dynamic_pointer_cast<PointerType>(ptype);
+            if (ptr_type && ptr_type->byval) {
+                cParamTypes.push_back(resolveCFieldType(ptype));
+                continue;
+            }
+        }
         // Foreign data (non-opaque): pass as pointer to the struct
         if (ptype->kind == TypeKind::DATA) {
             auto dt = std::dynamic_pointer_cast<DataType>(ptype);

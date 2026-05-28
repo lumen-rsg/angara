@@ -238,6 +238,17 @@ llvm::Type* LLVMBackend::resolveCFieldType(const std::shared_ptr<Type>& type) {
         return llvm::PointerType::get(*ctx, 0);
     }
     if (type->kind == TypeKind::POINTER) {
+        auto ptr_type = std::dynamic_pointer_cast<PointerType>(type);
+        // Byval pointer (^Type): return the struct type directly for by-value passing
+        if (ptr_type && ptr_type->byval && ptr_type->pointee_type->kind == TypeKind::DATA) {
+            auto dt = std::dynamic_pointer_cast<DataType>(ptr_type->pointee_type);
+            if (dt && dt->is_foreign && !dt->is_opaque) {
+                auto it = m_foreign_struct_types.find(dt->name);
+                if (it != m_foreign_struct_types.end()) {
+                    return it->second;
+                }
+            }
+        }
         // All pointer types map to LLVM opaque pointer (regardless of depth)
         return llvm::PointerType::get(*ctx, 0);
     }
@@ -289,6 +300,20 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
         }
     }
     if (type->kind == TypeKind::POINTER) {
+        auto ptr_type = std::dynamic_pointer_cast<PointerType>(type);
+        // Byval struct: extract data pointer from NativeInstance, then load the struct value
+        if (ptr_type && ptr_type->byval && ptr_type->pointee_type->kind == TypeKind::DATA) {
+            auto dt = std::dynamic_pointer_cast<DataType>(ptr_type->pointee_type);
+            if (dt && dt->is_foreign && !dt->is_opaque) {
+                auto it = m_foreign_struct_types.find(dt->name);
+                if (it != m_foreign_struct_types.end()) {
+                    auto* data_ptr = callRtByName("__ang_api_native_instance_data", {obj});
+                    auto* struct_ptr = builder->CreateBitCast(data_ptr,
+                        llvm::PointerType::get(it->second, 0));
+                    return builder->CreateLoad(it->second, struct_ptr);
+                }
+            }
+        }
         // Pointer is stored as NativeInstance — extract the raw data pointer
         return callRtByName("__ang_api_native_instance_data", {obj});
     }
@@ -406,6 +431,48 @@ llvm::Value* LLVMBackend::marshalCToAngara(llvm::Value* c_val, const std::shared
             return makeI64(builder->CreateSExt(c_val, llvm::Type::getInt64Ty(*ctx)));
         }
         return makeI64(c_val);
+    }
+    if (type->kind == TypeKind::POINTER) {
+        auto ptr_type = std::dynamic_pointer_cast<PointerType>(type);
+        if (ptr_type && ptr_type->byval && ptr_type->pointee_type->kind == TypeKind::DATA) {
+            // Struct returned by value — alloca, store, wrap in NativeInstance
+            auto dt = std::dynamic_pointer_cast<DataType>(ptr_type->pointee_type);
+            if (dt && dt->is_foreign && !dt->is_opaque) {
+                auto it = m_foreign_struct_types.find(dt->name);
+                if (it != m_foreign_struct_types.end()) {
+                    auto* struct_type = it->second;
+                    auto* alloca = builder->CreateAlloca(struct_type);
+                    builder->CreateStore(c_val, alloca);
+                    auto* void_ptr = builder->CreateBitCast(alloca, llvm::PointerType::get(*ctx, 0));
+                    auto* name_str = builder->CreateGlobalString(dt->name);
+                    // Use free()-based finalizer — the alloca'd copy needs to be freed
+                    // Actually, for stack-allocated structs, we need malloc + memcpy
+                    // so the finalizer can free it later
+                    auto* malloc_fn = mod->getFunction("malloc");
+                    if (!malloc_fn) {
+                        auto* malloc_type = llvm::FunctionType::get(llvm::PointerType::get(*ctx, 0),
+                            {llvm::Type::getInt64Ty(*ctx)}, false);
+                        malloc_fn = llvm::Function::Create(malloc_type, llvm::Function::ExternalLinkage,
+                            "malloc", mod.get());
+                    }
+                    auto* struct_size = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),
+                        mod->getDataLayout().getTypeAllocSize(struct_type).getFixedValue());
+                    auto* heap_mem = builder->CreateCall(malloc_fn, {struct_size});
+                    auto* heap_typed = builder->CreateBitCast(heap_mem, llvm::PointerType::get(struct_type, 0));
+                    // Copy the struct value to heap
+                    builder->CreateStore(c_val, heap_typed);
+                    // Wrap in NativeInstance
+                    auto* fin_fn = mod->getFunction("Angara_foreign_free_" + dt->name);
+                    if (!fin_fn) fin_fn = mod->getFunction("free");
+                    llvm::Value* finalizer = fin_fn
+                        ? static_cast<llvm::Value*>(fin_fn)
+                        : llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
+                    auto* native_obj = callRtByName("__ang_api_native_instance_new",
+                        {heap_mem, finalizer, name_str});
+                    return native_obj;
+                }
+            }
+        }
     }
     if (type->kind == TypeKind::DATA) {
         auto dt = std::dynamic_pointer_cast<DataType>(type);
