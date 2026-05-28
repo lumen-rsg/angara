@@ -4,6 +4,17 @@ namespace angara {
 void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     std::shared_ptr<Type> final_type = nullptr;
 
+    // Foreign const: resolve type only, no initializer
+    if (stmt->is_foreign) {
+        final_type = resolveType(stmt->typeAnnotation);
+        m_variable_types[stmt.get()] = final_type;
+        if (auto conflicting_symbol = m_symbols.declare(stmt->name, final_type, true)) {
+            error(stmt->name, "Symbol '" + stmt->name.lexeme + "' is already declared.");
+            note(conflicting_symbol->declaration_token, "Previous declaration was here.");
+        }
+        return;
+    }
+
     if (stmt->typeAnnotation && stmt->initializer) {
         final_type = resolveType(stmt->typeAnnotation);
 

@@ -49,7 +49,17 @@ namespace angara {
                     return union_decl;
                 }
 
-                throw error(peek(), "Expected 'func', 'data', or 'union' after 'foreign'.");
+                if (match({TokenType::CONST})) {
+                    Token name = consume(TokenType::IDENTIFIER, "Expected constant name.");
+                    consume(TokenType::AS, "A 'foreign const' requires a type annotation ('foreign const NAME as Type;').");
+                    auto typeAnnotation = type();
+                    consume(TokenType::SEMICOLON, "Expected ';' after foreign const declaration.");
+                    auto var_decl = std::make_shared<VarDeclStmt>(std::move(name), typeAnnotation, nullptr, true);
+                    var_decl->is_foreign = true;
+                    return var_decl;
+                }
+
+                throw error(peek(), "Expected 'func', 'data', 'union', or 'const' after 'foreign'.");
             }
 
             std::shared_ptr<Stmt> decl_stmt = nullptr;

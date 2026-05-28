@@ -33,6 +33,20 @@ void LLVMBackend::codegenGlobalVarDecl(const VarDeclStmt& stmt) {
 
     globals[name] = global;
     globals["g_" + sanitize(stmt.name.lexeme)] = global;
+
+    // For foreign const: also declare the external C global
+    if (stmt.is_foreign) {
+        auto sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(stmt.name.lexeme);
+        if (sym && sym->type) {
+            auto* c_type = resolveCFieldType(sym->type);
+            auto* c_global = mod->getGlobalVariable(stmt.name.lexeme);
+            if (!c_global) {
+                c_global = new llvm::GlobalVariable(
+                    *mod, c_type, false,
+                    llvm::GlobalValue::ExternalLinkage, nullptr, stmt.name.lexeme);
+            }
+        }
+    }
 }
 
 void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& module_name) {
@@ -653,6 +667,28 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
 
         if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
             const std::string name = sanitize(var_decl->name.lexeme);
+
+            if (var_decl->is_foreign) {
+                // Load the C global and marshal to AngaraObject
+                auto sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(var_decl->name.lexeme);
+                if (sym && sym->type) {
+                    auto* c_global = mod->getGlobalVariable(var_decl->name.lexeme);
+                    if (c_global) {
+                        auto* c_val = builder->CreateLoad(c_global->getValueType(), c_global, var_decl->name.lexeme);
+                        auto* angara_val = marshalCToAngara(c_val, sym->type);
+
+                        auto* alloca = allocLocal(main_fn, name);
+                        builder->CreateStore(angara_val, alloca);
+                        namedVals[name] = alloca;
+
+                        std::string global_name = "g_" + module_name + "_" + name;
+                        if (globals.count(global_name))
+                            builder->CreateStore(angara_val, globals[global_name]);
+                    }
+                }
+                continue;
+            }
+
             llvm::Value* init_val = var_decl->initializer ? cg(var_decl->initializer) : makeNil();
 
             auto* alloca = allocLocal(main_fn, name);

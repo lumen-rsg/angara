@@ -116,6 +116,7 @@ namespace angara {
         const bool is_const;
         bool is_exported = false;
         bool is_unsafe = false;
+        bool is_foreign = false;
 
         VarDeclStmt(Token name, std::shared_ptr<ASTType> type, std::shared_ptr<Expr> initializer, const bool is_const)
                 : name(std::move(name)),
