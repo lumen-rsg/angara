@@ -1,0 +1,29 @@
+// Benchmark: List operations (dynamic array, heap allocation)
+attach io;
+
+export func main() -> i64 {
+    // Build a list of 1M integers, then sum it
+    let size = 1000000;
+    let l as list<i64> = [];
+    for (let i = 0; i < size; i = i + 1) {
+        l.push(i);
+    }
+
+    let sum = 0;
+    for (let i = 0; i < len(l); i = i + 1) {
+        sum = sum + l[i];
+    }
+
+    // Filter: count multiples of 7
+    let count = 0;
+    for (let i = 0; i < len(l); i = i + 1) {
+        if (l[i] % 7 == 0) {
+            count = count + 1;
+        }
+    }
+
+    io.println(1, "List size: " + string(len(l)));
+    io.println(1, "Sum: " + string(sum));
+    io.println(1, "Multiples of 7: " + string(count));
+    return 0;
+}

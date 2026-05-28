@@ -1,0 +1,12 @@
+// Benchmark: Tight integer loop (raw loop overhead)
+attach io;
+
+export func main() -> i64 {
+    let n = 500000000;
+    let sum = 0;
+    for (let i = 0; i < n; i = i + 1) {
+        sum = sum + 1;
+    }
+    io.println(1, "Sum: " + string(sum));
+    return 0;
+}

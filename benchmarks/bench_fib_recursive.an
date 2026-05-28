@@ -1,0 +1,14 @@
+// Benchmark: Recursive Fibonacci (function call overhead, recursion)
+attach io;
+
+func fib(n as i64) -> i64 {
+    if (n <= 1) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+export func main() -> i64 {
+    let n = 40;
+    let result = fib(n);
+    io.println(1, "fib(" + string(n) + ") = " + string(result));
+    return 0;
+}

@@ -1,0 +1,23 @@
+// Benchmark: String building (concatenation, string operations)
+attach io;
+
+export func main() -> i64 {
+    let n = 100000;
+
+    // Build a string by repeated concatenation
+    let s = "";
+    for (let i = 0; i < n; i = i + 1) {
+        s = s + "x";
+    }
+    io.println(1, "String length: " + string(len(s)));
+
+    // Convert 100000 integers to strings
+    let count = 0;
+    for (let i = 0; i < n; i = i + 1) {
+        let tmp = string(i);
+        count = count + len(tmp);
+    }
+    io.println(1, "Total digits: " + string(count));
+
+    return 0;
+}

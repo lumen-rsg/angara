@@ -1,0 +1,25 @@
+// Benchmark: Data class allocation (object churn)
+attach io;
+
+data Point {
+    let x as i64;
+    let y as i64;
+    let z as i64;
+}
+
+func distance_sq(p as Point) -> i64 {
+    return p.x * p.x + p.y * p.y + p.z * p.z;
+}
+
+export func main() -> i64 {
+    let n = 500000;
+    let sum = 0;
+
+    for (let i = 0; i < n; i = i + 1) {
+        let p = Point(i, i * 2, i * 3);
+        sum = sum + distance_sq(p);
+    }
+
+    io.println(1, "Sum of distances: " + string(sum));
+    return 0;
+}

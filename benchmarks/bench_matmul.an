@@ -1,0 +1,42 @@
+// Benchmark: Integer matrix multiplication (nested loops, arithmetic)
+attach io;
+
+export func main() -> i64 {
+    let n = 200;
+
+    // Initialize matrices A and B with values
+    // Use flat indexing: mat[row * n + col]
+    let total = n * n;
+    let a as list<i64> = [];
+    let b as list<i64> = [];
+
+    for (let i = 0; i < total; i = i + 1) {
+        a.push(i % 10);
+        b.push((i + 3) % 10);
+    }
+
+    // Compute C = A * B (matrix multiply)
+    let c as list<i64> = [];
+    for (let i = 0; i < total; i = i + 1) {
+        c.push(0);
+    }
+
+    for (let i = 0; i < n; i = i + 1) {
+        for (let j = 0; j < n; j = j + 1) {
+            let sum = 0;
+            for (let k = 0; k < n; k = k + 1) {
+                sum = sum + a[i * n + k] * b[k * n + j];
+            }
+            c[i * n + j] = sum;
+        }
+    }
+
+    // Sum all elements of C
+    let result = 0;
+    for (let i = 0; i < total; i = i + 1) {
+        result = result + c[i];
+    }
+
+    io.println(1, "Matrix multiply " + string(n) + "x" + string(n) + " sum: " + string(result));
+    return 0;
+}
