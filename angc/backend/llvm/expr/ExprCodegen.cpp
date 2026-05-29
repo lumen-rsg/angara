@@ -286,106 +286,53 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
         case TokenType::CARET:     return makeI64(builder->CreateXor(getI64(l),getI64(r)));
         case TokenType::LSHIFT:    return makeI64(builder->CreateShl(getI64(l),getI64(r)));
         case TokenType::RSHIFT:    return makeI64(builder->CreateAShr(getI64(l),getI64(r)));
-        case TokenType::LESS: {
-            auto* lTag = getTag(l);
-            auto* rTag = getTag(r);
-            auto* eitherF64 = builder->CreateOr(
-                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(i32_ty, TAG_F64)),
-                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(i32_ty, TAG_F64)));
-            auto* fn = builder->GetInsertBlock()->getParent();
-            auto* fcmpBB = llvm::BasicBlock::Create(*ctx,"flt",fn);
-            auto* icmpBB = llvm::BasicBlock::Create(*ctx,"ilt",fn);
-            auto* mcmpBB = llvm::BasicBlock::Create(*ctx,"mlt",fn);
-            builder->CreateCondBr(eitherF64, fcmpBB, icmpBB);
-            builder->SetInsertPoint(fcmpBB);
-            auto* fb = makeBool(builder->CreateFCmpOLT(toDouble(l, lTag),toDouble(r, rTag)));
-            fcmpBB = builder->GetInsertBlock();
-            builder->CreateBr(mcmpBB);
-            builder->SetInsertPoint(icmpBB);
-            auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
-            auto rt2 = m_type_checker.getExpressionTypes().find(e.right.get());
-            bool unsigned_cmp = (lt != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(lt->second)) ||
-                                (rt2 != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(rt2->second));
-            auto* ib = makeBool(unsigned_cmp ? builder->CreateICmpULT(getI64(l),getI64(r))
-                                             : builder->CreateICmpSLT(getI64(l),getI64(r)));
-            icmpBB = builder->GetInsertBlock();
-            builder->CreateBr(mcmpBB);
-            builder->SetInsertPoint(mcmpBB);
-            auto* phi = builder->CreatePHI(objType,2);
-            phi->addIncoming(fb,fcmpBB); phi->addIncoming(ib,icmpBB);
-            return phi;
-        }
-        case TokenType::LESS_EQUAL: {
-            auto* lTag = getTag(l);
-            auto* rTag = getTag(r);
-            auto* eitherF64 = builder->CreateOr(
-                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(i32_ty, TAG_F64)),
-                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(i32_ty, TAG_F64)));
-            auto* fn = builder->GetInsertBlock()->getParent();
-            auto* fcmpBB = llvm::BasicBlock::Create(*ctx,"fle",fn);
-            auto* icmpBB = llvm::BasicBlock::Create(*ctx,"ile",fn);
-            auto* mcmpBB = llvm::BasicBlock::Create(*ctx,"mle",fn);
-            builder->CreateCondBr(eitherF64, fcmpBB, icmpBB);
-            builder->SetInsertPoint(fcmpBB);
-            auto* fb = makeBool(builder->CreateFCmpOLE(toDouble(l, lTag),toDouble(r, rTag)));
-            fcmpBB = builder->GetInsertBlock();
-            builder->CreateBr(mcmpBB);
-            builder->SetInsertPoint(icmpBB);
-            auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
-            auto rt2 = m_type_checker.getExpressionTypes().find(e.right.get());
-            bool unsigned_cmp = (lt != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(lt->second)) ||
-                                (rt2 != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(rt2->second));
-            auto* ib = makeBool(unsigned_cmp ? builder->CreateICmpULE(getI64(l),getI64(r))
-                                             : builder->CreateICmpSLE(getI64(l),getI64(r)));
-            icmpBB = builder->GetInsertBlock();
-            builder->CreateBr(mcmpBB);
-            builder->SetInsertPoint(mcmpBB);
-            auto* phi = builder->CreatePHI(objType,2);
-            phi->addIncoming(fb,fcmpBB); phi->addIncoming(ib,icmpBB);
-            return phi;
-        }
-        case TokenType::GREATER: {
-            auto* lTag = getTag(l);
-            auto* rTag = getTag(r);
-            auto* eitherF64 = builder->CreateOr(
-                builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(i32_ty, TAG_F64)),
-                builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(i32_ty, TAG_F64)));
-            auto* fn = builder->GetInsertBlock()->getParent();
-            auto* fcmpBB = llvm::BasicBlock::Create(*ctx,"fgt",fn);
-            auto* icmpBB = llvm::BasicBlock::Create(*ctx,"igt",fn);
-            auto* mcmpBB = llvm::BasicBlock::Create(*ctx,"mgt",fn);
-            builder->CreateCondBr(eitherF64, fcmpBB, icmpBB);
-            builder->SetInsertPoint(fcmpBB);
-            auto* fb = makeBool(builder->CreateFCmpOGT(toDouble(l, lTag),toDouble(r, rTag)));
-            fcmpBB = builder->GetInsertBlock();
-            builder->CreateBr(mcmpBB);
-            builder->SetInsertPoint(icmpBB);
-            auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
-            auto rt2 = m_type_checker.getExpressionTypes().find(e.right.get());
-            bool unsigned_cmp = (lt != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(lt->second)) ||
-                                (rt2 != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(rt2->second));
-            auto* ib = makeBool(unsigned_cmp ? builder->CreateICmpUGT(getI64(l),getI64(r))
-                                             : builder->CreateICmpSGT(getI64(l),getI64(r)));
-            icmpBB = builder->GetInsertBlock();
-            builder->CreateBr(mcmpBB);
-            builder->SetInsertPoint(mcmpBB);
-            auto* phi = builder->CreatePHI(objType,2);
-            phi->addIncoming(fb,fcmpBB); phi->addIncoming(ib,icmpBB);
-            return phi;
-        }
+        case TokenType::LESS:
+        case TokenType::LESS_EQUAL:
+        case TokenType::GREATER:
         case TokenType::GREATER_EQUAL: {
+            // Check if both operands are strings (compile-time type info)
+            {
+                auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+                auto rt = m_type_checker.getExpressionTypes().find(e.right.get());
+                if (lt != m_type_checker.getExpressionTypes().end() &&
+                    rt != m_type_checker.getExpressionTypes().end() &&
+                    lt->second->toString() == "string" && rt->second->toString() == "string") {
+                    // String comparison: call __ang_string_compare, compare result against 0
+                    auto* cmp_obj = callRtByName("__ang_string_compare", {l, r});
+                    auto* cmp_val = getI64(cmp_obj);
+                    auto* zero = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0);
+                    llvm::Value* bool_val;
+                    switch (e.op.type) {
+                        case TokenType::LESS:        bool_val = builder->CreateICmpSLT(cmp_val, zero); break;
+                        case TokenType::LESS_EQUAL:  bool_val = builder->CreateICmpSLE(cmp_val, zero); break;
+                        case TokenType::GREATER:     bool_val = builder->CreateICmpSGT(cmp_val, zero); break;
+                        case TokenType::GREATER_EQUAL: bool_val = builder->CreateICmpSGE(cmp_val, zero); break;
+                        default: bool_val = builder->CreateICmpSLT(cmp_val, zero); break;
+                    }
+                    return makeBool(bool_val);
+                }
+            }
+            // Numeric comparison (original code)
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
             auto* eitherF64 = builder->CreateOr(
                 builder->CreateICmpEQ(lTag, llvm::ConstantInt::get(i32_ty, TAG_F64)),
                 builder->CreateICmpEQ(rTag, llvm::ConstantInt::get(i32_ty, TAG_F64)));
             auto* fn = builder->GetInsertBlock()->getParent();
-            auto* fcmpBB = llvm::BasicBlock::Create(*ctx,"fge",fn);
-            auto* icmpBB = llvm::BasicBlock::Create(*ctx,"ige",fn);
-            auto* mcmpBB = llvm::BasicBlock::Create(*ctx,"mge",fn);
+            auto* fcmpBB = llvm::BasicBlock::Create(*ctx,"fcmp",fn);
+            auto* icmpBB = llvm::BasicBlock::Create(*ctx,"icmp",fn);
+            auto* mcmpBB = llvm::BasicBlock::Create(*ctx,"mcmp",fn);
             builder->CreateCondBr(eitherF64, fcmpBB, icmpBB);
             builder->SetInsertPoint(fcmpBB);
-            auto* fb = makeBool(builder->CreateFCmpOGE(toDouble(l, lTag),toDouble(r, rTag)));
+            llvm::Value* fb;
+            switch (e.op.type) {
+                case TokenType::LESS:        fb = builder->CreateFCmpOLT(toDouble(l, lTag),toDouble(r, rTag)); break;
+                case TokenType::LESS_EQUAL:  fb = builder->CreateFCmpOLE(toDouble(l, lTag),toDouble(r, rTag)); break;
+                case TokenType::GREATER:     fb = builder->CreateFCmpOGT(toDouble(l, lTag),toDouble(r, rTag)); break;
+                case TokenType::GREATER_EQUAL: fb = builder->CreateFCmpOGE(toDouble(l, lTag),toDouble(r, rTag)); break;
+                default: fb = builder->CreateFCmpOLT(toDouble(l, lTag),toDouble(r, rTag)); break;
+            }
+            auto* fresult = makeBool(fb);
             fcmpBB = builder->GetInsertBlock();
             builder->CreateBr(mcmpBB);
             builder->SetInsertPoint(icmpBB);
@@ -393,13 +340,20 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             auto rt2 = m_type_checker.getExpressionTypes().find(e.right.get());
             bool unsigned_cmp = (lt != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(lt->second)) ||
                                 (rt2 != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(rt2->second));
-            auto* ib = makeBool(unsigned_cmp ? builder->CreateICmpUGE(getI64(l),getI64(r))
-                                             : builder->CreateICmpSGE(getI64(l),getI64(r)));
+            llvm::Value* ib;
+            switch (e.op.type) {
+                case TokenType::LESS:        ib = unsigned_cmp ? builder->CreateICmpULT(getI64(l),getI64(r)) : builder->CreateICmpSLT(getI64(l),getI64(r)); break;
+                case TokenType::LESS_EQUAL:  ib = unsigned_cmp ? builder->CreateICmpULE(getI64(l),getI64(r)) : builder->CreateICmpSLE(getI64(l),getI64(r)); break;
+                case TokenType::GREATER:     ib = unsigned_cmp ? builder->CreateICmpUGT(getI64(l),getI64(r)) : builder->CreateICmpSGT(getI64(l),getI64(r)); break;
+                case TokenType::GREATER_EQUAL: ib = unsigned_cmp ? builder->CreateICmpUGE(getI64(l),getI64(r)) : builder->CreateICmpSGE(getI64(l),getI64(r)); break;
+                default: ib = builder->CreateICmpSLT(getI64(l),getI64(r)); break;
+            }
+            auto* iresult = makeBool(ib);
             icmpBB = builder->GetInsertBlock();
             builder->CreateBr(mcmpBB);
             builder->SetInsertPoint(mcmpBB);
             auto* phi = builder->CreatePHI(objType,2);
-            phi->addIncoming(fb,fcmpBB); phi->addIncoming(ib,icmpBB);
+            phi->addIncoming(fresult,fcmpBB); phi->addIncoming(iresult,icmpBB);
             return phi;
         }
         case TokenType::EQUAL_EQUAL: return callRtByName("__ang_equals",{l,r});
@@ -1174,17 +1128,131 @@ llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {
     auto* fn = builder->GetInsertBlock()->getParent();
     auto* mg = llvm::BasicBlock::Create(*ctx,"me",fn);
     std::vector<std::pair<llvm::BasicBlock*,llvm::Value*>> inc;
-    for (auto& c : e.cases) {
-        auto* eq = callRtByName("__ang_equals", {subj, cg(c.pattern)});
-        auto* bb = llvm::BasicBlock::Create(*ctx,"mb",fn);
-        auto* nb = llvm::BasicBlock::Create(*ctx,"mn",fn);
-        builder->CreateCondBr(getBool(eq), bb, nb);
-        builder->SetInsertPoint(bb);
-        auto* r = cg(c.body); bb = builder->GetInsertBlock();
-        builder->CreateBr(mg); inc.push_back({bb,r});
-        builder->SetInsertPoint(nb);
+
+    // Look up the enum type to find variant indices
+    auto type_it = m_type_checker.getExpressionTypes().find(e.condition.get());
+    std::shared_ptr<EnumType> enum_type;
+    if (type_it != m_type_checker.getExpressionTypes().end() && type_it->second->kind == TypeKind::ENUM) {
+        enum_type = std::dynamic_pointer_cast<EnumType>(type_it->second);
     }
-    builder->CreateBr(mg); inc.push_back({builder->GetInsertBlock(), makeNil()});
+
+    for (auto& c : e.cases) {
+        auto* match_bb = llvm::BasicBlock::Create(*ctx,"mb",fn);
+        auto* next_bb = llvm::BasicBlock::Create(*ctx,"mn",fn);
+
+        // Check for wildcard pattern '_'
+        bool is_wildcard = false;
+        if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(c.pattern)) {
+            if (var_expr->name.lexeme == "_") {
+                is_wildcard = true;
+            }
+        }
+
+        if (is_wildcard) {
+            // Wildcard always matches
+            builder->CreateBr(match_bb);
+            builder->SetInsertPoint(match_bb);
+
+            // Bind variable if present
+            if (c.variable) {
+                auto* alloca = allocLocal(fn, sanitize(c.variable->lexeme));
+                builder->CreateStore(subj, alloca);
+                namedVals[sanitize(c.variable->lexeme)] = alloca;
+            }
+
+            auto* r = cg(c.body);
+            match_bb = builder->GetInsertBlock();
+            builder->CreateBr(mg);
+            inc.push_back({match_bb, r});
+            builder->SetInsertPoint(next_bb);
+        } else {
+            // Named variant — extract variant name and index
+            std::string variant_name;
+            if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(c.pattern)) {
+                variant_name = get_expr->name.lexeme;
+            }
+
+            // Find the variant index from declaration order
+            int variant_index = -1;
+            bool has_payload = false;
+            // Look up the enum name prefix to build the qualified key
+            std::string enum_name;
+            if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(c.pattern)) {
+                if (auto lhs = std::dynamic_pointer_cast<const VarExpr>(get_expr->object)) {
+                    enum_name = lhs->name.lexeme;
+                }
+            }
+            std::string qualified = enum_name + "." + variant_name;
+            auto it = enumVariantIndex.find(qualified);
+            if (it != enumVariantIndex.end()) {
+                variant_index = it->second;
+            }
+            // Check if variant has payload from the enum type
+            if (enum_type) {
+                auto vit = enum_type->variants.find(variant_name);
+                if (vit != enum_type->variants.end()) {
+                    has_payload = !vit->second->param_types.empty();
+                }
+            }
+
+            // Generate discriminant comparison
+            auto* subj_tag = getTag(subj);
+            auto* tag_is_obj = builder->CreateICmpEQ(subj_tag,
+                llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_OBJ));
+
+            // For payload-carrying variants (TAG_OBJ): extract __tag from heap record
+            // For simple variants (TAG_I64): compare the i64 payload directly
+            auto* obj_path_bb = llvm::BasicBlock::Create(*ctx,"mop",fn);
+            auto* i64_path_bb = llvm::BasicBlock::Create(*ctx,"mip",fn);
+            auto* cmp_bb = llvm::BasicBlock::Create(*ctx,"mc",fn);
+            builder->CreateCondBr(tag_is_obj, obj_path_bb, i64_path_bb);
+
+            // Object path: extract __tag field from the heap record
+            builder->SetInsertPoint(obj_path_bb);
+            auto* tag_field = callRtByName("__ang_record_get",
+                {subj, builder->CreateGlobalString("__tag")});
+            auto* obj_disc = getI64(tag_field);
+            builder->CreateBr(cmp_bb);
+
+            // i64 path: the payload IS the discriminant
+            builder->SetInsertPoint(i64_path_bb);
+            auto* i64_disc = getI64(subj);
+            builder->CreateBr(cmp_bb);
+
+            // Merge discriminant values
+            builder->SetInsertPoint(cmp_bb);
+            auto* disc_phi = builder->CreatePHI(llvm::Type::getInt64Ty(*ctx), 2);
+            disc_phi->addIncoming(obj_disc, obj_path_bb);
+            disc_phi->addIncoming(i64_disc, i64_path_bb);
+
+            auto* target_index = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), variant_index);
+            auto* matches = builder->CreateICmpEQ(disc_phi, target_index);
+
+            builder->CreateCondBr(matches, match_bb, next_bb);
+
+            // Matched case — bind variable if needed
+            builder->SetInsertPoint(match_bb);
+
+            if (c.variable && has_payload) {
+                // Extract the payload field "_0" from the enum record
+                auto* payload_val = callRtByName("__ang_record_get",
+                    {subj, builder->CreateGlobalString("_0")});
+                auto* alloca = allocLocal(fn, sanitize(c.variable->lexeme));
+                builder->CreateStore(payload_val, alloca);
+                namedVals[sanitize(c.variable->lexeme)] = alloca;
+            }
+
+            auto* r = cg(c.body);
+            match_bb = builder->GetInsertBlock();
+            builder->CreateBr(mg);
+            inc.push_back({match_bb, r});
+            builder->SetInsertPoint(next_bb);
+        }
+    }
+
+    // Default fallthrough (no case matched)
+    builder->CreateBr(mg);
+    inc.push_back({builder->GetInsertBlock(), makeNil()});
     builder->SetInsertPoint(mg);
     auto* phi = builder->CreatePHI(objType, inc.size());
     for (auto& [b,v] : inc) phi->addIncoming(v,b);

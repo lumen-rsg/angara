@@ -221,6 +221,7 @@ namespace angara {
         std::map<std::string, llvm::GlobalVariable*> m_string_literal_cache;
 
         std::map<std::string, std::string> constructorLookup;
+        std::map<std::string, int> enumVariantIndex;  // "EnumName.VariantName" -> declaration order index
         std::map<std::string, std::string> methodLookup;
         std::string m_current_superclass;
 

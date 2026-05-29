@@ -188,7 +188,63 @@ void RuntimeBuilder::generateConversions() {
         bf.CreateRet(bf.CreateCall(str_from_c, {bf.CreateGlobalString("f64")}));
 
         IRBuilder<> bo(obj_bb);
-        bo.CreateRet(bo.CreateCall(str_from_c, {bo.CreateGlobalString("object")}));
+        // TAG_OBJ: inspect the heap object subtype via ObjHeader.type
+        auto* payload = bo.CreateExtractValue(val, {1}, "payload");
+        auto* obj_ptr = bo.CreateIntToPtr(payload, PointerType::get(m_ctx, 0), "obj_ptr");
+        auto* header_ptr = bo.CreateBitCast(obj_ptr, PointerType::get(m_ctx, 0));
+        auto* subtype = bo.CreateLoad(i32_ty, header_ptr, "subtype");
+
+        auto* str_bb = BasicBlock::Create(m_ctx, "ty_str", fn);
+        auto* lst_bb = BasicBlock::Create(m_ctx, "ty_lst", fn);
+        auto* rec_bb = BasicBlock::Create(m_ctx, "ty_rec", fn);
+        auto* exc_bb = BasicBlock::Create(m_ctx, "ty_exc", fn);
+        auto* thr_bb = BasicBlock::Create(m_ctx, "ty_thr", fn);
+        auto* mtx_bb = BasicBlock::Create(m_ctx, "ty_mtx", fn);
+        auto* cls_bb = BasicBlock::Create(m_ctx, "ty_cls", fn);
+        auto* clos_bb = BasicBlock::Create(m_ctx, "ty_clos", fn);
+        auto* bm_bb = BasicBlock::Create(m_ctx, "ty_bm", fn);
+        auto* obj_other_bb = BasicBlock::Create(m_ctx, "ty_obj_other", fn);
+
+        auto* sub_sw = bo.CreateSwitch(subtype, obj_other_bb, 9);
+        sub_sw->addCase(ConstantInt::get(i32_ty, OBJ_STRING), str_bb);
+        sub_sw->addCase(ConstantInt::get(i32_ty, OBJ_LIST), lst_bb);
+        sub_sw->addCase(ConstantInt::get(i32_ty, OBJ_RECORD), rec_bb);
+        sub_sw->addCase(ConstantInt::get(i32_ty, OBJ_EXCEPTION), exc_bb);
+        sub_sw->addCase(ConstantInt::get(i32_ty, OBJ_THREAD), thr_bb);
+        sub_sw->addCase(ConstantInt::get(i32_ty, OBJ_MUTEX), mtx_bb);
+        sub_sw->addCase(ConstantInt::get(i32_ty, OBJ_CLOSURE), clos_bb);
+        sub_sw->addCase(ConstantInt::get(i32_ty, OBJ_BOUND_METHOD), bm_bb);
+        sub_sw->addCase(ConstantInt::get(i32_ty, OBJ_CLASS), cls_bb);
+
+        IRBuilder<> bs2(str_bb);
+        bs2.CreateRet(bs2.CreateCall(str_from_c, {bs2.CreateGlobalString("string")}));
+
+        IRBuilder<> bl2(lst_bb);
+        bl2.CreateRet(bl2.CreateCall(str_from_c, {bl2.CreateGlobalString("list")}));
+
+        IRBuilder<> br2(rec_bb);
+        br2.CreateRet(br2.CreateCall(str_from_c, {br2.CreateGlobalString("record")}));
+
+        IRBuilder<> be2(exc_bb);
+        be2.CreateRet(be2.CreateCall(str_from_c, {be2.CreateGlobalString("exception")}));
+
+        IRBuilder<> bt2(thr_bb);
+        bt2.CreateRet(bt2.CreateCall(str_from_c, {bt2.CreateGlobalString("thread")}));
+
+        IRBuilder<> bm2(mtx_bb);
+        bm2.CreateRet(bm2.CreateCall(str_from_c, {bm2.CreateGlobalString("mutex")}));
+
+        IRBuilder<> bc2(clos_bb);
+        bc2.CreateRet(bc2.CreateCall(str_from_c, {bc2.CreateGlobalString("function")}));
+
+        IRBuilder<> bbm(bm_bb);
+        bbm.CreateRet(bbm.CreateCall(str_from_c, {bbm.CreateGlobalString("method")}));
+
+        IRBuilder<> bcls(cls_bb);
+        bcls.CreateRet(bcls.CreateCall(str_from_c, {bcls.CreateGlobalString("class")}));
+
+        IRBuilder<> bof(obj_other_bb);
+        bof.CreateRet(bof.CreateCall(str_from_c, {bof.CreateGlobalString("object")}));
     }
 }
 
@@ -322,17 +378,341 @@ void RuntimeBuilder::generateEquality() {
 }
 
 void RuntimeBuilder::generateDeepClone() {
+    auto* i32_ty = Type::getInt32Ty(m_ctx);
+    auto* i64_ty = Type::getInt64Ty(m_ctx);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
     auto* obj_ty = m_angara_obj_type;
+
+    auto* malloc_fn = m_module.getFunction("malloc");
+    auto* memcpy_fn = m_module.getFunction("memcpy");
+    auto* strdup_fn = m_module.getFunction("strdup");
+
+    auto pack_obj = [&](IRBuilder<>& b, Value* raw_ptr) -> Value* {
+        auto* ptr_i8 = b.CreateBitCast(raw_ptr, i8_ptr);
+        auto* ptr_i64 = b.CreatePtrToInt(ptr_i8, i64_ty);
+        Value* result = UndefValue::get(obj_ty);
+        result = b.CreateInsertValue(result, ConstantInt::get(i32_ty, TAG_OBJ), {0});
+        result = b.CreateInsertValue(result, ptr_i64, {1});
+        return result;
+    };
+
     auto* fn_ty = FunctionType::get(obj_ty, {obj_ty}, false);
     auto* fn = createRuntimeFunc("__ang_deep_clone", fn_ty);
     m_fn_deep_clone = FunctionCallee(fn);
 
     auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+    auto* is_obj_bb = BasicBlock::Create(m_ctx, "is_obj", fn);
+    auto* not_obj_bb = BasicBlock::Create(m_ctx, "not_obj", fn);
+
+    // Type dispatch blocks
+    auto* is_string_bb = BasicBlock::Create(m_ctx, "dc_string", fn);
+    auto* is_list_bb = BasicBlock::Create(m_ctx, "dc_list", fn);
+    auto* is_record_bb = BasicBlock::Create(m_ctx, "dc_record", fn);
+    auto* is_closure_bb = BasicBlock::Create(m_ctx, "dc_closure", fn);
+    auto* is_bound_bb = BasicBlock::Create(m_ctx, "dc_bound", fn);
+    auto* is_exception_bb = BasicBlock::Create(m_ctx, "dc_exception", fn);
+    auto* is_native_bb = BasicBlock::Create(m_ctx, "dc_native", fn);
+    auto* is_thread_bb = BasicBlock::Create(m_ctx, "dc_thread", fn);
+    auto* is_mutex_bb = BasicBlock::Create(m_ctx, "dc_mutex", fn);
+    auto* fallback_bb = BasicBlock::Create(m_ctx, "dc_fallback", fn);
+
     IRBuilder<> b(entry);
     auto* val = fn->arg_begin();
+    auto* tag = b.CreateExtractValue(val, {0}, "tag");
+    auto* is_obj = b.CreateICmpEQ(tag, ConstantInt::get(i32_ty, TAG_OBJ));
+    b.CreateCondBr(is_obj, is_obj_bb, not_obj_bb);
 
-    auto* incref_fn = m_module.getFunction("__ang_incref");
-    b.CreateCall(incref_fn, {val});
-    b.CreateRet(val);
+    // Non-object: return as-is (i64, f64, bool, nil are all value types)
+    IRBuilder<> bn(not_obj_bb);
+    bn.CreateRet(val);
+
+    // Object: extract pointer and dispatch on object type
+    IRBuilder<> bo(is_obj_bb);
+    auto* payload = bo.CreateExtractValue(val, {1}, "payload");
+    auto* ptr = bo.CreateIntToPtr(payload, i8_ptr, "ptr");
+    auto* type_addr = bo.CreateBitCast(ptr, PointerType::get(m_ctx, 0));
+    auto* obj_type = bo.CreateLoad(i32_ty, type_addr, "obj_type");
+    auto* sw = bo.CreateSwitch(obj_type, fallback_bb, 9);
+    sw->addCase(ConstantInt::get(i32_ty, OBJ_STRING), is_string_bb);
+    sw->addCase(ConstantInt::get(i32_ty, OBJ_LIST), is_list_bb);
+    sw->addCase(ConstantInt::get(i32_ty, OBJ_RECORD), is_record_bb);
+    sw->addCase(ConstantInt::get(i32_ty, OBJ_CLOSURE), is_closure_bb);
+    sw->addCase(ConstantInt::get(i32_ty, OBJ_BOUND_METHOD), is_bound_bb);
+    sw->addCase(ConstantInt::get(i32_ty, OBJ_EXCEPTION), is_exception_bb);
+    sw->addCase(ConstantInt::get(i32_ty, OBJ_NATIVE_INSTANCE), is_native_bb);
+    sw->addCase(ConstantInt::get(i32_ty, OBJ_THREAD), is_thread_bb);
+    sw->addCase(ConstantInt::get(i32_ty, OBJ_MUTEX), is_mutex_bb);
+
+    // --- Clone string ---
+    {
+        IRBuilder<> bs(is_string_bb);
+        auto* str_ptr = bs.CreateBitCast(ptr, PointerType::get(m_ctx, 0));
+        auto* len = bs.CreateLoad(i64_ty, bs.CreateStructGEP(m_string_type, str_ptr, 1), "len");
+        auto* chars = bs.CreateLoad(i8_ptr, bs.CreateStructGEP(m_string_type, str_ptr, 3), "chars");
+
+        auto* str_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_string_type));
+        auto* mem = bs.CreateCall(malloc_fn, {str_size}, "mem");
+        auto* new_ptr = bs.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_str");
+
+        // Init header: type=OBJ_STRING, refcount=1
+        auto* header = bs.CreateStructGEP(m_string_type, new_ptr, 0);
+        bs.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING),
+            bs.CreateStructGEP(m_obj_header_type, header, 0));
+        bs.CreateStore(ConstantInt::get(i64_ty, 1),
+            bs.CreateStructGEP(m_obj_header_type, header, 1));
+        bs.CreateStore(len, bs.CreateStructGEP(m_string_type, new_ptr, 1));
+        bs.CreateStore(len, bs.CreateStructGEP(m_string_type, new_ptr, 2));
+        bs.CreateStore(bs.CreateCall(strdup_fn, {chars}, "copied_chars"),
+            bs.CreateStructGEP(m_string_type, new_ptr, 3));
+
+        bs.CreateRet(pack_obj(bs, new_ptr));
+    }
+
+    // --- Clone list ---
+    {
+        IRBuilder<> bl(is_list_bb);
+        auto* list_ptr = bl.CreateBitCast(ptr, PointerType::get(m_ctx, 0));
+        auto* count = bl.CreateLoad(i64_ty, bl.CreateStructGEP(m_list_type, list_ptr, 1), "count");
+        auto* cap = bl.CreateLoad(i64_ty, bl.CreateStructGEP(m_list_type, list_ptr, 2), "cap");
+        auto* elems = bl.CreateLoad(PointerType::get(m_ctx, 0),
+            bl.CreateStructGEP(m_list_type, list_ptr, 3), "elems");
+
+        auto* list_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_list_type));
+        auto* mem = bl.CreateCall(malloc_fn, {list_size}, "mem");
+        auto* new_ptr = bl.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_list");
+
+        auto* header = bl.CreateStructGEP(m_list_type, new_ptr, 0);
+        bl.CreateStore(ConstantInt::get(i32_ty, OBJ_LIST),
+            bl.CreateStructGEP(m_obj_header_type, header, 0));
+        bl.CreateStore(ConstantInt::get(i64_ty, 1),
+            bl.CreateStructGEP(m_obj_header_type, header, 1));
+        bl.CreateStore(count, bl.CreateStructGEP(m_list_type, new_ptr, 1));
+        bl.CreateStore(cap, bl.CreateStructGEP(m_list_type, new_ptr, 2));
+
+        // Allocate element array
+        auto* elem_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(obj_ty));
+        auto* total = bl.CreateMul(count, elem_size);
+        auto* elems_mem = bl.CreateCall(malloc_fn, {total}, "elems_mem");
+        bl.CreateCall(memcpy_fn, {elems_mem, bl.CreateBitCast(elems, i8_ptr), total});
+        bl.CreateStore(bl.CreateBitCast(elems_mem, PointerType::get(m_ctx, 0)),
+            bl.CreateStructGEP(m_list_type, new_ptr, 3));
+
+        // Deep-clone each element
+        auto* loop_bb = BasicBlock::Create(m_ctx, "dc_list_loop", fn);
+        auto* body_bb = BasicBlock::Create(m_ctx, "dc_list_body", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "dc_list_done", fn);
+        bl.CreateBr(loop_bb);
+
+        IRBuilder<> bl2(loop_bb);
+        auto* i_phi = bl2.CreatePHI(i64_ty, 2, "i");
+        i_phi->addIncoming(ConstantInt::get(i64_ty, 0), is_list_bb);
+        bl2.CreateCondBr(bl2.CreateICmpSLT(i_phi, count), body_bb, done_bb);
+
+        IRBuilder<> bb(body_bb);
+        auto* new_elems = bl.CreateBitCast(elems_mem, PointerType::get(m_ctx, 0));
+        auto* elem_ptr = bb.CreateGEP(obj_ty, new_elems, {i_phi});
+        auto* elem = bb.CreateLoad(obj_ty, elem_ptr, "elem");
+
+        // Recursively deep-clone the element
+        auto* clone_fn = m_module.getFunction("__ang_deep_clone");
+        auto* cloned = bb.CreateCall(clone_fn, {elem}, "cloned");
+        bb.CreateStore(cloned, elem_ptr);
+
+        auto* next = bb.CreateAdd(i_phi, ConstantInt::get(i64_ty, 1));
+        bb.CreateBr(loop_bb);
+        i_phi->addIncoming(next, body_bb);
+
+        IRBuilder<> bd(done_bb);
+        bd.CreateRet(pack_obj(bd, new_ptr));
+    }
+
+    // --- Clone record ---
+    {
+        IRBuilder<> br(is_record_bb);
+        auto* rec_ptr = br.CreateBitCast(ptr, PointerType::get(m_ctx, 0));
+        auto* count = br.CreateLoad(i64_ty, br.CreateStructGEP(m_record_type, rec_ptr, 1), "count");
+        auto* cap = br.CreateLoad(i64_ty, br.CreateStructGEP(m_record_type, rec_ptr, 2), "cap");
+        auto* entries = br.CreateLoad(PointerType::get(m_ctx, 0),
+            br.CreateStructGEP(m_record_type, rec_ptr, 3), "entries");
+
+        auto* rec_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_record_type));
+        auto* mem = br.CreateCall(malloc_fn, {rec_size}, "mem");
+        auto* new_ptr = br.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_rec");
+
+        auto* header = br.CreateStructGEP(m_record_type, new_ptr, 0);
+        br.CreateStore(ConstantInt::get(i32_ty, OBJ_RECORD),
+            br.CreateStructGEP(m_obj_header_type, header, 0));
+        br.CreateStore(ConstantInt::get(i64_ty, 1),
+            br.CreateStructGEP(m_obj_header_type, header, 1));
+        br.CreateStore(count, br.CreateStructGEP(m_record_type, new_ptr, 1));
+        br.CreateStore(cap, br.CreateStructGEP(m_record_type, new_ptr, 2));
+
+        // Allocate entry array
+        auto* entry_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_record_entry_type));
+        auto* total = br.CreateMul(cap, entry_size);
+        auto* entries_mem = br.CreateCall(malloc_fn, {total}, "entries_mem");
+        br.CreateCall(memcpy_fn, {entries_mem, br.CreateBitCast(entries, i8_ptr), total});
+        br.CreateStore(br.CreateBitCast(entries_mem, PointerType::get(m_ctx, 0)),
+            br.CreateStructGEP(m_record_type, new_ptr, 3));
+
+        // Deep-clone each entry: strdup the key, deep-clone the value
+        auto* loop_bb = BasicBlock::Create(m_ctx, "dc_rec_loop", fn);
+        auto* body_bb = BasicBlock::Create(m_ctx, "dc_rec_body", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "dc_rec_done", fn);
+        br.CreateBr(loop_bb);
+
+        IRBuilder<> br2(loop_bb);
+        auto* i_phi = br2.CreatePHI(i64_ty, 2, "i");
+        i_phi->addIncoming(ConstantInt::get(i64_ty, 0), is_record_bb);
+        br2.CreateCondBr(br2.CreateICmpSLT(i_phi, count), body_bb, done_bb);
+
+        IRBuilder<> bb(body_bb);
+        auto* new_entries = br.CreateBitCast(entries_mem, PointerType::get(m_ctx, 0));
+        auto* entry_ptr = bb.CreateGEP(m_record_entry_type, new_entries, {i_phi});
+        auto* key_ptr = bb.CreateStructGEP(m_record_entry_type, entry_ptr, 0);
+        auto* old_key = bb.CreateLoad(i8_ptr, key_ptr, "old_key");
+        // strdup the key
+        bb.CreateStore(bb.CreateCall(strdup_fn, {old_key}, "new_key"), key_ptr);
+
+        // Deep-clone the value
+        auto* val_ptr = bb.CreateStructGEP(m_record_entry_type, entry_ptr, 1);
+        auto* old_val = bb.CreateLoad(obj_ty, val_ptr, "old_val");
+        auto* clone_fn = m_module.getFunction("__ang_deep_clone");
+        bb.CreateStore(bb.CreateCall(clone_fn, {old_val}, "cloned_val"), val_ptr);
+
+        auto* next = bb.CreateAdd(i_phi, ConstantInt::get(i64_ty, 1));
+        bb.CreateBr(loop_bb);
+        i_phi->addIncoming(next, body_bb);
+
+        IRBuilder<> bd(done_bb);
+        bd.CreateRet(pack_obj(bd, new_ptr));
+    }
+
+    // --- Clone closure: shallow copy (closures share code, captures are read-only) ---
+    {
+        IRBuilder<> bc(is_closure_bb);
+        auto* closure_ptr = bc.CreateBitCast(ptr, PointerType::get(m_ctx, 0));
+        auto* closure_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_closure_type));
+        auto* mem = bc.CreateCall(malloc_fn, {closure_size}, "mem");
+        auto* new_ptr = bc.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_closure");
+        bc.CreateCall(memcpy_fn, {new_ptr, bc.CreateBitCast(closure_ptr, i8_ptr), closure_size});
+        // Reset refcount to 1
+        auto* header = bc.CreateStructGEP(m_closure_type, new_ptr, 0);
+        bc.CreateStore(ConstantInt::get(i64_ty, 1),
+            bc.CreateStructGEP(m_obj_header_type, header, 1));
+        bc.CreateRet(pack_obj(bc, new_ptr));
+    }
+
+    // --- Clone bound method: deep-clone receiver and method ---
+    {
+        IRBuilder<> bb(is_bound_bb);
+        auto* bm_ptr = bb.CreateBitCast(ptr, PointerType::get(m_ctx, 0));
+        auto* recv = bb.CreateLoad(obj_ty, bb.CreateStructGEP(m_bound_method_type, bm_ptr, 1), "recv");
+        auto* meth = bb.CreateLoad(obj_ty, bb.CreateStructGEP(m_bound_method_type, bm_ptr, 2), "meth");
+
+        auto* bm_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_bound_method_type));
+        auto* mem = bb.CreateCall(malloc_fn, {bm_size}, "mem");
+        auto* new_ptr = bb.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_bm");
+
+        auto* header = bb.CreateStructGEP(m_bound_method_type, new_ptr, 0);
+        bb.CreateStore(ConstantInt::get(i32_ty, OBJ_BOUND_METHOD),
+            bb.CreateStructGEP(m_obj_header_type, header, 0));
+        bb.CreateStore(ConstantInt::get(i64_ty, 1),
+            bb.CreateStructGEP(m_obj_header_type, header, 1));
+
+        auto* clone_fn = m_module.getFunction("__ang_deep_clone");
+        bb.CreateStore(bb.CreateCall(clone_fn, {recv}, "cloned_recv"),
+            bb.CreateStructGEP(m_bound_method_type, new_ptr, 1));
+        bb.CreateStore(bb.CreateCall(clone_fn, {meth}, "cloned_meth"),
+            bb.CreateStructGEP(m_bound_method_type, new_ptr, 2));
+
+        bb.CreateRet(pack_obj(bb, new_ptr));
+    }
+
+    // --- Clone exception: deep-clone the message ---
+    {
+        IRBuilder<> be(is_exception_bb);
+        auto* exc_ptr = be.CreateBitCast(ptr, PointerType::get(m_ctx, 0));
+        auto* msg = be.CreateLoad(obj_ty, be.CreateStructGEP(m_exception_type, exc_ptr, 1), "msg");
+
+        auto* exc_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_exception_type));
+        auto* mem = be.CreateCall(malloc_fn, {exc_size}, "mem");
+        auto* new_ptr = be.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_exc");
+
+        auto* header = be.CreateStructGEP(m_exception_type, new_ptr, 0);
+        be.CreateStore(ConstantInt::get(i32_ty, OBJ_EXCEPTION),
+            be.CreateStructGEP(m_obj_header_type, header, 0));
+        be.CreateStore(ConstantInt::get(i64_ty, 1),
+            be.CreateStructGEP(m_obj_header_type, header, 1));
+
+        auto* clone_fn = m_module.getFunction("__ang_deep_clone");
+        be.CreateStore(be.CreateCall(clone_fn, {msg}, "cloned_msg"),
+            be.CreateStructGEP(m_exception_type, new_ptr, 1));
+
+        be.CreateRet(pack_obj(be, new_ptr));
+    }
+
+    // --- Clone native instance: shallow copy (opaque to runtime) ---
+    {
+        IRBuilder<> bn2(is_native_bb);
+        auto* ni_ptr = bn2.CreateBitCast(ptr, PointerType::get(m_ctx, 0));
+        auto* ni_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_native_instance_type));
+        auto* mem = bn2.CreateCall(malloc_fn, {ni_size}, "mem");
+        auto* new_ptr = bn2.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_ni");
+        bn2.CreateCall(memcpy_fn, {new_ptr, bn2.CreateBitCast(ni_ptr, i8_ptr), ni_size});
+        // Reset refcount to 1
+        auto* header = bn2.CreateStructGEP(m_native_instance_type, new_ptr, 0);
+        bn2.CreateStore(ConstantInt::get(i64_ty, 1),
+            bn2.CreateStructGEP(m_obj_header_type, header, 1));
+        bn2.CreateRet(pack_obj(bn2, new_ptr));
+    }
+
+    // --- Clone thread: shallow copy (thread handle is opaque) ---
+    {
+        IRBuilder<> bt(is_thread_bb);
+        auto* thr_ptr = bt.CreateBitCast(ptr, PointerType::get(m_ctx, 0));
+        auto* thr_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_thread_type));
+        auto* mem = bt.CreateCall(malloc_fn, {thr_size}, "mem");
+        auto* new_ptr = bt.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_thr");
+        bt.CreateCall(memcpy_fn, {new_ptr, bt.CreateBitCast(thr_ptr, i8_ptr), thr_size});
+        auto* header = bt.CreateStructGEP(m_thread_type, new_ptr, 0);
+        bt.CreateStore(ConstantInt::get(i64_ty, 1),
+            bt.CreateStructGEP(m_obj_header_type, header, 1));
+        bt.CreateRet(pack_obj(bt, new_ptr));
+    }
+
+    // --- Clone mutex: shallow copy (mutex handle is opaque) ---
+    {
+        IRBuilder<> bm(is_mutex_bb);
+        auto* mtx_ptr = bm.CreateBitCast(ptr, PointerType::get(m_ctx, 0));
+        auto* mtx_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_mutex_type));
+        auto* mem = bm.CreateCall(malloc_fn, {mtx_size}, "mem");
+        auto* new_ptr = bm.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_mtx");
+        bm.CreateCall(memcpy_fn, {new_ptr, bm.CreateBitCast(mtx_ptr, i8_ptr), mtx_size});
+        auto* header = bm.CreateStructGEP(m_mutex_type, new_ptr, 0);
+        bm.CreateStore(ConstantInt::get(i64_ty, 1),
+            bm.CreateStructGEP(m_obj_header_type, header, 1));
+        bm.CreateRet(pack_obj(bm, new_ptr));
+    }
+
+    // --- Fallback: shallow incref for unknown types ---
+    {
+        IRBuilder<> bf(fallback_bb);
+        // Can't clone unknown type — just incref and return the same object
+        auto* incref_fn = m_module.getFunction("__ang_incref");
+        bf.CreateCall(incref_fn, {val});
+        bf.CreateRet(val);
+    }
 }
 } // namespace angara

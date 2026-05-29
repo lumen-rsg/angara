@@ -163,7 +163,47 @@ namespace angara {
 
     Token Parser::consume(TokenType type, const std::string &message, const std::string &code) {
         if (check(type)) return advance();
+
+        // If expecting an identifier but found a keyword, give a clearer error
+        if (type == TokenType::IDENTIFIER && isKeywordToken(peek().type)) {
+            throw error(peek(),
+                "Cannot use reserved keyword '" + peek().lexeme + "' as an identifier. "
+                "Reserved keywords cannot be used as variable, field, or parameter names.",
+                code);
+        }
+
         throw error(peek(), message, code);
+    }
+
+    bool Parser::isKeywordToken(TokenType type) {
+        switch (type) {
+            case TokenType::LET: case TokenType::CONST: case TokenType::IF:
+            case TokenType::ELSE: case TokenType::ORIF: case TokenType::FOR:
+            case TokenType::WHILE: case TokenType::IN: case TokenType::FUNC:
+            case TokenType::RETURN: case TokenType::TRUE: case TokenType::FALSE:
+            case TokenType::TRY: case TokenType::CATCH: case TokenType::ATTACH:
+            case TokenType::NIL: case TokenType::THROW: case TokenType::FROM:
+            case TokenType::CLASS: case TokenType::THIS: case TokenType::INHERITS:
+            case TokenType::SUPER: case TokenType::TRAIT: case TokenType::USES:
+            case TokenType::STATIC: case TokenType::PRIVATE: case TokenType::PUBLIC:
+            case TokenType::EXPORT: case TokenType::CONTRACT: case TokenType::SIGNS:
+            case TokenType::BREAK: case TokenType::CONTINUE: case TokenType::IS:
+            case TokenType::DATA: case TokenType::ENUM: case TokenType::MATCH:
+            case TokenType::CASE: case TokenType::FOREIGN: case TokenType::INTRINSIC:
+            case TokenType::UNION: case TokenType::AS:
+            case TokenType::TYPE_STRING: case TokenType::TYPE_INT:
+            case TokenType::TYPE_FLOAT: case TokenType::TYPE_BOOL:
+            case TokenType::TYPE_LIST: case TokenType::TYPE_MAP: case TokenType::TYPE_VOID:
+            case TokenType::TYPE_I8: case TokenType::TYPE_I16: case TokenType::TYPE_I32:
+            case TokenType::TYPE_I64: case TokenType::TYPE_U8: case TokenType::TYPE_U16:
+            case TokenType::TYPE_U32: case TokenType::TYPE_U64: case TokenType::TYPE_UINT:
+            case TokenType::TYPE_F32: case TokenType::TYPE_F64: case TokenType::TYPE_NIL:
+            case TokenType::TYPE_RECORD: case TokenType::TYPE_FUNCTION:
+            case TokenType::TYPE_ANY: case TokenType::TYPE_THREAD:
+                return true;
+            default:
+                return false;
+        }
     }
 
     bool Parser::check(TokenType type) {

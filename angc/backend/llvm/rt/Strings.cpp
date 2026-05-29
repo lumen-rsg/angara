@@ -417,6 +417,86 @@ void RuntimeBuilder::generateStringOps() {
             bns.CreateRet(bns.CreateCall(str_from_c, {gsptr}));
         }
     }
+
+    // __ang_string_compare: lexicographic comparison of two strings.
+    // Returns AngaraObject wrapping i64: -1 if a < b, 0 if a == b, 1 if a > b.
+    // Falls back to __ang_to_string for non-string operands.
+    {
+        auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, obj_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_string_compare", fn_ty);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* fallback_bb = BasicBlock::Create(m_ctx, "fallback", fn);
+        auto* compare_bb = BasicBlock::Create(m_ctx, "compare", fn);
+
+        IRBuilder<> b(entry);
+        auto* a = fn->arg_begin();
+        auto* b_arg = fn->arg_begin() + 1;
+
+        auto* a_tag = b.CreateExtractValue(a, {0}, "a_tag");
+        auto* b_tag = b.CreateExtractValue(b_arg, {0}, "b_tag");
+        auto* both_obj = b.CreateAnd(
+            b.CreateICmpEQ(a_tag, ConstantInt::get(i32_ty, TAG_OBJ)),
+            b.CreateICmpEQ(b_tag, ConstantInt::get(i32_ty, TAG_OBJ)));
+
+        auto* a_payload = b.CreateExtractValue(a, {1});
+        auto* a_str = b.CreateIntToPtr(b.CreateBitCast(a_payload, i64_ty),
+                                        PointerType::get(m_ctx, 0));
+        auto* b_payload = b.CreateExtractValue(b_arg, {1});
+        auto* b_str = b.CreateIntToPtr(b.CreateBitCast(b_payload, i64_ty),
+                                        PointerType::get(m_ctx, 0));
+
+        auto* a_obj_type = b.CreateLoad(i32_ty,
+            b.CreateStructGEP(m_obj_header_type, a_str, 0), "a_obj_type");
+        auto* b_obj_type = b.CreateLoad(i32_ty,
+            b.CreateStructGEP(m_obj_header_type, b_str, 0), "b_obj_type");
+        auto* both_string = b.CreateAnd(
+            b.CreateICmpEQ(a_obj_type, ConstantInt::get(i32_ty, OBJ_STRING)),
+            b.CreateICmpEQ(b_obj_type, ConstantInt::get(i32_ty, OBJ_STRING)));
+        auto* both_valid = b.CreateAnd(both_obj, both_string);
+        b.CreateCondBr(both_valid, compare_bb, fallback_bb);
+
+        // Fallback: convert to string and retry
+        {
+            IRBuilder<> bf(fallback_bb);
+            auto* to_str_fn = m_module.getFunction("__ang_to_string");
+            auto* a_str_obj = bf.CreateCall(to_str_fn, {a}, "a_str");
+            auto* b_str_obj = bf.CreateCall(to_str_fn, {b_arg}, "b_str");
+            auto* result = bf.CreateCall(fn, {a_str_obj, b_str_obj}, "result");
+            bf.CreateCall(m_module.getFunction("__ang_decref"), {a_str_obj});
+            bf.CreateCall(m_module.getFunction("__ang_decref"), {b_str_obj});
+            bf.CreateRet(result);
+        }
+
+        // Compare: extract char*, call strcmp, clamp to -1/0/1
+        {
+            IRBuilder<> bc(compare_bb);
+            auto* strcmp_fn = m_module.getFunction("strcmp");
+            auto* a_chars = bc.CreateLoad(i8_ptr,
+                bc.CreateStructGEP(m_string_type, a_str, 3), "a_chars");
+            auto* b_chars = bc.CreateLoad(i8_ptr,
+                bc.CreateStructGEP(m_string_type, b_str, 3), "b_chars");
+            auto* cmp_i32 = bc.CreateCall(strcmp_fn, {a_chars, b_chars}, "cmp");
+            auto* cmp_i64 = bc.CreateSExt(cmp_i32, i64_ty, "cmp_i64");
+
+            auto* neg_one = ConstantInt::get(i64_ty, -1);
+            auto* zero = ConstantInt::get(i64_ty, 0);
+            auto* one = ConstantInt::get(i64_ty, 1);
+
+            // sign = cmp < 0 ? -1 : (cmp > 0 ? 1 : 0)
+            auto* is_pos = bc.CreateICmpSGT(cmp_i64, zero);
+            auto* is_neg = bc.CreateICmpSLT(cmp_i64, zero);
+            auto* sign = bc.CreateSelect(is_neg, neg_one,
+                           bc.CreateSelect(is_pos, one, zero), "sign");
+
+            // Pack as AngaraObject with TAG_I64
+            Value* result = UndefValue::get(obj_ty);
+            result = bc.CreateInsertValue(result, ConstantInt::get(i32_ty, TAG_I64), {0});
+            result = bc.CreateInsertValue(result, sign, {1});
+            bc.CreateRet(result);
+        }
+    }
+
 }
 
 } // namespace angara

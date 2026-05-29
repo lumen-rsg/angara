@@ -631,6 +631,9 @@ void LLVMBackend::codegenEnumDecl(const EnumStmt& stmt) {
 
             constructorLookup[stmt.name.lexeme + "." + variant->name.lexeme] = ctor_name;
         }
+
+        // Store declaration-order index for match codegen
+        enumVariantIndex[stmt.name.lexeme + "." + variant->name.lexeme] = static_cast<int>(i);
     }
 }
 

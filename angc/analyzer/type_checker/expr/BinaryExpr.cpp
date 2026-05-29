@@ -102,8 +102,10 @@ namespace angara {
                     result_type = m_type_bool;
                 } else if (isNumeric(left_type) && isNumeric(right_type)) {
                     result_type = m_type_bool;
+                } else if (left_type->toString() == "string" && right_type->toString() == "string") {
+                    result_type = m_type_bool;
                 } else {
-                    error(expr.op, "Operator '" + expr.op.lexeme + "' requires numeric operands, but got '" +
+                    error(expr.op, "Operator '" + expr.op.lexeme + "' requires numeric or string operands, but got '" +
                                    left_type->toString() + "' and '" + right_type->toString() + "'.", "E355");
                 }
                 break;
