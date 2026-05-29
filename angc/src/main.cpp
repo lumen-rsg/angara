@@ -15,6 +15,7 @@
 #include "../analyzer/printer/ASTPrinter.h"
 #include "../includes/Formatter.h"
 #include "../includes/LSPServer.h"
+#include "../includes/REPL.h"
 #include "Lexer.h"
 #include "Parser.h"
 #include "ErrorHandler.h"
@@ -190,6 +191,7 @@ static void print_help() {
     std::cout << "  modules   List installed native modules\n";
     std::cout << "  fmt       Format source files (-w to write in place)\n";
     std::cout << "  lsp       Start Language Server Protocol server\n";
+    std::cout << "  repl      Start interactive read-eval-print loop\n";
     std::cout << "\n" << CLR_BOLD << "Options:" << CLR_RESET << "\n";
     std::cout << "  -v, --version               Show version information\n";
     std::cout << "  -h, --help                  Show this help message\n";
@@ -833,6 +835,7 @@ int main(int argc, char* argv[]) {
     if (cmd == "check")   return handle_check(args);
     if (cmd == "fmt")     return handle_fmt(args);
     if (cmd == "lsp")     { angara::LSPServer lsp; return lsp.run(); }
+    if (cmd == "repl")    { angara::REPL repl; return repl.run(); }
     if (cmd == "-v" || cmd == "--version") { print_version(); return 0; }
     if (cmd == "-h" || cmd == "--help")    { print_help(); return 0; }
     if (cmd == "--make-perfect") { angara::run_easter_egg(); return 0; }

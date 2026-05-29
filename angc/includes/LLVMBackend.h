@@ -61,6 +61,13 @@ namespace angara {
         /// Returns the path to the emitted unoptimized IR file (.ll).
         const std::string& get_ir_file_path() const { return irPath; }
 
+        /// Generates LLVM IR only (no object file emission).
+        /// Returns ownership of the module and context for use by JIT compilers.
+        std::pair<std::unique_ptr<llvm::Module>, std::unique_ptr<llvm::LLVMContext>>
+        generateIR(const std::vector<std::shared_ptr<Stmt>>& statements,
+                   const std::shared_ptr<ModuleType>& module_type,
+                   std::vector<std::string>& all_module_names);
+
     private:
         std::unique_ptr<llvm::LLVMContext> ctx;
         std::unique_ptr<llvm::Module> mod;

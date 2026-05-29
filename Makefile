@@ -33,7 +33,7 @@ ifeq ($(UNAME_S),Darwin)
 endif
 LLVM_CXXFLAGS := $(filter-out -fno-exceptions -fno-rtti -std=%,$(shell $(LLVM_CONFIG) --cxxflags 2>/dev/null))
 LLVM_LDFLAGS  := $(shell $(LLVM_CONFIG) --ldflags 2>/dev/null)
-LLVM_LIBS     := $(shell $(LLVM_CONFIG) --libs core native 2>/dev/null)
+LLVM_LIBS     := $(shell $(LLVM_CONFIG) --libs core native orcjit 2>/dev/null)
 LLVM_SYSTEM_LIBS := $(shell $(LLVM_CONFIG) --system-libs 2>/dev/null)
 
 CC  := clang

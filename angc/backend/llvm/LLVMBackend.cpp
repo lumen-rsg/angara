@@ -57,6 +57,23 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
     objType = rt->getAngaraObjType();
 }
 
+std::pair<std::unique_ptr<llvm::Module>, std::unique_ptr<llvm::LLVMContext>>
+LLVMBackend::generateIR(const std::vector<std::shared_ptr<Stmt>>& stmts,
+                        const std::shared_ptr<ModuleType>& moduleType,
+                        std::vector<std::string>& allMods) {
+    moduleName = moduleType ? moduleType->name : "main";
+    codegenTopLevelDecls(stmts);
+    bool has_user_main = false;
+    for (const auto& stmt : stmts) {
+        auto func = std::dynamic_pointer_cast<const FuncStmt>(stmt);
+        if (func && func->name.lexeme == "main") { has_user_main = true; break; }
+    }
+    if (has_user_main) {
+        codegenMainFunction(stmts, moduleName, allMods);
+    }
+    return {std::move(mod), std::move(ctx)};
+}
+
 bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     const std::shared_ptr<ModuleType>& moduleType, std::vector<std::string>& allMods) {
     moduleName = moduleType ? moduleType->name : "main";
@@ -70,6 +87,13 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
         codegenMainFunction(stmts, moduleName, allMods);
     }
     std::string base = "ang_" + moduleName;
+
+    if (m_dump_ir) {
+        std::error_code ec;
+        llvm::raw_fd_ostream ir(base+".ll", ec, llvm::sys::fs::OF_Text);
+        if (!ec) { mod->print(ir,nullptr); ir.close(); }
+        irPath = base+".ll";
+    }
     if (m_dump_ir) {
         std::error_code ec;
         llvm::raw_fd_ostream ir(base+".ll", ec, llvm::sys::fs::OF_Text);
