@@ -58,6 +58,10 @@ namespace angara {
         void set_check_only(bool val) { m_check_only = val; }
         bool is_check_only() const { return m_check_only; }
 
+        /// Enables or disables quiet mode (suppress all stdout output).
+        void set_quiet(bool val) { m_quiet = val; }
+        bool is_quiet() const { return m_quiet; }
+
         /// Enables or disables IR dump (emit unoptimized .ll files).
         void set_dump_ir(bool val) { m_dump_ir = val; }
         bool is_dump_ir() const { return m_dump_ir; }
@@ -146,6 +150,7 @@ namespace angara {
         bool m_freestanding = false;
         bool m_nostdlib = false;
         bool m_check_only = false;
+        bool m_quiet = false;
         bool m_dump_ir = false;
         bool m_debug = false;
         bool m_werror = false;

@@ -106,6 +106,7 @@ namespace angara {
     };
 
     void CompilerDriver::log_step(const std::string& message) {
+        if (m_quiet) return;
         std::cout << "\r\033[K";
         std::cout << CLR_BOLD << CLR_GREEN << "-> " << CLR_RESET << CLR_BOLD << message << CLR_RESET << std::endl;
         print_progress(m_last_progress_message);
@@ -136,6 +137,7 @@ namespace angara {
     }
 
     void CompilerDriver::print_progress(const std::string& current_file) {
+        if (m_quiet) return;
         m_last_progress_message = current_file;
 
         int bar_width = 20;
@@ -190,10 +192,12 @@ namespace angara {
         int total_modules = static_cast<int>(m_generated_object_files.size());
         int native_count = static_cast<int>(m_native_lib_names.size());
 
-        std::cout << CLR_BOLD << CLR_GREEN << "[OK] " << CLR_RESET << "Compiled "
-                  << total_modules << " module" << (total_modules != 1 ? "s" : "")
-                  << (native_count > 0 ? " + " + std::to_string(native_count) + " native lib" + (native_count != 1 ? "s" : "") : "")
-                  << " in " << CLR_BOLD << seconds << "s" << CLR_RESET << std::endl;
+        if (!m_quiet) {
+            std::cout << CLR_BOLD << CLR_GREEN << "[OK] " << CLR_RESET << "Compiled "
+                      << total_modules << " module" << (total_modules != 1 ? "s" : "")
+                      << (native_count > 0 ? " + " + std::to_string(native_count) + " native lib" + (native_count != 1 ? "s" : "") : "")
+                      << " in " << CLR_BOLD << seconds << "s" << CLR_RESET << std::endl;
+        }
 
         return true;
     }
@@ -384,8 +388,10 @@ namespace angara {
 
         if (m_check_only) {
             m_modules_compiled++;
-            print_progress("Done!");
-            std::cout << "\r\033[K" << std::flush;
+            if (!m_quiet) {
+                print_progress("Done!");
+                std::cout << "\r\033[K" << std::flush;
+            }
             return mod;
         }
 
@@ -404,8 +410,10 @@ namespace angara {
             return nullptr;
         }
         m_modules_compiled++;
-        print_progress("Done!");
-        std::cout << "\r\033[K" << std::flush;
+        if (!m_quiet) {
+            print_progress("Done!");
+            std::cout << "\r\033[K" << std::flush;
+        }
         return mod;
     }
 

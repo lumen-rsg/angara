@@ -424,6 +424,7 @@ void LSPServer::analyzeDocument(const std::string& uri) {
             // Stage 3: Type check
             CompilerDriver driver;
             driver.set_check_only(true);
+            driver.set_quiet(true);
 
             std::string native_mod_path = "/opt/angara/modules";
             if (fs::exists("build/modules")) {
@@ -631,6 +632,7 @@ JSON LSPServer::handleHover(const JSON& params) {
 
     CompilerDriver driver;
     driver.set_check_only(true);
+    driver.set_quiet(true);
     std::string native_mod_path = "/opt/angara/modules";
     if (fs::exists("build/modules")) {
         native_mod_path = fs::absolute("build/modules").string();
@@ -700,6 +702,7 @@ JSON LSPServer::handleDefinition(const JSON& params) {
 
     CompilerDriver driver;
     driver.set_check_only(true);
+    driver.set_quiet(true);
     std::string native_mod_path = "/opt/angara/modules";
     if (fs::exists("build/modules")) {
         native_mod_path = fs::absolute("build/modules").string();
