@@ -238,6 +238,11 @@ namespace angara {
         /// @return The token immediately before the current cursor position.
         Token previous() const;
 
+        /// Checks whether a token type is a reserved keyword (cannot be used as an identifier).
+        /// @param type  Token type to check.
+        /// @return True if the token type is a keyword.
+        static bool isKeywordToken(TokenType type);
+
         /// Lookahead to determine if the current `attach` is selective.
         /// @return True if the attach targets a specific function.
         bool isSelectiveAttach();
