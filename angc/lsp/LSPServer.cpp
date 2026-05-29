@@ -492,6 +492,8 @@ void LSPServer::buildSymbolCache(AnalysisResult& result, TypeChecker& typeChecke
 
     // Build position-indexed entries from expression types
     for (auto& [expr, type] : exprTypes) {
+        if (!type || type->kind == TypeKind::ERROR) continue;
+
         if (auto* var = dynamic_cast<const VarExpr*>(expr)) {
             SymbolRef ref;
             ref.name = var->name.lexeme;
@@ -523,7 +525,7 @@ void LSPServer::buildSymbolCache(AnalysisResult& result, TypeChecker& typeChecke
     // Build name-indexed symbol table and declaration-position entries
     for (auto& scope : symbols.getScopes()) {
         for (auto& [name, sym] : scope) {
-            if (!sym->type) continue;
+            if (!sym || !sym->type || sym->type->kind == TypeKind::ERROR) continue;
 
             // Symbol table entry (inner scopes override outer)
             SymbolTableEntry entry;
