@@ -223,6 +223,9 @@ namespace angara {
         std::map<const AttachStmt*, std::shared_ptr<ModuleType>> m_module_resolutions;
         std::set<UsedNativeSymbol> m_used_native_symbols;
         bool m_is_in_unsafe_context = false;
+
+        // Downward-flowing expected type for bidirectional inference (e.g., list<i64> -> [] element type)
+        std::shared_ptr<Type> m_expected_type;
     };
 
 }

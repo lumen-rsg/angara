@@ -3,7 +3,15 @@ namespace angara {
 
     std::any TypeChecker::visit(const ListExpr& expr) {
         if (expr.elements.empty()) {
-            auto empty_list_type = std::make_shared<ListType>(m_type_any);
+            // Bidirectional inference: if an expected type is a list<T>, use T as element type
+            std::shared_ptr<Type> element_type = m_type_any;
+            if (m_expected_type && m_expected_type->kind == TypeKind::LIST) {
+                auto expected_list = std::dynamic_pointer_cast<ListType>(m_expected_type);
+                if (expected_list) {
+                    element_type = expected_list->element_type;
+                }
+            }
+            auto empty_list_type = std::make_shared<ListType>(element_type);
             pushAndSave(&expr, empty_list_type);
             return {};
         }

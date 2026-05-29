@@ -18,7 +18,12 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     if (stmt->typeAnnotation && stmt->initializer) {
         final_type = resolveType(stmt->typeAnnotation);
 
+        // Pass expected type down for bidirectional inference (e.g., list<i64> -> [])
+        auto saved_expected = m_expected_type;
+        m_expected_type = final_type;
         stmt->initializer->accept(*this);
+        m_expected_type = saved_expected;
+
         auto initializer_type = popType();
 
         if (final_type->kind != TypeKind::ERROR && initializer_type->kind != TypeKind::ERROR) {
