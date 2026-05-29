@@ -23,36 +23,36 @@ Designed for clarity, safety, and pragmatic interoperability with C.
 
 ## What is Angara?
 
-Angara is a systems programming language that compiles to **native machine code via LLVM**. It combines the performance and low-level control of systems programming with the safety and expressiveness of modern language design — mandatory type annotations, algebraic data types, pattern matching, and a first-class C FFI.
+Angara is a systems programming language that compiles to **native machine code via LLVM**. It combines the performance and low-level control of systems programming with the safety and expressiveness of modern language design: mandatory type annotations, algebraic data types, pattern matching, and a first-class C FFI.
 
-The core philosophy: **explicit is better than implicit**. No hidden allocations, no implicit conversions, no surprises.
+The core philosophy is **explicit is better than implicit**: no hidden allocations, no implicit conversions, no surprises.
 
 <table>
 <tr>
 <td width="25%" align="center">
 
-🦺 **Safe by Default**
+**Safe by Default**
 
 Compile-time checks eliminate null pointer exceptions, type mismatches, and missing return paths.
 
 </td>
 <td width="25%" align="center">
 
-⚡ **LLVM-Powered**
+**LLVM-Powered**
 
 Compiles directly to native code via LLVM. Supports cross-compilation, optimization passes, and bare-metal targets.
 
 </td>
 <td width="25%" align="center">
 
-🔗 **Seamless C FFI**
+**Seamless C FFI**
 
 Call any C library directly. Map C structs to Angara types. Zero-cost interop with `foreign` declarations.
 
 </td>
 <td width="25%" align="center">
 
-📦 **Rich Stdlib**
+**Rich Stdlib**
 
 20+ native modules: I/O, JSON, HTTP, WebSocket, AMQP, filesystem, math, hashing, UUIDs, and more.
 
@@ -64,7 +64,7 @@ Call any C library directly. Map C structs to Angara types. Zero-cost interop wi
 
 ## Feature Highlights
 
-### 🔤 Modern Type System
+### Modern Type System
 
 Angara provides a rich type system with primitives (`i64`, `f64`, `bool`, `string`), generics (`list<T>`), and compound types.
 
@@ -74,7 +74,7 @@ let scores as list<i64> = [98, 87, 95];
 let point as record = { x: 10.0, y: 20.0 };
 ```
 
-### 🏗️ Data Classes
+### Data Classes
 
 Value-semantic data blocks with auto-generated constructors and equality operators.
 
@@ -97,7 +97,7 @@ io.println(1, p1.name);   // still "Alex"
 io.println(1, p1 == p2);  // false
 ```
 
-### 🎯 Enums & Pattern Matching
+### Enums & Pattern Matching
 
 Algebraic data types with exhaustive pattern matching and destructuring.
 
@@ -116,7 +116,7 @@ let description = match (event) {
 };
 ```
 
-### 🏛️ Classes & Inheritance
+### Classes & Inheritance
 
 Object-oriented programming with access control, constructor chaining via `super`, and method overriding.
 
@@ -151,7 +151,7 @@ class Player inherits Entity {
 }
 ```
 
-### 📜 Contracts & Traits
+### Contracts & Traits
 
 Define interfaces that classes can implement, ensuring type-safe polymorphism.
 
@@ -167,7 +167,7 @@ contract Identifiable {
 }
 ```
 
-### 🔗 Seamless C FFI
+### Seamless C FFI
 
 Call C functions and map C structs directly — no glue code required.
 
@@ -187,7 +187,7 @@ foreign func uname(buffer as c_ptr) -> i32;
 foreign func free(ptr as c_ptr) -> nil;
 ```
 
-### ❓ Optionals & Null Safety
+### Optionals & Null Safety
 
 Optional types (`T?`) ensure null safety is enforced at compile time.
 
@@ -198,7 +198,7 @@ if (result != nil) {
 }
 ```
 
-### ⚠️ Exceptions
+### Exceptions
 
 Structured error handling with `try`/`catch` blocks.
 
@@ -211,7 +211,7 @@ try {
 }
 ```
 
-### 🧵 Concurrency
+### Concurrency
 
 Built-in `Thread` and `Mutex` types for straightforward parallel programming.
 
@@ -224,7 +224,7 @@ results.push(42);
 mutex.unlock();
 ```
 
-### 🎯 Cross-Compilation & Bare-Metal
+### Cross-Compilation & Bare-Metal
 
 Target any architecture LLVM supports — including freestanding/bare-metal environments.
 
@@ -475,4 +475,4 @@ Angara is distributed under the terms of the MIT license. See `LICENSE` for deta
 
 ---
 
-*Built with ❤️ by [Lumina Labs](https://github.com/lumen-rsg)*
+*Built by [Lumina Labs](https://github.com/lumen-rsg)*
