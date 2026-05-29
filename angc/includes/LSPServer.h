@@ -111,6 +111,22 @@ namespace angara {
         LSPRange range;
     };
 
+    /// A symbol reference at a source position, used for hover/definition lookup.
+    struct SymbolRef {
+        std::string name;
+        std::string typeString;
+        int line = 0, startCol = 0, endCol = 0; // 0-based LSP position
+        std::string declFile;                    // for go-to-definition
+        int declLine = 0, declCol = 0;           // 0-based LSP position
+    };
+
+    /// A name-indexed symbol table entry, used for fallback hover/definition.
+    struct SymbolTableEntry {
+        std::string typeString;
+        std::string declFile;
+        int declLine = 0, declCol = 0; // 0-based LSP position
+    };
+
     // ── LSP Server ────────────────────────────────────────────
 
     class LSPServer {
@@ -118,6 +134,20 @@ namespace angara {
         int run();
 
     private:
+        // State types
+        struct DocumentState {
+            std::string path;
+            std::string source;
+            int version = 0;
+        };
+
+        struct AnalysisResult {
+            std::vector<LSPDiagnostic> diagnostics;
+            std::vector<LSPCompletionItem> completions;
+            std::vector<SymbolRef> symbols;
+            std::map<std::string, SymbolTableEntry> symbolTable;
+        };
+
         // JSON-RPC transport
         std::string readMessage();
         void sendMessage(const JSON& msg);
@@ -142,22 +172,13 @@ namespace angara {
         void publishDiagnostics(const std::string& uri);
         std::string uriToPath(const std::string& uri);
         std::string pathToUri(const std::string& path);
+        void buildSymbolCache(AnalysisResult& result, class TypeChecker& typeChecker, const std::string& docPath);
+        static std::string extractWordAt(const std::string& source, int line, int col);
 
         // State
-        struct DocumentState {
-            std::string path;
-            std::string source;
-            int version = 0;
-        };
         std::map<std::string, DocumentState> m_documents;
+        std::string m_workspace_root;
         bool m_shutdown = false;
-
-        // Analysis results per document
-        struct AnalysisResult {
-            std::vector<LSPDiagnostic> diagnostics;
-            // Maps for completion, hover, definition
-            std::vector<LSPCompletionItem> completions;
-        };
         std::map<std::string, AnalysisResult> m_analysis;
     };
 

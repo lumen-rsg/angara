@@ -427,7 +427,12 @@ void LSPServer::analyzeDocument(const std::string& uri) {
             driver.set_quiet(true);
 
             std::string native_mod_path = "/opt/angara/modules";
-            if (fs::exists("build/modules")) {
+            if (!m_workspace_root.empty()) {
+                auto p = fs::path(m_workspace_root) / "build/modules";
+                if (fs::exists(p)) {
+                    native_mod_path = fs::absolute(p).string();
+                }
+            } else if (fs::exists("build/modules")) {
                 native_mod_path = fs::absolute("build/modules").string();
             }
             driver.set_paths("/opt/angara/src/modules", native_mod_path);
@@ -439,44 +444,8 @@ void LSPServer::analyzeDocument(const std::string& uri) {
             // Collect all diagnostics (including type errors)
             result.diagnostics = errorHandler.diagnostics;
 
-            // Collect completions from symbol table
-            const auto& symbols = typeChecker.getSymbolTable();
-            for (auto& scope : symbols.getScopes()) {
-                for (auto& [name, sym] : scope) {
-                    LSPCompletionItem item;
-                    item.label = name;
-                    if (sym->type) item.detail = sym->type->toString();
-                    // Determine kind
-                    if (sym->type && sym->type->kind == TypeKind::FUNCTION) {
-                        item.kind = 3; // Function
-                    } else if (sym->type && (sym->type->kind == TypeKind::CLASS ||
-                              sym->type->kind == TypeKind::DATA ||
-                              sym->type->kind == TypeKind::ENUM ||
-                              sym->type->kind == TypeKind::TRAIT)) {
-                        item.kind = 7; // Class
-                    } else {
-                        item.kind = 6; // Variable
-                    }
-                    result.completions.push_back(item);
-                }
-            }
-
-            // Store expression types and variable resolutions for hover/definition
-            // (We'll look these up on demand rather than pre-computing)
-            const auto& exprTypes = typeChecker.getExpressionTypes();
-
-            // Store completion items with their source locations for hover/def
-            // For now, build a lookup map from source positions
-            for (auto& [expr, type] : exprTypes) {
-                if (auto* varExpr = dynamic_cast<const VarExpr*>(expr)) {
-                    // Store for hover/def lookup
-                    LSPCompletionItem item;
-                    item.label = varExpr->name.lexeme;
-                    item.detail = type->toString();
-                    item.kind = (type->kind == TypeKind::FUNCTION) ? 3 : 6;
-                    result.completions.push_back(item);
-                }
-            }
+            // Build hover/definition/completion cache from type checker results
+            buildSymbolCache(result, typeChecker, doc.path);
         }
     }
 
@@ -514,9 +483,121 @@ void LSPServer::publishDiagnostics(const std::string& uri) {
     notify("textDocument/publishDiagnostics", params);
 }
 
+// ── Symbol Cache & Word Extraction ──────────────────────────────
+
+void LSPServer::buildSymbolCache(AnalysisResult& result, TypeChecker& typeChecker, const std::string& docPath) {
+    const auto& exprTypes = typeChecker.getExpressionTypes();
+    const auto& varResolutions = typeChecker.getVariableResolutions();
+    const auto& symbols = typeChecker.getSymbolTable();
+
+    // Build position-indexed entries from expression types
+    for (auto& [expr, type] : exprTypes) {
+        if (auto* var = dynamic_cast<const VarExpr*>(expr)) {
+            SymbolRef ref;
+            ref.name = var->name.lexeme;
+            ref.typeString = type->toString();
+            ref.line = var->name.line - 1;
+            ref.startCol = var->name.column - 1;
+            ref.endCol = ref.startCol + (int)var->name.lexeme.size();
+
+            auto resIt = varResolutions.find(var);
+            if (resIt != varResolutions.end()) {
+                auto& decl = resIt->second->declaration_token;
+                ref.declFile = decl.file ? *decl.file : docPath;
+                ref.declLine = decl.line - 1;
+                ref.declCol = decl.column - 1;
+            }
+            result.symbols.push_back(std::move(ref));
+        }
+        else if (auto* get = dynamic_cast<const GetExpr*>(expr)) {
+            SymbolRef ref;
+            ref.name = get->name.lexeme;
+            ref.typeString = type->toString();
+            ref.line = get->name.line - 1;
+            ref.startCol = get->name.column - 1;
+            ref.endCol = ref.startCol + (int)get->name.lexeme.size();
+            result.symbols.push_back(std::move(ref));
+        }
+    }
+
+    // Build name-indexed symbol table and declaration-position entries
+    for (auto& scope : symbols.getScopes()) {
+        for (auto& [name, sym] : scope) {
+            if (!sym->type) continue;
+
+            // Symbol table entry (inner scopes override outer)
+            SymbolTableEntry entry;
+            entry.typeString = sym->type->toString();
+            entry.declFile = sym->declaration_token.file ? *sym->declaration_token.file : docPath;
+            entry.declLine = sym->declaration_token.line - 1;
+            entry.declCol = sym->declaration_token.column - 1;
+            result.symbolTable[name] = std::move(entry);
+
+            // Completion item
+            LSPCompletionItem item;
+            item.label = name;
+            item.detail = sym->type->toString();
+            if (sym->type->kind == TypeKind::FUNCTION) {
+                item.kind = 3; // Function
+            } else if (sym->type->kind == TypeKind::CLASS ||
+                       sym->type->kind == TypeKind::DATA ||
+                       sym->type->kind == TypeKind::ENUM ||
+                       sym->type->kind == TypeKind::TRAIT ||
+                       sym->type->kind == TypeKind::CONTRACT) {
+                item.kind = 7; // Class
+            } else if (sym->type->kind == TypeKind::MODULE) {
+                item.kind = 9; // Module
+            } else {
+                item.kind = 6; // Variable
+            }
+            result.completions.push_back(std::move(item));
+        }
+    }
+}
+
+std::string LSPServer::extractWordAt(const std::string& source, int line, int col) {
+    // Find the start of the requested line
+    int currentLine = 0;
+    size_t lineStart = 0;
+    for (size_t i = 0; i < source.size(); ++i) {
+        if (currentLine == line) {
+            lineStart = i;
+            break;
+        }
+        if (source[i] == '\n') currentLine++;
+    }
+    if (currentLine < line) return "";
+
+    // Find end of line
+    size_t lineEnd = source.find('\n', lineStart);
+    if (lineEnd == std::string::npos) lineEnd = source.size();
+
+    if (col < 0 || col >= (int)(lineEnd - lineStart)) return "";
+
+    auto isIdentChar = [](char c) {
+        return isalnum(static_cast<unsigned char>(c)) || c == '_';
+    };
+
+    int start = col;
+    while (start > 0 && isIdentChar(source[lineStart + start - 1])) start--;
+
+    int end = col;
+    while (end < (int)(lineEnd - lineStart) && isIdentChar(source[lineStart + end])) end++;
+
+    if (end <= start) return "";
+    return source.substr(lineStart + start, end - start);
+}
+
 // ── LSP Request Handlers ───────────────────────────────────────
 
-JSON LSPServer::handleInitialize(const JSON& /*params*/) {
+JSON LSPServer::handleInitialize(const JSON& params) {
+    // Capture workspace root
+    if (params.has("rootUri") && !params["rootUri"].is_null()) {
+        m_workspace_root = uriToPath(params["rootUri"].as_str());
+    } else if (params.has("rootPath") && !params["rootPath"].is_null()) {
+        m_workspace_root = params["rootPath"].as_str();
+    }
+
     JSON result = JSON_OBJ{};
 
     JSON caps = JSON_OBJ{};
@@ -614,68 +695,47 @@ JSON LSPServer::handleHover(const JSON& params) {
     int line = params["position"]["line"].as_int();
     int character = params["position"]["character"].as_int();
 
-    // Re-analyze to get expression types at position
-    auto docIt = m_documents.find(uri);
-    if (docIt == m_documents.end()) return JSON(nullptr);
+    auto analysisIt = m_analysis.find(uri);
+    if (analysisIt == m_analysis.end()) return JSON(nullptr);
+    auto& analysis = analysisIt->second;
 
-    auto& doc = docIt->second;
-    auto filename_ptr = std::make_shared<std::string>(doc.path);
-    ErrorHandler errorHandler(doc.source);
-
-    Lexer lexer(doc.source, filename_ptr, errorHandler);
-    auto tokens = lexer.scanTokens();
-    if (errorHandler.hadError()) return JSON(nullptr);
-
-    Parser parser(tokens, errorHandler);
-    auto statements = parser.parseStmts();
-    if (errorHandler.hadError()) return JSON(nullptr);
-
-    CompilerDriver driver;
-    driver.set_check_only(true);
-    driver.set_quiet(true);
-    std::string native_mod_path = "/opt/angara/modules";
-    if (fs::exists("build/modules")) {
-        native_mod_path = fs::absolute("build/modules").string();
-    }
-    driver.set_paths("/opt/angara/src/modules", native_mod_path);
-
-    std::string base_name = CompilerDriver::get_base_name(doc.path);
-    TypeChecker typeChecker(driver, errorHandler, base_name);
-    typeChecker.check(statements);
-    if (errorHandler.hadError()) return JSON(nullptr);
-
-    // Find expression at position (LSP is 0-based, Angara is 1-based)
-    int target_line = line + 1;
-    int target_col = character + 1;
-
-    const auto& exprTypes = typeChecker.getExpressionTypes();
-    const Expr* bestMatch = nullptr;
-    std::shared_ptr<Type> bestType;
+    // 1. Try positional match from expression types
+    const SymbolRef* best = nullptr;
     int bestLen = 0;
+    for (auto& ref : analysis.symbols) {
+        if (ref.line == line && ref.startCol <= character && ref.endCol > character) {
+            if ((ref.endCol - ref.startCol) > bestLen) {
+                bestLen = ref.endCol - ref.startCol;
+                best = &ref;
+            }
+        }
+    }
 
-    for (auto& [expr, type] : exprTypes) {
-        // Walk the AST to find tokens at position
-        // For now, check VarExpr specifically
-        if (auto* var = dynamic_cast<const VarExpr*>(expr)) {
-            if (var->name.line == target_line &&
-                var->name.column <= target_col &&
-                var->name.column + (int)var->name.lexeme.size() > target_col) {
-                int len = (int)var->name.lexeme.size();
-                if (len > bestLen) {
-                    bestLen = len;
-                    bestMatch = expr;
-                    bestType = type;
+    // 2. Fallback: look up the word at cursor in the symbol table
+    if (!best) {
+        auto docIt = m_documents.find(uri);
+        if (docIt != m_documents.end()) {
+            std::string word = extractWordAt(docIt->second.source, line, character);
+            if (!word.empty()) {
+                auto symIt = analysis.symbolTable.find(word);
+                if (symIt != analysis.symbolTable.end() && !symIt->second.typeString.empty()) {
+                    JSON result = JSON_OBJ{};
+                    JSON contents = JSON_OBJ{};
+                    contents["kind"] = "plaintext";
+                    contents["value"] = symIt->second.typeString;
+                    result["contents"] = contents;
+                    return result;
                 }
             }
         }
     }
 
-    if (!bestMatch || !bestType) return JSON(nullptr);
+    if (!best || best->typeString.empty()) return JSON(nullptr);
 
     JSON result = JSON_OBJ{};
     JSON contents = JSON_OBJ{};
     contents["kind"] = "plaintext";
-    contents["value"] = bestType->toString();
+    contents["value"] = best->typeString;
     result["contents"] = contents;
     return result;
 }
@@ -685,60 +745,59 @@ JSON LSPServer::handleDefinition(const JSON& params) {
     int line = params["position"]["line"].as_int();
     int character = params["position"]["character"].as_int();
 
-    auto docIt = m_documents.find(uri);
-    if (docIt == m_documents.end()) return JSON(nullptr);
+    auto analysisIt = m_analysis.find(uri);
+    if (analysisIt == m_analysis.end()) return JSON(nullptr);
+    auto& analysis = analysisIt->second;
 
-    auto& doc = docIt->second;
-    auto filename_ptr = std::make_shared<std::string>(doc.path);
-    ErrorHandler errorHandler(doc.source);
-
-    Lexer lexer(doc.source, filename_ptr, errorHandler);
-    auto tokens = lexer.scanTokens();
-    if (errorHandler.hadError()) return JSON(nullptr);
-
-    Parser parser(tokens, errorHandler);
-    auto statements = parser.parseStmts();
-    if (errorHandler.hadError()) return JSON(nullptr);
-
-    CompilerDriver driver;
-    driver.set_check_only(true);
-    driver.set_quiet(true);
-    std::string native_mod_path = "/opt/angara/modules";
-    if (fs::exists("build/modules")) {
-        native_mod_path = fs::absolute("build/modules").string();
+    // 1. Try positional match from expression types
+    const SymbolRef* best = nullptr;
+    int bestLen = 0;
+    for (auto& ref : analysis.symbols) {
+        if (ref.line == line && ref.startCol <= character && ref.endCol > character) {
+            if ((ref.endCol - ref.startCol) > bestLen) {
+                bestLen = ref.endCol - ref.startCol;
+                best = &ref;
+            }
+        }
     }
-    driver.set_paths("/opt/angara/src/modules", native_mod_path);
 
-    std::string base_name = CompilerDriver::get_base_name(doc.path);
-    TypeChecker typeChecker(driver, errorHandler, base_name);
-    typeChecker.check(statements);
+    if (best && !best->declFile.empty()) {
+        JSON result = JSON_OBJ{};
+        result["uri"] = pathToUri(best->declFile);
+        JSON range = JSON_OBJ{};
+        JSON start = JSON_OBJ{};
+        start["line"] = best->declLine;
+        start["character"] = best->declCol;
+        JSON end = JSON_OBJ{};
+        end["line"] = best->declLine;
+        end["character"] = best->declCol + (int)best->name.size();
+        range["start"] = start;
+        range["end"] = end;
+        result["range"] = range;
+        return result;
+    }
 
-    // Find variable at position and resolve to its declaration
-    int target_line = line + 1;
-    int target_col = character + 1;
-
-    const auto& varResolutions = typeChecker.getVariableResolutions();
-    for (auto& [varExpr, symbol] : varResolutions) {
-        if (varExpr->name.line == target_line &&
-            varExpr->name.column <= target_col &&
-            varExpr->name.column + (int)varExpr->name.lexeme.size() > target_col) {
-            // Found the variable - resolve to declaration
-            auto& declToken = symbol->declaration_token;
-            std::string declFile = declToken.file ? *declToken.file : doc.path;
-
-            JSON result = JSON_OBJ{};
-            result["uri"] = pathToUri(declFile);
-            JSON range = JSON_OBJ{};
-            JSON start = JSON_OBJ{};
-            start["line"] = declToken.line - 1;
-            start["character"] = declToken.column - 1;
-            JSON end = JSON_OBJ{};
-            end["line"] = declToken.line - 1;
-            end["character"] = declToken.column - 1 + (int)declToken.lexeme.size();
-            range["start"] = start;
-            range["end"] = end;
-            result["range"] = range;
-            return result;
+    // 2. Fallback: word-at-cursor in symbol table
+    auto docIt = m_documents.find(uri);
+    if (docIt != m_documents.end()) {
+        std::string word = extractWordAt(docIt->second.source, line, character);
+        if (!word.empty()) {
+            auto symIt = analysis.symbolTable.find(word);
+            if (symIt != analysis.symbolTable.end() && !symIt->second.declFile.empty()) {
+                JSON result = JSON_OBJ{};
+                result["uri"] = pathToUri(symIt->second.declFile);
+                JSON range = JSON_OBJ{};
+                JSON start = JSON_OBJ{};
+                start["line"] = symIt->second.declLine;
+                start["character"] = symIt->second.declCol;
+                JSON end = JSON_OBJ{};
+                end["line"] = symIt->second.declLine;
+                end["character"] = symIt->second.declCol + (int)word.size();
+                range["start"] = start;
+                range["end"] = end;
+                result["range"] = range;
+                return result;
+            }
         }
     }
 
