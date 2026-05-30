@@ -53,6 +53,34 @@ std::any TypeChecker::visit(const GetExpr& expr) {
             }
         }
     }
+    else if (unwrapped_object_type->kind == TypeKind::GENERIC_INSTANCE) {
+        auto generic_instance = std::dynamic_pointer_cast<GenericInstanceType>(unwrapped_object_type);
+        auto base_data = std::dynamic_pointer_cast<DataType>(generic_instance->base_type);
+
+        if (base_data) {
+            if (property_name == "clone") {
+                property_type = std::make_shared<FunctionType>(
+                    std::vector<std::shared_ptr<Type>>{},
+                    unwrapped_object_type
+                );
+            } else if (property_name == "deep_clone") {
+                property_type = std::make_shared<FunctionType>(
+                    std::vector<std::shared_ptr<Type>>{},
+                    unwrapped_object_type
+                );
+            } else {
+                auto field_it = base_data->fields.find(property_name);
+                if (field_it == base_data->fields.end()) {
+                    error(expr.name, "Data type '" + base_data->name + "' has no field named '" + property_name + "'.", "E334");
+                } else {
+                    // Substitute type parameters with concrete types
+                    property_type = generic_instance->substitute(field_it->second.type);
+                }
+            }
+        } else {
+            error(expr.op, "Cannot access properties on generic instance of '" + generic_instance->base_type->toString() + "'.", "E345");
+        }
+    }
     else if (unwrapped_object_type->kind == TypeKind::INSTANCE) {
         auto instance_type = std::dynamic_pointer_cast<InstanceType>(unwrapped_object_type);
         const ClassType::MemberInfo* prop_info = instance_type->class_type->findProperty(property_name);

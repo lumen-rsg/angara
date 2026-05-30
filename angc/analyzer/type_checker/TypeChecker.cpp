@@ -490,4 +490,32 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         }
     }
 
+    void TypeChecker::extract_type_args(
+        const std::shared_ptr<Type>& pattern,
+        const std::shared_ptr<Type>& concrete,
+        std::map<std::string, std::shared_ptr<Type>>& inferred
+    ) {
+        if (pattern->kind == TypeKind::TYPE_PARAM) {
+            auto tp = std::dynamic_pointer_cast<TypeParameterType>(pattern);
+            if (!inferred.count(tp->name)) {
+                inferred[tp->name] = concrete;
+            }
+        } else if (pattern->kind == TypeKind::GENERIC_INSTANCE && concrete->kind == TypeKind::GENERIC_INSTANCE) {
+            auto p_gen = std::dynamic_pointer_cast<GenericInstanceType>(pattern);
+            auto c_gen = std::dynamic_pointer_cast<GenericInstanceType>(concrete);
+            for (const auto& [name, p_arg] : p_gen->type_args) {
+                auto it = c_gen->type_args.find(name);
+                if (it != c_gen->type_args.end()) {
+                    extract_type_args(p_arg, it->second, inferred);
+                }
+            }
+        } else if (pattern->kind == TypeKind::LIST && concrete->kind == TypeKind::LIST) {
+            extract_type_args(
+                std::dynamic_pointer_cast<ListType>(pattern)->element_type,
+                std::dynamic_pointer_cast<ListType>(concrete)->element_type,
+                inferred
+            );
+        }
+    }
+
 }

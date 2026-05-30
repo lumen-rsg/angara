@@ -188,6 +188,12 @@ namespace angara {
         /// Searches candidates for close matches to a misspelled name and emits a "did you mean?" note.
         void find_and_report_suggestion(const Token& bad_token, const std::vector<std::string>& candidates);
 
+        /// Recursively extracts type parameter bindings by matching a pattern type
+        /// (containing TypeParameterType) against a concrete type.
+        static void extract_type_args(const std::shared_ptr<Type>& pattern,
+                                      const std::shared_ptr<Type>& concrete,
+                                      std::map<std::string, std::shared_ptr<Type>>& inferred);
+
         // --- State ---
 
         ErrorHandler& m_errorHandler;

@@ -89,6 +89,11 @@ namespace angara {
             return;
         }
 
+        // Reset per-function error state so errors in one function
+        // don't poison type checking in subsequent functions.
+        bool saved_had_error = m_hadError;
+        m_hadError = false;
+
         auto symbol = m_symbols.resolve(stmt->name.lexeme);
         std::shared_ptr<FunctionType> func_type;
         if (m_current_class && m_current_class->methods.count(stmt->name.lexeme)) {
@@ -123,6 +128,10 @@ namespace angara {
         m_active_type_params = saved_type_params;
         m_function_return_types.pop();
         exitScopeAndWarn();
+
+        // Restore: if this function had errors, propagate to outer state
+        if (m_hadError) saved_had_error = true;
+        m_hadError = saved_had_error;
     }
 
 }

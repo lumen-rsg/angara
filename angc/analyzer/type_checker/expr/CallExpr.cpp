@@ -49,7 +49,18 @@ namespace angara {
             auto data_type = std::dynamic_pointer_cast<DataType>(callee_type);
             check_function_call(expr, data_type->constructor_type, arg_types);
             if (!m_hadError) {
-                result_type = data_type;
+                if (data_type->is_generic()) {
+                    // Infer type arguments by matching constructor param patterns
+                    // (which contain TypeParameterType) against concrete arg types.
+                    std::map<std::string, std::shared_ptr<Type>> inferred_args;
+                    const auto& ctor_params = data_type->constructor_type->param_types;
+                    for (size_t i = 0; i < std::min(ctor_params.size(), arg_types.size()); ++i) {
+                        extract_type_args(ctor_params[i], arg_types[i], inferred_args);
+                    }
+                    result_type = std::make_shared<GenericInstanceType>(data_type, std::move(inferred_args));
+                } else {
+                    result_type = data_type;
+                }
             }
         }
         else if (callee_type->kind == TypeKind::ANY) {

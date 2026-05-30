@@ -64,6 +64,26 @@ bool TypeChecker::check_type_compatibility(
         return check_type_compatibility(expected_list->element_type, actual_list->element_type);
     }
 
+    // Generic instance vs generic instance: same base type, compatible type args
+    if (expected->kind == TypeKind::GENERIC_INSTANCE && actual->kind == TypeKind::GENERIC_INSTANCE) {
+        auto expected_gen = std::dynamic_pointer_cast<GenericInstanceType>(expected);
+        auto actual_gen = std::dynamic_pointer_cast<GenericInstanceType>(actual);
+        if (expected_gen->base_type->toString() != actual_gen->base_type->toString()) return false;
+        for (const auto& [name, expected_arg] : expected_gen->type_args) {
+            auto it = actual_gen->type_args.find(name);
+            if (it == actual_gen->type_args.end()) return false;
+            if (!check_type_compatibility(expected_arg, it->second)) return false;
+        }
+        return true;
+    }
+
+    // Generic instance is compatible with its bare base data type
+    if (expected->kind == TypeKind::DATA && actual->kind == TypeKind::GENERIC_INSTANCE) {
+        auto expected_data = std::dynamic_pointer_cast<DataType>(expected);
+        auto actual_gen = std::dynamic_pointer_cast<GenericInstanceType>(actual);
+        return expected_data->toString() == actual_gen->base_type->toString();
+    }
+
     return false;
 }
 
