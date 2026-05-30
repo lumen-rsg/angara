@@ -57,6 +57,31 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
     objType = rt->getAngaraObjType();
 }
 
+llvm::DIFile* LLVMBackend::getOrCreateDIFile(const std::string& filename) {
+    if (!m_di_builder) return nullptr;
+    // Extract just the filename and directory
+    std::string dir = ".";
+    std::string name = filename;
+    auto slash = name.rfind('/');
+    if (slash != std::string::npos) {
+        dir = name.substr(0, slash);
+        name = name.substr(slash + 1);
+    }
+    return m_di_builder->createFile(name, dir);
+}
+
+void LLVMBackend::setDebugLoc(const Token& tok) {
+    if (!m_debug || !m_di_scope) return;
+    builder->SetCurrentDebugLocation(
+        llvm::DILocation::get(*ctx, tok.line, tok.column, m_di_scope));
+}
+
+void LLVMBackend::setDebugLoc(int line, int col) {
+    if (!m_debug || !m_di_scope) return;
+    builder->SetCurrentDebugLocation(
+        llvm::DILocation::get(*ctx, line, col, m_di_scope));
+}
+
 std::pair<std::unique_ptr<llvm::Module>, std::unique_ptr<llvm::LLVMContext>>
 LLVMBackend::generateIR(const std::vector<std::shared_ptr<Stmt>>& stmts,
                         const std::shared_ptr<ModuleType>& moduleType,

@@ -5,18 +5,21 @@ namespace angara {
 
 void LLVMBackend::cgStmt(const std::shared_ptr<Stmt>& s) {
     if (!s) return;
-    if (auto* p = dynamic_cast<const VarDeclStmt*>(s.get())) cgVarDecl(*p);
-    else if (auto* p = dynamic_cast<const ExpressionStmt*>(s.get())) cg(p->expression);
+    if (auto* p = dynamic_cast<const VarDeclStmt*>(s.get())) { setDebugLoc(p->name); cgVarDecl(*p); }
+    else if (auto* p = dynamic_cast<const ExpressionStmt*>(s.get())) {
+        if (auto* ve = dynamic_cast<const VarExpr*>(p->expression.get())) setDebugLoc(ve->name);
+        cg(p->expression);
+    }
     else if (auto* p = dynamic_cast<const BlockStmt*>(s.get())) cgBlock(*p);
-    else if (auto* p = dynamic_cast<const IfStmt*>(s.get())) cgIf(*p);
-    else if (auto* p = dynamic_cast<const WhileStmt*>(s.get())) cgWhile(*p);
-    else if (auto* p = dynamic_cast<const ForStmt*>(s.get())) cgFor(*p);
-    else if (auto* p = dynamic_cast<const ForInStmt*>(s.get())) cgForIn(*p);
-    else if (auto* p = dynamic_cast<const ReturnStmt*>(s.get())) cgReturn(*p);
-    else if (auto* p = dynamic_cast<const BreakStmt*>(s.get())) { if (loopExit) builder->CreateBr(loopExit); }
-    else if (auto* p = dynamic_cast<const ContinueStmt*>(s.get())) { if (loopContinue) builder->CreateBr(loopContinue); }
-    else if (auto* p = dynamic_cast<const ThrowStmt*>(s.get())) cgThrow(*p);
-    else if (auto* p = dynamic_cast<const TryStmt*>(s.get())) cgTry(*p);
+    else if (auto* p = dynamic_cast<const IfStmt*>(s.get())) { setDebugLoc(p->keyword); cgIf(*p); }
+    else if (auto* p = dynamic_cast<const WhileStmt*>(s.get())) { setDebugLoc(p->keyword); cgWhile(*p); }
+    else if (auto* p = dynamic_cast<const ForStmt*>(s.get())) { setDebugLoc(p->keyword); cgFor(*p); }
+    else if (auto* p = dynamic_cast<const ForInStmt*>(s.get())) { setDebugLoc(p->keyword); cgForIn(*p); }
+    else if (auto* p = dynamic_cast<const ReturnStmt*>(s.get())) { setDebugLoc(p->keyword); cgReturn(*p); }
+    else if (auto* p = dynamic_cast<const BreakStmt*>(s.get())) { setDebugLoc(0, 0); if (loopExit) builder->CreateBr(loopExit); }
+    else if (auto* p = dynamic_cast<const ContinueStmt*>(s.get())) { setDebugLoc(0, 0); if (loopContinue) builder->CreateBr(loopContinue); }
+    else if (auto* p = dynamic_cast<const ThrowStmt*>(s.get())) { setDebugLoc(p->keyword); cgThrow(*p); }
+    else if (auto* p = dynamic_cast<const TryStmt*>(s.get())) { setDebugLoc(p->catchName); cgTry(*p); }
     else if (auto* p = dynamic_cast<const UnsafeBlockStmt*>(s.get())) {
         if (p->block) {
             for (auto& st : p->block->statements) {

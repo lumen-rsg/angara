@@ -194,6 +194,7 @@ static void print_help() {
     std::cout << "  init      Create a new project interactively\n";
     std::cout << "  modules   List installed native modules\n";
     std::cout << "  fmt       Format source files (-w to write in place)\n";
+    std::cout << "  watch     Watch for file changes and rebuild\n";
     std::cout << "  lsp       Start Language Server Protocol server\n";
     std::cout << "  repl      Start interactive read-eval-print loop\n";
     std::cout << "\n" << CLR_BOLD << "Options:" << CLR_RESET << "\n";
@@ -464,6 +465,13 @@ static int cmd_compile_single_file(const std::string& source_file, const CliFlag
     double total_time = std::chrono::duration<double>(total_end - build_start).count();
 
     if (res == 0) {
+        // Generate dSYM bundle on macOS in debug mode before cleaning up object files
+        if (flags.debug) {
+#ifdef __APPLE__
+            std::string dsym_cmd = "dsymutil " + angara::shell_escape(binary_name) + " 2>/dev/null";
+            (void)system(dsym_cmd.c_str());
+#endif
+        }
         for (const auto& o_file : driver.get_generated_object_files()) {
             remove(o_file.c_str());
         }
@@ -586,10 +594,16 @@ static int handle_check(std::vector<std::string> args) {
 static int handle_fmt(std::vector<std::string> args) {
     args.erase(args.begin());
     bool write_in_place = false;
+    bool check_mode = false;
+    bool list_mode = false;
     std::vector<std::string> files;
     for (auto& arg : args) {
         if (arg == "-w" || arg == "--write") {
             write_in_place = true;
+        } else if (arg == "-c" || arg == "--check") {
+            check_mode = true;
+        } else if (arg == "-l" || arg == "--list") {
+            list_mode = true;
         } else {
             files.push_back(arg);
         }
@@ -597,11 +611,12 @@ static int handle_fmt(std::vector<std::string> args) {
 
     if (files.empty()) {
         std::cerr << CLR_RED << "[ERROR] 'fmt' requires at least one .an source file." << CLR_RESET << "\n";
-        std::cerr << "Usage: angc fmt [-w|--write] <file.an> [file2.an ...]\n";
+        std::cerr << "Usage: angc fmt [-w|--write] [-c|--check] [-l|--list] <file.an> [file2.an ...]\n";
         return 1;
     }
 
     int errors = 0;
+    int needs_formatting = 0;
     for (auto& file : files) {
         std::ifstream ifs(file);
         if (!ifs.is_open()) {
@@ -625,7 +640,18 @@ static int handle_fmt(std::vector<std::string> args) {
         angara::Formatter formatter;
         std::string formatted = formatter.format(statements);
 
-        if (write_in_place) {
+        if (check_mode || list_mode) {
+            if (formatted != source) {
+                needs_formatting++;
+                if (list_mode) {
+                    std::cout << file << "\n";
+                } else {
+                    std::cerr << CLR_RED << "[FAIL] " << CLR_RESET << file << " needs formatting\n";
+                }
+            } else if (check_mode && !list_mode) {
+                std::cout << CLR_BOLD << CLR_GREEN << "[OK] " << CLR_RESET << file << "\n";
+            }
+        } else if (write_in_place) {
             std::ofstream ofs(file);
             ofs << formatted;
             ofs.close();
@@ -634,7 +660,156 @@ static int handle_fmt(std::vector<std::string> args) {
             std::cout << formatted;
         }
     }
-    return errors > 0 ? 1 : 0;
+    if (errors > 0) return 1;
+    if ((check_mode || list_mode) && needs_formatting > 0) return 1;
+    return 0;
+}
+
+// ── Watch Mode ───────────────────────────────────────────────────
+
+static int handle_test(std::vector<std::string> args);  // forward decl
+
+static std::vector<fs::path> collect_an_files(const fs::path& root) {
+    std::vector<fs::path> files;
+    try {
+        for (const auto& entry : fs::recursive_directory_iterator(root)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".an") {
+                files.push_back(entry.path());
+            }
+        }
+    } catch (...) {}
+    return files;
+}
+
+struct FileSnapshot {
+    fs::path path;
+    fs::file_time_type last_write;
+};
+
+static std::vector<FileSnapshot> snapshot_files(const std::vector<fs::path>& files) {
+    std::vector<FileSnapshot> snap;
+    for (const auto& f : files) {
+        try {
+            snap.push_back({f, fs::last_write_time(f)});
+        } catch (...) {}
+    }
+    return snap;
+}
+
+static bool detect_changes(const std::vector<FileSnapshot>& prev,
+                           std::vector<FileSnapshot>& curr) {
+    bool changed = false;
+    for (size_t i = 0; i < curr.size(); i++) {
+        if (i < prev.size() && curr[i].path == prev[i].path) {
+            if (curr[i].last_write != prev[i].last_write) {
+                changed = true;
+                curr[i] = {curr[i].path, fs::last_write_time(curr[i].path)};
+            }
+        } else {
+            changed = true;
+        }
+    }
+    // Check for new files
+    try {
+        for (const auto& entry : fs::recursive_directory_iterator(".")) {
+            if (entry.is_regular_file() && entry.path().extension() == ".an") {
+                bool found = false;
+                for (auto& c : curr) {
+                    if (c.path == entry.path()) { found = true; break; }
+                }
+                if (!found) {
+                    changed = true;
+                    curr.push_back({entry.path(), fs::last_write_time(entry.path())});
+                }
+            }
+        }
+    } catch (...) {}
+    return changed;
+}
+
+static int handle_watch(std::vector<std::string> args) {
+    args.erase(args.begin());
+    bool run_after = false;
+    bool test_after = false;
+    for (auto& arg : args) {
+        if (arg == "-r" || arg == "--run") run_after = true;
+        else if (arg == "-t" || arg == "--test") test_after = true;
+    }
+
+    std::string project_file = find_local_project_file();
+    if (project_file.empty()) {
+        std::cerr << CLR_RED << "[ERROR] No .abs project file found in the current directory." << CLR_RESET << "\n";
+        return 1;
+    }
+
+    std::cout << CLR_BOLD << CLR_CYAN << "[WATCH] " << CLR_RESET
+              << "Watching for changes (project: " << project_file << ")\n";
+    if (run_after) std::cout << CLR_DIM << "  --run enabled: will execute after each build\n" << CLR_RESET;
+    if (test_after) std::cout << CLR_DIM << "  --test enabled: will run tests after each build\n" << CLR_RESET;
+    std::cout << CLR_DIM << "  Press Ctrl+C to stop\n" << CLR_RESET << "\n";
+
+    auto an_files = collect_an_files(".");
+    auto snapshot = snapshot_files(an_files);
+
+    // Initial build
+    {
+        auto t0 = std::chrono::high_resolution_clock::now();
+        std::cout << CLR_BOLD << CLR_CYAN << "[WATCH] " << CLR_RESET << "Initial build...\n";
+        angara::BuildSystem builder;
+        bool ok = builder.build(project_file);
+        auto t1 = std::chrono::high_resolution_clock::now();
+        double secs = std::chrono::duration<double>(t1 - t0).count();
+
+        if (ok) {
+            std::cout << CLR_BOLD << CLR_GREEN << "[WATCH] " << CLR_RESET
+                      << "Build OK" << CLR_DIM << " (" << secs << "s)" << CLR_RESET << "\n";
+            if (run_after) builder.run(project_file);
+            if (test_after) {
+                std::vector<std::string> test_args = {"test"};
+                handle_test(test_args);
+            }
+        } else {
+            std::cout << CLR_BOLD << CLR_RED << "[WATCH] " << CLR_RESET << "Build failed\n";
+        }
+        std::cout << CLR_DIM << "  Waiting for changes...\n" << CLR_RESET;
+    }
+
+    while (true) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+        auto current_files = collect_an_files(".");
+        auto current_snap = snapshot_files(current_files);
+        if (!detect_changes(snapshot, current_snap)) continue;
+        snapshot = current_snap;
+
+        // Debounce: wait for changes to settle
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        current_snap = snapshot_files(collect_an_files("."));
+        snapshot = current_snap;
+
+        auto t0 = std::chrono::high_resolution_clock::now();
+        std::cout << "\n" << CLR_BOLD << CLR_CYAN << "[WATCH] " << CLR_RESET
+                  << "Change detected, rebuilding...\n";
+
+        angara::BuildSystem builder;
+        bool ok = builder.build(project_file);
+        auto t1 = std::chrono::high_resolution_clock::now();
+        double secs = std::chrono::duration<double>(t1 - t0).count();
+
+        if (ok) {
+            std::cout << CLR_BOLD << CLR_GREEN << "[WATCH] " << CLR_RESET
+                      << "Build OK" << CLR_DIM << " (" << secs << "s)" << CLR_RESET << "\n";
+            if (run_after) builder.run(project_file);
+            if (test_after) {
+                std::vector<std::string> test_args = {"test"};
+                handle_test(test_args);
+            }
+        } else {
+            std::cout << CLR_BOLD << CLR_RED << "[WATCH] " << CLR_RESET << "Build failed\n";
+        }
+        std::cout << CLR_DIM << "  Waiting for changes...\n" << CLR_RESET;
+    }
+    return 0;
 }
 
 static int handle_test(std::vector<std::string> args) {
@@ -840,6 +1015,7 @@ int main(int argc, char* argv[]) {
     if (cmd == "modules") { list_modules(); return 0; }
     if (cmd == "check")   return handle_check(args);
     if (cmd == "fmt")     return handle_fmt(args);
+    if (cmd == "watch")   return handle_watch(args);
     if (cmd == "lsp")     { angara::LSPServer lsp; return lsp.run(); }
     if (cmd == "repl")    { angara::REPL repl; return repl.run(); }
     if (cmd == "-v" || cmd == "--version") { print_version(); return 0; }

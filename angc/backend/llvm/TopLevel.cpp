@@ -63,16 +63,20 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     }
 
     // Attach DWARF debug info to this function in debug mode
+    llvm::DIScope* saved_di_scope = m_di_scope;
     if (m_debug && m_di_builder && m_di_file) {
+        std::string src_file = stmt.name.file ? *stmt.name.file : "unknown";
+        auto diFile = getOrCreateDIFile(src_file);
         auto diFuncType = m_di_builder->createSubroutineType(
             m_di_builder->getOrCreateTypeArray({}));
-        std::string src_file = stmt.name.file ? *stmt.name.file : "unknown";
-        auto diFile = m_di_builder->createFile(src_file, ".");
         auto sp = m_di_builder->createFunction(
             diFile, stmt.name.lexeme, func_name, diFile,
             stmt.name.line, diFuncType, stmt.name.column,
             llvm::DINode::FlagZero, llvm::DISubprogram::SPFlagDefinition);
         fn->setSubprogram(sp);
+        m_di_scope = sp;
+        builder->SetCurrentDebugLocation(
+            llvm::DILocation::get(*ctx, stmt.name.line, stmt.name.column, sp));
     }
 
     size_t idx = 0;
@@ -109,6 +113,8 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
 
     namedVals = std::move(saved_values);
     namedTypes = std::move(saved_types);
+    m_di_scope = saved_di_scope;
+    if (m_debug) builder->SetCurrentDebugLocation(llvm::DebugLoc());
 }
 
 void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
@@ -661,6 +667,9 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
             1, diFuncType, 0,
             llvm::DINode::FlagZero, llvm::DISubprogram::SPFlagDefinition);
         main_fn->setSubprogram(sp);
+        m_di_scope = sp;
+        builder->SetCurrentDebugLocation(
+            llvm::DILocation::get(*ctx, 1, 0, sp));
     }
 
     auto* entry = llvm::BasicBlock::Create(*ctx, "entry", main_fn);

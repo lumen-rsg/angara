@@ -252,6 +252,10 @@ namespace angara {
         llvm::DIFile* m_di_file = nullptr;
         llvm::DICompileUnit* m_di_cu = nullptr;
         std::map<std::string, llvm::DISubprogram*> m_di_functions;
+        llvm::DIScope* m_di_scope = nullptr;  // current debug scope (function/subprogram)
+        llvm::DIFile* getOrCreateDIFile(const std::string& filename);
+        void setDebugLoc(const Token& tok);
+        void setDebugLoc(int line, int col);
 
         int m_lambda_counter = 0;
 
