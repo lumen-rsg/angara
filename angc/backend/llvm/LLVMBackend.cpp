@@ -190,11 +190,11 @@ llvm::Value* LLVMBackend::makeStr(const std::string& s) {
         return cached;
     }
 
-    // First occurrence: create a global variable and initialize it eagerly.
-    // The __ang_string_from_c call is emitted in the current block, then
-    // stored to the global for all future references to reuse.
+    // First occurrence: create a global variable and initialize it in the
+    // function's entry block (after allocas) so it always executes, even if
+    // the first codegen reference is inside a conditional branch like a match
+    // case that may not run.
     auto* gsptr = builder->CreateGlobalString(s);
-    auto* new_str = callRtByName("__ang_string_from_c", {gsptr});
 
     auto* global = new llvm::GlobalVariable(
         *mod, objType, false,
@@ -202,12 +202,22 @@ llvm::Value* LLVMBackend::makeStr(const std::string& s) {
         llvm::ConstantAggregateZero::get(objType),
         "__ang_strlit_" + std::to_string(m_string_literal_cache.size()));
     global->setDSOLocal(true);
+
+    // Emit the init call in the function's entry block, right after allocas
+    auto* fn = builder->GetInsertBlock()->getParent();
+    auto& entry = fn->getEntryBlock();
+    auto savedIP = builder->saveIP();
+    builder->SetInsertPoint(&entry, entry.getFirstInsertionPt());
+    auto* new_str = callRtByName("__ang_string_from_c", {gsptr});
     builder->CreateStore(new_str, global);
+    builder->restoreIP(savedIP);
+
     m_string_literal_cache[s] = global;
 
-    // Incref for the caller's reference (global holds the base ref)
-    callRtByName("__ang_incref", {new_str});
-    return new_str;
+    // At the current position, load from the global and incref
+    auto* loaded = builder->CreateLoad(objType, global, "strlit");
+    callRtByName("__ang_incref", {loaded});
+    return loaded;
 }
 
 llvm::Value* LLVMBackend::getI64(llvm::Value* o) { return builder->CreateExtractValue(o,{1}); }

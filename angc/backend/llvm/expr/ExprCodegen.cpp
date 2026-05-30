@@ -548,12 +548,77 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             }
             return makeNil();
         }
+        // Handle this.method(args...) calls
+        if (dynamic_cast<const ThisExpr*>(get->object.get())) {
+            std::string fnName = get->name.lexeme;
+            // Use namedTypes["this"] to find the class, then walk the chain
+            auto tit = namedTypes.find("this");
+            if (tit != namedTypes.end() && tit->second->kind == TypeKind::INSTANCE) {
+                auto inst = std::dynamic_pointer_cast<InstanceType>(tit->second);
+                if (inst && inst->class_type) {
+                    auto cls = inst->class_type;
+                    while (cls) {
+                        auto qit = methodLookup.find(cls->name + "." + fnName);
+                        if (qit != methodLookup.end()) {
+                            llvm::Function* mf = this->mod->getFunction(qit->second);
+                            if (mf) {
+                                std::vector<llvm::Value*> args;
+                                args.push_back(loadVar("this"));
+                                for (auto& a : expr.arguments) args.push_back(cg(a));
+                                auto* ft = mf->getFunctionType();
+                                while (args.size() < ft->getNumParams()) args.push_back(makeNil());
+                                return builder->CreateCall(mf, args);
+                            }
+                        }
+                        cls = cls->superclass;
+                    }
+                }
+            }
+            // Fallback to unqualified lookup
+            auto mit = methodLookup.find(fnName);
+            if (mit != methodLookup.end()) {
+                llvm::Function* mf = this->mod->getFunction(mit->second);
+                if (mf) {
+                    std::vector<llvm::Value*> args;
+                    args.push_back(loadVar("this"));
+                    for (auto& a : expr.arguments) args.push_back(cg(a));
+                    auto* ft = mf->getFunctionType();
+                    while (args.size() < ft->getNumParams()) args.push_back(makeNil());
+                    return builder->CreateCall(mf, args);
+                }
+            }
+        }
         if (auto* obj = dynamic_cast<const VarExpr*>(get->object.get())) {
             std::string modName = obj->name.lexeme, fnName = get->name.lexeme;
             {
-                auto mit = methodLookup.find(fnName);
-                if (mit != methodLookup.end()) {
-                    llvm::Function* mf = this->mod->getFunction(mit->second);
+                // Type-aware method dispatch: use the variable's class type to
+                // look up the qualified key (e.g. "Animal.speak"), walking the
+                // superclass chain if the method isn't found on the exact class.
+                std::string resolved_method;
+                auto type_it = m_type_checker.getExpressionTypes().find(obj);
+                if (type_it != m_type_checker.getExpressionTypes().end() &&
+                    type_it->second->kind == TypeKind::INSTANCE) {
+                    auto inst = std::dynamic_pointer_cast<InstanceType>(type_it->second);
+                    if (inst && inst->class_type) {
+                        auto cls = inst->class_type;
+                        while (cls) {
+                            auto qit = methodLookup.find(cls->name + "." + fnName);
+                            if (qit != methodLookup.end()) {
+                                resolved_method = qit->second;
+                                break;
+                            }
+                            cls = cls->superclass;
+                        }
+                    }
+                }
+                // Fall back to unqualified lookup if no qualified match
+                if (resolved_method.empty()) {
+                    auto mit = methodLookup.find(fnName);
+                    if (mit != methodLookup.end())
+                        resolved_method = mit->second;
+                }
+                if (!resolved_method.empty()) {
+                    llvm::Function* mf = this->mod->getFunction(resolved_method);
                     if (mf) {
                         std::vector<llvm::Value*> args;
                         args.push_back(loadVar(modName));

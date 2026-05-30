@@ -180,7 +180,9 @@ void LLVMBackend::cgReturn(const ReturnStmt& s) {
 }
 
 void LLVMBackend::cgThrow(const ThrowStmt& s) {
-    callRtByName("__ang_throw", {callRtByName("__ang_exception_new", {cg(s.expression)})});
+    // The expression (e.g. Exception("msg")) already creates the exception
+    // object via __ang_exception_new in cgCall, so just throw it directly.
+    callRtByName("__ang_throw", {cg(s.expression)});
 }
 
 void LLVMBackend::cgTry(const TryStmt& s) {
