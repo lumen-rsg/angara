@@ -747,6 +747,23 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             }
             return callModuleFn(modName, fnName, expr.arguments);
         }
+        // Handle chained property access on arbitrary expressions:
+        // e.g., this.mtx.lock(), this.mtx.unlock(), some_expr.join()
+        std::string fnName = get->name.lexeme;
+        if (fnName == "lock" || fnName == "unlock" || fnName == "join") {
+            auto* obj = cg(get->object);
+            if (fnName == "lock") {
+                callRtByName("__ang_mutex_lock", {obj});
+                return makeNil();
+            }
+            if (fnName == "unlock") {
+                callRtByName("__ang_mutex_unlock", {obj});
+                return makeNil();
+            }
+            if (fnName == "join") {
+                return callRtByName("__ang_thread_join", {obj});
+            }
+        }
         return cg(get->object);
     }
 
@@ -888,6 +905,26 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         if (fn == "spawn") {
             if (!expr.arguments.empty()) {
                 auto* closure = cg(expr.arguments[0]);
+                int n_args = (int)expr.arguments.size() - 1;
+                if (n_args > 0) {
+                    // Allocate heap array for the extra arguments
+                    auto* malloc_fn = this->mod->getFunction("malloc");
+                    auto* arr_size = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),
+                        (uint64_t)n_args * 16); // sizeof(AngaraObject) = 16
+                    auto* args_mem = builder->CreateCall(malloc_fn, {arr_size}, "spawn_args");
+                    auto* arr_type = llvm::ArrayType::get(objType, n_args);
+                    for (int i = 0; i < n_args; i++) {
+                        auto* elem_ptr = builder->CreateGEP(arr_type, args_mem,
+                            {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
+                             llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
+                        builder->CreateStore(cg(expr.arguments[i + 1]), elem_ptr);
+                    }
+                    return callRtByName("__ang_spawn_thread", {
+                        closure,
+                        llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), n_args),
+                        args_mem
+                    });
+                }
                 return callRtByName("__ang_spawn_thread", {
                     closure,
                     llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0),

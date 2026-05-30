@@ -350,14 +350,21 @@ void RuntimeBuilder::generateThreadOps() {
         IRBuilder<> b(entry);
         auto* arg = trampoline->arg_begin();
         auto* closure = b.CreateLoad(obj_ty, b.CreateStructGEP(m_thread_type, arg, 2), "closure");
+        auto* argc = b.CreateLoad(i32_ty, b.CreateStructGEP(m_thread_type, arg, 3), "argc");
+        auto* args = b.CreateLoad(ptr_ty, b.CreateStructGEP(m_thread_type, arg, 4), "args");
         auto* call_fn = m_module.getFunction("__ang_call");
-        auto* result = b.CreateCall(call_fn, {
-            closure,
-            ConstantInt::get(i32_ty, 0),
-            ConstantPointerNull::get(ptr_ty)
-        });
+        auto* result = b.CreateCall(call_fn, {closure, argc, args});
         b.CreateStore(result, b.CreateStructGEP(m_thread_type, arg, 2));
-        b.CreateRet(ConstantPointerNull::get(ptr_ty));
+        // Free the heap-allocated args array (if any)
+        auto* args_not_null = b.CreateICmpNE(args, ConstantPointerNull::get(ptr_ty));
+        auto* free_bb = BasicBlock::Create(m_ctx, "free_args", trampoline);
+        auto* done_bb = BasicBlock::Create(m_ctx, "done", trampoline);
+        b.CreateCondBr(args_not_null, free_bb, done_bb);
+        IRBuilder<> bf(free_bb);
+        bf.CreateCall(free_fn, {args});
+        bf.CreateBr(done_bb);
+        IRBuilder<> bd(done_bb);
+        bd.CreateRet(ConstantPointerNull::get(ptr_ty));
     }
 
     {
@@ -369,8 +376,7 @@ void RuntimeBuilder::generateThreadOps() {
         IRBuilder<> b(entry);
         auto* closure = fn->arg_begin();
 
-        auto* size = ConstantInt::get(i64_ty, 32);
-        size = ConstantInt::get(i64_ty, 40);
+        auto* size = ConstantInt::get(i64_ty, 56);
         auto* mem = b.CreateCall(malloc_fn, {size}, "mem");
         auto* thread_ptr = b.CreateBitCast(mem, ptr_ty, "thread_ptr");
 
@@ -385,6 +391,12 @@ void RuntimeBuilder::generateThreadOps() {
 
         auto* result_slot = b.CreateStructGEP(m_thread_type, thread_ptr, 2);
         b.CreateStore(closure, result_slot);
+
+        // Store argc and args array for the spawned function
+        auto* argc_arg = fn->arg_begin() + 1;
+        auto* args_arg = fn->arg_begin() + 2;
+        b.CreateStore(argc_arg, b.CreateStructGEP(m_thread_type, thread_ptr, 3));
+        b.CreateStore(args_arg, b.CreateStructGEP(m_thread_type, thread_ptr, 4));
 
         auto* trampoline = m_module.getFunction("__ang_thread_trampoline");
         b.CreateCall(pthread_create_fn, {

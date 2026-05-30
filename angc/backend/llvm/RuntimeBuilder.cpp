@@ -108,7 +108,9 @@ void RuntimeBuilder::generateTypes() {
     m_thread_type = StructType::create(m_ctx, {
         m_obj_header_type,
         PointerType::get(m_ctx, 0),
-        m_angara_obj_type
+        m_angara_obj_type,
+        Type::getInt32Ty(m_ctx),     // argc for spawned function
+        PointerType::get(m_ctx, 0)   // args array (heap-allocated AngaraObject[])
     }, "AngaraThread");
 
     m_mutex_type = StructType::create(m_ctx, {
