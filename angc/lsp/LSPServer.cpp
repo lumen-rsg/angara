@@ -445,7 +445,11 @@ void LSPServer::analyzeDocument(const std::string& uri) {
             result.diagnostics = errorHandler.diagnostics;
 
             // Build hover/definition/completion cache from type checker results
-            buildSymbolCache(result, typeChecker, doc.path);
+            // Cast to const shared_ptr for storage
+            std::vector<std::shared_ptr<const Stmt>> constStmts;
+            for (auto& s : statements) constStmts.push_back(s);
+            buildSymbolCache(result, typeChecker, constStmts, doc.path);
+            result.topLevelStmts = std::move(constStmts);
         }
     }
 
@@ -485,7 +489,9 @@ void LSPServer::publishDiagnostics(const std::string& uri) {
 
 // ── Symbol Cache & Word Extraction ──────────────────────────────
 
-void LSPServer::buildSymbolCache(AnalysisResult& result, TypeChecker& typeChecker, const std::string& docPath) {
+void LSPServer::buildSymbolCache(AnalysisResult& result, TypeChecker& typeChecker,
+                                 const std::vector<std::shared_ptr<const Stmt>>& stmts,
+                                 const std::string& docPath) {
     const auto& exprTypes = typeChecker.getExpressionTypes();
     const auto& varResolutions = typeChecker.getVariableResolutions();
     const auto& symbols = typeChecker.getSymbolTable();
@@ -520,6 +526,26 @@ void LSPServer::buildSymbolCache(AnalysisResult& result, TypeChecker& typeChecke
             ref.endCol = ref.startCol + (int)get->name.lexeme.size();
             result.symbols.push_back(std::move(ref));
         }
+        // Collect call sites for signature help
+        else if (auto* call = dynamic_cast<const CallExpr*>(expr)) {
+            // Look up the callee's type (which is the function type)
+            auto calleeIt = exprTypes.find(call->callee.get());
+            if (calleeIt != exprTypes.end() && calleeIt->second &&
+                calleeIt->second->kind == TypeKind::FUNCTION) {
+                auto funcType = std::dynamic_pointer_cast<FunctionType>(calleeIt->second);
+                CallSiteInfo csi;
+                csi.signature = funcType->toString();
+                csi.openParenLine = call->paren.line - 1;
+                csi.openParenCol = call->paren.column - 1;
+                // Try to get callee name
+                if (auto* varCallee = dynamic_cast<const VarExpr*>(call->callee.get())) {
+                    csi.calleeName = varCallee->name.lexeme;
+                } else if (auto* getCallee = dynamic_cast<const GetExpr*>(call->callee.get())) {
+                    csi.calleeName = getCallee->name.lexeme;
+                }
+                result.callSites.push_back(std::move(csi));
+            }
+        }
     }
 
     // Build name-indexed symbol table and declaration-position entries
@@ -553,6 +579,65 @@ void LSPServer::buildSymbolCache(AnalysisResult& result, TypeChecker& typeChecke
                 item.kind = 6; // Variable
             }
             result.completions.push_back(std::move(item));
+        }
+    }
+
+    // Build document symbols from top-level statements
+    for (auto& stmt : stmts) {
+        if (auto* fn = dynamic_cast<const FuncStmt*>(stmt.get())) {
+            DocumentSymbolInfo dsi;
+            dsi.name = fn->name.lexeme;
+            dsi.kind = 12; // Function
+            dsi.startLine = fn->name.line - 1;
+            dsi.startCol = fn->name.column - 1;
+            dsi.endLine = fn->name.line - 1;
+            dsi.endCol = dsi.startCol + (int)fn->name.lexeme.size();
+            result.documentSymbols.push_back(std::move(dsi));
+        } else if (auto* cls = dynamic_cast<const ClassStmt*>(stmt.get())) {
+            DocumentSymbolInfo dsi;
+            dsi.name = cls->name.lexeme;
+            dsi.kind = 5; // Class
+            dsi.startLine = cls->name.line - 1;
+            dsi.startCol = cls->name.column - 1;
+            dsi.endLine = cls->name.line - 1;
+            dsi.endCol = dsi.startCol + (int)cls->name.lexeme.size();
+            result.documentSymbols.push_back(std::move(dsi));
+        } else if (auto* data = dynamic_cast<const DataStmt*>(stmt.get())) {
+            DocumentSymbolInfo dsi;
+            dsi.name = data->name.lexeme;
+            dsi.kind = 23; // Struct
+            dsi.startLine = data->name.line - 1;
+            dsi.startCol = data->name.column - 1;
+            dsi.endLine = data->name.line - 1;
+            dsi.endCol = dsi.startCol + (int)data->name.lexeme.size();
+            result.documentSymbols.push_back(std::move(dsi));
+        } else if (auto* en = dynamic_cast<const EnumStmt*>(stmt.get())) {
+            DocumentSymbolInfo dsi;
+            dsi.name = en->name.lexeme;
+            dsi.kind = 10; // Enum
+            dsi.startLine = en->name.line - 1;
+            dsi.startCol = en->name.column - 1;
+            dsi.endLine = en->name.line - 1;
+            dsi.endCol = dsi.startCol + (int)en->name.lexeme.size();
+            result.documentSymbols.push_back(std::move(dsi));
+        } else if (auto* tr = dynamic_cast<const TraitStmt*>(stmt.get())) {
+            DocumentSymbolInfo dsi;
+            dsi.name = tr->name.lexeme;
+            dsi.kind = 22; // Interface
+            dsi.startLine = tr->name.line - 1;
+            dsi.startCol = tr->name.column - 1;
+            dsi.endLine = tr->name.line - 1;
+            dsi.endCol = dsi.startCol + (int)tr->name.lexeme.size();
+            result.documentSymbols.push_back(std::move(dsi));
+        } else if (auto* ct = dynamic_cast<const ContractStmt*>(stmt.get())) {
+            DocumentSymbolInfo dsi;
+            dsi.name = ct->name.lexeme;
+            dsi.kind = 22; // Interface
+            dsi.startLine = ct->name.line - 1;
+            dsi.startCol = ct->name.column - 1;
+            dsi.endLine = ct->name.line - 1;
+            dsi.endCol = dsi.startCol + (int)ct->name.lexeme.size();
+            result.documentSymbols.push_back(std::move(dsi));
         }
     }
 }
@@ -620,6 +705,14 @@ JSON LSPServer::handleInitialize(const JSON& params) {
 
     // Go-to-definition
     caps["definitionProvider"] = true;
+
+    // Signature help
+    JSON sigCaps = JSON_OBJ{};
+    sigCaps["triggerCharacters"] = JSON_ARR{"(", ","};
+    caps["signatureHelpProvider"] = sigCaps;
+
+    // Document symbols
+    caps["documentSymbolProvider"] = true;
 
     result["capabilities"] = caps;
     result["serverInfo"] = JSON_OBJ{{"name", "angc-lsp"}, {"version", "3.1.0"}};
@@ -806,6 +899,97 @@ JSON LSPServer::handleDefinition(const JSON& params) {
     return JSON(nullptr);
 }
 
+JSON LSPServer::handleSignatureHelp(const JSON& params) {
+    std::string uri = params["textDocument"]["uri"].as_str();
+    int line = params["position"]["line"].as_int();
+    int character = params["position"]["character"].as_int();
+
+    auto analysisIt = m_analysis.find(uri);
+    if (analysisIt == m_analysis.end()) return JSON(nullptr);
+    auto& analysis = analysisIt->second;
+
+    // Find the innermost call site enclosing the cursor
+    const CallSiteInfo* best = nullptr;
+    for (auto& cs : analysis.callSites) {
+        // The cursor must be after the '(' on the same line or on subsequent lines
+        if (cs.openParenLine < line ||
+            (cs.openParenLine == line && cs.openParenCol < character)) {
+            if (!best || (cs.openParenLine > best->openParenLine ||
+                (cs.openParenLine == best->openParenLine && cs.openParenCol > best->openParenCol))) {
+                best = &cs;
+            }
+        }
+    }
+
+    if (!best) return JSON(nullptr);
+
+    // Count commas between '(' and cursor to determine active parameter
+    auto docIt = m_documents.find(uri);
+    int activeParam = 0;
+    if (docIt != m_documents.end()) {
+        const std::string& src = docIt->second.source;
+        int currentLine = 0;
+        size_t lineStart = 0;
+        for (size_t i = 0; i < src.size(); ++i) {
+            if (currentLine == best->openParenLine) { lineStart = i; break; }
+            if (src[i] == '\n') currentLine++;
+        }
+        // Find the '(' position in source
+        size_t parenPos = lineStart + best->openParenCol;
+        // Count commas between '(' and cursor position
+        size_t cursorPos = 0;
+        int cl = 0;
+        for (size_t i = 0; i < src.size(); ++i) {
+            if (cl == line && (int)(i - lineStart) == character) { cursorPos = i; break; }
+            if (src[i] == '\n') cl++;
+        }
+        if (cursorPos == 0 && cl <= line) cursorPos = src.size();
+        int depth = 1;
+        for (size_t i = parenPos + 1; i < cursorPos && i < src.size(); ++i) {
+            if (src[i] == '(') depth++;
+            else if (src[i] == ')') { depth--; if (depth == 0) break; }
+            else if (src[i] == ',' && depth == 1) activeParam++;
+        }
+    }
+
+    JSON sigInfo = JSON_OBJ{};
+    JSON_ARR signatures;
+    JSON sig = JSON_OBJ{};
+    sig["label"] = best->calleeName.empty() ? best->signature : best->calleeName + best->signature.substr(8); // strip "function" prefix
+    sig["activeParameter"] = activeParam;
+    signatures.push_back(sig);
+    sigInfo["signatures"] = signatures;
+    return sigInfo;
+}
+
+JSON LSPServer::handleDocumentSymbol(const JSON& params) {
+    std::string uri = params["textDocument"]["uri"].as_str();
+
+    auto analysisIt = m_analysis.find(uri);
+    if (analysisIt == m_analysis.end()) return JSON_ARR{};
+
+    JSON_ARR result;
+    for (auto& ds : analysisIt->second.documentSymbols) {
+        JSON sym = JSON_OBJ{};
+        sym["name"] = ds.name;
+        sym["kind"] = ds.kind;
+        if (!ds.detail.empty()) sym["detail"] = ds.detail;
+        JSON range = JSON_OBJ{};
+        JSON start = JSON_OBJ{};
+        start["line"] = ds.startLine;
+        start["character"] = ds.startCol;
+        JSON end = JSON_OBJ{};
+        end["line"] = ds.endLine;
+        end["character"] = ds.endCol;
+        range["start"] = start;
+        range["end"] = end;
+        sym["range"] = range;
+        sym["selectionRange"] = range;
+        result.push_back(sym);
+    }
+    return result;
+}
+
 JSON LSPServer::handleShutdown() {
     m_shutdown = true;
     return JSON(nullptr);
@@ -851,6 +1035,10 @@ int LSPServer::run() {
             sendResponse(id, handleHover(msg["params"]));
         } else if (method == "textDocument/definition") {
             sendResponse(id, handleDefinition(msg["params"]));
+        } else if (method == "textDocument/signatureHelp") {
+            sendResponse(id, handleSignatureHelp(msg["params"]));
+        } else if (method == "textDocument/documentSymbol") {
+            sendResponse(id, handleDocumentSymbol(msg["params"]));
         } else if (method == "shutdown") {
             sendResponse(id, handleShutdown());
         } else if (method == "exit") {

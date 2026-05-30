@@ -127,6 +127,23 @@ namespace angara {
         int declLine = 0, declCol = 0; // 0-based LSP position
     };
 
+    /// Tracks a call expression for signature help.
+    struct CallSiteInfo {
+        std::string calleeName;
+        std::string signature;   // e.g. "function(i64, string) -> bool"
+        int openParenLine = 0;   // 0-based line of the '(' token
+        int openParenCol = 0;    // 0-based column of the '(' token
+    };
+
+    /// A top-level document symbol (for outline/breadcrumbs).
+    struct DocumentSymbolInfo {
+        std::string name;
+        int kind;                // LSP SymbolKind: 12=Function, 5=Class, 23=Struct, 10=Enum, 22=Interface
+        int startLine = 0, startCol = 0;
+        int endLine = 0, endCol = 0;
+        std::string detail;      // type string or similar
+    };
+
     // ── LSP Server ────────────────────────────────────────────
 
     class LSPServer {
@@ -146,6 +163,9 @@ namespace angara {
             std::vector<LSPCompletionItem> completions;
             std::vector<SymbolRef> symbols;
             std::map<std::string, SymbolTableEntry> symbolTable;
+            std::vector<CallSiteInfo> callSites;
+            std::vector<DocumentSymbolInfo> documentSymbols;
+            std::vector<std::shared_ptr<const class Stmt>> topLevelStmts;
         };
 
         // JSON-RPC transport
@@ -164,6 +184,8 @@ namespace angara {
         JSON handleCompletion(const JSON& params);
         JSON handleHover(const JSON& params);
         JSON handleDefinition(const JSON& params);
+        JSON handleSignatureHelp(const JSON& params);
+        JSON handleDocumentSymbol(const JSON& params);
         JSON handleShutdown();
         void handleExit();
 
@@ -172,7 +194,9 @@ namespace angara {
         void publishDiagnostics(const std::string& uri);
         std::string uriToPath(const std::string& uri);
         std::string pathToUri(const std::string& path);
-        void buildSymbolCache(AnalysisResult& result, class TypeChecker& typeChecker, const std::string& docPath);
+        void buildSymbolCache(AnalysisResult& result, class TypeChecker& typeChecker,
+                              const std::vector<std::shared_ptr<const class Stmt>>& stmts,
+                              const std::string& docPath);
         static std::string extractWordAt(const std::string& source, int line, int col);
 
         // State
