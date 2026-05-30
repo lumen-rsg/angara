@@ -66,6 +66,10 @@ namespace angara {
         void set_dump_ir(bool val) { m_dump_ir = val; }
         bool is_dump_ir() const { return m_dump_ir; }
 
+        /// Enables emitting LLVM IR to stdout instead of compiling.
+        void set_emit_llvm(bool val) { m_emit_llvm = val; }
+        bool is_emit_llvm() const { return m_emit_llvm; }
+
         /// Enables or disables debug mode (O0 optimization + DWARF debug info).
         void set_debug(bool val) { m_debug = val; }
         bool is_debug() const { return m_debug; }
@@ -152,6 +156,7 @@ namespace angara {
         bool m_check_only = false;
         bool m_quiet = false;
         bool m_dump_ir = false;
+        bool m_emit_llvm = false;
         bool m_debug = false;
         bool m_werror = false;
         bool m_wall = false;

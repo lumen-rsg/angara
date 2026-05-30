@@ -64,7 +64,8 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
             return callRtByName("__ang_closure_new", {
                 wrapper_fn,
                 llvm::ConstantInt::get(i32_ty, arity),
-                llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0)
+                llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0),
+                llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0))
             });
         }
         return loadVar(p->name.lexeme);
@@ -521,6 +522,14 @@ llvm::Value* LLVMBackend::cgUpdate(const UpdateExpr& e) {
 
 llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
     if (!expr.callee) return makeNil();
+
+    // Handle immediate lambda invocation: (func(...) -> T { ... })(args)
+    if (dynamic_cast<const LambdaExpr*>(expr.callee.get())) {
+        auto* callee = cg(expr.callee);
+        std::vector<llvm::Value*> llvmArgs;
+        for (auto& a : expr.arguments) llvmArgs.push_back(cg(a));
+        return cgClosureCall(callee, llvmArgs);
+    }
 
     // Handle super.method(args...) calls
     if (auto* get = dynamic_cast<const GetExpr*>(expr.callee.get())) {
@@ -1265,26 +1274,47 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
 
     auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
     auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
-    auto* fn_type = llvm::FunctionType::get(objType, {i32_ty, ptr_ty}, false);
+    auto* i64_ty = llvm::Type::getInt64Ty(*ctx);
+    auto* fn_type = llvm::FunctionType::get(objType, {i32_ty, ptr_ty, ptr_ty}, false);
     auto* lambda_fn = llvm::Function::Create(fn_type, llvm::Function::PrivateLinkage,
                                               lambda_fn_name, mod.get());
 
     auto* saved_insert_block = builder->GetInsertBlock();
 
-    std::map<std::string, llvm::GlobalVariable*> capture_globals;
+    // Collect captured variable names and their current allocas
+    std::vector<std::pair<std::string, llvm::AllocaInst*>> captures;
     for (const auto& [name, alloca] : namedVals) {
-        std::string gname = "__ang_cap_" + lambda_fn_name + "_" + name;
-        auto* global = mod->getGlobalVariable(gname);
-        if (!global) {
-            global = new llvm::GlobalVariable(
-                *mod, objType, false, llvm::GlobalValue::PrivateLinkage,
-                llvm::ConstantAggregateZero::get(objType), gname);
+        captures.emplace_back(name, alloca);
+    }
+    int capture_count = (int)captures.size();
+
+    // At the call site: malloc a per-instance array and store captured values into it
+    auto* capture_arr_type = llvm::ArrayType::get(objType, std::max(capture_count, 1));
+    llvm::Value* env_ptr;
+    if (capture_count > 0) {
+        auto* capture_size = llvm::ConstantInt::get(i64_ty,
+            mod->getDataLayout().getTypeAllocSize(capture_arr_type));
+        auto* malloc_fn = mod->getFunction("malloc");
+        if (!malloc_fn) {
+            auto* malloc_type = llvm::FunctionType::get(ptr_ty, {i64_ty}, false);
+            malloc_fn = llvm::Function::Create(malloc_type, llvm::Function::ExternalLinkage,
+                                               "malloc", mod.get());
         }
-        auto* val = builder->CreateLoad(objType, alloca, name);
-        builder->CreateStore(val, global);
-        capture_globals[name] = global;
+        auto* env_mem = builder->CreateCall(malloc_fn, {capture_size});
+        env_ptr = builder->CreateBitCast(env_mem, ptr_ty);
+
+        for (int i = 0; i < capture_count; i++) {
+            auto& [name, alloca] = captures[i];
+            auto* elem_ptr = builder->CreateGEP(capture_arr_type, env_ptr,
+                {llvm::ConstantInt::get(i64_ty, 0), llvm::ConstantInt::get(i64_ty, i)});
+            auto* val = builder->CreateLoad(objType, alloca, name);
+            builder->CreateStore(val, elem_ptr);
+        }
+    } else {
+        env_ptr = llvm::ConstantPointerNull::get(ptr_ty);
     }
 
+    // Generate the lambda function body
     auto* entry = llvm::BasicBlock::Create(*ctx, "entry", lambda_fn);
     builder->SetInsertPoint(entry);
 
@@ -1297,10 +1327,14 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     namedVals.clear();
     namedTypes.clear();
 
-    for (const auto& [name, global] : capture_globals) {
-        std::string sname = sanitize(name);
+    // Load captured variables from the env pointer (3rd arg)
+    auto* env_arg = lambda_fn->arg_begin() + 2;
+    for (int i = 0; i < capture_count; i++) {
+        std::string sname = sanitize(captures[i].first);
         auto* alloca = allocLocal(lambda_fn, sname);
-        auto* val = builder->CreateLoad(objType, global, sname);
+        auto* elem_ptr = builder->CreateGEP(capture_arr_type, env_arg,
+            {llvm::ConstantInt::get(i64_ty, 0), llvm::ConstantInt::get(i64_ty, i)});
+        auto* val = builder->CreateLoad(objType, elem_ptr, sname);
         builder->CreateStore(val, alloca);
         namedVals[sname] = alloca;
     }
@@ -1342,7 +1376,8 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     return callRtByName("__ang_closure_new", {
         lambda_fn,
         llvm::ConstantInt::get(i32_ty, arity),
-        llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0)
+        llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0),
+        env_ptr
     });
 }
 

@@ -40,7 +40,8 @@ namespace angara {
                     const std::string& target_triple = "",
                     bool freestanding = false,
                     bool dump_ir = false,
-                    bool debug = false);
+                    bool debug = false,
+                    bool emit_llvm = false);
 
         /// Releases LLVM objects (cleanup at process exit).
         ~LLVMBackend();
@@ -243,6 +244,7 @@ namespace angara {
 
         bool m_freestanding = false;
         bool m_dump_ir = false;
+        bool m_emit_llvm = false;
         bool m_debug = false;
 
         // Debug info (DWARF) generation

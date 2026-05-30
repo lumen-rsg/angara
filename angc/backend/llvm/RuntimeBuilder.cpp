@@ -88,7 +88,8 @@ void RuntimeBuilder::generateTypes() {
         m_obj_header_type,
         fn_ptr_type,
         Type::getInt32Ty(m_ctx),
-        Type::getInt1Ty(m_ctx)
+        Type::getInt1Ty(m_ctx),
+        PointerType::get(m_ctx, 0)   // env: pointer to captured variables array
     }, "AngaraClosure");
 
     m_bound_method_type = StructType::create(m_ctx, {

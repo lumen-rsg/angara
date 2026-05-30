@@ -17,8 +17,8 @@ namespace angara {
 
 LLVMBackend::~LLVMBackend() = default;
 
-LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir, bool debug)
-    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_dump_ir(dump_ir), m_debug(debug) {
+LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir, bool debug, bool emit_llvm)
+    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm) {
     ctx = std::make_unique<llvm::LLVMContext>();
     mod = std::make_unique<llvm::Module>("angara_module", *ctx);
     builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
@@ -94,11 +94,8 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
         if (!ec) { mod->print(ir,nullptr); ir.close(); }
         irPath = base+".ll";
     }
-    if (m_dump_ir) {
-        std::error_code ec;
-        llvm::raw_fd_ostream ir(base+".ll", ec, llvm::sys::fs::OF_Text);
-        if (!ec) { mod->print(ir,nullptr); ir.close(); }
-        irPath = base+".ll";
+    if (m_emit_llvm) {
+        mod->print(llvm::outs(), nullptr);
     }
     std::string ve; llvm::raw_string_ostream es(ve);
     if (llvm::verifyModule(*mod, &es)) { std::cerr<<"Verify: "<<ve<<"\n"; return false; }
@@ -697,7 +694,8 @@ llvm::Value* LLVMBackend::marshalCToAngara(llvm::Value* c_val, const std::shared
             closure = builder->CreateCall(closure_new_fn, {
                 wrapper,
                 llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), argc),
-                llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 1) // native = true
+                llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 1), // native = true
+                llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)) // no env
             });
         } else {
             closure = makeNil();

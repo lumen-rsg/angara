@@ -25,7 +25,7 @@ void RuntimeBuilder::generateClosureOps() {
 
     {
         auto* fn_ptr_type = PointerType::get(m_ctx, 0);
-        auto* fn_ty = FunctionType::get(obj_ty, {fn_ptr_type, i32_ty, i1_ty}, false);
+        auto* fn_ty = FunctionType::get(obj_ty, {fn_ptr_type, i32_ty, i1_ty, i8_ptr}, false);
         auto* fn = createRuntimeFunc("__ang_closure_new", fn_ty);
         m_fn_closure_new = FunctionCallee(fn);
 
@@ -34,6 +34,7 @@ void RuntimeBuilder::generateClosureOps() {
         auto* fn_arg = fn->arg_begin();
         auto* arity_arg = fn->arg_begin() + 1;
         auto* native_arg = fn->arg_begin() + 2;
+        auto* env_arg = fn->arg_begin() + 3;
 
         auto* closure_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_closure_type));
@@ -48,6 +49,7 @@ void RuntimeBuilder::generateClosureOps() {
         b.CreateStore(fn_arg, b.CreateStructGEP(m_closure_type, closure_ptr, 1));
         b.CreateStore(arity_arg, b.CreateStructGEP(m_closure_type, closure_ptr, 2));
         b.CreateStore(native_arg, b.CreateStructGEP(m_closure_type, closure_ptr, 3));
+        b.CreateStore(env_arg, b.CreateStructGEP(m_closure_type, closure_ptr, 4));
 
         b.CreateRet(pack_obj(b, closure_ptr));
     }
@@ -81,8 +83,11 @@ void RuntimeBuilder::generateClosureOps() {
         auto* fn_field = bc.CreateLoad(
             PointerType::get(m_ctx, 0),
             bc.CreateStructGEP(m_closure_type, closure_ptr, 1), "fn");
-        auto* closure_fn_ty = FunctionType::get(obj_ty, {i32_ty, PointerType::get(m_ctx, 0)}, false);
-        auto* result = bc.CreateCall(closure_fn_ty, fn_field, {argc, args});
+        auto* env_field = bc.CreateLoad(
+            PointerType::get(m_ctx, 0),
+            bc.CreateStructGEP(m_closure_type, closure_ptr, 4), "env");
+        auto* closure_fn_ty = FunctionType::get(obj_ty, {i32_ty, PointerType::get(m_ctx, 0), PointerType::get(m_ctx, 0)}, false);
+        auto* result = bc.CreateCall(closure_fn_ty, fn_field, {argc, args, env_field});
         bc.CreateRet(result);
 
         IRBuilder<> bbm(is_bound_bb);
