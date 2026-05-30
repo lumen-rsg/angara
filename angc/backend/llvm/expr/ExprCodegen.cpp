@@ -1165,8 +1165,75 @@ llvm::Value* LLVMBackend::cgTernary(const TernaryExpr& e) {
 }
 
 llvm::Value* LLVMBackend::cgIs(const IsExpr& e) {
-    auto* tag = getTag(cg(e.object));
-    return makeBool(builder->CreateICmpEQ(tag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_I64)));
+    // Resolve the target type name from the AST
+    std::string type_name;
+    if (auto* simple = dynamic_cast<const SimpleType*>(e.type.get())) {
+        type_name = simple->name.lexeme;
+    }
+
+    auto* obj = cg(e.object);
+    auto* tag = getTag(obj);
+    auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
+
+    // Primitive types: check the top-level tag directly
+    if (type_name == "nil") {
+        return makeBool(builder->CreateICmpEQ(tag, llvm::ConstantInt::get(i32_ty, TAG_NIL)));
+    }
+    if (type_name == "bool") {
+        return makeBool(builder->CreateICmpEQ(tag, llvm::ConstantInt::get(i32_ty, TAG_BOOL)));
+    }
+    if (type_name == "i64" || type_name == "i32" || type_name == "i16" || type_name == "i8" ||
+        type_name == "u64" || type_name == "u32" || type_name == "u16" || type_name == "u8") {
+        return makeBool(builder->CreateICmpEQ(tag, llvm::ConstantInt::get(i32_ty, TAG_I64)));
+    }
+    if (type_name == "f64" || type_name == "f32") {
+        return makeBool(builder->CreateICmpEQ(tag, llvm::ConstantInt::get(i32_ty, TAG_F64)));
+    }
+
+    // Object types: must be TAG_OBJ, then check the ObjHeader sub-type.
+    // We need conditional branches to avoid dereferencing non-pointer payloads.
+    auto* is_obj = builder->CreateICmpEQ(tag, llvm::ConstantInt::get(i32_ty, TAG_OBJ));
+
+    // Helper: check if an object type matches a specific OBJ_* subtype.
+    // Generates: if (is_obj) { check subtype } else { false }
+    auto checkObjSubtype = [&](int expected_subtype) -> llvm::Value* {
+        auto* fn = builder->GetInsertBlock()->getParent();
+        auto* check_bb = llvm::BasicBlock::Create(*ctx, "is_check", fn);
+        auto* merge_bb = llvm::BasicBlock::Create(*ctx, "is_merge", fn);
+        auto* cont_bb = llvm::BasicBlock::Create(*ctx, "is_cont", fn);
+
+        builder->CreateCondBr(is_obj, check_bb, cont_bb);
+
+        builder->SetInsertPoint(check_bb);
+        auto* payload = builder->CreateExtractValue(obj, {1});
+        auto* ptr = builder->CreateIntToPtr(payload, llvm::PointerType::get(*ctx, 0));
+        auto* obj_type = builder->CreateLoad(i32_ty, ptr, "obj_subtype");
+        auto* subtype_match = builder->CreateICmpEQ(obj_type,
+            llvm::ConstantInt::get(i32_ty, expected_subtype));
+        builder->CreateBr(merge_bb);
+
+        builder->SetInsertPoint(cont_bb);
+        builder->CreateBr(merge_bb);
+
+        builder->SetInsertPoint(merge_bb);
+        auto* phi = builder->CreatePHI(llvm::Type::getInt1Ty(*ctx), 2, "is_result");
+        phi->addIncoming(subtype_match, check_bb);
+        phi->addIncoming(llvm::ConstantInt::getFalse(*ctx), cont_bb);
+        return makeBool(phi);
+    };
+
+    if (type_name == "string") {
+        return checkObjSubtype(OBJ_STRING);
+    }
+    if (type_name == "list") {
+        return checkObjSubtype(OBJ_LIST);
+    }
+    if (type_name == "record") {
+        return checkObjSubtype(OBJ_RECORD);
+    }
+
+    // For unknown/class types, just check TAG_OBJ
+    return makeBool(is_obj);
 }
 
 llvm::Value* LLVMBackend::cgCast(const CastExpr& e) {
