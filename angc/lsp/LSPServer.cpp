@@ -363,6 +363,23 @@ namespace {
             addDiagnostic(2, start, end, message, code);
         }
 
+        void note(const Token &token, const std::string &message) override {
+            ErrorHandler::note(token, message);
+            // Attach as related information to the last diagnostic
+            if (!diagnostics.empty()) {
+                auto& last = diagnostics.back();
+                LSPDiagnosticRelated rel;
+                rel.message = message;
+                std::string file = token.file ? *token.file : "";
+                rel.uri = "file://" + file;
+                rel.range.startLine = token.line - 1;
+                rel.range.startChar = token.column - 1;
+                rel.range.endLine = token.line - 1;
+                rel.range.endChar = token.column - 1 + (int)token.lexeme.size();
+                last.related.push_back(std::move(rel));
+            }
+        }
+
     private:
         void addDiagnostic(int severity, const Token &token, const std::string &message, const std::string &code) {
             LSPDiagnostic d;
@@ -478,6 +495,29 @@ void LSPServer::publishDiagnostics(const std::string& uri) {
         range["start"] = start;
         range["end"] = end;
         diag["range"] = range;
+        // Attach related information (e.g. "declared here" notes)
+        if (!d.related.empty()) {
+            JSON_ARR relatedArr;
+            for (auto& r : d.related) {
+                JSON rel = JSON_OBJ{};
+                rel["message"] = r.message;
+                JSON loc = JSON_OBJ{};
+                loc["uri"] = r.uri;
+                JSON relRange = JSON_OBJ{};
+                JSON relStart = JSON_OBJ{};
+                relStart["line"] = r.range.startLine;
+                relStart["character"] = r.range.startChar;
+                JSON relEnd = JSON_OBJ{};
+                relEnd["line"] = r.range.endLine;
+                relEnd["character"] = r.range.endChar;
+                relRange["start"] = relStart;
+                relRange["end"] = relEnd;
+                loc["range"] = relRange;
+                rel["location"] = loc;
+                relatedArr.push_back(rel);
+            }
+            diag["relatedInformation"] = relatedArr;
+        }
         diagArr.push_back(diag);
     }
 

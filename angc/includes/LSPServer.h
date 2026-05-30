@@ -92,12 +92,19 @@ namespace angara {
         int endLine = 0, endChar = 0;
     };
 
+    struct LSPDiagnosticRelated {
+        std::string message;
+        std::string uri;
+        LSPRange range;
+    };
+
     struct LSPDiagnostic {
         int severity = 1; // 1=Error, 2=Warning, 3=Info, 4=Hint
         std::string code;
         std::string message;
         LSPRange range;
         std::string source = "angara";
+        std::vector<LSPDiagnosticRelated> related;
     };
 
     struct LSPCompletionItem {
