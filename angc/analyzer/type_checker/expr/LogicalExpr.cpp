@@ -15,13 +15,24 @@ namespace angara {
 
             if (lhs_type->kind == TypeKind::OPTIONAL) {
                 auto unwrapped_lhs_type = std::dynamic_pointer_cast<OptionalType>(lhs_type)->wrapped_type;
-                if (!check_type_compatibility(unwrapped_lhs_type, rhs_type)) {
+                // If RHS is also optional, unwrap it for comparison (chained ?? case)
+                auto effective_rhs = rhs_type;
+                bool rhs_is_optional = rhs_type->kind == TypeKind::OPTIONAL;
+                if (rhs_is_optional) {
+                    effective_rhs = std::dynamic_pointer_cast<OptionalType>(rhs_type)->wrapped_type;
+                }
+                if (!check_type_compatibility(unwrapped_lhs_type, effective_rhs)) {
                     error(expr.op, "Type mismatch in '??' operator. The default value has type '" + rhs_type->toString() +
                                    "', but the unwrapped optional expects type '" + unwrapped_lhs_type->toString() + "'.", "E362");
                     pushAndSave(&expr, m_type_error);
                     return {};
                 }
-                pushAndSave(&expr, unwrapped_lhs_type);
+                // If RHS is also optional, result is still optional; otherwise unwrapped
+                if (rhs_is_optional) {
+                    pushAndSave(&expr, lhs_type);
+                } else {
+                    pushAndSave(&expr, unwrapped_lhs_type);
+                }
                 return {};
             }
 

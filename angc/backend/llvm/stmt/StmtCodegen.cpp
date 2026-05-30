@@ -118,7 +118,8 @@ void LLVMBackend::cgFor(const ForStmt& s) {
     auto* lp = llvm::BasicBlock::Create(*ctx,"fc",fn);
     auto* bd = llvm::BasicBlock::Create(*ctx,"fb",fn);
     auto* en = llvm::BasicBlock::Create(*ctx,"fe",fn);
-    auto* sv2 = loopExit; auto* svc = loopContinue; loopExit = en; loopContinue = lp; loopDepth++;
+    auto* inc = llvm::BasicBlock::Create(*ctx,"finc",fn);
+    auto* sv2 = loopExit; auto* svc = loopContinue; loopExit = en; loopContinue = inc; loopDepth++;
     builder->CreateBr(lp);
     builder->SetInsertPoint(lp);
     if (s.condition) builder->CreateCondBr(isTruthy(cg(s.condition)), bd, en);
@@ -126,9 +127,11 @@ void LLVMBackend::cgFor(const ForStmt& s) {
     builder->SetInsertPoint(bd);
     cgStmt(s.body);
     if (!builder->GetInsertBlock()->getTerminator()) {
-        if (s.increment) cg(s.increment);
-        builder->CreateBr(lp);
+        builder->CreateBr(inc);
     }
+    builder->SetInsertPoint(inc);
+    if (s.increment) cg(s.increment);
+    builder->CreateBr(lp);
     builder->SetInsertPoint(en);
     loopExit = sv2; loopContinue = svc; loopDepth--; namedVals = sv; namedTypes = stv;
 }

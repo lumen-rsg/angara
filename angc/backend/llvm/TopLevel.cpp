@@ -164,7 +164,9 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
         if (auto method = std::dynamic_pointer_cast<const MethodMember>(member)) {
             const auto& method_stmt = method->declaration;
             std::string method_name = mangleMethod(class_name, method_stmt->name.lexeme);
+            // Store both unqualified and class-qualified keys
             methodLookup[method_stmt->name.lexeme] = method_name;
+            methodLookup[class_name + "." + method_stmt->name.lexeme] = method_name;
 
             std::vector<llvm::Type*> param_types(method_stmt->params.size() + 1, objType);
             auto* fn_type = llvm::FunctionType::get(objType, param_types, false);
@@ -182,6 +184,10 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
             auto* this_alloca = allocLocal(fn, "this");
             builder->CreateStore(&*fn->arg_begin(), this_alloca);
             namedVals["this"] = this_alloca;
+            auto sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(class_name);
+            if (sym && sym->type->kind == TypeKind::CLASS) {
+                namedTypes["this"] = std::make_shared<InstanceType>(std::dynamic_pointer_cast<ClassType>(sym->type));
+            }
 
             size_t pi = 0;
             for (auto it = fn->arg_begin() + 1; it != fn->arg_end() && pi < method_stmt->params.size(); ++it, ++pi) {
