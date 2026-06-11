@@ -183,13 +183,37 @@ void MarkSweepGC::generateFunctions() {
         auto* size_arg = fn->arg_begin();
         auto* type_arg = fn->arg_begin() + 1;
 
-        // Safepoint check: if GC is running, spin-wait
+        // Safepoint check: if GC is running, set waiting and spin-wait
         auto* running = b.CreateLoad(i1_ty, m_g_gc_running, "running");
         b.CreateCondBr(running, safepoint_bb, alloc_bb);
 
         IRBuilder<> bsp(safepoint_bb);
-        auto* still_running = bsp.CreateLoad(i1_ty, m_g_gc_running, "still_running");
-        bsp.CreateCondBr(still_running, safepoint_bb, alloc_bb);
+        auto* tls_ptr = bsp.CreateLoad(i8_ptr, m_g_gc_thread_state_tls, "tls");
+        auto* tls_ok = bsp.CreateICmpNE(tls_ptr, ConstantPointerNull::get(i8_ptr));
+        auto* set_wait_bb = BasicBlock::Create(m_ctx, "set_wait", fn);
+        auto* spin_bb = BasicBlock::Create(m_ctx, "spin", fn);
+        bsp.CreateCondBr(tls_ok, set_wait_bb, spin_bb);
+
+        IRBuilder<> bsw(set_wait_bb);
+        bsw.CreateStore(ConstantInt::getTrue(m_ctx),
+            bsw.CreateStructGEP(m_gc_thread_state_type, tls_ptr, 3));
+        bsw.CreateBr(spin_bb);
+
+        IRBuilder<> bspin(spin_bb);
+        auto* still_running = bspin.CreateLoad(i1_ty, m_g_gc_running, "still_running");
+        auto* clear_wait_bb = BasicBlock::Create(m_ctx, "clear_wait", fn);
+        bspin.CreateCondBr(still_running, spin_bb, clear_wait_bb);
+
+        IRBuilder<> bcw(clear_wait_bb);
+        auto* tls2 = bcw.CreateLoad(i8_ptr, m_g_gc_thread_state_tls, "tls2");
+        auto* tls2_ok = bcw.CreateICmpNE(tls2, ConstantPointerNull::get(i8_ptr));
+        auto* do_clear_bb = BasicBlock::Create(m_ctx, "do_clear", fn);
+        bcw.CreateCondBr(tls2_ok, do_clear_bb, alloc_bb);
+
+        IRBuilder<> bdc(do_clear_bb);
+        bdc.CreateStore(ConstantInt::getFalse(m_ctx),
+            bdc.CreateStructGEP(m_gc_thread_state_type, tls2, 3));
+        bdc.CreateBr(alloc_bb);
 
         // Allocate and initialize
         IRBuilder<> ba(alloc_bb);
@@ -827,7 +851,8 @@ void MarkSweepGC::generateFunctions() {
     }
 
     // ===================================================================
-    // __ang_gc_push_frame(i8* frame_ptr) -> void  [Stage 5 stub]
+    // __ang_gc_push_frame(i8* frame_ptr) -> void
+    // Push a root frame: frame->prev = thread->root_frames, thread->root_frames = frame
     // ===================================================================
     {
         auto* fn_ty = FunctionType::get(void_ty, {i8_ptr}, false);
@@ -835,12 +860,33 @@ void MarkSweepGC::generateFunctions() {
         m_fn_gc_push_frame = FunctionCallee(fn);
 
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* has_tls_bb = BasicBlock::Create(m_ctx, "has_tls", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+
         IRBuilder<> b(entry);
-        b.CreateRetVoid();
+        auto* frame_ptr = fn->arg_begin();
+        auto* tls = b.CreateLoad(i8_ptr, m_g_gc_thread_state_tls, "tls");
+        auto* tls_ok = b.CreateICmpNE(tls, ConstantPointerNull::get(i8_ptr));
+        b.CreateCondBr(tls_ok, has_tls_bb, done_bb);
+
+        IRBuilder<> bht(has_tls_bb);
+        // frame->prev_frame = thread->root_frames
+        auto* root_frames = bht.CreateLoad(i8_ptr,
+            bht.CreateStructGEP(m_gc_thread_state_type, tls, 2), "root_frames");
+        bht.CreateStore(root_frames,
+            bht.CreateStructGEP(m_gc_root_frame_type, frame_ptr, 0));
+        // thread->root_frames = frame_ptr
+        bht.CreateStore(frame_ptr,
+            bht.CreateStructGEP(m_gc_thread_state_type, tls, 2));
+        bht.CreateBr(done_bb);
+
+        IRBuilder<> bd(done_bb);
+        bd.CreateRetVoid();
     }
 
     // ===================================================================
-    // __ang_gc_pop_frame() -> void  [Stage 5 stub]
+    // __ang_gc_pop_frame() -> void
+    // Pop the top root frame: thread->root_frames = top->prev_frame
     // ===================================================================
     {
         auto* fn_ty = FunctionType::get(void_ty, {}, false);
@@ -848,12 +894,35 @@ void MarkSweepGC::generateFunctions() {
         m_fn_gc_pop_frame = FunctionCallee(fn);
 
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* has_tls_bb = BasicBlock::Create(m_ctx, "has_tls", fn);
+        auto* has_frame_bb = BasicBlock::Create(m_ctx, "has_frame", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+
         IRBuilder<> b(entry);
-        b.CreateRetVoid();
+        auto* tls = b.CreateLoad(i8_ptr, m_g_gc_thread_state_tls, "tls");
+        auto* tls_ok = b.CreateICmpNE(tls, ConstantPointerNull::get(i8_ptr));
+        b.CreateCondBr(tls_ok, has_tls_bb, done_bb);
+
+        IRBuilder<> bht(has_tls_bb);
+        auto* top = bht.CreateLoad(i8_ptr,
+            bht.CreateStructGEP(m_gc_thread_state_type, tls, 2), "top");
+        auto* top_ok = bht.CreateICmpNE(top, ConstantPointerNull::get(i8_ptr));
+        bht.CreateCondBr(top_ok, has_frame_bb, done_bb);
+
+        IRBuilder<> bhf(has_frame_bb);
+        auto* prev = bhf.CreateLoad(i8_ptr,
+            bhf.CreateStructGEP(m_gc_root_frame_type, top, 0), "prev");
+        bhf.CreateStore(prev,
+            bhf.CreateStructGEP(m_gc_thread_state_type, tls, 2));
+        bhf.CreateBr(done_bb);
+
+        IRBuilder<> bd(done_bb);
+        bd.CreateRetVoid();
     }
 
     // ===================================================================
-    // __ang_gc_thread_register(i8* state_ptr) -> void  [Stage 5 stub]
+    // __ang_gc_thread_register(i8* state_ptr) -> void
+    // Initialize state, store TLS, prepend to thread list.
     // ===================================================================
     {
         auto* fn_ty = FunctionType::get(void_ty, {i8_ptr}, false);
@@ -862,11 +931,33 @@ void MarkSweepGC::generateFunctions() {
 
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<> b(entry);
+        auto* state = fn->arg_begin();
+
+        // Init state fields
+        b.CreateStore(state,
+            b.CreateStructGEP(m_gc_thread_state_type, state, 0));    // self
+        b.CreateStore(ConstantPointerNull::get(i8_ptr),
+            b.CreateStructGEP(m_gc_thread_state_type, state, 1));    // next_thread = null
+        b.CreateStore(ConstantPointerNull::get(i8_ptr),
+            b.CreateStructGEP(m_gc_thread_state_type, state, 2));    // root_frames = null
+        b.CreateStore(ConstantInt::getFalse(m_ctx),
+            b.CreateStructGEP(m_gc_thread_state_type, state, 3));    // waiting = false
+
+        // Store TLS = state
+        b.CreateStore(state, m_g_gc_thread_state_tls);
+
+        // Prepend to thread list: state->next_thread = @threads, @threads = state
+        auto* old_head = b.CreateLoad(i8_ptr, m_g_gc_threads, "old_threads");
+        b.CreateStore(old_head,
+            b.CreateStructGEP(m_gc_thread_state_type, state, 1));
+        b.CreateStore(state, m_g_gc_threads);
+
         b.CreateRetVoid();
     }
 
     // ===================================================================
-    // __ang_gc_thread_unregister(i8* state_ptr) -> void  [Stage 5 stub]
+    // __ang_gc_thread_unregister(i8* state_ptr) -> void
+    // Unlink from thread list, clear TLS.
     // ===================================================================
     {
         auto* fn_ty = FunctionType::get(void_ty, {i8_ptr}, false);
@@ -874,12 +965,59 @@ void MarkSweepGC::generateFunctions() {
         m_fn_gc_thread_unregister = FunctionCallee(fn);
 
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* unlink_head_bb = BasicBlock::Create(m_ctx, "unlink_head", fn);
+        auto* walk_bb = BasicBlock::Create(m_ctx, "walk", fn);
+        auto* check_next_bb = BasicBlock::Create(m_ctx, "check_next", fn);
+        auto* unlink_mid_bb = BasicBlock::Create(m_ctx, "unlink_mid", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+
         IRBuilder<> b(entry);
-        b.CreateRetVoid();
+        auto* state = fn->arg_begin();
+        auto* head = b.CreateLoad(i8_ptr, m_g_gc_threads, "head");
+
+        // Check if head is the one to remove
+        auto* is_head = b.CreateICmpEQ(head, state);
+        b.CreateCondBr(is_head, unlink_head_bb, walk_bb);
+
+        // Unlink head: @threads = head->next_thread
+        IRBuilder<> buh(unlink_head_bb);
+        auto* next = buh.CreateLoad(i8_ptr,
+            buh.CreateStructGEP(m_gc_thread_state_type, head, 1), "next");
+        buh.CreateStore(next, m_g_gc_threads);
+        buh.CreateBr(done_bb);
+
+        // Walk: iterate linked list looking for state
+        IRBuilder<> bw(walk_bb);
+        auto* curr_phi = bw.CreatePHI(i8_ptr, 2, "curr");
+        curr_phi->addIncoming(head, entry);
+        auto* curr_null = bw.CreateICmpEQ(curr_phi, ConstantPointerNull::get(i8_ptr));
+        bw.CreateCondBr(curr_null, done_bb, check_next_bb);
+
+        // Check next: if curr->next == state, unlink
+        IRBuilder<> bcn(check_next_bb);
+        auto* curr_next = bcn.CreateLoad(i8_ptr,
+            bcn.CreateStructGEP(m_gc_thread_state_type, curr_phi, 1), "curr_next");
+        auto* found = bcn.CreateICmpEQ(curr_next, state);
+        bcn.CreateCondBr(found, unlink_mid_bb, walk_bb);
+        curr_phi->addIncoming(curr_next, check_next_bb);
+
+        // Unlink middle: curr->next = state->next
+        IRBuilder<> bum(unlink_mid_bb);
+        auto* state_next = bum.CreateLoad(i8_ptr,
+            bum.CreateStructGEP(m_gc_thread_state_type, state, 1), "state_next");
+        bum.CreateStore(state_next,
+            bum.CreateStructGEP(m_gc_thread_state_type, curr_phi, 1));
+        bum.CreateBr(done_bb);
+
+        // Done: clear TLS
+        IRBuilder<> bd(done_bb);
+        bd.CreateStore(ConstantPointerNull::get(i8_ptr), m_g_gc_thread_state_tls);
+        bd.CreateRetVoid();
     }
 
     // ===================================================================
-    // __ang_gc_safepoint() -> void  [Stage 5 stub]
+    // __ang_gc_safepoint() -> void
+    // If GC is running, set waiting=true, spin-wait, set waiting=false.
     // ===================================================================
     {
         auto* fn_ty = FunctionType::get(void_ty, {}, false);
@@ -887,8 +1025,46 @@ void MarkSweepGC::generateFunctions() {
         m_fn_gc_safepoint = FunctionCallee(fn);
 
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* set_wait_bb = BasicBlock::Create(m_ctx, "set_wait", fn);
+        auto* do_set_bb = BasicBlock::Create(m_ctx, "do_set", fn);
+        auto* spin_bb = BasicBlock::Create(m_ctx, "spin", fn);
+        auto* resume_bb = BasicBlock::Create(m_ctx, "resume", fn);
+        auto* do_clear_bb = BasicBlock::Create(m_ctx, "do_clear", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+
         IRBuilder<> b(entry);
-        b.CreateRetVoid();
+        auto* running = b.CreateLoad(i1_ty, m_g_gc_running, "running");
+        b.CreateCondBr(running, set_wait_bb, done_bb);
+
+        // Set waiting=true if TLS is available
+        IRBuilder<> bsw(set_wait_bb);
+        auto* tls = bsw.CreateLoad(i8_ptr, m_g_gc_thread_state_tls, "tls");
+        auto* tls_ok = bsw.CreateICmpNE(tls, ConstantPointerNull::get(i8_ptr));
+        bsw.CreateCondBr(tls_ok, do_set_bb, spin_bb);
+
+        IRBuilder<> bds(do_set_bb);
+        bds.CreateStore(ConstantInt::getTrue(m_ctx),
+            bds.CreateStructGEP(m_gc_thread_state_type, tls, 3));
+        bds.CreateBr(spin_bb);
+
+        // Spin until gc_running is false
+        IRBuilder<> bspin(spin_bb);
+        auto* still_running = bspin.CreateLoad(i1_ty, m_g_gc_running, "still_running");
+        bspin.CreateCondBr(still_running, spin_bb, resume_bb);
+
+        // Resume: clear waiting flag
+        IRBuilder<> br(resume_bb);
+        auto* tls2 = br.CreateLoad(i8_ptr, m_g_gc_thread_state_tls, "tls2");
+        auto* tls2_ok = br.CreateICmpNE(tls2, ConstantPointerNull::get(i8_ptr));
+        br.CreateCondBr(tls2_ok, do_clear_bb, done_bb);
+
+        IRBuilder<> bdc(do_clear_bb);
+        bdc.CreateStore(ConstantInt::getFalse(m_ctx),
+            bdc.CreateStructGEP(m_gc_thread_state_type, tls2, 3));
+        bdc.CreateBr(done_bb);
+
+        IRBuilder<> bd(done_bb);
+        bd.CreateRetVoid();
     }
 
     // ===================================================================

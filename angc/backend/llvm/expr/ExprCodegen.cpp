@@ -1463,8 +1463,12 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     auto saved_types = std::move(namedTypes);
     auto* saved_ret_alloca = m_inlined_main_ret_alloca;
     auto* saved_cleanup_bb = m_inlined_main_cleanup_bb;
+    auto* saved_gc_frame = m_gc_current_frame;
+    int saved_gc_slot_idx = m_gc_frame_slot_idx;
+    int saved_gc_max_slots = m_gc_frame_max_slots;
     m_inlined_main_ret_alloca = nullptr;
     m_inlined_main_cleanup_bb = nullptr;
+    m_gc_current_frame = nullptr;
     namedVals.clear();
     namedTypes.clear();
 
@@ -1496,11 +1500,14 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
         namedVals[pname] = alloca;
     }
 
+    emitGcPushFrame(lambda_fn, 256);
+
     for (const auto& stmt : e.body) {
         cgStmt(stmt);
     }
 
     if (!builder->GetInsertBlock()->getTerminator()) {
+        if (m_gc_current_frame) emitGcPopFrame();
         builder->CreateRet(makeNil());
     }
 
@@ -1508,6 +1515,9 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     namedTypes = std::move(saved_types);
     m_inlined_main_ret_alloca = saved_ret_alloca;
     m_inlined_main_cleanup_bb = saved_cleanup_bb;
+    m_gc_current_frame = saved_gc_frame;
+    m_gc_frame_slot_idx = saved_gc_slot_idx;
+    m_gc_frame_max_slots = saved_gc_max_slots;
 
     if (saved_insert_block) {
         builder->SetInsertPoint(saved_insert_block);

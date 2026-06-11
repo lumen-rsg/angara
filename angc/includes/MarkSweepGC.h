@@ -40,6 +40,10 @@ public:
 
     void generateFreestandingStubs() override;
 
+    llvm::StructType* getGcRootFrameType() const override { return m_gc_root_frame_type; }
+    llvm::StructType* getGcThreadStateType() const override { return m_gc_thread_state_type; }
+    llvm::GlobalVariable* getGcThreadStateTLS() const override { return m_g_gc_thread_state_tls; }
+
     // --- Constants ---
     static constexpr int COLOR_WHITE = 0;
     static constexpr int COLOR_GRAY  = 1;
@@ -51,8 +55,6 @@ public:
     }
 
     // --- Additional accessors ---
-    llvm::StructType* getGcThreadStateType() const { return m_gc_thread_state_type; }
-    llvm::StructType* getGcRootFrameType() const { return m_gc_root_frame_type; }
 
     /// Set the AngaraObject struct type (called by RuntimeBuilder after generateTypes).
     void setAngaraObjType(llvm::StructType* ty) { m_angara_obj_type = ty; }

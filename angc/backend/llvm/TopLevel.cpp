@@ -101,6 +101,8 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
         idx++;
     }
 
+    emitGcPushFrame(fn, 256);
+
     if (stmt.body) {
         for (const auto& s : *stmt.body) {
             if (builder->GetInsertBlock()->getTerminator()) break;
@@ -108,8 +110,10 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
         }
     }
 
-    if (!builder->GetInsertBlock()->getTerminator())
+    if (!builder->GetInsertBlock()->getTerminator()) {
+        if (m_gc_current_frame) emitGcPopFrame();
         builder->CreateRet(makeNil());
+    }
 
     namedVals = std::move(saved_values);
     namedTypes = std::move(saved_types);
@@ -203,6 +207,8 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
                 namedVals[pname] = alloca;
             }
 
+            emitGcPushFrame(fn, 256);
+
             if (method_stmt->body) {
                 for (const auto& s : *method_stmt->body) {
                     if (builder->GetInsertBlock()->getTerminator()) break;
@@ -210,8 +216,10 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
                 }
             }
 
-            if (!builder->GetInsertBlock()->getTerminator())
+            if (!builder->GetInsertBlock()->getTerminator()) {
+                if (m_gc_current_frame) emitGcPopFrame();
                 builder->CreateRet(makeNil());
+            }
 
             namedVals = std::move(saved_values);
             namedTypes = std::move(saved_types);
@@ -678,6 +686,13 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
     namedVals.clear();
     namedTypes.clear();
 
+    // GC: register main thread and push root frame
+    llvm::Value* gc_thread_state = nullptr;
+    if (!m_freestanding) {
+        gc_thread_state = emitGcThreadSetup();
+        emitGcPushFrame(main_fn, 256);
+    }
+
     if (!m_freestanding) {
         auto* vtable = rt->getAPIVtable();
         if (vtable) {
@@ -786,8 +801,9 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
                 builder->CreateBr(cleanup_bb);
             }
 
-            // Cleanup block: under GC, no manual decref needed — just branch to exit
+            // Cleanup block: pop frame, teardown GC thread, branch to exit
             builder->SetInsertPoint(cleanup_bb);
+            if (m_gc_current_frame) emitGcPopFrame();
             builder->CreateBr(exit_bb);
 
             // Exit block: load return value and return
@@ -809,6 +825,7 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
         builder->SetInsertPoint(halt_bb);
         builder->CreateBr(halt_bb);
     } else {
+        if (gc_thread_state) emitGcTeardown(gc_thread_state);
         builder->CreateRet(exit_code);
     }
 }

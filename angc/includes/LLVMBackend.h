@@ -259,6 +259,17 @@ namespace angara {
 
         int m_lambda_counter = 0;
 
+        // GC root frame state
+        llvm::Value* m_gc_current_frame = nullptr;
+        int m_gc_frame_slot_idx = 0;
+        int m_gc_frame_max_slots = 0;
+        llvm::StructType* m_gc_frame_type = nullptr;
+
+        void emitGcPushFrame(llvm::Function* fn, int slot_count);
+        void emitGcPopFrame();
+        llvm::Value* emitGcThreadSetup();
+        void emitGcTeardown(llvm::Value* state_ptr);
+
         std::string objPath;
         std::string irPath;
     };

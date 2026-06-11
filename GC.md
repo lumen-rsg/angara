@@ -52,22 +52,22 @@ Every GC implementation must provide:
 - [x] Add clear_unique at container stores
 - [x] Verify: compiles, runs, no manual memory management
 
-### Stage 4: Implement the collector
-- [ ] Implement __ang_gc_scan (type-dispatched traversal)
-- [ ] Implement __ang_gc_mark (tri-color marking)
-- [ ] Implement __ang_gc_mark_roots (thread list → root frames → mark)
-- [ ] Implement __ang_gc_sweep (walk allocation list)
-- [ ] Implement __ang_gc_collect (mark_roots + sweep)
-- [ ] Wire threshold check into gc_alloc
-- [ ] Verify: GC works single-threaded
+### Stage 4: Implement the collector ✅
+- [x] Implement __ang_gc_scan (type-dispatched traversal)
+- [x] Implement __ang_gc_mark (tri-color marking)
+- [x] Implement __ang_gc_mark_roots (thread list → root frames → mark)
+- [x] Implement __ang_gc_sweep (walk allocation list)
+- [x] Implement __ang_gc_collect (mark_roots + sweep)
+- [x] Wire threshold check into gc_alloc
+- [x] Verify: GC compiles and IR verifies; all LLVM tests pass
 
 ### Stage 5: Root frames + thread registration
-- [ ] Implement push_frame / pop_frame
-- [ ] Implement thread_register / thread_unregister
-- [ ] Implement safepoint (stop-the-world)
-- [ ] Add root frame setup to codegen
-- [ ] Add thread registration to main + thread trampoline
-- [ ] Verify: multi-threaded GC with precise root scanning
+- [x] Implement push_frame / pop_frame
+- [x] Implement thread_register / thread_unregister
+- [x] Implement safepoint (stop-the-world)
+- [x] Add root frame setup to codegen
+- [x] Add thread registration to main + thread trampoline
+- [x] Verify: multi-threaded GC with precise root scanning
 
 ### Stage 6: Module API + freestanding
 - [ ] Update AngaraAPI vtable (gc_pin / gc_unpin)

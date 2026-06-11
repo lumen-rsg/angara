@@ -268,7 +268,88 @@ llvm::Value* LLVMBackend::callRtByName(const std::string& name, const std::vecto
 
 llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string& name) {
     llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().begin());
-    return tmp.CreateAlloca(objType, nullptr, name);
+    auto* alloca = tmp.CreateAlloca(objType, nullptr, name);
+
+    // Track in GC root frame if active
+    if (m_gc_current_frame && m_gc_frame_slot_idx < m_gc_frame_max_slots) {
+        auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
+        auto* i64_ty = llvm::Type::getInt64Ty(*ctx);
+        auto* i8_ptr = llvm::PointerType::get(*ctx, 0);
+
+        // Store alloca address into frame slot
+        auto* slot_addr = builder->CreateGEP(m_gc_frame_type, m_gc_current_frame,
+            {llvm::ConstantInt::get(i32_ty, 0), llvm::ConstantInt::get(i32_ty, 2),
+             llvm::ConstantInt::get(i64_ty, m_gc_frame_slot_idx)});
+        auto* alloca_i8 = builder->CreateBitCast(alloca, i8_ptr);
+        builder->CreateStore(alloca_i8, slot_addr);
+
+        // Increment frame count
+        auto* count_addr = builder->CreateStructGEP(m_gc_frame_type, m_gc_current_frame, 1);
+        auto* count = builder->CreateLoad(i32_ty, count_addr, "frame_count");
+        builder->CreateStore(builder->CreateAdd(count, llvm::ConstantInt::get(i32_ty, 1)), count_addr);
+
+        m_gc_frame_slot_idx++;
+    }
+
+    return alloca;
+}
+
+void LLVMBackend::emitGcPushFrame(llvm::Function* fn, int slot_count) {
+    // Create concrete frame type if not yet created
+    if (!m_gc_frame_type) {
+        auto* i8_ptr = llvm::PointerType::get(*ctx, 0);
+        m_gc_frame_type = llvm::StructType::create(*ctx, {
+            i8_ptr,                                             // prev_frame
+            llvm::Type::getInt32Ty(*ctx),                      // count
+            llvm::ArrayType::get(i8_ptr, slot_count)           // slots
+        }, "GcFrame");
+    }
+
+    // Alloca at entry block beginning (before any other instructions)
+    auto& entry = fn->getEntryBlock();
+    llvm::IRBuilder<> tmp(&entry, entry.begin());
+    m_gc_current_frame = tmp.CreateAlloca(m_gc_frame_type, nullptr, "gc_frame");
+
+    // Init count = 0
+    auto* count_addr = tmp.CreateStructGEP(m_gc_frame_type, m_gc_current_frame, 1);
+    tmp.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0), count_addr);
+
+    // Call __ang_gc_push_frame at current builder position
+    auto* frame_i8 = builder->CreateBitCast(m_gc_current_frame, llvm::PointerType::get(*ctx, 0));
+    callRtByName("__ang_gc_push_frame", {frame_i8});
+
+    m_gc_frame_slot_idx = 0;
+    m_gc_frame_max_slots = slot_count;
+}
+
+void LLVMBackend::emitGcPopFrame() {
+    callRtByName("__ang_gc_pop_frame", {});
+    m_gc_current_frame = nullptr;
+    m_gc_frame_slot_idx = 0;
+}
+
+llvm::Value* LLVMBackend::emitGcThreadSetup() {
+    auto* state_type = rt->getGcThreadStateType();
+    auto& dl = mod->getDataLayout();
+    uint64_t state_size_val = dl.getTypeAllocSize(state_type);
+    auto* state_size = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), state_size_val);
+
+    // malloc a GcThreadState
+    auto* state_raw = callRtByName("malloc", {state_size});
+    auto* state_ptr = builder->CreateBitCast(state_raw, llvm::PointerType::get(*ctx, 0), "gc_state");
+
+    // Zero-init
+    callRtByName("memset", {state_ptr, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0), state_size});
+
+    // Register with GC
+    callRtByName("__ang_gc_thread_register", {state_ptr});
+
+    return state_ptr;
+}
+
+void LLVMBackend::emitGcTeardown(llvm::Value* state_ptr) {
+    callRtByName("__ang_gc_thread_unregister", {state_ptr});
+    callRtByName("free", {state_ptr});
 }
 
 llvm::Value* LLVMBackend::loadVar(const std::string& n) {

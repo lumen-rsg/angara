@@ -15,6 +15,10 @@ RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>
 
 RuntimeBuilder::~RuntimeBuilder() = default;
 
+llvm::StructType* RuntimeBuilder::getGcRootFrameType() const { return m_gc->getGcRootFrameType(); }
+llvm::StructType* RuntimeBuilder::getGcThreadStateType() const { return m_gc->getGcThreadStateType(); }
+llvm::GlobalVariable* RuntimeBuilder::getGcThreadStateTLS() const { return m_gc->getGcThreadStateTLS(); }
+
 void RuntimeBuilder::generateRuntime() {
     generateTypes();
 

@@ -178,6 +178,7 @@ void LLVMBackend::cgReturn(const ReturnStmt& s) {
         builder->CreateStore(exit_code, m_inlined_main_ret_alloca);
         builder->CreateBr(m_inlined_main_cleanup_bb);
     } else {
+        if (m_gc_current_frame) emitGcPopFrame();
         builder->CreateRet(s.value ? cg(s.value) : makeNil());
     }
 }

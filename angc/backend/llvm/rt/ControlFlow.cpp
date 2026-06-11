@@ -354,6 +354,19 @@ void RuntimeBuilder::generateThreadOps() {
         auto* entry = BasicBlock::Create(m_ctx, "entry", trampoline);
         IRBuilder<> b(entry);
         auto* arg = trampoline->arg_begin();
+
+        // GC: register this thread
+        auto* gc_state_type = m_gc->getGcThreadStateType();
+        auto& dl = m_module.getDataLayout();
+        uint64_t state_size_val = dl.getTypeAllocSize(gc_state_type);
+        auto* state_size = ConstantInt::get(i64_ty, state_size_val);
+        auto* state_mem = b.CreateCall(malloc_fn, {state_size}, "gc_state_mem");
+        auto* gc_state = b.CreateBitCast(state_mem, ptr_ty, "gc_state");
+        auto* memset_fn = m_module.getFunction("memset");
+        b.CreateCall(memset_fn, {gc_state, ConstantInt::get(i32_ty, 0), state_size});
+        auto* register_fn = m_module.getFunction("__ang_gc_thread_register");
+        b.CreateCall(register_fn, {gc_state});
+
         auto* closure = b.CreateLoad(obj_ty, b.CreateStructGEP(m_thread_type, arg, 2), "closure");
         auto* argc = b.CreateLoad(i32_ty, b.CreateStructGEP(m_thread_type, arg, 3), "argc");
         auto* args = b.CreateLoad(ptr_ty, b.CreateStructGEP(m_thread_type, arg, 4), "args");
@@ -369,6 +382,10 @@ void RuntimeBuilder::generateThreadOps() {
         bf.CreateCall(free_fn, {args});
         bf.CreateBr(done_bb);
         IRBuilder<> bd(done_bb);
+        // GC: unregister and free state
+        auto* unregister_fn = m_module.getFunction("__ang_gc_thread_unregister");
+        bd.CreateCall(unregister_fn, {gc_state});
+        bd.CreateCall(free_fn, {gc_state});
         bd.CreateRet(ConstantPointerNull::get(ptr_ty));
     }
 

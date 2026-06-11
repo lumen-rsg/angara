@@ -149,6 +149,12 @@ public:
     /// Returns the active garbage collector instance.
     GarbageCollector* gc() const { return m_gc.get(); }
 
+    // --- GC type / global accessors (defined in RuntimeBuilder.cpp) ---
+
+    llvm::StructType* getGcRootFrameType() const;
+    llvm::StructType* getGcThreadStateType() const;
+    llvm::GlobalVariable* getGcThreadStateTLS() const;
+
 private:
     /// Creates all LLVM struct types for the runtime object model.
     void generateTypes();

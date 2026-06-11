@@ -47,6 +47,12 @@ public:
     virtual llvm::FunctionCallee getGcUnpinFunc() const = 0;
 
     virtual void generateFreestandingStubs() = 0;
+
+    // --- Stage 5: root frame / thread state accessors ---
+
+    virtual llvm::StructType* getGcRootFrameType() const = 0;
+    virtual llvm::StructType* getGcThreadStateType() const = 0;
+    virtual llvm::GlobalVariable* getGcThreadStateTLS() const = 0;
 };
 
 } // namespace angara
