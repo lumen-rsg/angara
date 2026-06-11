@@ -206,12 +206,11 @@ llvm::Value* LLVMBackend::makeF64(llvm::Value* v) {
 }
 llvm::Value* LLVMBackend::makeStr(const std::string& s) {
     // Intern string literals: each unique literal is allocated once per module
-    // and reused across all references. The global holds a permanent reference
-    // (never decref'd), so the string lives for the program's lifetime.
+    // and reused across all references. Under GC, the global is a permanent root
+    // so the string lives for the program's lifetime — no incref needed.
     auto it = m_string_literal_cache.find(s);
     if (it != m_string_literal_cache.end()) {
         auto* cached = builder->CreateLoad(objType, it->second, "strlit");
-        callRtByName("__ang_incref", {cached});
         return cached;
     }
 
@@ -239,9 +238,8 @@ llvm::Value* LLVMBackend::makeStr(const std::string& s) {
 
     m_string_literal_cache[s] = global;
 
-    // At the current position, load from the global and incref
+    // Load from the global — no incref under GC
     auto* loaded = builder->CreateLoad(objType, global, "strlit");
-    callRtByName("__ang_incref", {loaded});
     return loaded;
 }
 

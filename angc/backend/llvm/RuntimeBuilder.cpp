@@ -13,6 +13,8 @@ RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>
     m_gc = std::make_unique<MarkSweepGC>(m_ctx, m_module, m_builder);
 }
 
+RuntimeBuilder::~RuntimeBuilder() = default;
+
 llvm::FunctionCallee RuntimeBuilder::getFuncIncref() const {
     // Deprecated — return the GC pin function as a no-op stand-in
     // During Stage 2/3, incref/decref calls will be removed from codegen

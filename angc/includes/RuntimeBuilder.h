@@ -52,6 +52,9 @@ public:
     RuntimeBuilder(llvm::LLVMContext& context, llvm::Module& module, llvm::IRBuilder<>& builder,
                    bool freestanding = false);
 
+    /// Destructor — defined in RuntimeBuilder.cpp where GarbageCollector is complete.
+    ~RuntimeBuilder();
+
     /// Generates all runtime types, function declarations, and implementations.
     /// Must be called once before any codegen. In freestanding mode, generates
     /// minimal stubs and builtin replacements for libc functions.

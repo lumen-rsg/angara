@@ -786,19 +786,8 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
                 builder->CreateBr(cleanup_bb);
             }
 
-            // Cleanup block: decref locals, branch to exit
+            // Cleanup block: under GC, no manual decref needed — just branch to exit
             builder->SetInsertPoint(cleanup_bb);
-            if (!m_freestanding) {
-                for (const auto& [name, alloca] : namedVals) {
-                    llvm::Value* val = builder->CreateLoad(objType, alloca);
-                    callRtByName("__ang_decref", {val});
-                }
-            }
-            // Also decref top-level saved values
-            for (const auto& [name, alloca] : saved_values) {
-                llvm::Value* val = builder->CreateLoad(objType, alloca);
-                callRtByName("__ang_decref", {val});
-            }
             builder->CreateBr(exit_bb);
 
             // Exit block: load return value and return
@@ -811,13 +800,6 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
             namedVals = std::move(saved_values);
             namedTypes = std::move(saved_types);
             break;
-        }
-    }
-
-    if (!m_freestanding) {
-        for (const auto& [name, alloca] : namedVals) {
-            llvm::Value* val = builder->CreateLoad(objType, alloca);
-            callRtByName("__ang_decref", {val});
         }
     }
 
