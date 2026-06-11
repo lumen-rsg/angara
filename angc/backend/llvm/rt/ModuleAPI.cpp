@@ -1,4 +1,5 @@
 #include "RuntimeBuilder.h"
+#include "MarkSweepGC.h"
 
 using namespace llvm;
 
@@ -195,8 +196,10 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* hdr = b.CreateStructGEP(m_native_instance_type, inst, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_NATIVE_INSTANCE),
                       b.CreateStructGEP(m_obj_header_type, hdr, 0));
-        b.CreateStore(ConstantInt::get(i64_ty, 1),
+        b.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
                       b.CreateStructGEP(m_obj_header_type, hdr, 1));
+        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
+                      b.CreateStructGEP(m_obj_header_type, hdr, 2));
         b.CreateStore(data_arg, b.CreateStructGEP(m_native_instance_type, inst, 1));
         b.CreateStore(fin_arg,   b.CreateStructGEP(m_native_instance_type, inst, 2));
         auto* name_copy = b.CreateCall(strdup_fn, {name_arg});
@@ -311,8 +314,10 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* hdr = b.CreateStructGEP(m_string_type, str_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING),
                       b.CreateStructGEP(m_obj_header_type, hdr, 0));
-        b.CreateStore(ConstantInt::get(i64_ty, 1),
+        b.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
                       b.CreateStructGEP(m_obj_header_type, hdr, 1));
+        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
+                      b.CreateStructGEP(m_obj_header_type, hdr, 2));
         b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 1));
         b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 2));
         b.CreateStore(buf, b.CreateStructGEP(m_string_type, str_ptr, 3));
@@ -336,8 +341,10 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* hdr = b.CreateStructGEP(m_string_type, str_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING),
                       b.CreateStructGEP(m_obj_header_type, hdr, 0));
-        b.CreateStore(ConstantInt::get(i64_ty, 1),
+        b.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
                       b.CreateStructGEP(m_obj_header_type, hdr, 1));
+        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
+                      b.CreateStructGEP(m_obj_header_type, hdr, 2));
         b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 1));
         b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 2));
         b.CreateStore(src, b.CreateStructGEP(m_string_type, str_ptr, 3));

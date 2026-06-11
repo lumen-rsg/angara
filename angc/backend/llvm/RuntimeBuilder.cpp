@@ -1,4 +1,5 @@
 #include "RuntimeBuilder.h"
+#include "MarkSweepGC.h"
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -7,7 +8,20 @@ using namespace llvm;
 namespace angara {
 
 RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>& builder, bool freestanding)
-    : m_ctx(context), m_module(module), m_builder(builder), m_freestanding(freestanding) {}
+    : m_ctx(context), m_module(module), m_builder(builder), m_freestanding(freestanding) {
+    // Create the GC strategy
+    m_gc = std::make_unique<MarkSweepGC>(m_ctx, m_module, m_builder);
+}
+
+llvm::FunctionCallee RuntimeBuilder::getFuncIncref() const {
+    // Deprecated — return the GC pin function as a no-op stand-in
+    // During Stage 2/3, incref/decref calls will be removed from codegen
+    return m_gc->getGcPinFunc();
+}
+
+llvm::FunctionCallee RuntimeBuilder::getFuncDecref() const {
+    return m_gc->getGcUnpinFunc();
+}
 
 void RuntimeBuilder::generateRuntime() {
     generateTypes();
@@ -18,6 +32,11 @@ void RuntimeBuilder::generateRuntime() {
     }
 
     declareCLibFunctions();
+
+    // GC: generate globals and functions
+    m_gc->generateGlobals();
+    m_gc->generateFunctions();
+
     generateMemoryManagement();
     generateStringOps();
     generateEquality();
@@ -47,10 +66,13 @@ void RuntimeBuilder::generateTypes() {
         Type::getInt64Ty(m_ctx)
     }, "AngaraObject");
 
-    m_obj_header_type = StructType::create(m_ctx, {
-        Type::getInt32Ty(m_ctx),
-        Type::getInt64Ty(m_ctx)
-    }, "ObjHeader");
+    // Let the GC create its header type
+    m_gc->generateTypes();
+    m_obj_header_type = m_gc->getHeaderType();
+
+    // Give the GC access to the AngaraObject type for function signatures
+    auto* ms_gc = static_cast<MarkSweepGC*>(m_gc.get());
+    ms_gc->setAngaraObjType(m_angara_obj_type);
 
     m_string_type = StructType::create(m_ctx, {
         m_obj_header_type,
@@ -89,7 +111,8 @@ void RuntimeBuilder::generateTypes() {
         fn_ptr_type,
         Type::getInt32Ty(m_ctx),
         Type::getInt1Ty(m_ctx),
-        PointerType::get(m_ctx, 0)   // env: pointer to captured variables array
+        PointerType::get(m_ctx, 0),   // env: pointer to captured variables array
+        Type::getInt32Ty(m_ctx)       // env_count: number of captured variables (for GC scanning)
     }, "AngaraClosure");
 
     m_bound_method_type = StructType::create(m_ctx, {

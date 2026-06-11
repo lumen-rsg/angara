@@ -1,4 +1,5 @@
 #include "RuntimeBuilder.h"
+#include "MarkSweepGC.h"
 
 using namespace llvm;
 
@@ -25,7 +26,7 @@ void RuntimeBuilder::generateClosureOps() {
 
     {
         auto* fn_ptr_type = PointerType::get(m_ctx, 0);
-        auto* fn_ty = FunctionType::get(obj_ty, {fn_ptr_type, i32_ty, i1_ty, i8_ptr}, false);
+        auto* fn_ty = FunctionType::get(obj_ty, {fn_ptr_type, i32_ty, i1_ty, i8_ptr, i32_ty}, false);
         auto* fn = createRuntimeFunc("__ang_closure_new", fn_ty);
         m_fn_closure_new = FunctionCallee(fn);
 
@@ -35,6 +36,7 @@ void RuntimeBuilder::generateClosureOps() {
         auto* arity_arg = fn->arg_begin() + 1;
         auto* native_arg = fn->arg_begin() + 2;
         auto* env_arg = fn->arg_begin() + 3;
+        auto* env_count_arg = fn->arg_begin() + 4;
 
         auto* closure_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_closure_type));
@@ -44,12 +46,15 @@ void RuntimeBuilder::generateClosureOps() {
         auto* header_ptr = b.CreateStructGEP(m_closure_type, closure_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_CLOSURE),
             b.CreateStructGEP(m_obj_header_type, header_ptr, 0));
-        b.CreateStore(ConstantInt::get(i64_ty, 1),
+        b.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
             b.CreateStructGEP(m_obj_header_type, header_ptr, 1));
+        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
+            b.CreateStructGEP(m_obj_header_type, header_ptr, 2));
         b.CreateStore(fn_arg, b.CreateStructGEP(m_closure_type, closure_ptr, 1));
         b.CreateStore(arity_arg, b.CreateStructGEP(m_closure_type, closure_ptr, 2));
         b.CreateStore(native_arg, b.CreateStructGEP(m_closure_type, closure_ptr, 3));
         b.CreateStore(env_arg, b.CreateStructGEP(m_closure_type, closure_ptr, 4));
+        b.CreateStore(env_count_arg, b.CreateStructGEP(m_closure_type, closure_ptr, 5));
 
         b.CreateRet(pack_obj(b, closure_ptr));
     }
@@ -145,8 +150,10 @@ void RuntimeBuilder::generateClosureOps() {
         auto* header_ptr = b.CreateStructGEP(m_bound_method_type, bm_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_BOUND_METHOD),
             b.CreateStructGEP(m_obj_header_type, header_ptr, 0));
-        b.CreateStore(ConstantInt::get(i64_ty, 1),
+        b.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
             b.CreateStructGEP(m_obj_header_type, header_ptr, 1));
+        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
+            b.CreateStructGEP(m_obj_header_type, header_ptr, 2));
         b.CreateStore(recv_arg, b.CreateStructGEP(m_bound_method_type, bm_ptr, 1));
         b.CreateStore(closure_arg, b.CreateStructGEP(m_bound_method_type, bm_ptr, 2));
 
@@ -193,8 +200,10 @@ void RuntimeBuilder::generateExceptionOps() {
         auto* header_ptr = b.CreateStructGEP(m_exception_type, exc_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_EXCEPTION),
             b.CreateStructGEP(m_obj_header_type, header_ptr, 0));
-        b.CreateStore(ConstantInt::get(i64_ty, 1),
+        b.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
             b.CreateStructGEP(m_obj_header_type, header_ptr, 1));
+        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
+            b.CreateStructGEP(m_obj_header_type, header_ptr, 2));
         b.CreateStore(msg, b.CreateStructGEP(m_exception_type, exc_ptr, 1));
         b.CreateCall(m_module.getFunction("__ang_incref"), {msg});
 
@@ -383,8 +392,10 @@ void RuntimeBuilder::generateThreadOps() {
         auto* header = b.CreateStructGEP(m_thread_type, thread_ptr, 0);
         auto* type_addr = b.CreateStructGEP(m_obj_header_type, header, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_THREAD), type_addr);
-        auto* rc_addr = b.CreateStructGEP(m_obj_header_type, header, 1);
-        b.CreateStore(ConstantInt::get(i64_ty, 1), rc_addr);
+        auto* meta_addr = b.CreateStructGEP(m_obj_header_type, header, 1);
+        b.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)), meta_addr);
+        auto* next_addr = b.CreateStructGEP(m_obj_header_type, header, 2);
+        b.CreateStore(ConstantPointerNull::get(ptr_ty), next_addr);
 
         auto* pthread_slot = b.CreateStructGEP(m_thread_type, thread_ptr, 1);
         b.CreateStore(ConstantPointerNull::get(ptr_ty), pthread_slot);
@@ -447,8 +458,10 @@ void RuntimeBuilder::generateThreadOps() {
         auto* header = b.CreateStructGEP(m_mutex_type, mutex_ptr, 0);
         auto* type_addr = b.CreateStructGEP(m_obj_header_type, header, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_MUTEX), type_addr);
-        auto* rc_addr = b.CreateStructGEP(m_obj_header_type, header, 1);
-        b.CreateStore(ConstantInt::get(i64_ty, 1), rc_addr);
+        auto* meta_addr = b.CreateStructGEP(m_obj_header_type, header, 1);
+        b.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)), meta_addr);
+        auto* next_addr = b.CreateStructGEP(m_obj_header_type, header, 2);
+        b.CreateStore(ConstantPointerNull::get(ptr_ty), next_addr);
 
         auto* mutex_bytes = b.CreateStructGEP(m_mutex_type, mutex_ptr, 1);
 

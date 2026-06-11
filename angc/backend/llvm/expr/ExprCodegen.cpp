@@ -65,7 +65,8 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
                 wrapper_fn,
                 llvm::ConstantInt::get(i32_ty, arity),
                 llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0),
-                llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0))
+                llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)),
+                llvm::ConstantInt::get(i32_ty, 0)  // env_count = 0 (no captures)
             });
         }
         return loadVar(p->name.lexeme);
@@ -1546,7 +1547,8 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
         lambda_fn,
         llvm::ConstantInt::get(i32_ty, arity),
         llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0),
-        env_ptr
+        env_ptr,
+        llvm::ConstantInt::get(i32_ty, capture_count)
     });
 }
 
