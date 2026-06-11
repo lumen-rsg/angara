@@ -133,6 +133,12 @@ void RuntimeBuilder::generateTypes() {
         ArrayType::get(Type::getInt8Ty(m_ctx), 64)
     }, "AngaraMutex");
 
+    // Give the GC access to all runtime struct types for scanner traversal
+    ms_gc->setStructTypes(
+        m_string_type, m_list_type, m_record_type, m_record_entry_type,
+        m_exception_type, m_closure_type, m_bound_method_type,
+        m_thread_type, m_native_instance_type);
+
     m_g_exception_chain = new GlobalVariable(
         m_module, PointerType::get(m_ctx, 0),
         false, GlobalValue::CommonLinkage,

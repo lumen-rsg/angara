@@ -31,26 +31,26 @@ Every GC implementation must provide:
 
 ## Progress
 
-### Stage 1: Infrastructure
-- [ ] Create GC interface class
-- [ ] Modify ObjHeader layout
-- [ ] Add GC globals
-- [ ] Generate `__ang_gc_alloc`
-- [ ] Update header initialization sites
-- [ ] Verify: compiles and runs identically
+### Stage 1: Infrastructure ✅
+- [x] Create GC interface class
+- [x] Modify ObjHeader layout
+- [x] Add GC globals
+- [x] Generate `__ang_gc_alloc`
+- [x] Update header initialization sites
+- [x] Verify: compiles and runs identically
 
-### Stage 2: Remove ARC from codegen
-- [ ] Remove decref from cgAssign
-- [ ] Remove decref from main cleanup
-- [ ] Remove incref from makeStr
-- [ ] Verify: compiles, runs, leaks memory
+### Stage 2: Remove ARC from codegen ✅
+- [x] Remove decref from cgAssign
+- [x] Remove decref from main cleanup
+- [x] Remove incref from makeStr
+- [x] Verify: compiles, runs, leaks memory
 
-### Stage 3: Remove ARC from runtime
-- [ ] Remove incref/decref from Collections, Strings, ControlFlow, IO, Conversions
-- [ ] Replace malloc with gc_alloc in constructors
-- [ ] Add env_count to closure layout
-- [ ] Add clear_unique at container stores
-- [ ] Verify: compiles, runs, no manual memory management
+### Stage 3: Remove ARC from runtime ✅
+- [x] Remove incref/decref from Collections, Strings, ControlFlow, IO, Conversions
+- [x] Replace malloc with gc_alloc in constructors
+- [x] Add env_count to closure layout
+- [x] Add clear_unique at container stores
+- [x] Verify: compiles, runs, no manual memory management
 
 ### Stage 4: Implement the collector
 - [ ] Implement __ang_gc_scan (type-dispatched traversal)

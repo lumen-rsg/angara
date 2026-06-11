@@ -57,6 +57,30 @@ public:
     /// Set the AngaraObject struct type (called by RuntimeBuilder after generateTypes).
     void setAngaraObjType(llvm::StructType* ty) { m_angara_obj_type = ty; }
 
+    /// Set all runtime struct types (called by RuntimeBuilder after generateTypes).
+    /// Needed by the GC scanner for type-dispatched child traversal.
+    void setStructTypes(
+        llvm::StructType* string_type,
+        llvm::StructType* list_type,
+        llvm::StructType* record_type,
+        llvm::StructType* record_entry_type,
+        llvm::StructType* exception_type,
+        llvm::StructType* closure_type,
+        llvm::StructType* bound_method_type,
+        llvm::StructType* thread_type,
+        llvm::StructType* native_instance_type)
+    {
+        m_string_type = string_type;
+        m_list_type = list_type;
+        m_record_type = record_type;
+        m_record_entry_type = record_entry_type;
+        m_exception_type = exception_type;
+        m_closure_type = closure_type;
+        m_bound_method_type = bound_method_type;
+        m_thread_type = thread_type;
+        m_native_instance_type = native_instance_type;
+    }
+
 private:
     llvm::LLVMContext&  m_ctx;
     llvm::Module&       m_module;
@@ -67,6 +91,17 @@ private:
     llvm::StructType* m_obj_header_type = nullptr;
     llvm::StructType* m_gc_thread_state_type = nullptr;
     llvm::StructType* m_gc_root_frame_type = nullptr;
+
+    // --- Runtime struct types (set by RuntimeBuilder after generateTypes) ---
+    llvm::StructType* m_string_type = nullptr;
+    llvm::StructType* m_list_type = nullptr;
+    llvm::StructType* m_record_type = nullptr;
+    llvm::StructType* m_record_entry_type = nullptr;
+    llvm::StructType* m_exception_type = nullptr;
+    llvm::StructType* m_closure_type = nullptr;
+    llvm::StructType* m_bound_method_type = nullptr;
+    llvm::StructType* m_thread_type = nullptr;
+    llvm::StructType* m_native_instance_type = nullptr;
 
     // --- LLVM globals ---
     llvm::GlobalVariable* m_g_gc_head = nullptr;
