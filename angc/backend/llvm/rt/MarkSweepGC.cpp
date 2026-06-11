@@ -66,7 +66,7 @@ void MarkSweepGC::generateGlobals() {
     m_g_gc_threshold = new GlobalVariable(
         m_module, Type::getInt64Ty(ctx),
         false, GlobalValue::InternalLinkage,
-        ConstantInt::get(Type::getInt64Ty(ctx), 1024),
+        ConstantInt::get(Type::getInt64Ty(ctx), 65536),
         "__ang_gc_threshold");
 
     // Stop-the-world flag
@@ -658,6 +658,7 @@ void MarkSweepGC::generateFunctions() {
         auto* loop_bb = BasicBlock::Create(m_ctx, "loop", fn);
         auto* check_color_bb = BasicBlock::Create(m_ctx, "check_color", fn);
         auto* is_white_bb = BasicBlock::Create(m_ctx, "is_white", fn);
+        auto* check_pinned_bb = BasicBlock::Create(m_ctx, "check_pinned", fn);
         auto* unlink_head_bb = BasicBlock::Create(m_ctx, "unlink_head", fn);
         auto* unlink_mid_bb = BasicBlock::Create(m_ctx, "unlink_mid", fn);
         auto* free_obj_bb = BasicBlock::Create(m_ctx, "free_obj", fn);
@@ -688,14 +689,20 @@ void MarkSweepGC::generateFunctions() {
         auto* is_white = bcc.CreateICmpEQ(color, ConstantInt::get(i32_ty, COLOR_WHITE));
         bcc.CreateCondBr(is_white, is_white_bb, is_black_bb);
 
-        // WHITE: unlink and free
+        // WHITE: check if pinned before freeing
         IRBuilder<> bw(is_white_bb);
+        auto* pinned_bit = bw.CreateAnd(meta, ConstantInt::get(i32_ty, 1 << 16), "pinned");
+        auto* is_pinned = bw.CreateICmpNE(pinned_bit, ConstantInt::get(i32_ty, 0));
+        bw.CreateCondBr(is_pinned, is_black_bb, check_pinned_bb);
+
+        // Not pinned WHITE: unlink and free
+        IRBuilder<> bcp(check_pinned_bb);
         // Get next pointer before we free
-        auto* next_ptr = bw.CreateLoad(i8_ptr,
-            bw.CreateStructGEP(header_ty, curr_phi, 2), "next");
+        auto* next_ptr = bcp.CreateLoad(i8_ptr,
+            bcp.CreateStructGEP(header_ty, curr_phi, 2), "next");
         // Check if prev is null (head of list)
-        auto* prev_is_null = bw.CreateICmpEQ(prev_phi, ConstantPointerNull::get(i8_ptr));
-        bw.CreateCondBr(prev_is_null, unlink_head_bb, unlink_mid_bb);
+        auto* prev_is_null = bcp.CreateICmpEQ(prev_phi, ConstantPointerNull::get(i8_ptr));
+        bcp.CreateCondBr(prev_is_null, unlink_head_bb, unlink_mid_bb);
 
         // Unlink from head
         IRBuilder<> buh(unlink_head_bb);
@@ -846,6 +853,9 @@ void MarkSweepGC::generateFunctions() {
 
         // Sweep unreachable objects
         b.CreateCall(get_func("__ang_gc_sweep"), {});
+
+        // Reset allocation count so next collection triggers after threshold fresh allocations
+        b.CreateStore(ConstantInt::get(i64_ty, 0), m_g_gc_count);
 
         b.CreateRetVoid();
     }
@@ -1068,7 +1078,8 @@ void MarkSweepGC::generateFunctions() {
     }
 
     // ===================================================================
-    // __ang_gc_pin(AngaraObject val) -> void  [Stage 6 stub]
+    // __ang_gc_pin(AngaraObject val) -> void
+    // Set the pinned bit (bit 16 of meta) so the object survives collection.
     // ===================================================================
     {
         auto* fn_ty = FunctionType::get(void_ty, {obj_ty}, false);
@@ -1076,12 +1087,32 @@ void MarkSweepGC::generateFunctions() {
         m_fn_gc_pin = FunctionCallee(fn);
 
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* is_obj_bb = BasicBlock::Create(m_ctx, "is_obj", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+
         IRBuilder<> b(entry);
-        b.CreateRetVoid();
+        auto* val = fn->arg_begin();
+        auto* tag = b.CreateExtractValue(val, {0}, "tag");
+        auto* is_obj = b.CreateICmpEQ(tag, ConstantInt::get(i32_ty, TAG_OBJ));
+        b.CreateCondBr(is_obj, is_obj_bb, done_bb);
+
+        IRBuilder<> b2(is_obj_bb);
+        auto* payload = b2.CreateExtractValue(val, {1}, "payload");
+        auto* ptr_i64 = b2.CreateBitCast(payload, i64_ty);
+        auto* obj_ptr = b2.CreateIntToPtr(ptr_i64, i8_ptr, "obj_ptr");
+        auto* meta_gaddr = b2.CreateStructGEP(header_ty, obj_ptr, 1);
+        auto* meta = b2.CreateLoad(i32_ty, meta_gaddr, "meta");
+        auto* pinned_meta = b2.CreateOr(meta, ConstantInt::get(i32_ty, 1 << 16), "pinned_meta");
+        b2.CreateStore(pinned_meta, meta_gaddr);
+        b2.CreateBr(done_bb);
+
+        IRBuilder<> bd(done_bb);
+        bd.CreateRetVoid();
     }
 
     // ===================================================================
-    // __ang_gc_unpin(AngaraObject val) -> void  [Stage 6 stub]
+    // __ang_gc_unpin(AngaraObject val) -> void
+    // Clear the pinned bit (bit 16 of meta).
     // ===================================================================
     {
         auto* fn_ty = FunctionType::get(void_ty, {obj_ty}, false);
@@ -1089,8 +1120,27 @@ void MarkSweepGC::generateFunctions() {
         m_fn_gc_unpin = FunctionCallee(fn);
 
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* is_obj_bb = BasicBlock::Create(m_ctx, "is_obj", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+
         IRBuilder<> b(entry);
-        b.CreateRetVoid();
+        auto* val = fn->arg_begin();
+        auto* tag = b.CreateExtractValue(val, {0}, "tag");
+        auto* is_obj = b.CreateICmpEQ(tag, ConstantInt::get(i32_ty, TAG_OBJ));
+        b.CreateCondBr(is_obj, is_obj_bb, done_bb);
+
+        IRBuilder<> b2(is_obj_bb);
+        auto* payload = b2.CreateExtractValue(val, {1}, "payload");
+        auto* ptr_i64 = b2.CreateBitCast(payload, i64_ty);
+        auto* obj_ptr = b2.CreateIntToPtr(ptr_i64, i8_ptr, "obj_ptr");
+        auto* meta_gaddr = b2.CreateStructGEP(header_ty, obj_ptr, 1);
+        auto* meta = b2.CreateLoad(i32_ty, meta_gaddr, "meta");
+        auto* unpinned_meta = b2.CreateAnd(meta, ConstantInt::get(i32_ty, ~(1 << 16)), "unpinned_meta");
+        b2.CreateStore(unpinned_meta, meta_gaddr);
+        b2.CreateBr(done_bb);
+
+        IRBuilder<> bd(done_bb);
+        bd.CreateRetVoid();
     }
 }
 
