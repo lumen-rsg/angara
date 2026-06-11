@@ -157,9 +157,6 @@ void RuntimeBuilder::generateClosureOps() {
         b.CreateStore(recv_arg, b.CreateStructGEP(m_bound_method_type, bm_ptr, 1));
         b.CreateStore(closure_arg, b.CreateStructGEP(m_bound_method_type, bm_ptr, 2));
 
-        b.CreateCall(m_module.getFunction("__ang_incref"), {recv_arg});
-        b.CreateCall(m_module.getFunction("__ang_incref"), {closure_arg});
-
         b.CreateRet(pack_obj(b, bm_ptr));
     }
 }
@@ -205,7 +202,6 @@ void RuntimeBuilder::generateExceptionOps() {
         b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             b.CreateStructGEP(m_obj_header_type, header_ptr, 2));
         b.CreateStore(msg, b.CreateStructGEP(m_exception_type, exc_ptr, 1));
-        b.CreateCall(m_module.getFunction("__ang_incref"), {msg});
 
         b.CreateRet(pack_obj(b, exc_ptr));
     }

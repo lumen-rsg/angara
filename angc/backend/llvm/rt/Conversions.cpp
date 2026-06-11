@@ -725,12 +725,9 @@ void RuntimeBuilder::generateDeepClone() {
         bm.CreateRet(pack_obj(bm, new_ptr));
     }
 
-    // --- Fallback: shallow incref for unknown types ---
+    // --- Fallback: return same object for unknown types ---
     {
         IRBuilder<> bf(fallback_bb);
-        // Can't clone unknown type — just incref and return the same object
-        auto* incref_fn = m_module.getFunction("__ang_incref");
-        bf.CreateCall(incref_fn, {val});
         bf.CreateRet(val);
     }
 }

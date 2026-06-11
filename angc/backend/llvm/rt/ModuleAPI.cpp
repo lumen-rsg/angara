@@ -46,8 +46,8 @@ void RuntimeBuilder::generateModuleAPIVTable() {
     auto* fn_record_set   = m_module.getFunction("__ang_record_set");
     auto* fn_list_new     = m_module.getFunction("__ang_list_new");
     auto* fn_list_push    = m_module.getFunction("__ang_list_push");
-    auto* fn_incref       = m_module.getFunction("__ang_incref");
-    auto* fn_decref       = m_module.getFunction("__ang_decref");
+    auto* fn_pin         = m_module.getFunction("__ang_gc_pin");
+    auto* fn_unpin       = m_module.getFunction("__ang_gc_unpin");
     auto* fn_to_string    = m_module.getFunction("__ang_to_string");
 
     Function* fn_as_cstr;
@@ -418,8 +418,8 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         fn_record_val_at,
         fn_native_instance_new,
         fn_native_instance_data,
-        fn_incref,
-        fn_decref,
+        fn_pin,
+        fn_unpin,
         fn_to_string,
         fn_truthy,
         fn_equals,

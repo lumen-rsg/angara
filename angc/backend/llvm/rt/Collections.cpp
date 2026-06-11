@@ -100,10 +100,6 @@ void RuntimeBuilder::generateListOps() {
         bl.CreateCondBr(cmp, body_bb, done_bb);
 
         IRBuilder<> bb(body_bb);
-        auto* new_elems = b.CreateBitCast(elems_mem, PointerType::get(m_ctx, 0));
-        auto* elem_ptr = bb.CreateGEP(obj_ty, new_elems, {i_phi});
-        auto* elem = bb.CreateLoad(obj_ty, elem_ptr);
-        bb.CreateCall(m_module.getFunction("__ang_incref"), {elem});
         auto* next = bb.CreateAdd(i_phi, ConstantInt::get(i64_ty, 1));
         bb.CreateBr(loop_bb);
         i_phi->addIncoming(next, body_bb);
@@ -159,7 +155,6 @@ void RuntimeBuilder::generateListOps() {
         auto* elems2 = bs.CreateLoad(PointerType::get(m_ctx, 0), elems_addr, "elems2");
         auto* elem_ptr = bs.CreateGEP(obj_ty, elems2, {count2});
         bs.CreateStore(val_arg, elem_ptr);
-        bs.CreateCall(m_module.getFunction("__ang_incref"), {val_arg});
         bs.CreateStore(bs.CreateAdd(count2, ConstantInt::get(i64_ty, 1)), count_addr);
         bs.CreateRetVoid();
     }
@@ -230,10 +225,7 @@ void RuntimeBuilder::generateListOps() {
             b.CreateStructGEP(m_list_type, list_ptr, 3), "elems");
         auto* elem_ptr = b.CreateGEP(obj_ty, elems, {idx});
 
-        auto* old = b.CreateLoad(obj_ty, elem_ptr, "old");
-        b.CreateCall(m_module.getFunction("__ang_decref"), {old});
         b.CreateStore(val_arg, elem_ptr);
-        b.CreateCall(m_module.getFunction("__ang_incref"), {val_arg});
 
         b.CreateRetVoid();
     }
@@ -551,10 +543,7 @@ void RuntimeBuilder::generateRecordOps() {
         IRBuilder<> bf(found_bb);
         auto* found_entry = bf.CreateGEP(m_record_entry_type, entries, {i_phi});
         auto* val_addr = bf.CreateStructGEP(m_record_entry_type, found_entry, 1);
-        auto* old_val = bf.CreateLoad(obj_ty, val_addr, "old");
-        bf.CreateCall(m_module.getFunction("__ang_decref"), {old_val});
         bf.CreateStore(val_arg, val_addr);
-        bf.CreateCall(m_module.getFunction("__ang_incref"), {val_arg});
         bf.CreateBr(done_bb);
 
         IRBuilder<> bnf(not_found_bb);
@@ -587,7 +576,6 @@ void RuntimeBuilder::generateRecordOps() {
         bi.CreateStore(copied_key, bi.CreateStructGEP(m_record_entry_type, new_entry, 0));
 
         bi.CreateStore(val_arg, bi.CreateStructGEP(m_record_entry_type, new_entry, 1));
-        bi.CreateCall(m_module.getFunction("__ang_incref"), {val_arg});
 
         bi.CreateStore(bi.CreateAdd(cur_count, ConstantInt::get(i64_ty, 1)), count_addr);
         bi.CreateBr(done_bb);

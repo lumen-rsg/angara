@@ -15,16 +15,6 @@ RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>
 
 RuntimeBuilder::~RuntimeBuilder() = default;
 
-llvm::FunctionCallee RuntimeBuilder::getFuncIncref() const {
-    // Deprecated — return the GC pin function as a no-op stand-in
-    // During Stage 2/3, incref/decref calls will be removed from codegen
-    return m_gc->getGcPinFunc();
-}
-
-llvm::FunctionCallee RuntimeBuilder::getFuncDecref() const {
-    return m_gc->getGcUnpinFunc();
-}
-
 void RuntimeBuilder::generateRuntime() {
     generateTypes();
 

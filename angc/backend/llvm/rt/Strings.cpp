@@ -143,8 +143,6 @@ void RuntimeBuilder::generateStringOps() {
             auto* a_str_obj = bs.CreateCall(to_str_fn, {a}, "a_str");
             auto* b_str_obj = bs.CreateCall(to_str_fn, {b_arg}, "b_str");
             auto* result = bs.CreateCall(fn, {a_str_obj, b_str_obj}, "result");
-            bs.CreateCall(m_module.getFunction("__ang_decref"), {a_str_obj});
-            bs.CreateCall(m_module.getFunction("__ang_decref"), {b_str_obj});
             bs.CreateRet(result);
         }
 
@@ -210,8 +208,6 @@ void RuntimeBuilder::generateStringOps() {
                 ba.CreateStore(ConstantInt::get(i8_ty, 0),
                     ba.CreateGEP(i8_ty, a_chars, {final_len}));
 
-                // Incref to compensate for caller's assignment decref
-                ba.CreateCall(m_module.getFunction("__ang_incref"), {a});
                 ba.CreateRet(a);
             }
 
@@ -410,8 +406,6 @@ void RuntimeBuilder::generateStringOps() {
             bo.CreateCondBr(is_str, str_bb, not_str_bb);
 
             IRBuilder<> bs(str_bb);
-            auto* incref_fn = m_module.getFunction("__ang_incref");
-            bs.CreateCall(incref_fn, {val});
             bs.CreateRet(val);
 
             IRBuilder<> bns(not_str_bb);
@@ -466,8 +460,6 @@ void RuntimeBuilder::generateStringOps() {
             auto* a_str_obj = bf.CreateCall(to_str_fn, {a}, "a_str");
             auto* b_str_obj = bf.CreateCall(to_str_fn, {b_arg}, "b_str");
             auto* result = bf.CreateCall(fn, {a_str_obj, b_str_obj}, "result");
-            bf.CreateCall(m_module.getFunction("__ang_decref"), {a_str_obj});
-            bf.CreateCall(m_module.getFunction("__ang_decref"), {b_str_obj});
             bf.CreateRet(result);
         }
 

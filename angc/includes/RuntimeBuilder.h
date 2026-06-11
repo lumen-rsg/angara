@@ -99,8 +99,6 @@ public:
     llvm::FunctionCallee getFuncRecordNew()       const { return m_fn_record_new; }
     llvm::FunctionCallee getFuncRecordGet()       const { return m_fn_record_get; }
     llvm::FunctionCallee getFuncRecordSet()       const { return m_fn_record_set; }
-    llvm::FunctionCallee getFuncIncref()          const;  // Deprecated: delegates to GC
-    llvm::FunctionCallee getFuncDecref()          const;  // Deprecated: delegates to GC
     llvm::FunctionCallee getFuncEquals()          const { return m_fn_equals; }
     llvm::FunctionCallee getFuncDeepClone()       const { return m_fn_deep_clone; }
     llvm::FunctionCallee getFuncToI64()           const { return m_fn_to_i64; }
