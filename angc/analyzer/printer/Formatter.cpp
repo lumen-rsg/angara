@@ -2,8 +2,6 @@
 
 namespace angara {
 
-// ── Output Helpers ────────────────────────────────────────
-
 void Formatter::writeIndent() {
     if (m_at_line_start) {
         for (int i = 0; i < m_indent; i++) m_out << "    ";
@@ -16,8 +14,6 @@ void Formatter::decreaseIndent() { m_indent--; }
 void Formatter::newLine() { m_out << "\n"; m_at_line_start = true; }
 void Formatter::write(const std::string& s) { writeIndent(); m_out << s; }
 void Formatter::writeLine(const std::string& s) { writeIndent(); m_out << s; newLine(); }
-
-// ── Expression Formatting ─────────────────────────────────
 
 std::string Formatter::fmtExpr(const std::shared_ptr<Expr>& expr) {
     if (!expr) return "";
@@ -107,7 +103,6 @@ void Formatter::fmtMembers(const std::vector<std::shared_ptr<ClassMember>>& memb
     }
 }
 
-// ── Top-Level ─────────────────────────────────────────────
 
 std::string Formatter::format(const std::vector<std::shared_ptr<Stmt>>& statements) {
     m_out.str(""); m_indent = 0; m_at_line_start = true;
@@ -115,7 +110,6 @@ std::string Formatter::format(const std::vector<std::shared_ptr<Stmt>>& statemen
     return m_out.str();
 }
 
-// ── Statement Visitors ────────────────────────────────────
 
 void Formatter::visit(std::shared_ptr<const ExpressionStmt> stmt) {
     writeLine(fmtExpr(stmt->expression) + ";");
@@ -322,7 +316,6 @@ void Formatter::visit(std::shared_ptr<const UnsafeBlockStmt> stmt) {
 
 void Formatter::visit(std::shared_ptr<const EmptyStmt>) { writeLine(";"); }
 
-// ── Expression Visitors (return std::string via std::any) ──
 
 std::any Formatter::visit(const Literal& expr) {
     if (expr.token.type == TokenType::STRING) return "\"" + expr.token.lexeme + "\"";

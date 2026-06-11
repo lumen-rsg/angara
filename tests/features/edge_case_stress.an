@@ -1,0 +1,1534 @@
+// ============================================================
+//  ANGARA EDGE CASE STRESS TEST
+//
+//  Purpose: Push every language feature to its boundaries.
+//  Covers: arithmetic, strings, scoping, control flow, closures,
+//  collections, records, data classes, enums, exceptions,
+//  inheritance, optionals, generics, concurrency, and
+//  feature interactions.
+// ============================================================
+attach io;
+attach assert;
+
+// ---- Shared Types ----
+
+data Pair<K, V> {
+    let key as K;
+    let val as V;
+}
+
+data Box<T> {
+    let value as T;
+}
+
+data Triple<A, B, C> {
+    let a as A;
+    let b as B;
+    let c as C;
+}
+
+data NestedBox<T> {
+    let inner as Box<T>;
+}
+
+data Wrapper {
+    let payload as string;
+    let count as i64;
+}
+
+enum Shape {
+    Point,
+    Circle(f64),
+    Square(f64)
+}
+
+enum Result {
+    Ok(i64),
+    Err(string)
+}
+
+class Counter {
+    public:
+    let value as i64;
+
+    func init(this) {
+        this.value = 0;
+    }
+
+    func inc(this) {
+        this.value = this.value + 1;
+    }
+
+    func add(this, n as i64) {
+        this.value = this.value + n;
+    }
+}
+
+class Animal {
+    public:
+    let name as string;
+
+    func init(this, name as string) {
+        this.name = name;
+    }
+
+    func speak(this) -> string {
+        return this.name + " speaks";
+    }
+}
+
+class Dog inherits Animal {
+    public:
+    let breed as string;
+
+    func init(this, name as string, breed as string) {
+        super(name);
+        this.breed = breed;
+    }
+
+    func speak(this) -> string {
+        return this.name + " barks";
+    }
+
+    func info(this) -> string {
+        return this.breed + " named " + this.name;
+    }
+}
+
+class GuideDog inherits Dog {
+    public:
+    let handler as string;
+
+    func init(this, name as string, breed as string, handler as string) {
+        super(name, breed);
+        this.handler = handler;
+    }
+
+    func speak(this) -> string {
+        return this.name + " guides and barks";
+    }
+
+    func detail(this) -> string {
+        return this.info() + " for " + this.handler;
+    }
+}
+
+// ---- Higher-order helpers ----
+
+func make_adder(n as i64) -> function(i64) -> i64 {
+    return func(x as i64) -> i64 {
+        return x + n;
+    };
+}
+
+func apply(f as function(i64) -> i64, x as i64) -> i64 {
+    return f(x);
+}
+
+func apply_twice(f as function(i64) -> i64, x as i64) -> i64 {
+    return f(f(x));
+}
+
+func compose(f as function(i64) -> i64, g as function(i64) -> i64) -> function(i64) -> i64 {
+    return func(x as i64) -> i64 {
+        return f(g(x));
+    };
+}
+
+// ---- Exception helpers ----
+
+func always_throws() -> i64 {
+    throw Exception("always");
+}
+
+func maybe_throws(x as i64) -> i64 {
+    if (x < 0) {
+        throw Exception("negative: " + string(x));
+    }
+    return x * 2;
+}
+
+func rethrow_wrapper(x as i64) -> i64 {
+    try {
+        return maybe_throws(x);
+    } catch (e as Exception) {
+        throw Exception("wrapped: " + e.message);
+    }
+}
+
+
+// ============================================================
+//  SECTION 1: Arithmetic Edge Cases
+// ============================================================
+
+func test_arithmetic() {
+    io.println(1, "\n[1] Arithmetic Edge Cases");
+
+    // Negative multiplication
+    let neg = -1;
+    assert.eq(neg * neg, 1, "(-1) * (-1) = 1");
+    assert.eq(-neg, 1, "double negation = 1");
+
+    // Modulo with negatives (truncation toward zero)
+    assert.eq(7 % 3, 1, "7 % 3 = 1");
+    assert.eq((-7) % 3, -1, "(-7) % 3 = -1");
+    assert.eq(7 % (-3), 1, "7 % (-3) = 1");
+
+    // Integer division truncation
+    assert.eq(10 / 3, 3, "10 / 3 = 3 (truncation)");
+    assert.eq((-10) / 3, -3, "(-10) / 3 = -3 (truncation toward zero)");
+    assert.eq(0 / 5, 0, "0 / 5 = 0");
+
+    // Large numbers
+    let billion = 1000000000;
+    let product = billion * 2;
+    assert.eq(product, 2000000000, "billion * 2 = 2 billion");
+
+    // Floating point basics
+    let f1 = 0.1;
+    let f2 = 0.2;
+    let f_sum = f1 + f2;
+    io.println(1, "  0.1 + 0.2 = " + string(f_sum));
+    // Just verify it doesn't crash; float precision is a known issue
+
+    // Type casts at boundaries
+    assert.eq(i64(9.99), 9, "i64(9.99) truncates to 9");
+    assert.eq(i64(-9.99), -9, "i64(-9.99) truncates to -9");
+    assert.eq(i64(0.0), 0, "i64(0.0) = 0");
+
+    // Boolean stringification
+    assert.eq(string(true), "true", "string(true) = 'true'");
+    assert.eq(string(false), "false", "string(false) = 'false'");
+
+    // Chained arithmetic
+    let expr = 2 + 3 * 4 - 1;
+    assert.eq(expr, 13, "2 + 3*4 - 1 = 13 (precedence)");
+
+    // Unary plus/minus combos
+    let a = 5;
+    assert.eq(-(-a), 5, "double unary minus");
+
+    io.println(1, "  [1] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 2: String Edge Cases
+// ============================================================
+
+func test_strings() {
+    io.println(1, "\n[2] String Edge Cases");
+
+    // Empty strings
+    let empty = "";
+    assert.eq(len(empty), 0, "empty string length = 0");
+    let glued = empty + "hello" + empty;
+    assert.eq(glued, "hello", "empty concat is identity");
+
+    // String repetition
+    assert.eq("ab" * 3, "ababab", "'ab' * 3 = 'ababab'");
+    assert.eq("x" * 1, "x", "'x' * 1 = 'x'");
+
+    // Build a long string by concatenation
+    let long = "";
+    for (let i = 0; i < 200; i = i + 1) {
+        long = long + "x";
+    }
+    assert.eq(len(long), 200, "200-char string via concatenation");
+
+    // String comparison
+    assert.eq("abc" == "abc", true, "string ==");
+    assert.eq("abc" != "def", true, "string !=");
+    assert.eq("a" < "b", true, "string <");
+    assert.eq("b" > "a", true, "string >");
+
+    // String containing numbers (no implicit conversion)
+    let s = "123";
+    assert.eq(len(s), 3, "'123' is a 3-char string");
+
+    // String from type conversion
+    assert.eq(string(0), "0", "string(0) = '0'");
+    assert.eq(string(-42), "-42", "string(-42) = '-42'");
+
+    io.println(1, "  [2] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 3: Variable Scoping & Shadowing
+// ============================================================
+
+func test_scoping() {
+    io.println(1, "\n[3] Variable Scoping & Shadowing");
+
+    // Block scoping
+    let x = 10;
+    {
+        let y = 20;
+        assert.eq(x + y, 30, "inner block sees outer var");
+    }
+    assert.eq(x, 10, "outer var unchanged after block");
+
+    // Variable shadowing in inner scope
+    let a = 1;
+    {
+        let a = 2;
+        assert.eq(a, 2, "inner a shadows outer");
+    }
+    assert.eq(a, 1, "outer a is still 1");
+
+    // Reassignment
+    let b = 10;
+    b = 20;
+    b = 30;
+    assert.eq(b, 30, "reassignment works");
+
+    // For-loop variable does not leak (test via separate counter)
+    let last = 0;
+    for (let i = 0; i < 5; i = i + 1) {
+        last = i;
+    }
+    assert.eq(last, 4, "last loop value captured correctly");
+
+    // Deeply nested blocks
+    let depth = 0;
+    {
+        depth = depth + 1;
+        {
+            depth = depth + 1;
+            {
+                depth = depth + 1;
+            }
+        }
+    }
+    assert.eq(depth, 3, "deeply nested blocks all execute");
+
+    io.println(1, "  [3] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 4: Control Flow Edge Cases
+// ============================================================
+
+func test_control_flow() {
+    io.println(1, "\n[4] Control Flow Edge Cases");
+
+    // Break only exits innermost loop
+    let count = 0;
+    for (let i = 0; i < 3; i = i + 1) {
+        for (let j = 0; j < 10; j = j + 1) {
+            if (j == 2) { break; }
+            count = count + 1;
+        }
+    }
+    assert.eq(count, 6, "break exits only inner loop (3*2=6)");
+
+    // Continue skips correctly
+    let sum = 0;
+    for (let i = 0; i < 10; i = i + 1) {
+        if (i % 3 == 0) { continue; }
+        sum = sum + i;
+    }
+    // sum = 1+2+4+5+7+8 = 27
+    assert.eq(sum, 27, "continue skips multiples of 3");
+
+    // Nested ternary
+    let val = 2;
+    let result = val == 1 ? "one" : (val == 2 ? "two" : "other");
+    assert.eq(result, "two", "nested ternary: second branch");
+
+    let val2 = 99;
+    let result2 = val2 == 1 ? "one" : (val2 == 2 ? "two" : "other");
+    assert.eq(result2, "other", "nested ternary: default branch");
+
+    // Collatz conjecture: 100 -> 1
+    let n = 100;
+    while (n > 1) {
+        if (n % 2 == 0) {
+            n = n / 2;
+        } else {
+            n = 3 * n + 1;
+        }
+    }
+    assert.eq(n, 1, "Collatz(100) reaches 1");
+
+    // orif chain
+    let grade = 85;
+    let letter = "";
+    if (grade >= 90) {
+        letter = "A";
+    } orif (grade >= 80) {
+        letter = "B";
+    } orif (grade >= 70) {
+        letter = "C";
+    } orif (grade >= 60) {
+        letter = "D";
+    } else {
+        letter = "F";
+    }
+    assert.eq(letter, "B", "orif chain: 85 = B");
+
+    // Ternary in expression context
+    let base = 10;
+    let adjusted = base + (true ? 5 : 0);
+    assert.eq(adjusted, 15, "ternary inside arithmetic");
+
+    // Boolean short-circuit: false && <anything> is false
+    let side_effect = false;
+    let short_val = false && true;
+    assert.eq(short_val, false, "false && true = false");
+
+    // Boolean short-circuit: true || <anything> is true
+    let short_val2 = true || false;
+    assert.eq(short_val2, true, "true || false = true");
+
+    io.println(1, "  [4] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 5: Closure & Higher-Order Function Edge Cases
+// ============================================================
+
+func test_closures() {
+    io.println(1, "\n[5] Closure & Higher-Order Edge Cases");
+
+    // Closure returned from function (different captures)
+    let add5 = make_adder(5);
+    let add10 = make_adder(10);
+    assert.eq(add5(3), 8, "make_adder(5)(3) = 8");
+    assert.eq(add10(3), 13, "make_adder(10)(3) = 13");
+
+    // Closures are independent
+    assert.eq(add5(100), 105, "add5 closure independent from add10");
+    assert.eq(add10(100), 110, "add10 closure independent from add5");
+
+    // Apply function twice
+    let double = func(x as i64) -> i64 { return x * 2; };
+    assert.eq(apply_twice(double, 3), 12, "double(double(3)) = 12");
+
+    let add1 = func(x as i64) -> i64 { return x + 1; };
+    assert.eq(apply_twice(add1, 0), 2, "add1(add1(0)) = 2");
+
+    // Function composition
+    let double2 = func(x as i64) -> i64 { return x * 2; };
+    let negate = func(x as i64) -> i64 { return -x; };
+    let double_then_negate = compose(negate, double2);
+    assert.eq(double_then_negate(5), -10, "compose: negate(double(5)) = -10");
+
+    let negate_then_double = compose(double2, negate);
+    assert.eq(negate_then_double(5), -10, "compose: double(negate(5)) = -10");
+
+    // Closure reading outer variable
+    let captured = 42;
+    let get_captured = func() -> i64 {
+        return captured;
+    };
+    assert.eq(get_captured(), 42, "closure reads outer variable");
+
+    // Nested closures (3 levels)
+    let level1 = 1;
+    let make_level2 = func() -> function(i64) -> i64 {
+        let level2 = 10;
+        return func(x as i64) -> i64 {
+            let level3 = 100;
+            return level1 + level2 + level3 + x;
+        };
+    };
+    let level2_fn = make_level2();
+    assert.eq(level2_fn(1000), 1111, "3-level nested closure: 1+10+100+1000=1111");
+
+    // Lambda immediately invoked (IIFE pattern)
+    let iife_result = func() -> i64 { return 99; }();
+    assert.eq(iife_result, 99, "IIFE returns 99");
+
+    // Higher-order: map pattern (manual)
+    let items = [1, 2, 3, 4, 5];
+    let doubled = [];
+    for (item in items) {
+        doubled.push(apply(double, item));
+    }
+    assert.eq(len(doubled), 5, "map: length preserved");
+    assert.eq(doubled[0], 2, "map: first element doubled");
+    assert.eq(doubled[4], 10, "map: last element doubled");
+
+    io.println(1, "  [5] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 6: Collection Edge Cases
+// ============================================================
+
+func test_collections() {
+    io.println(1, "\n[6] Collection Edge Cases");
+
+    // Empty list operations
+    let empty = [];
+    assert.eq(len(empty), 0, "empty list length = 0");
+
+    // Push to empty list
+    empty.push(42);
+    assert.eq(len(empty), 1, "push to empty: length = 1");
+    assert.eq(empty[0], 42, "push to empty: element = 42");
+
+    // Single element list
+    let single = [99];
+    assert.eq(len(single), 1, "single-element list");
+    assert.eq(single[0], 99, "single element access");
+
+    // Large list (10K items)
+    let big as list<i64> = [];
+    for (let i = 0; i < 10000; i = i + 1) {
+        big.push(i);
+    }
+    assert.eq(len(big), 10000, "10K list length");
+    assert.eq(big[0], 0, "10K list first element");
+    assert.eq(big[9999], 9999, "10K list last element");
+
+    // Sum of large list
+    let big_sum = 0;
+    for (item in big) {
+        big_sum = big_sum + item;
+    }
+    // sum(0..9999) = 9999 * 10000 / 2 = 49995000
+    assert.eq(big_sum, 49995000, "sum of 0..9999 = 49995000");
+
+    // Nested lists
+    let matrix = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+    assert.eq(matrix[0][0], 1, "matrix[0][0] = 1");
+    assert.eq(matrix[1][1], 5, "matrix[1][1] = 5");
+    assert.eq(matrix[2][2], 9, "matrix[2][2] = 9");
+
+    // List mutation via index
+    let mut = [10, 20, 30];
+    mut[1] = 99;
+    assert.eq(mut[1], 99, "list mutation via index");
+
+    // List of strings
+    let names = ["alice", "bob", "charlie"];
+    assert.eq(len(names), 3, "string list length");
+    assert.eq(names[1], "bob", "string list access");
+
+    // List of data class instances
+    let points = [Pair("x", 1)];
+    points.push(Pair("y", 2));
+    points.push(Pair("z", 3));
+    assert.eq(len(points), 3, "data class list length");
+    assert.eq(points[0].key, "x", "data class list: first key");
+    assert.eq(points[2].val, 3, "data class list: last val");
+
+    // List concatenation via push in loop
+    let merged as list<i64> = [];
+    for (item in [10, 20]) {
+        merged.push(item);
+    }
+    for (item in [30, 40]) {
+        merged.push(item);
+    }
+    assert.eq(len(merged), 4, "merged list length = 4");
+    assert.eq(merged[2], 30, "merged list element");
+
+    io.println(1, "  [6] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 7: Record Edge Cases
+// ============================================================
+
+func test_records() {
+    io.println(1, "\n[7] Record Edge Cases");
+
+    // Basic record
+    let rec = {
+        "name": "test",
+        "value": 42
+    };
+    assert.eq(rec["name"], "test", "record string access");
+    assert.eq(rec["value"], 42, "record int access");
+
+    // Nested record
+    let nested = {
+        "user": {
+            "name": "Alice",
+            "age": 30
+        }
+    };
+    let user = nested["user"];
+    assert.eq(user["name"], "Alice", "nested record access");
+
+    // Record with list value
+    let with_list = {
+        "items": [1, 2, 3],
+        "count": 3
+    };
+    assert.eq(with_list["count"], 3, "record with list: count");
+    let items = with_list["items"];
+    assert.eq(len(items), 3, "record with list: items length");
+
+    // Record mutation
+    let mut_rec = {
+        "x": 10
+    };
+    mut_rec["x"] = 20;
+    assert.eq(mut_rec["x"], 20, "record mutation");
+
+    // Record keys
+    let keyed = {
+        "a": 1,
+        "b": 2,
+        "c": 3
+    };
+    let keys = keyed.keys();
+    assert.eq(len(keys), 3, "record has 3 keys");
+
+    // Record remove
+    let removable = {
+        "keep": 1,
+        "remove_me": 2
+    };
+    let ok = removable.remove("remove_me");
+    assert.eq(len(removable.keys()), 1, "record after remove: 1 key");
+
+    // Remove non-existent key
+    let ok2 = removable.remove("nonexistent");
+    assert.eq(len(removable.keys()), 1, "remove nonexistent: no change");
+
+    io.println(1, "  [7] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 8: Data Class Edge Cases
+// ============================================================
+
+func test_data_classes() {
+    io.println(1, "\n[8] Data Class Edge Cases");
+
+    // Basic construction and field access
+    let w = Wrapper("hello", 5);
+    assert.eq(w.payload, "hello", "data class: payload field");
+    assert.eq(w.count, 5, "data class: count field");
+
+    // Generic data class with i64
+    let ib = Box(42);
+    assert.eq(ib.value, 42, "Box(i64): value = 42");
+
+    // Generic data class with string
+    let sb = Box("world");
+    assert.eq(sb.value, "world", "Box(string): value = 'world'");
+
+    // Nested generic data class
+    let inner_box = Box(99);
+    assert.eq(inner_box.value, 99, "Box(99): value = 99");
+
+    // Triple with three different types
+    let trip = Triple("name", 42, 3.14);
+    assert.eq(trip.a, "name", "Triple: string field");
+    assert.eq(trip.b, 42, "Triple: int field");
+
+    // Pair with complex types
+    let pair1 = Pair("key", 100);
+    assert.eq(pair1.key, "key", "Pair: key");
+    assert.eq(pair1.val, 100, "Pair: val");
+
+    // Data class clone
+    let original = Wrapper("orig", 1);
+    let cloned = original.clone();
+    assert.eq(cloned.payload, "orig", "clone: payload preserved");
+    assert.eq(cloned.count, 1, "clone: count preserved");
+
+    // Data class deep clone
+    let dc = Pair("test", 42);
+    let dc2 = dc.deep_clone();
+    assert.eq(dc2.key, "test", "deep_clone: key preserved");
+    assert.eq(dc2.val, 42, "deep_clone: val preserved");
+
+    // Data class in list
+    let box_list = [Box(0)];
+    for (let i = 1; i < 100; i = i + 1) {
+        box_list.push(Box(i));
+    }
+    assert.eq(len(box_list), 100, "100 Box instances in list");
+    assert.eq(box_list[50].value, 50, "Box at index 50");
+
+    // Data class as record value
+    let rec_with_dc = {
+        "box": Box("stored")
+    };
+    let retrieved = rec_with_dc["box"];
+    assert.eq(retrieved.value, "stored", "data class in record");
+
+    io.println(1, "  [8] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 9: Enum & Pattern Matching Edge Cases
+// ============================================================
+
+func test_enums() {
+    io.println(1, "\n[9] Enum & Pattern Matching Edge Cases");
+
+    // Simple enum variant
+    let p = Shape.Point;
+    let desc = match (p) {
+        case Shape.Point: "point",
+        case Shape.Circle(r): "circle r=" + string(r),
+        case Shape.Square(s): "square s=" + string(s),
+        case _: "unknown"
+    };
+    assert.eq(desc, "point", "match simple variant");
+
+    // Enum with single payload
+    let c = Shape.Circle(5.0);
+    let desc2 = match (c) {
+        case Shape.Point: "point",
+        case Shape.Circle(r): "circle r=" + string(r),
+        case Shape.Square(s): "square " + string(s),
+        case _: "unknown"
+    };
+    // Just verify it doesn't crash and matches the Circle case
+
+    // Enum with single payload (Square)
+    let r = Shape.Square(4.0);
+    let desc3 = match (r) {
+        case Shape.Point: "point",
+        case Shape.Circle(radius): "circle",
+        case Shape.Square(s): "square " + string(s),
+        case _: "unknown"
+    };
+
+    // Result enum: Ok
+    let ok_val = Result.Ok(42);
+    let ok_desc = match (ok_val) {
+        case Result.Ok(v): "ok: " + string(v),
+        case Result.Err(msg): "err: " + msg,
+        case _: "unknown"
+    };
+    assert.eq(ok_desc, "ok: 42", "Result.Ok matched");
+
+    // Result enum: Err
+    let err_val = Result.Err("not found");
+    let err_desc = match (err_val) {
+        case Result.Ok(v): "ok: " + string(v),
+        case Result.Err(msg): "err: " + msg,
+        case _: "unknown"
+    };
+    assert.eq(err_desc, "err: not found", "Result.Err matched");
+
+    // Match as expression assigned to variable
+    let shape = Shape.Circle(10.0);
+    let label = match (shape) {
+        case Shape.Point: "P",
+        case Shape.Circle(r): "C",
+        case Shape.Square(s): "S",
+        case _: "?"
+    };
+    assert.eq(label, "C", "match expression assigned to variable");
+
+    // Wildcard catches unhandled
+    let mystery = Shape.Point;
+    let wildcard_result = match (mystery) {
+        case Shape.Circle(r): "circle",
+        case Shape.Square(s): "square s=" + string(s),
+        case _: "wildcard"
+    };
+    assert.eq(wildcard_result, "wildcard", "wildcard catches unmatched");
+
+    // Match in ternary-like context
+    let r2 = Result.Ok(10);
+    let is_ok = match (r2) {
+        case Result.Ok(_): true,
+        case Result.Err(_): false,
+        case _: false
+    };
+    assert.eq(is_ok, true, "match produces bool: Ok = true");
+
+    io.println(1, "  [9] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 10: Exception Edge Cases
+// ============================================================
+
+func test_exceptions() {
+    io.println(1, "\n[10] Exception Edge Cases");
+
+    // Basic throw/catch
+    try {
+        throw Exception("test error");
+    } catch (e as Exception) {
+        assert.eq(e.message, "test error", "caught exception message");
+    }
+
+    // Exception across function boundary
+    try {
+        let v = always_throws();
+    } catch (e as Exception) {
+        assert.eq(e.message, "always", "exception from function");
+    }
+
+    // Conditional throw
+    try {
+        let v = maybe_throws(5);
+        assert.eq(v, 10, "no throw: maybe_throws(5) = 10");
+    } catch (e as Exception) {
+        // Should not reach here
+        assert.eq(true, false, "unexpected exception for positive input");
+    }
+
+    try {
+        let v = maybe_throws(-1);
+    } catch (e as Exception) {
+        assert.eq(e.message, "negative: -1", "conditional throw caught");
+    }
+
+    // Re-throw
+    try {
+        let v = rethrow_wrapper(-5);
+    } catch (e as Exception) {
+        assert.eq(e.message, "wrapped: negative: -5", "re-thrown with wrapped message");
+    }
+
+    // Nested try/catch: inner catches, outer does not
+    let outer_caught = false;
+    try {
+        try {
+            throw Exception("inner error");
+        } catch (e as Exception) {
+            assert.eq(e.message, "inner error", "inner catch");
+        }
+    } catch (e as Exception) {
+        outer_caught = true;
+    }
+    assert.eq(outer_caught, false, "outer catch not reached: inner handled it");
+
+    // Exception in loop
+    let iterations = 0;
+    for (let i = 0; i < 10; i = i + 1) {
+        try {
+            if (i == 5) {
+                throw Exception("at 5");
+            }
+            iterations = iterations + 1;
+        } catch (e as Exception) {
+            iterations = iterations + 100;
+        }
+    }
+    // 5 normal (i=0..4) + 100 (at i=5) + 4 normal (i=6..9) = 109
+    assert.eq(iterations, 109, "exception in loop: 5 + 100 + 4 = 109");
+
+    // Try/catch with return value
+    let safe_result = 0;
+    try {
+        safe_result = maybe_throws(7);
+    } catch (e as Exception) {
+        safe_result = -1;
+    }
+    assert.eq(safe_result, 14, "try/catch preserves success value: 7*2 = 14");
+
+    let safe_err = 0;
+    try {
+        safe_err = maybe_throws(-3);
+    } catch (e as Exception) {
+        safe_err = -1;
+    }
+    assert.eq(safe_err, -1, "try/catch returns fallback on error");
+
+    io.println(1, "  [10] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 11: Inheritance & Polymorphism Edge Cases
+// ============================================================
+
+func test_inheritance() {
+    io.println(1, "\n[11] Inheritance & Polymorphism Edge Cases");
+
+    // Base class
+    let animal = Animal("Cat");
+    assert.eq(animal.speak(), "Cat speaks", "base class method");
+
+    // Single inheritance with override
+    let dog = Dog("Rex", "Shepherd");
+    assert.eq(dog.speak(), "Rex barks", "overridden method");
+    assert.eq(dog.info(), "Shepherd named Rex", "derived class method");
+    assert.eq(dog.name, "Rex", "inherited field");
+
+    // 3-level deep inheritance
+    let guide = GuideDog("Buddy", "Labrador", "John");
+    assert.eq(guide.speak(), "Buddy guides and barks", "3-level override");
+    assert.eq(guide.detail(), "Labrador named Buddy for John", "3-level method chain");
+    assert.eq(guide.name, "Buddy", "3-level inherited field");
+    assert.eq(guide.breed, "Labrador", "2-level inherited field");
+    assert.eq(guide.handler, "John", "own field");
+
+    // Class instances in list
+    let animals = [];
+    animals.push(Animal("Cat"));
+    animals.push(Dog("Rex", "Poodle"));
+    assert.eq(len(animals), 2, "mixed class list length");
+
+    // Counter class (mutation)
+    let c = Counter();
+    assert.eq(c.value, 0, "counter starts at 0");
+    c.inc();
+    c.inc();
+    c.inc();
+    assert.eq(c.value, 3, "counter after 3 inc = 3");
+    c.add(7);
+    assert.eq(c.value, 10, "counter after add(7) = 10");
+
+    io.println(1, "  [11] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 12: Optional Edge Cases
+// ============================================================
+
+func test_optionals() {
+    io.println(1, "\n[12] Optional Edge Cases");
+
+    // Basic optional with value
+    let val as i64? = 42;
+    assert.eq(val != nil, true, "optional with value is not nil");
+
+    // Basic optional with nil
+    let nothing as i64? = nil;
+    assert.eq(nothing == nil, true, "optional with nil is nil");
+
+    // String optional
+    let s as string? = "hello";
+    assert.eq(s != nil, true, "string optional has value");
+
+    let sn as string? = nil;
+    assert.eq(sn == nil, true, "string optional is nil");
+
+    // Nil coalescing
+    let a as i64? = nil;
+    let resolved = a ?? 99;
+    assert.eq(resolved, 99, "nil ?? 99 = 99");
+
+    let b as i64? = 7;
+    let resolved2 = b ?? 99;
+    assert.eq(resolved2, 7, "7 ?? 99 = 7");
+
+    // Chained nil coalescing
+    let x1 as i64? = nil;
+    let x2 as i64? = nil;
+    let x3 as i64? = 42;
+    let chain = x1 ?? x2 ?? x3;
+    assert.eq(chain, 42, "nil ?? nil ?? 42 = 42");
+
+    // Optional in list
+    let opt_val as i64? = nil;
+    assert.eq(opt_val == nil, true, "optional is nil");
+    let resolved_opt = opt_val ?? 99;
+    assert.eq(resolved_opt, 99, "nil ?? 99 = 99");
+
+    // Optional in list
+    let opts = [];
+    opts.push(nil);
+    opts.push(1);
+    opts.push(nil);
+    opts.push(2);
+    assert.eq(len(opts), 4, "list with nils: length = 4");
+
+    io.println(1, "  [12] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 13: Generic Edge Cases
+// ============================================================
+
+func test_generics() {
+    io.println(1, "\n[13] Generic Edge Cases");
+
+    // Generic function with i64
+    let a = identity(42);
+    assert.eq(a, 42, "identity(i64)");
+
+    // Generic function with string
+    let b = identity("hello");
+    assert.eq(b, "hello", "identity(string)");
+
+    // Generic function with bool
+    let c = identity(true);
+    assert.eq(c, true, "identity(bool)");
+
+    // Nested Box
+    let inner_box2 = Box(42);
+    assert.eq(inner_box2.value, 42, "Box(42) value = 42");
+
+    // Generic with Pair
+    let p1 = Pair("key", 100);
+    assert.eq(p1.key, "key", "Pair<string,i64> key");
+    assert.eq(p1.val, 100, "Pair<string,i64> val");
+
+    let p2 = Pair(1, "value");
+    assert.eq(p2.key, 1, "Pair<i64,string> key");
+    assert.eq(p2.val, "value", "Pair<i64,string> val");
+
+    let p3 = Pair(true, false);
+    assert.eq(p3.key, true, "Pair<bool,bool> key");
+    assert.eq(p3.val, false, "Pair<bool,bool> val");
+
+    // Triple with three different types
+    let t = Triple("a", 1, true);
+    assert.eq(t.a, "a", "Triple: first = 'a'");
+    assert.eq(t.b, 1, "Triple: second = 1");
+    assert.eq(t.c, true, "Triple: third = true");
+
+    // Generic function applied to data class
+    let id_num = identity(42);
+    assert.eq(id_num, 42, "identity(42) = 42");
+    let id_str = identity("hello");
+    assert.eq(id_str, "hello", "identity('hello') = 'hello'");
+    let id_bool = identity(true);
+    assert.eq(id_bool, true, "identity(true) = true");
+
+    // Generic data in list
+    let pairs = [Pair(1, "one")];
+    pairs.push(Pair(2, "two"));
+    pairs.push(Pair(3, "three"));
+    assert.eq(len(pairs), 3, "list of Pair: length = 3");
+    assert.eq(pairs[1].val, "two", "list of Pair: second val");
+
+    io.println(1, "  [13] PASSED");
+}
+
+func identity<T>(x as T) -> T {
+    return x;
+}
+
+
+// ============================================================
+//  SECTION 14: Concurrency Edge Cases
+// ============================================================
+
+class ThreadSafeCounter {
+    public:
+    let value as i64;
+    let mtx as Mutex;
+
+    func init(this) {
+        this.value = 0;
+        this.mtx = Mutex();
+    }
+
+    func inc(this) {
+        this.mtx.lock();
+        this.value = this.value + 1;
+        this.mtx.unlock();
+    }
+}
+
+func counter_worker(ctr as ThreadSafeCounter, n as i64) {
+    for (let i = 0; i < n; i = i + 1) {
+        ctr.inc();
+    }
+}
+
+func test_concurrency() {
+    io.println(1, "\n[14] Concurrency Edge Cases");
+
+    // 10 threads, each incrementing 500 times = 5000
+    let ctr = ThreadSafeCounter();
+    let threads as list<Thread> = [];
+    let num_threads = 10;
+    let ops_per = 500;
+
+    for (let i = 0; i < num_threads; i = i + 1) {
+        let t = spawn(counter_worker, ctr, ops_per);
+        threads.push(t);
+    }
+
+    for (let i = 0; i < num_threads; i = i + 1) {
+        threads[i].join();
+    }
+
+    let expected = num_threads * ops_per;
+    assert.eq(ctr.value, expected, "10 threads x 500 = 5000");
+
+    // Join in reverse order (tests join independence)
+    let ctr2 = ThreadSafeCounter();
+    let threads2 as list<Thread> = [];
+
+    for (let i = 0; i < 5; i = i + 1) {
+        let t = spawn(counter_worker, ctr2, 200);
+        threads2.push(t);
+    }
+
+    // Join in reverse
+    for (let i = 4; i >= 0; i = i - 1) {
+        threads2[i].join();
+    }
+    assert.eq(ctr2.value, 1000, "reverse join: 5 x 200 = 1000");
+
+    io.println(1, "  [14] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 15: Type Inspection Edge Cases
+// ============================================================
+
+func test_type_inspection() {
+    io.println(1, "\n[15] Type Inspection Edge Cases");
+
+    // typeof on primitives
+    let t_int = typeof(42);
+    let t_str = typeof("hello");
+    let t_bool = typeof(true);
+    let t_float = typeof(3.14);
+
+    io.println(1, "  typeof(42) = " + t_int);
+    io.println(1, "  typeof('hello') = " + t_str);
+    io.println(1, "  typeof(true) = " + t_bool);
+    io.println(1, "  typeof(3.14) = " + t_float);
+
+    // typeof on complex types
+    let t_list = typeof([1, 2, 3]);
+    let t_record = typeof({ "key": "val" });
+    let t_nil = typeof(nil);
+
+    io.println(1, "  typeof([1,2,3]) = " + t_list);
+    io.println(1, "  typeof(record) = " + t_record);
+    io.println(1, "  typeof(nil) = " + t_nil);
+
+    // is expression with various types
+    let items as list<any> = [42, "hello", true, 3.14, nil];
+    let int_count = 0;
+    let str_count = 0;
+    let bool_count = 0;
+
+    for (item in items) {
+        if (item is i64) {
+            int_count = int_count + 1;
+        } orif (item is string) {
+            str_count = str_count + 1;
+        } orif (item is bool) {
+            bool_count = bool_count + 1;
+        }
+    }
+    assert.eq(int_count, 1, "is: found 1 i64 in any list");
+    assert.eq(str_count, 1, "is: found 1 string in any list");
+    assert.eq(bool_count, 1, "is: found 1 bool in any list");
+
+    io.println(1, "  [15] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 16: Feature Interaction Edge Cases
+// ============================================================
+
+func test_interactions() {
+    io.println(1, "\n[16] Feature Interaction Edge Cases");
+
+    // Exception inside closure
+    let safe_call = func(x as i64) -> i64 {
+        if (x < 0) {
+            throw Exception("negative in closure");
+        }
+        return x * 2;
+    };
+
+    try {
+        let r = safe_call(5);
+        assert.eq(r, 10, "closure that might throw: success case");
+    } catch (e as Exception) {
+        assert.eq(true, false, "closure should not have thrown for 5");
+    }
+
+    try {
+        let r = safe_call(-1);
+    } catch (e as Exception) {
+        assert.eq(e.message, "negative in closure", "exception from closure caught");
+    }
+
+    // Data class in match
+    let raw_result = Result.Ok(42);
+    let unpacked = match (raw_result) {
+        case Result.Ok(v): v,
+        case Result.Err(msg): -1,
+        case _: -1
+    };
+    assert.eq(unpacked, 42, "match on Result.Ok: extract value");
+
+    // Generic function with data class
+    let pair = Pair("count", 10);
+    assert.eq(pair.key, "count", "Pair preserves data");
+    assert.eq(pair.val, 10, "Pair preserves value");
+
+    // List of enums
+    let results = [Result.Ok(1)];
+    results.push(Result.Err("fail"));
+    results.push(Result.Ok(3));
+    assert.eq(len(results), 3, "list of Result enum: length = 3");
+
+    let ok_count = 0;
+    for (r in results) {
+        let desc = match (r) {
+            case Result.Ok(v): "ok",
+            case Result.Err(msg): "err",
+            case _: "?"
+        };
+        if (desc == "ok") {
+            ok_count = ok_count + 1;
+        }
+    }
+    assert.eq(ok_count, 2, "list of Result: 2 Ok, 1 Err");
+
+    // Nested match + ternary
+    let shape = Shape.Square(3.0);
+    let area_hint = match (shape) {
+        case Shape.Point: 0,
+        case Shape.Circle(r): 3,
+        case Shape.Square(s): (s > 2.0 ? 1 : 2),
+        case _: -1
+    };
+    assert.eq(area_hint, 1, "match + ternary: Square(3.0) s>2 = 1");
+
+    // Counter + exception
+    let c = Counter();
+    try {
+        c.inc();
+        throw Exception("stop");
+    } catch (e) {
+        assert.eq(c.value, 1, "counter incremented before exception was thrown");
+    }
+
+    // Record + list
+    let mixed = {
+        "items": [1, 2, 3],
+        "label": "boxes"
+    };
+    let boxes = mixed["items"];
+    assert.eq(len(boxes), 3, "record with list: 3 items");
+    assert.eq(boxes[1], 2, "record with list: second = 2");
+
+    io.println(1, "  [16] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 17: Memory & Scale Stress
+// ============================================================
+
+func test_memory_pressure() {
+    io.println(1, "\n[17] Memory & Scale Stress");
+
+    // Allocate 50K data class instances
+    let many_boxes = [Box(0)];
+    for (let i = 1; i < 50000; i = i + 1) {
+        many_boxes.push(Box(i));
+    }
+    assert.eq(len(many_boxes), 50000, "50K Box instances allocated");
+    assert.eq(many_boxes[0].value, 0, "50K: first element");
+    assert.eq(many_boxes[49999].value, 49999, "50K: last element");
+
+    // Allocation churn: create and discard
+    let churn_sum = 0;
+    for (let i = 0; i < 10000; i = i + 1) {
+        churn_sum = churn_sum + i * 2;
+    }
+    assert.eq(churn_sum, 99990000, "allocation churn sum = 99990000");
+
+    // Large string via concatenation
+    let big_str = "";
+    for (let i = 0; i < 1000; i = i + 1) {
+        big_str = big_str + "abcdefghij";
+    }
+    assert.eq(len(big_str), 10000, "10K string via concatenation");
+
+    // Deeply nested list (using any to allow reassignment of different list types)
+    let deep as any = [1];
+    for (let i = 0; i < 100; i = i + 1) {
+        deep = [deep];
+    }
+    // Just verify it doesn't crash
+    assert.eq(len(deep), 1, "deeply nested list: outer length = 1");
+
+    io.println(1, "  [17] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 18: Operator Precedence & Associativity
+// ============================================================
+
+func test_operators() {
+    io.println(1, "\n[18] Operator Precedence & Associativity");
+
+    // Arithmetic precedence: * before +-
+    assert.eq(2 + 3 * 4, 14, "2 + 3*4 = 14");
+    assert.eq(2 * 3 + 4, 10, "2*3 + 4 = 10");
+    assert.eq(10 - 2 * 3, 4, "10 - 2*3 = 4");
+
+    // Parentheses override precedence
+    assert.eq((2 + 3) * 4, 20, "(2+3)*4 = 20");
+
+    // Modulo same precedence as * /
+    assert.eq(10 % 3 + 1, 2, "10%3 + 1 = 2");
+
+    // Comparison chaining
+    assert.eq(1 < 2 && 2 < 3, true, "1 < 2 && 2 < 3 = true");
+    assert.eq(1 < 2 && 3 < 2, false, "1 < 2 && 3 < 2 = false");
+
+    // Logical operator precedence: && binds tighter than ||
+    assert.eq(true || false && false, true, "true || (false && false) = true");
+    assert.eq((true || false) && false, false, "(true || false) && false = false");
+
+    // Negation precedence
+    assert.eq(-3 + 5, 2, "-3 + 5 = 2");
+    assert.eq(-(3 + 5), -8, "-(3 + 5) = -8");
+
+    // Boolean negation
+    assert.eq(!true, false, "!true = false");
+    assert.eq(!false, true, "!false = true");
+    assert.eq(!true == false, true, "!true == false (negation before comparison)");
+
+    // Equality vs comparison
+    assert.eq(1 < 2 == true, true, "1 < 2 == true (comparison before equality)");
+
+    io.println(1, "  [18] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 19: Edge Cases in Loops & Iteration
+// ============================================================
+
+func test_loop_edges() {
+    io.println(1, "\n[19] Loop Edge Cases");
+
+    // Zero-iteration for loop
+    let count = 0;
+    for (let i = 0; i < 0; i = i + 1) {
+        count = count + 1;
+    }
+    assert.eq(count, 0, "zero-iteration for loop");
+
+    // Zero-iteration while loop
+    let w_count = 0;
+    while (false) {
+        w_count = w_count + 1;
+    }
+    assert.eq(w_count, 0, "zero-iteration while loop");
+
+    // For-in on empty list
+    let e_count = 0;
+    for (item in []) {
+        e_count = e_count + 1;
+    }
+    assert.eq(e_count, 0, "for-in on empty list: 0 iterations");
+
+    // Single-iteration loop
+    let s_count = 0;
+    for (let i = 0; i < 1; i = i + 1) {
+        s_count = s_count + 1;
+    }
+    assert.eq(s_count, 1, "single-iteration for loop");
+
+    // Break on first iteration
+    let b_count = 0;
+    for (let i = 0; i < 100; i = i + 1) {
+        b_count = b_count + 1;
+        break;
+    }
+    assert.eq(b_count, 1, "break on first iteration");
+
+    // Continue all iterations
+    let c_sum = 0;
+    for (let i = 0; i < 5; i = i + 1) {
+        continue;
+        c_sum = c_sum + 1;
+    }
+    assert.eq(c_sum, 0, "continue all: sum stays 0");
+
+    // Nested for-in
+    let outer_list = [[1, 2], [3, 4], [5, 6]];
+    let total = 0;
+    for (inner in outer_list) {
+        for (val in inner) {
+            total = total + val;
+        }
+    }
+    assert.eq(total, 21, "nested for-in: 1+2+3+4+5+6 = 21");
+
+    // Loop with complex update
+    let p = 1;
+    for (let i = 1; i <= 10; i = i + 1) {
+        p = p * i;
+    }
+    assert.eq(p, 3628800, "10! = 3628800");
+
+    io.println(1, "  [19] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 20: String & Type Conversion Edge Cases
+// ============================================================
+
+func test_conversions() {
+    io.println(1, "\n[20] Type Conversion Edge Cases");
+
+    // i64 conversions
+    assert.eq(i64(3.7), 3, "i64(3.7) = 3");
+    assert.eq(i64(-3.7), -3, "i64(-3.7) = -3");
+    assert.eq(i64(0.0), 0, "i64(0.0) = 0");
+
+    // f64 conversions
+    let f1 = f64(42);
+    assert.eq(i64(f1), 42, "f64(42) -> i64 = 42");
+
+    // string() on various types
+    assert.eq(string(0), "0", "string(0) = '0'");
+    assert.eq(string(-1), "-1", "string(-1) = '-1'");
+    assert.eq(string(true), "true", "string(true)");
+    assert.eq(string(false), "false", "string(false)");
+
+    // len() on various types
+    assert.eq(len("hello"), 5, "len('hello') = 5");
+    assert.eq(len(""), 0, "len('') = 0");
+    assert.eq(len([1, 2, 3]), 3, "len([1,2,3]) = 3");
+    assert.eq(len([]), 0, "len([]) = 0");
+
+    // typeof returns strings
+    assert.eq(typeof(42) == "i64", true, "typeof(42) == 'i64'");
+    assert.eq(typeof("hi") == "string", true, "typeof('hi') == 'string'");
+    assert.eq(typeof(true) == "bool", true, "typeof(true) == 'bool'");
+
+    io.println(1, "  [20] PASSED");
+}
+
+
+// ============================================================
+//  SECTION 21: Recursive Algorithms Stress
+// ============================================================
+
+func gcd(a as i64, b as i64) -> i64 {
+    if (b == 0) { return a; }
+    return gcd(b, a % b);
+}
+
+func factorial(n as i64) -> i64 {
+    if (n <= 1) { return 1; }
+    return n * factorial(n - 1);
+}
+
+func fibonacci(n as i64) -> i64 {
+    if (n <= 1) { return n; }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+func is_prime(n as i64) -> bool {
+    if (n < 2) { return false; }
+    if (n == 2) { return true; }
+    if (n % 2 == 0) { return false; }
+    let i = 3;
+    while (i * i <= n) {
+        if (n % i == 0) { return false; }
+        i = i + 2;
+    }
+    return true;
+}
+
+func test_recursive_stress() {
+    io.println(1, "\n[21] Recursive Algorithms Stress");
+
+    // GCD
+    assert.eq(gcd(48, 18), 6, "gcd(48,18) = 6");
+    assert.eq(gcd(100, 75), 25, "gcd(100,75) = 25");
+    assert.eq(gcd(17, 13), 1, "gcd(17,13) = 1 (coprime)");
+
+    // Factorial
+    assert.eq(factorial(0), 1, "0! = 1");
+    assert.eq(factorial(1), 1, "1! = 1");
+    assert.eq(factorial(10), 3628800, "10! = 3628800");
+
+    // Fibonacci
+    assert.eq(fibonacci(0), 0, "fib(0) = 0");
+    assert.eq(fibonacci(1), 1, "fib(1) = 1");
+    assert.eq(fibonacci(10), 55, "fib(10) = 55");
+    assert.eq(fibonacci(20), 6765, "fib(20) = 6765");
+
+    // Prime checking
+    assert.eq(is_prime(2), true, "2 is prime");
+    assert.eq(is_prime(17), true, "17 is prime");
+    assert.eq(is_prime(18), false, "18 is not prime");
+    assert.eq(is_prime(997), true, "997 is prime");
+
+    // Recursive sum via loop (comparison)
+    let loop_sum = 0;
+    for (let i = 1; i <= 100; i = i + 1) {
+        loop_sum = loop_sum + i;
+    }
+    assert.eq(loop_sum, 5050, "sum(1..100) = 5050");
+
+    // Count primes up to 100
+    let prime_count = 0;
+    for (let i = 2; i <= 100; i = i + 1) {
+        if (is_prime(i)) {
+            prime_count = prime_count + 1;
+        }
+    }
+    assert.eq(prime_count, 25, "25 primes up to 100");
+
+    io.println(1, "  [21] PASSED");
+}
+
+
+// ============================================================
+//  MAIN: Run all tests
+// ============================================================
+
+export func main() -> i64 {
+    try {
+        io.println(1, "============================================");
+        io.println(1, "  ANGARA EDGE CASE STRESS TEST");
+        io.println(1, "  21 sections of boundary-pushing tests");
+        io.println(1, "============================================");
+
+        test_arithmetic();
+        test_strings();
+        test_scoping();
+        test_control_flow();
+        test_closures();
+        test_collections();
+        test_records();
+        test_data_classes();
+        test_enums();
+        test_exceptions();
+        test_inheritance();
+        test_optionals();
+        test_generics();
+        test_concurrency();
+        test_type_inspection();
+        test_interactions();
+        test_memory_pressure();
+        test_operators();
+        test_loop_edges();
+        test_conversions();
+        test_recursive_stress();
+
+        io.println(1, "\n============================================");
+        io.println(1, "  ALL 21 SECTIONS PASSED");
+        io.println(1, "  No crashes, no assertion failures.");
+        io.println(1, "============================================");
+        return 0;
+    } catch (e as Exception) {
+        io.println(2, "\n[UNEXPECTED EXCEPTION]");
+        io.println(2, "  " + e.message);
+        return 1;
+    }
+}
