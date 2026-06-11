@@ -84,3 +84,36 @@ Every GC implementation must provide:
 - ObjHeader grows from 12 → 16 bytes
 - Closure gains env_count field
 - All incref/decref calls removed from entire codebase
+
+## Benchmark: Angara (GC) vs C (Stage 5)
+
+Results after Stage 5 (mark-sweep with root frames), --release / -O2, 5-run averages:
+
+| Benchmark | Angara | C | Ratio |
+|---|---|---|---|
+| Integer Loop (500M iter) | 0.842s | 0.098s | 8.59x |
+| String Building (100K) | 0.700s | 0.084s | 8.33x |
+| Recursive Fibonacci (n=40) | 0.824s | 0.352s | 2.34x |
+| Bubble Sort (20K) | 1.084s | 0.560s | 1.93x |
+| Data Class Churn (500K) | 0.130s | 0.080s | 1.62x |
+| Matrix Multiply (200x200) | 0.100s | 0.078s | 1.28x |
+| Prime Sieve (1M) | 0.096s | 0.088s | 1.09x |
+| List Ops (1M items) | 0.086s | 0.078s | 1.10x |
+
+### Analysis
+
+- **Under 1.3x (near C speed):** Prime sieve, lists, matrix multiply — these allocate few objects relative to compute, so GC overhead is negligible.
+- **1.6–2.3x (moderate):** Bubble sort, dataclass churn, recursive fibonacci — allocation-heavy but objects live long enough to amortize collection cost.
+- **~8x (heavy GC pressure):** Integer loop and string building — the GC threshold of 1024 triggers a full mark+sweep every 1024 allocations. Integer loop creates 500M boxed integers → ~500K collections. String building creates many short-lived concatenation results.
+
+### Root causes of overhead
+
+1. **Low collection threshold (1024)** — far too aggressive for allocation-heavy workloads. Each collection walks the entire allocation list, marking every live object.
+2. **No uniqueness reuse** — string concat always allocates a new string instead of reusing the buffer when the source is unique (Stage 7 will fix this).
+3. **No generational optimization** — every collection scans all live objects regardless of age. A future generational collector would only scan recently-allocated objects.
+
+### Improvement roadmap
+
+- **Raise threshold to 64K–128K** — simplest fix, expected to bring the 8x cases down to 2–3x by reducing collection frequency 60–120x.
+- **Stage 7 (is_unique)** — enables in-place string concat, eliminates most string allocation overhead.
+- **Future: generational GC** — nursery-based collection would make short-lived objects nearly free.
