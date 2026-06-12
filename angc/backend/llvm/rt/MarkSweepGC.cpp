@@ -126,6 +126,7 @@ llvm::Function* MarkSweepGC::createRuntimeFunc(const std::string& name, llvm::Fu
     auto* fn = cast<Function>(callee.getCallee());
     fn->setLinkage(Function::InternalLinkage);
     fn->setDSOLocal(true);
+    fn->addFnAttr(llvm::Attribute::NoInline);
     return fn;
 }
 
@@ -252,11 +253,9 @@ void MarkSweepGC::generateFunctions() {
         auto* meta_addr = ba.CreateStructGEP(header_ty, mem, 1);
         ba.CreateStore(ConstantInt::get(i32_ty, packMeta(COLOR_WHITE, true)), meta_addr);
 
-        // Initialize header: next = current head, prepend to list
+        // Initialize header: next = null (will be linked after collection check)
         auto* next_addr = ba.CreateStructGEP(header_ty, mem, 2);
-        auto* old_head = ba.CreateLoad(i8_ptr, m_g_gc_head, "old_head");
-        ba.CreateStore(old_head, next_addr);
-        ba.CreateStore(mem, m_g_gc_head);
+        ba.CreateStore(ConstantPointerNull::get(i8_ptr), next_addr);
 
         // Increment count
         auto* count = ba.CreateLoad(i64_ty, m_g_gc_count, "count");
@@ -269,7 +268,8 @@ void MarkSweepGC::generateFunctions() {
         auto* total_bytes = ba.CreateLoad(i64_ty, m_g_gc_total_bytes_alloc, "total_bytes");
         ba.CreateStore(ba.CreateAdd(total_bytes, size_arg), m_g_gc_total_bytes_alloc);
 
-        // Check threshold
+        // Check threshold BEFORE linking — so the collector doesn't see
+        // this object with uninitialized type-specific fields
         auto* threshold = ba.CreateLoad(i64_ty, m_g_gc_threshold, "threshold");
         auto* over = ba.CreateICmpSGE(new_count, threshold, "over_threshold");
         ba.CreateCondBr(over, collect_bb, done_bb);
@@ -279,7 +279,11 @@ void MarkSweepGC::generateFunctions() {
         bc.CreateCall(get_func("__ang_gc_collect"), {});
         bc.CreateBr(done_bb);
 
+        // Link into allocation list AFTER potential collection
         IRBuilder<> bd(done_bb);
+        auto* old_head = bd.CreateLoad(i8_ptr, m_g_gc_head, "old_head");
+        bd.CreateStore(old_head, next_addr);
+        bd.CreateStore(mem, m_g_gc_head);
         bd.CreateRet(mem);
     }
 

@@ -270,23 +270,40 @@ llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string&
     llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().begin());
     auto* alloca = tmp.CreateAlloca(objType, nullptr, name);
 
-    // Track in GC root frame if active
+    // Track in GC root frame if active — register in entry block to avoid
+    // re-registering (and incrementing count) inside loops.
+    // Insert AFTER the gc_push_frame call (which is near the end of entry block)
     if (m_gc_current_frame && m_gc_frame_slot_idx < m_gc_frame_max_slots) {
         auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
         auto* i64_ty = llvm::Type::getInt64Ty(*ctx);
         auto* i8_ptr = llvm::PointerType::get(*ctx, 0);
 
+        // Find the gc_push_frame call to insert after it
+        llvm::Instruction* insertAfter = nullptr;
+        for (auto& inst : fn->getEntryBlock()) {
+            if (auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
+                if (call->getCalledFunction() &&
+                    call->getCalledFunction()->getName() == "__ang_gc_push_frame") {
+                    insertAfter = &inst;
+                    break;
+                }
+            }
+        }
+
+        llvm::IRBuilder<> regBuilder(insertAfter ? insertAfter->getNextNode()
+                                                  : &fn->getEntryBlock().front());
+
         // Store alloca address into frame slot
-        auto* slot_addr = builder->CreateGEP(m_gc_frame_type, m_gc_current_frame,
+        auto* slot_addr = regBuilder.CreateGEP(m_gc_frame_type, m_gc_current_frame,
             {llvm::ConstantInt::get(i32_ty, 0), llvm::ConstantInt::get(i32_ty, 2),
              llvm::ConstantInt::get(i64_ty, m_gc_frame_slot_idx)});
-        auto* alloca_i8 = builder->CreateBitCast(alloca, i8_ptr);
-        builder->CreateStore(alloca_i8, slot_addr);
+        auto* alloca_i8 = regBuilder.CreateBitCast(alloca, i8_ptr);
+        regBuilder.CreateStore(alloca_i8, slot_addr);
 
         // Increment frame count
-        auto* count_addr = builder->CreateStructGEP(m_gc_frame_type, m_gc_current_frame, 1);
-        auto* count = builder->CreateLoad(i32_ty, count_addr, "frame_count");
-        builder->CreateStore(builder->CreateAdd(count, llvm::ConstantInt::get(i32_ty, 1)), count_addr);
+        auto* count_addr = regBuilder.CreateStructGEP(m_gc_frame_type, m_gc_current_frame, 1);
+        auto* count = regBuilder.CreateLoad(i32_ty, count_addr, "frame_count");
+        regBuilder.CreateStore(regBuilder.CreateAdd(count, llvm::ConstantInt::get(i32_ty, 1)), count_addr);
 
         m_gc_frame_slot_idx++;
     }
