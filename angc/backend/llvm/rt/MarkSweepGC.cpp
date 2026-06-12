@@ -9,6 +9,14 @@ MarkSweepGC::MarkSweepGC(LLVMContext& ctx, Module& module, IRBuilder<>& builder)
     : m_ctx(ctx), m_module(module), m_builder(builder) {}
 
 // ---------------------------------------------------------------------------
+// GC swap extensibility
+// ---------------------------------------------------------------------------
+
+llvm::ConstantInt* MarkSweepGC::getInitialMetaConstant() const {
+    return ConstantInt::get(Type::getInt32Ty(m_ctx), packMeta(COLOR_WHITE, true));
+}
+
+// ---------------------------------------------------------------------------
 // Type generation
 // ---------------------------------------------------------------------------
 
@@ -1263,6 +1271,21 @@ void MarkSweepGC::generateFunctions() {
     }
 
     // ===================================================================
+    // __ang_gc_read_barrier(i8* obj_ptr) -> i8*
+    // Identity read barrier for MarkSweepGC (no relocation, just returns input).
+    // ChaperoneGC overrides this with forwarding pointer resolution.
+    // ===================================================================
+    {
+        auto* fn_ty = FunctionType::get(i8_ptr, {i8_ptr}, false);
+        auto* fn = createRuntimeFunc("__ang_gc_read_barrier", fn_ty);
+        m_fn_gc_read_barrier = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+        b.CreateRet(fn->arg_begin());
+    }
+
+    // ===================================================================
     // __ang_gc_print_stats() -> void
     // Print GC statistics via individual printf calls to avoid variadic
     // ABI issues on arm64 (2+ variadic i64 args cause crashes).
@@ -1352,6 +1375,18 @@ void MarkSweepGC::generateFreestandingStubs() {
     stub_void("__ang_gc_pin", FunctionType::get(void_ty, {obj_ty}, false));
     stub_void("__ang_gc_unpin", FunctionType::get(void_ty, {obj_ty}, false));
     stub_void("__ang_gc_print_stats", FunctionType::get(void_ty, {}, false));
+
+    // Read barrier: identity (returns input pointer)
+    {
+        auto callee = m_module.getOrInsertFunction("__ang_gc_read_barrier",
+            FunctionType::get(i8_ptr, {i8_ptr}, false));
+        auto* fn = cast<Function>(callee.getCallee());
+        fn->setLinkage(Function::InternalLinkage);
+        fn->setDSOLocal(true);
+        auto* e = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<>(e).CreateRet(fn->arg_begin());
+        m_fn_gc_read_barrier = FunctionCallee(fn);
+    }
 }
 
 } // namespace angara

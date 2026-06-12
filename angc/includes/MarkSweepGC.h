@@ -45,6 +45,11 @@ public:
     llvm::StructType* getGcThreadStateType() const override { return m_gc_thread_state_type; }
     llvm::GlobalVariable* getGcThreadStateTLS() const override { return m_g_gc_thread_state_tls; }
 
+    // --- GC swap extensibility ---
+    llvm::ConstantInt* getInitialMetaConstant() const override;
+    llvm::FunctionCallee getReadBarrierFunc() const override { return m_fn_gc_read_barrier; }
+    void setAngaraObjType(llvm::StructType* ty) override { m_angara_obj_type = ty; }
+
     // --- Constants ---
     static constexpr int COLOR_WHITE = 0;
     static constexpr int COLOR_GRAY  = 1;
@@ -56,9 +61,6 @@ public:
     }
 
     // --- Additional accessors ---
-
-    /// Set the AngaraObject struct type (called by RuntimeBuilder after generateTypes).
-    void setAngaraObjType(llvm::StructType* ty) { m_angara_obj_type = ty; }
 
     /// Set all runtime struct types (called by RuntimeBuilder after generateTypes).
     /// Needed by the GC scanner for type-dispatched child traversal.
@@ -137,6 +139,7 @@ private:
     llvm::FunctionCallee m_fn_gc_pin;
     llvm::FunctionCallee m_fn_gc_unpin;
     llvm::FunctionCallee m_fn_gc_print_stats;
+    llvm::FunctionCallee m_fn_gc_read_barrier;
 
     llvm::Function* createRuntimeFunc(const std::string& name, llvm::FunctionType* type);
 };

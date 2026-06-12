@@ -1,5 +1,4 @@
 #include "RuntimeBuilder.h"
-#include "MarkSweepGC.h"
 
 using namespace llvm;
 

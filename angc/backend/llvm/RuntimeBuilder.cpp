@@ -1,6 +1,7 @@
 #include "RuntimeBuilder.h"
 #include "MarkSweepGC.h"
 #include <llvm/IR/Verifier.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
@@ -19,6 +20,7 @@ llvm::StructType* RuntimeBuilder::getGcRootFrameType() const { return m_gc->getG
 llvm::StructType* RuntimeBuilder::getGcThreadStateType() const { return m_gc->getGcThreadStateType(); }
 llvm::GlobalVariable* RuntimeBuilder::getGcThreadStateTLS() const { return m_gc->getGcThreadStateTLS(); }
 llvm::FunctionCallee RuntimeBuilder::getGcPrintStatsFunc() const { return m_gc->getGcPrintStatsFunc(); }
+llvm::ConstantInt* RuntimeBuilder::getGcInitialMeta() const { return m_gc->getInitialMetaConstant(); }
 
 void RuntimeBuilder::generateRuntime() {
     generateTypes();
@@ -68,8 +70,7 @@ void RuntimeBuilder::generateTypes() {
     m_obj_header_type = m_gc->getHeaderType();
 
     // Give the GC access to the AngaraObject type for function signatures
-    auto* ms_gc = static_cast<MarkSweepGC*>(m_gc.get());
-    ms_gc->setAngaraObjType(m_angara_obj_type);
+    m_gc->setAngaraObjType(m_angara_obj_type);
 
     m_string_type = StructType::create(m_ctx, {
         m_obj_header_type,
@@ -139,7 +140,7 @@ void RuntimeBuilder::generateTypes() {
     }, "AngaraMutex");
 
     // Give the GC access to all runtime struct types for scanner traversal
-    ms_gc->setStructTypes(
+    m_gc->setStructTypes(
         m_string_type, m_list_type, m_record_type, m_record_entry_type,
         m_exception_type, m_closure_type, m_bound_method_type,
         m_thread_type, m_native_instance_type);

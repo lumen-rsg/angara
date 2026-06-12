@@ -14,6 +14,7 @@ class Type;
 class Function;
 class BasicBlock;
 class Constant;
+class ConstantInt;
 }
 
 namespace angara {
@@ -54,6 +55,33 @@ public:
     virtual llvm::StructType* getGcRootFrameType() const = 0;
     virtual llvm::StructType* getGcThreadStateType() const = 0;
     virtual llvm::GlobalVariable* getGcThreadStateTLS() const = 0;
+
+    // --- GC swap extensibility ---
+
+    /// Returns the initial meta value for newly allocated objects.
+    /// Each GC packs its own color/flags bitfield differently.
+    virtual llvm::ConstantInt* getInitialMetaConstant() const = 0;
+
+    /// Returns the read barrier function for this GC strategy.
+    /// MarkSweepGC returns an identity stub; ChaperoneGC returns
+    /// the forwarding-pointer check.
+    virtual llvm::FunctionCallee getReadBarrierFunc() const = 0;
+
+    /// Set the AngaraObject struct type (called by RuntimeBuilder after generateTypes).
+    virtual void setAngaraObjType(llvm::StructType* ty) = 0;
+
+    /// Set all runtime struct types (called by RuntimeBuilder after generateTypes).
+    /// Needed by the GC scanner for type-dispatched child traversal.
+    virtual void setStructTypes(
+        llvm::StructType* string_type,
+        llvm::StructType* list_type,
+        llvm::StructType* record_type,
+        llvm::StructType* record_entry_type,
+        llvm::StructType* exception_type,
+        llvm::StructType* closure_type,
+        llvm::StructType* bound_method_type,
+        llvm::StructType* thread_type,
+        llvm::StructType* native_instance_type) = 0;
 };
 
 } // namespace angara
