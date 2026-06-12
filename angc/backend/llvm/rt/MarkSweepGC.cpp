@@ -638,7 +638,9 @@ void MarkSweepGC::generateFunctions() {
 
     // ===================================================================
     // __ang_gc_finalize(i8* obj_ptr) -> void
-    // For OBJ_NATIVE_INSTANCE: call the finalize function pointer.
+    // Free internal buffers before sweep frees the struct.
+    // Handles: OBJ_STRING (chars), OBJ_LIST (elements), OBJ_RECORD (entries+keys),
+    //          OBJ_NATIVE_INSTANCE (finalize callback).
     // ===================================================================
     {
         auto* fn_ty = FunctionType::get(void_ty, {i8_ptr}, false);
@@ -646,7 +648,13 @@ void MarkSweepGC::generateFunctions() {
         m_fn_gc_finalize = FunctionCallee(fn);
 
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
-        auto* is_native_bb = BasicBlock::Create(m_ctx, "is_native", fn);
+        auto* string_bb = BasicBlock::Create(m_ctx, "string", fn);
+        auto* list_bb = BasicBlock::Create(m_ctx, "list", fn);
+        auto* record_bb = BasicBlock::Create(m_ctx, "record", fn);
+        auto* record_loop_bb = BasicBlock::Create(m_ctx, "rec_loop", fn);
+        auto* record_body_bb = BasicBlock::Create(m_ctx, "rec_body", fn);
+        auto* record_free_entries_bb = BasicBlock::Create(m_ctx, "rec_free_entries", fn);
+        auto* native_bb = BasicBlock::Create(m_ctx, "native", fn);
         auto* call_finalize_bb = BasicBlock::Create(m_ctx, "call_finalize", fn);
         auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
 
@@ -654,23 +662,91 @@ void MarkSweepGC::generateFunctions() {
         auto* obj_ptr = fn->arg_begin();
         auto* type_gaddr = b.CreateStructGEP(header_ty, obj_ptr, 0);
         auto* obj_type = b.CreateLoad(i32_ty, type_gaddr, "obj_type");
-        auto* is_native = b.CreateICmpEQ(obj_type, ConstantInt::get(i32_ty, OBJ_NATIVE_INSTANCE));
-        b.CreateCondBr(is_native, is_native_bb, done_bb);
 
-        IRBuilder<> bn(is_native_bb);
-        // AngaraNativeInstance: { ObjHeader, i8* data, i8* finalize_fn, i8* type_name }
-        auto* finalize_fn = bn.CreateLoad(i8_ptr,
-            bn.CreateStructGEP(m_native_instance_type, obj_ptr, 2), "finalize_fn");
-        auto* has_fn = bn.CreateICmpNE(finalize_fn, ConstantPointerNull::get(i8_ptr));
-        bn.CreateCondBr(has_fn, call_finalize_bb, done_bb);
+        auto* sw = b.CreateSwitch(obj_type, done_bb, 4);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_STRING), string_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_LIST), list_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_RECORD), record_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_NATIVE_INSTANCE), native_bb);
 
-        IRBuilder<> bcf(call_finalize_bb);
-        auto* data = bcf.CreateLoad(i8_ptr,
-            bcf.CreateStructGEP(m_native_instance_type, obj_ptr, 1), "data");
-        // Call finalize_fn(data) — it's a void(*)(void*)
-        auto* finalize_ty = FunctionType::get(void_ty, {i8_ptr}, false);
-        bcf.CreateCall(finalize_ty, finalize_fn, {data});
-        bcf.CreateBr(done_bb);
+        // OBJ_STRING: free chars buffer (field 3 of AngaraString)
+        {
+            IRBuilder<> bs(string_bb);
+            auto* chars_ptr = bs.CreateLoad(i8_ptr,
+                bs.CreateStructGEP(m_string_type, obj_ptr, 3), "chars");
+            auto* has_chars = bs.CreateICmpNE(chars_ptr,
+                ConstantPointerNull::get(i8_ptr));
+            auto* free_chars_bb = BasicBlock::Create(m_ctx, "free_chars", fn);
+            bs.CreateCondBr(has_chars, free_chars_bb, done_bb);
+
+            IRBuilder<> bfc(free_chars_bb);
+            bfc.CreateCall(free_fn, {chars_ptr});
+            bfc.CreateBr(done_bb);
+        }
+
+        // OBJ_LIST: free elements array (field 3 of AngaraList)
+        {
+            IRBuilder<> bl(list_bb);
+            auto* elems_ptr = bl.CreateLoad(PointerType::get(m_ctx, 0),
+                bl.CreateStructGEP(m_list_type, obj_ptr, 3), "elems");
+            auto* has_elems = bl.CreateICmpNE(elems_ptr,
+                ConstantPointerNull::get(PointerType::get(m_ctx, 0)));
+            auto* free_elems_bb = BasicBlock::Create(m_ctx, "free_elems", fn);
+            bl.CreateCondBr(has_elems, free_elems_bb, done_bb);
+
+            IRBuilder<> bfe(free_elems_bb);
+            auto* elems_raw = bfe.CreateBitCast(elems_ptr, i8_ptr);
+            bfe.CreateCall(free_fn, {elems_raw});
+            bfe.CreateBr(done_bb);
+        }
+
+        // OBJ_RECORD: free each strdup'd key, then free entries array
+        {
+            IRBuilder<> br(record_bb);
+            auto* count = br.CreateLoad(i64_ty,
+                br.CreateStructGEP(m_record_type, obj_ptr, 1), "count");
+            auto* entries = br.CreateLoad(PointerType::get(m_ctx, 0),
+                br.CreateStructGEP(m_record_type, obj_ptr, 3), "entries");
+            auto* has_entries = br.CreateICmpNE(entries,
+                ConstantPointerNull::get(PointerType::get(m_ctx, 0)));
+            br.CreateCondBr(has_entries, record_loop_bb, done_bb);
+
+            IRBuilder<> brl(record_loop_bb);
+            auto* i_phi = brl.CreatePHI(i64_ty, 2, "i");
+            i_phi->addIncoming(ConstantInt::get(i64_ty, 0), record_bb);
+            auto* cont = brl.CreateICmpSLT(i_phi, count);
+            brl.CreateCondBr(cont, record_body_bb, record_free_entries_bb);
+
+            IRBuilder<> brb(record_body_bb);
+            auto* entry_ptr = brb.CreateGEP(m_record_entry_type, entries, {i_phi});
+            auto* key = brb.CreateLoad(i8_ptr,
+                brb.CreateStructGEP(m_record_entry_type, entry_ptr, 0), "key");
+            brb.CreateCall(free_fn, {key});  // free(NULL) is safe
+            auto* next_i = brb.CreateAdd(i_phi, ConstantInt::get(i64_ty, 1));
+            brb.CreateBr(record_loop_bb);
+            i_phi->addIncoming(next_i, record_body_bb);
+
+            IRBuilder<> brfe(record_free_entries_bb);
+            auto* entries_raw = brfe.CreateBitCast(entries, i8_ptr);
+            brfe.CreateCall(free_fn, {entries_raw});
+            brfe.CreateBr(done_bb);
+        }
+
+        // OBJ_NATIVE_INSTANCE: call the finalize function pointer
+        {
+            IRBuilder<> bn(native_bb);
+            auto* finalize_fn = bn.CreateLoad(i8_ptr,
+                bn.CreateStructGEP(m_native_instance_type, obj_ptr, 2), "finalize_fn");
+            auto* has_fn = bn.CreateICmpNE(finalize_fn, ConstantPointerNull::get(i8_ptr));
+            bn.CreateCondBr(has_fn, call_finalize_bb, done_bb);
+
+            IRBuilder<> bcf(call_finalize_bb);
+            auto* data = bcf.CreateLoad(i8_ptr,
+                bcf.CreateStructGEP(m_native_instance_type, obj_ptr, 1), "data");
+            auto* finalize_ty = FunctionType::get(void_ty, {i8_ptr}, false);
+            bcf.CreateCall(finalize_ty, finalize_fn, {data});
+            bcf.CreateBr(done_bb);
+        }
 
         IRBuilder<> bd(done_bb);
         bd.CreateRetVoid();

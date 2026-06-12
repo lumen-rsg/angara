@@ -35,8 +35,9 @@ void RuntimeBuilder::generateListOps() {
 
         auto* list_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_list_type));
-        auto* mem = b.CreateCall(malloc_fn, {list_size}, "mem");
-        auto* list_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
+        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* list_ptr = b.CreateCall(gc_alloc_fn,
+            {list_size, ConstantInt::get(i32_ty, OBJ_LIST)}, "list_mem");
 
         auto* header_ptr = b.CreateStructGEP(m_list_type, list_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_LIST),
@@ -66,8 +67,9 @@ void RuntimeBuilder::generateListOps() {
 
         auto* list_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_list_type));
-        auto* mem = b.CreateCall(malloc_fn, {list_size});
-        auto* list_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
+        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* list_ptr = b.CreateCall(gc_alloc_fn,
+            {list_size, ConstantInt::get(i32_ty, OBJ_LIST)}, "list_mem");
 
         auto* header_ptr = b.CreateStructGEP(m_list_type, list_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_LIST),
@@ -411,8 +413,9 @@ void RuntimeBuilder::generateRecordOps() {
 
         auto* rec_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_record_type));
-        auto* mem = b.CreateCall(malloc_fn, {rec_size});
-        auto* rec_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
+        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* rec_ptr = b.CreateCall(gc_alloc_fn,
+            {rec_size, ConstantInt::get(i32_ty, OBJ_RECORD)}, "rec_mem");
 
         auto* header_ptr = b.CreateStructGEP(m_record_type, rec_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_RECORD),
