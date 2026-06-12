@@ -120,6 +120,7 @@ private:
 
     // --- LLVM globals ---
     llvm::GlobalVariable* m_g_gc_arenas = nullptr;         // [256 x i8*]
+    llvm::GlobalVariable* m_g_gc_alloc_list = nullptr;    // i8* (allocation linked list head)
     llvm::GlobalVariable* m_g_gc_arena_count = nullptr;    // i64
     llvm::GlobalVariable* m_g_gc_arena_free = nullptr;     // i8* (linked list)
     llvm::GlobalVariable* m_g_gc_arena_lock = nullptr;     // i32 (spinlock)
@@ -168,6 +169,10 @@ private:
     llvm::FunctionCallee m_fn_gc_relocate;
     llvm::FunctionCallee m_fn_gc_update_refs;
     llvm::FunctionCallee m_fn_gc_chaperone_spawn;
+    llvm::FunctionCallee m_fn_gc_obj_size;
+    llvm::FunctionCallee m_fn_gc_update_ref_in_value;
+    llvm::FunctionCallee m_fn_gc_update_refs_heap;
+    llvm::FunctionCallee m_fn_gc_recycle_arenas;
 
     llvm::Function* createRuntimeFunc(const std::string& name, llvm::FunctionType* type);
 };

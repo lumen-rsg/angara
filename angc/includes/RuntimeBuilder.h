@@ -51,7 +51,7 @@ public:
     /// @param builder      IR builder for generating instructions.
     /// @param freestanding If true, generates stubs instead of libc-dependent implementations.
     RuntimeBuilder(llvm::LLVMContext& context, llvm::Module& module, llvm::IRBuilder<>& builder,
-                   bool freestanding = false);
+                   bool freestanding = false, const std::string& gc_strategy = "chaperone");
 
     /// Destructor — defined in RuntimeBuilder.cpp where GarbageCollector is complete.
     ~RuntimeBuilder();

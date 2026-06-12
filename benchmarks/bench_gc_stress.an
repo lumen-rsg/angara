@@ -1,0 +1,56 @@
+// Benchmark: GC stress — short-lived objects, string churn, list churn
+// Forces many GC collections through rapid allocation and release of heap objects.
+attach io;
+
+data Pair {
+    let key as string;
+    let value as i64;
+}
+
+func make_pairs(n as i64) -> i64 {
+    let total = 0;
+    for (let i = 0; i < n; i = i + 1) {
+        let p = Pair("key_" + string(i), i * i);
+        total = total + p.value;
+    }
+    return total;
+}
+
+func list_churn(n as i64) -> i64 {
+    let total = 0;
+    for (let i = 0; i < n; i = i + 1) {
+        let l as list<i64> = [];
+        for (let j = 0; j < 100; j = j + 1) {
+            l.push(i * 100 + j);
+        }
+        total = total + l[0] + l[49] + l[99];
+    }
+    return total;
+}
+
+func string_churn(n as i64) -> i64 {
+    let total_len = 0;
+    for (let i = 0; i < n; i = i + 1) {
+        let s = "prefix_" + string(i) + "_suffix";
+        total_len = total_len + len(s);
+        let s2 = string(i * i);
+        total_len = total_len + len(s2);
+    }
+    return total_len;
+}
+
+export func main() -> i64 {
+    // Phase 1: 50K short-lived Pair objects (string + data instance each)
+    let pair_total = make_pairs(50000);
+
+    // Phase 2: 5K short-lived lists (100 items each)
+    let list_total = list_churn(5000);
+
+    // Phase 3: 50K temporary strings
+    let str_total = string_churn(50000);
+
+    io.println(1, "Pair total: " + string(pair_total));
+    io.println(1, "List total: " + string(list_total));
+    io.println(1, "String total: " + string(str_total));
+    return 0;
+}

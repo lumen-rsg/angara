@@ -9,14 +9,13 @@ using namespace llvm;
 
 namespace angara {
 
-RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>& builder, bool freestanding)
+RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>& builder, bool freestanding, const std::string& gc_strategy)
     : m_ctx(context), m_module(module), m_builder(builder), m_freestanding(freestanding) {
-    // Create the GC strategy
-#ifdef USE_CHAPERONE_GC
-    m_gc = std::make_unique<ChaperoneGC>(m_ctx, m_module, m_builder);
-#else
-    m_gc = std::make_unique<MarkSweepGC>(m_ctx, m_module, m_builder);
-#endif
+    if (gc_strategy == "chaperone") {
+        m_gc = std::make_unique<ChaperoneGC>(m_ctx, m_module, m_builder);
+    } else {
+        m_gc = std::make_unique<MarkSweepGC>(m_ctx, m_module, m_builder);
+    }
 }
 
 RuntimeBuilder::~RuntimeBuilder() = default;

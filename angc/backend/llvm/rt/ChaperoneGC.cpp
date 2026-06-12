@@ -77,6 +77,13 @@ void ChaperoneGC::generateGlobals() {
         ConstantAggregateZero::get(ArrayType::get(PointerType::get(ctx, 0), 256)),
         "__ang_gc_arenas");
 
+    // Allocation linked-list head (all live objects chained via forward field)
+    m_g_gc_alloc_list = new GlobalVariable(
+        m_module, PointerType::get(ctx, 0),
+        false, GlobalValue::InternalLinkage,
+        ConstantPointerNull::get(PointerType::get(ctx, 0)),
+        "__ang_gc_alloc_list");
+
     m_g_gc_arena_count = new GlobalVariable(
         m_module, Type::getInt64Ty(ctx),
         false, GlobalValue::InternalLinkage,
@@ -280,6 +287,28 @@ void ChaperoneGC::generateFunctions() {
         auto* fn = cast<Function>(m_module.getOrInsertFunction("__ang_gc_read_barrier", ty).getCallee());
         fn->setLinkage(Function::InternalLinkage); fn->setDSOLocal(true);
     }
+    // Object size helper (returns 16-aligned allocation size from ObjHeader.type)
+    {
+        auto* ty = FunctionType::get(i64_ty, {i8_ptr}, false);
+        auto* fn = cast<Function>(m_module.getOrInsertFunction("__ang_gc_obj_size", ty).getCallee());
+        fn->setLinkage(Function::InternalLinkage); fn->setDSOLocal(true);
+    }
+    // Update-ref helpers for chaperone relocation
+    {
+        auto* ty = FunctionType::get(void_ty, {i8_ptr, i64_ty, i64_ty}, false);
+        auto* fn = cast<Function>(m_module.getOrInsertFunction("__ang_gc_update_ref_in_value", ty).getCallee());
+        fn->setLinkage(Function::InternalLinkage); fn->setDSOLocal(true);
+    }
+    {
+        auto* ty = FunctionType::get(void_ty, {i64_ty, i64_ty}, false);
+        auto* fn = cast<Function>(m_module.getOrInsertFunction("__ang_gc_update_refs_heap", ty).getCallee());
+        fn->setLinkage(Function::InternalLinkage); fn->setDSOLocal(true);
+    }
+    {
+        auto* ty = FunctionType::get(void_ty, {}, false);
+        auto* fn = cast<Function>(m_module.getOrInsertFunction("__ang_gc_recycle_arenas", ty).getCallee());
+        fn->setLinkage(Function::InternalLinkage); fn->setDSOLocal(true);
+    }
     // Chaperone functions
     {
         auto* ty = FunctionType::get(i8_ptr, {i8_ptr}, false);
@@ -398,11 +427,6 @@ void ChaperoneGC::generateFunctions() {
         buf.CreateStore(new_meta, buf.CreateStructGEP(header_ty, free_list, 1));
         buf.CreateStore(ConstantPointerNull::get(i8_ptr),
             buf.CreateStructGEP(header_ty, free_list, 2));
-        // Stats
-        auto* total_allocs = buf.CreateLoad(i64_ty, m_g_gc_total_allocs, "total_allocs");
-        buf.CreateStore(buf.CreateAdd(total_allocs, ConstantInt::get(i64_ty, 1)), m_g_gc_total_allocs);
-        auto* total_bytes = buf.CreateLoad(i64_ty, m_g_gc_total_bytes_alloc, "total_bytes");
-        buf.CreateStore(buf.CreateAdd(total_bytes, ConstantInt::get(i64_ty, 48)), m_g_gc_total_bytes_alloc);
         auto* ret_free_bb = BasicBlock::Create(m_ctx, "ret_free", fn);
         buf.CreateBr(ret_free_bb);
 
@@ -451,13 +475,9 @@ void ChaperoneGC::generateFunctions() {
         auto* fwd_addr = bdb.CreateStructGEP(header_ty, bump, 2);
         bdb.CreateStore(ConstantPointerNull::get(i8_ptr), fwd_addr);
 
-        // Stats
+        // Stats (only total_count needed for threshold check)
         auto* total_count2 = bdb.CreateLoad(i64_ty, m_g_gc_total_count, "total_count");
         bdb.CreateStore(bdb.CreateAdd(total_count2, ConstantInt::get(i64_ty, 1)), m_g_gc_total_count);
-        auto* total_allocs2 = bdb.CreateLoad(i64_ty, m_g_gc_total_allocs, "total_allocs");
-        bdb.CreateStore(bdb.CreateAdd(total_allocs2, ConstantInt::get(i64_ty, 1)), m_g_gc_total_allocs);
-        auto* total_bytes2 = bdb.CreateLoad(i64_ty, m_g_gc_total_bytes_alloc, "total_bytes");
-        bdb.CreateStore(bdb.CreateAdd(total_bytes2, size_arg), m_g_gc_total_bytes_alloc);
 
         // Check threshold
         auto* new_total = bdb.CreateAdd(total_count2, ConstantInt::get(i64_ty, 1));
@@ -1047,12 +1067,9 @@ void ChaperoneGC::generateFunctions() {
         auto* advance_bb = BasicBlock::Create(m_ctx, "advance", fn);
         auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
 
-        // arenas[0] is the allocation list head
+        // Allocation linked-list head
         IRBuilder<> b(entry);
-        auto* arenas_ptr = b.CreateInBoundsGEP(
-            ArrayType::get(i8_ptr, 256), m_g_gc_arenas,
-            {ConstantInt::get(i64_ty, 0), ConstantInt::get(i64_ty, 0)});
-        auto* head = b.CreateLoad(i8_ptr, arenas_ptr, "head");
+        auto* head = b.CreateLoad(i8_ptr, m_g_gc_alloc_list, "head");
         b.CreateBr(loop_bb);
 
         IRBuilder<> bl(loop_bb);
@@ -1082,7 +1099,7 @@ void ChaperoneGC::generateFunctions() {
         bcp.CreateCondBr(prev_is_null, unlink_head_bb, unlink_mid_bb);
 
         IRBuilder<> buh(unlink_head_bb);
-        buh.CreateStore(next_ptr, arenas_ptr);
+        buh.CreateStore(next_ptr, m_g_gc_alloc_list);
         buh.CreateBr(free_obj_bb);
 
         IRBuilder<> bum(unlink_mid_bb);
@@ -1091,21 +1108,6 @@ void ChaperoneGC::generateFunctions() {
 
         IRBuilder<> bf(free_obj_bb);
         bf.CreateCall(get_func("__ang_gc_finalize"), {curr_phi});
-        // Push freed slot onto arena's free list for reuse
-        // Extract arena_id from meta (bits 24-31)
-        auto* arena_id_val = bf.CreateLShr(
-            bf.CreateAnd(meta, ConstantInt::get(i32_ty, 0xFF000000)),
-            ConstantInt::get(i32_ty, 24), "arena_id_val");
-        auto* arena_id_ext = bf.CreateZExt(arena_id_val, i64_ty, "arena_id_ext");
-        auto* freed_arena_addr = bf.CreateInBoundsGEP(
-            ArrayType::get(i8_ptr, 256), m_g_gc_arenas,
-            {ConstantInt::get(i64_ty, 0), arena_id_ext});
-        auto* freed_arena = bf.CreateLoad(i8_ptr, freed_arena_addr, "freed_arena");
-        // Push: curr->forward = arena->free_list; arena->free_list = curr
-        auto* old_free_list = bf.CreateLoad(i8_ptr,
-            bf.CreateStructGEP(m_arena_header_type, freed_arena, 6), "old_free");
-        bf.CreateStore(old_free_list, bf.CreateStructGEP(header_ty, curr_phi, 2));
-        bf.CreateStore(curr_phi, bf.CreateStructGEP(m_arena_header_type, freed_arena, 6));
         // Stats
         auto* frees = bf.CreateLoad(i64_ty, m_g_gc_total_frees, "frees");
         bf.CreateStore(bf.CreateAdd(frees, ConstantInt::get(i64_ty, 1)), m_g_gc_total_frees);
@@ -1134,30 +1136,37 @@ void ChaperoneGC::generateFunctions() {
     }
 
     // ===================================================================
-    // Patch __ang_gc_alloc: link ALL returned objects into the allocation list.
-    // The list head is __ang_gc_arenas[0]; forward field (index 2) = next.
+    // Patch __ang_gc_alloc: link returned objects into the allocation list.
+    // The list head is __ang_gc_alloc_list; forward field (index 2) = next.
+    //
+    // IMPORTANT: Skip returns whose value comes from __ang_gc_alloc_slow.
+    // alloc_slow calls __ang_gc_alloc recursively, so the object is already
+    // linked by the recursive call. Double-linking creates a circular
+    // self-referencing node that corrupts the sweep.
     // ===================================================================
     {
         auto* fn = get_func("__ang_gc_alloc");
-        // Collect all return instructions, then patch each one
+        auto* alloc_slow_fn = get_func("__ang_gc_alloc_slow");
+        // Collect return instructions, excluding the slow path
         std::vector<ReturnInst*> rets;
         for (auto& bb : *fn) {
             if (auto* ret = dyn_cast<ReturnInst>(bb.getTerminator())) {
-                if (ret->getReturnValue()) {
-                    rets.push_back(ret);
+                if (!ret->getReturnValue()) continue;
+                // Skip returns that delegate to alloc_slow — the recursive
+                // call already links the object into the alloc list.
+                if (auto* ci = dyn_cast<CallInst>(ret->getReturnValue())) {
+                    if (ci->getCalledFunction() == alloc_slow_fn) continue;
                 }
+                rets.push_back(ret);
             }
         }
         for (auto* ret : rets) {
             auto* ret_val = ret->getReturnValue();
             auto* link_bb = BasicBlock::Create(m_ctx, "link", fn);
             IRBuilder<> bl(link_bb);
-            auto* arenas_ptr = bl.CreateInBoundsGEP(
-                ArrayType::get(i8_ptr, 256), m_g_gc_arenas,
-                {ConstantInt::get(i64_ty, 0), ConstantInt::get(i64_ty, 0)});
-            auto* old_head = bl.CreateLoad(i8_ptr, arenas_ptr, "old_head");
+            auto* old_head = bl.CreateLoad(i8_ptr, m_g_gc_alloc_list, "old_head");
             bl.CreateStore(old_head, bl.CreateStructGEP(header_ty, ret_val, 2));
-            bl.CreateStore(ret_val, arenas_ptr);
+            bl.CreateStore(ret_val, m_g_gc_alloc_list);
             bl.CreateRet(ret_val);
             // Replace the return with a branch to link_bb
             auto* parent = ret->getParent();
@@ -1243,6 +1252,132 @@ void ChaperoneGC::generateFunctions() {
     }
 
     // ===================================================================
+    // __ang_gc_recycle_arenas() -> void
+    // Post-sweep pass: iterate all arenas, count live objects, and
+    // recycle empty arenas back to the free pool.
+    // ===================================================================
+    {
+        auto* fn_ty = FunctionType::get(void_ty, {}, false);
+        auto* fn = cast<Function>(m_module.getOrInsertFunction("__ang_gc_recycle_arenas", fn_ty).getCallee());
+        fn->setLinkage(Function::InternalLinkage);
+        fn->setDSOLocal(true);
+        fn->addFnAttr(llvm::Attribute::NoInline);
+        // Erase any blocks from pre-declaration or prior use
+        while (!fn->empty())
+            fn->back().eraseFromParent();
+        m_fn_gc_recycle_arenas = FunctionCallee(fn);
+
+        // Strategy: walk the alloc list, extract arena_id from each live object,
+        // build a per-arena live count. Then iterate arenas and recycle empty ones.
+        // We use a simple i64 array on the stack (256 entries) for per-arena counts.
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* zero_loop_bb = BasicBlock::Create(m_ctx, "zero_loop", fn);
+        auto* zero_body_bb = BasicBlock::Create(m_ctx, "zero_body", fn);
+        auto* count_loop_bb = BasicBlock::Create(m_ctx, "count_loop", fn);
+        auto* count_body_bb = BasicBlock::Create(m_ctx, "count_body", fn);
+        auto* arena_loop_bb = BasicBlock::Create(m_ctx, "arena_loop", fn);
+        auto* arena_body_bb = BasicBlock::Create(m_ctx, "arena_body", fn);
+        auto* recycle_bb = BasicBlock::Create(m_ctx, "recycle", fn);
+        auto* next_arena_bb = BasicBlock::Create(m_ctx, "next_arena", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+
+        IRBuilder<> b(entry);
+        // Allocate per-arena count array on the stack (256 * 8 bytes)
+        auto* counts = b.CreateAlloca(ArrayType::get(i64_ty, 256), ConstantInt::get(i64_ty, 1), "counts");
+        auto* alloc_list_head = b.CreateLoad(i8_ptr, m_g_gc_alloc_list, "head");
+        b.CreateBr(zero_loop_bb);
+
+        // Zero the counts array
+        IRBuilder<> bzl(zero_loop_bb);
+        auto* zi_phi = bzl.CreatePHI(i64_ty, 2, "zi");
+        zi_phi->addIncoming(ConstantInt::get(i64_ty, 0), entry);
+        auto* zi_end = bzl.CreateICmpSLT(zi_phi, ConstantInt::get(i64_ty, 256));
+        bzl.CreateCondBr(zi_end, zero_body_bb, count_loop_bb);
+
+        IRBuilder<> bzb(zero_body_bb);
+        bzb.CreateStore(ConstantInt::get(i64_ty, 0),
+            bzb.CreateInBoundsGEP(ArrayType::get(i64_ty, 256), counts,
+                {ConstantInt::get(i64_ty, 0), zi_phi}));
+        auto* next_zi = bzb.CreateAdd(zi_phi, ConstantInt::get(i64_ty, 1));
+        zi_phi->addIncoming(next_zi, zero_body_bb);
+        bzb.CreateBr(zero_loop_bb);
+
+        // Walk alloc list, increment per-arena counts
+        IRBuilder<> bcl(count_loop_bb);
+        auto* cur_phi = bcl.CreatePHI(i8_ptr, 2, "cur");
+        cur_phi->addIncoming(alloc_list_head, zero_loop_bb);
+        auto* is_null = bcl.CreateICmpEQ(cur_phi, ConstantPointerNull::get(i8_ptr));
+        bcl.CreateCondBr(is_null, arena_loop_bb, count_body_bb);
+
+        IRBuilder<> bcb(count_body_bb);
+        auto* meta = bcb.CreateLoad(i32_ty,
+            bcb.CreateStructGEP(header_ty, cur_phi, 1), "meta");
+        auto* arena_id_val = bcb.CreateLShr(
+            bcb.CreateAnd(meta, ConstantInt::get(i32_ty, 0xFF000000)),
+            ConstantInt::get(i32_ty, 24), "arena_id");
+        auto* arena_id_ext = bcb.CreateZExt(arena_id_val, i64_ty, "arena_id_ext");
+        auto* count_addr = bcb.CreateInBoundsGEP(ArrayType::get(i64_ty, 256), counts,
+            {ConstantInt::get(i64_ty, 0), arena_id_ext});
+        auto* old_count = bcb.CreateLoad(i64_ty, count_addr, "old_count");
+        bcb.CreateStore(bcb.CreateAdd(old_count, ConstantInt::get(i64_ty, 1)), count_addr);
+        auto* next_obj = bcb.CreateLoad(i8_ptr,
+            bcb.CreateStructGEP(header_ty, cur_phi, 2), "next_obj");
+        cur_phi->addIncoming(next_obj, count_body_bb);
+        bcb.CreateBr(count_loop_bb);
+
+        // Iterate arenas, check counts, recycle empty ones
+        IRBuilder<> bal(arena_loop_bb);
+        auto* i_phi = bal.CreatePHI(i64_ty, 2, "i");
+        i_phi->addIncoming(ConstantInt::get(i64_ty, 0), count_loop_bb);
+        auto* arena_count = bal.CreateLoad(i64_ty, m_g_gc_arena_count, "arena_count");
+        auto* at_end = bal.CreateICmpSLT(i_phi, arena_count);
+        bal.CreateCondBr(at_end, arena_body_bb, done_bb);
+
+        IRBuilder<> bab(arena_body_bb);
+        auto* arena_addr = bab.CreateInBoundsGEP(
+            ArrayType::get(i8_ptr, 256), m_g_gc_arenas,
+            {ConstantInt::get(i64_ty, 0), i_phi});
+        auto* arena = bab.CreateLoad(i8_ptr, arena_addr, "arena");
+        auto* is_null2 = bab.CreateICmpEQ(arena, ConstantPointerNull::get(i8_ptr));
+        bab.CreateCondBr(is_null2, next_arena_bb, recycle_bb);
+
+        IRBuilder<> brc(recycle_bb);
+        // Load count for this arena
+        auto* live_count = brc.CreateLoad(i64_ty,
+            brc.CreateInBoundsGEP(ArrayType::get(i64_ty, 256), counts,
+                {ConstantInt::get(i64_ty, 0), i_phi}), "live_count");
+        // Update arena.object_count
+        brc.CreateStore(live_count, brc.CreateStructGEP(arena_ty, arena, 3));
+        auto* is_empty = brc.CreateICmpEQ(live_count, ConstantInt::get(i64_ty, 0));
+        auto* do_recycle_bb = BasicBlock::Create(m_ctx, "do_recycle", fn);
+        brc.CreateCondBr(is_empty, do_recycle_bb, next_arena_bb);
+
+        IRBuilder<> bdr(do_recycle_bb);
+        auto* old_free = bdr.CreateLoad(i8_ptr, m_g_gc_arena_free, "old_free");
+        bdr.CreateStore(old_free, bdr.CreateStructGEP(arena_ty, arena, 5));
+        // Reset bump to base
+        auto* base = bdr.CreateLoad(i8_ptr,
+            bdr.CreateStructGEP(arena_ty, arena, 0), "base");
+        bdr.CreateStore(base, bdr.CreateStructGEP(arena_ty, arena, 1));
+        // Clear free_list
+        bdr.CreateStore(ConstantPointerNull::get(i8_ptr),
+            bdr.CreateStructGEP(arena_ty, arena, 6));
+        bdr.CreateStore(arena, m_g_gc_arena_free);
+        // Null out the arena slot
+        bdr.CreateStore(ConstantPointerNull::get(i8_ptr), arena_addr);
+        bdr.CreateBr(next_arena_bb);
+
+        IRBuilder<> bna(next_arena_bb);
+        auto* next_i = bna.CreateAdd(i_phi, ConstantInt::get(i64_ty, 1));
+        i_phi->addIncoming(next_i, next_arena_bb);
+        bna.CreateBr(arena_loop_bb);
+
+        IRBuilder<> bd(done_bb);
+        bd.CreateRetVoid();
+    }
+
+    // ===================================================================
     // __ang_gc_collect() -> void
     // ===================================================================
     {
@@ -1254,6 +1389,9 @@ void ChaperoneGC::generateFunctions() {
         IRBuilder<> b(entry);
         b.CreateCall(get_func("__ang_gc_mark_roots"), {});
         b.CreateCall(get_func("__ang_gc_sweep"), {});
+        // Run one chaperone compaction step (synchronous, after sweep)
+        b.CreateCall(get_func("__ang_gc_chaperone_step"), {});
+        b.CreateCall(get_func("__ang_gc_recycle_arenas"), {});
         auto* cols = b.CreateLoad(i64_ty, m_g_gc_collections, "cols");
         b.CreateStore(b.CreateAdd(cols, ConstantInt::get(i64_ty, 1)), m_g_gc_collections);
         b.CreateStore(ConstantInt::get(i64_ty, 0), m_g_gc_total_count);
@@ -1596,6 +1734,32 @@ void ChaperoneGC::generateFunctions() {
     }
 
     // ===================================================================
+    // __ang_gc_obj_size(i8* obj_ptr) -> i64
+    // Returns the 16-aligned allocation size for an object based on its
+    // ObjHeader.type field. Used by compute_energy, chaperone_step,
+    // relocate, and arena walking.
+    // ===================================================================
+    {
+        auto* fn_ty = FunctionType::get(i64_ty, {i8_ptr}, false);
+        auto* fn = createRuntimeFunc("__ang_gc_obj_size", fn_ty);
+        m_fn_gc_obj_size = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+        auto* obj_ptr = fn->arg_begin();
+        auto* obj_type_val = b.CreateLoad(i32_ty,
+            b.CreateStructGEP(header_ty, obj_ptr, 0), "obj_type");
+        // Only types with non-48 sizes need explicit checks
+        auto* is_exception = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_EXCEPTION));
+        auto* is_thread = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_THREAD));
+        auto* is_mutex = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_MUTEX));
+        auto* sz1 = b.CreateSelect(is_exception, ConstantInt::get(i64_ty, 32), ConstantInt::get(i64_ty, 48));
+        auto* sz2 = b.CreateSelect(is_thread, ConstantInt::get(i64_ty, 64), sz1);
+        auto* obj_size = b.CreateSelect(is_mutex, ConstantInt::get(i64_ty, 80), sz2);
+        b.CreateRet(obj_size);
+    }
+
+    // ===================================================================
     // __ang_gc_compute_energy(i8* arena_ptr) -> f64
     // Computes the free-energy of an arena: E = fragmentation score.
     // In the biological analogy, this measures how "misfolded" the arena is.
@@ -1644,6 +1808,8 @@ void ChaperoneGC::generateFunctions() {
         cur_phi->addIncoming(base, entry);
         auto* live_phi = bw.CreatePHI(i64_ty, 2, "live_count");
         live_phi->addIncoming(ConstantInt::get(i64_ty, 0), entry);
+        auto* live_bytes_phi = bw.CreatePHI(i64_ty, 2, "live_bytes");
+        live_bytes_phi->addIncoming(ConstantInt::get(i64_ty, 0), entry);
         auto* at_end = bw.CreateICmpUGE(cur_phi, bump);
         bw.CreateCondBr(at_end, done_bb, body_bb);
 
@@ -1652,32 +1818,25 @@ void ChaperoneGC::generateFunctions() {
             bb.CreateStructGEP(header_ty, cur_phi, 1), "meta");
         auto* color = bb.CreateAnd(meta, ConstantInt::get(i32_ty, 0xFF), "color");
         auto* is_white = bb.CreateICmpEQ(color, ConstantInt::get(i32_ty, COLOR_WHITE));
-        // If not white, increment live count
+        // Get actual object size from type field
+        auto* stride = bb.CreateCall(get_func("__ang_gc_obj_size"), {cur_phi}, "stride");
+        // If not white, increment live count and accumulate live bytes
         auto* new_live = bb.CreateSelect(is_white, live_phi,
             bb.CreateAdd(live_phi, ConstantInt::get(i64_ty, 1)), "new_live");
-        // Advance: read type field to determine size, or just use a fixed stride
-        // For simplicity, read the object type to get size estimate
-        auto* obj_type_val = bb.CreateLoad(i32_ty,
-            bb.CreateStructGEP(header_ty, cur_phi, 0), "obj_type");
-        // Estimate size: header(16) + payload varies by type
-        // String/List/Record: header(16) + 3 fields (8+8+8) = 40, round to 48
-        // Closure: header(16) + 4 fields = 48
-        // Use 48 as default, 16 for small types
-        // For now, just use a constant stride of 48 bytes
-        auto* stride = ConstantInt::get(i64_ty, 48);
+        auto* new_live_bytes = bb.CreateSelect(is_white, live_bytes_phi,
+            bb.CreateAdd(live_bytes_phi, stride), "new_live_bytes");
         auto* next_ptr = bb.CreateGEP(i8_ty, cur_phi, {stride}, "next_ptr");
         bb.CreateBr(next_bb);
 
         IRBuilder<> bn(next_bb);
         cur_phi->addIncoming(next_ptr, next_bb);
         live_phi->addIncoming(new_live, next_bb);
+        live_bytes_phi->addIncoming(new_live_bytes, next_bb);
         bn.CreateBr(walk_bb);
 
         // Compute energy from live ratio
         IRBuilder<> bd(done_bb);
-        auto* live_f = bd.CreateSIToFP(live_phi, f64_ty, "live_f");
-        // Estimate live bytes: live_count * 48
-        auto* live_bytes_f = bd.CreateFMul(live_f, ConstantFP::get(f64_ty, 48.0), "live_bytes_f");
+        auto* live_bytes_f = bd.CreateSIToFP(live_bytes_phi, f64_ty, "live_bytes_f");
         // Ratio: live_bytes / used_bytes
         auto* used_safe = bd.CreateSelect(
             bd.CreateFCmpOEQ(used_bytes_f, ConstantFP::get(f64_ty, 0.0)),
@@ -1715,34 +1874,8 @@ void ChaperoneGC::generateFunctions() {
         auto* old_ptr = fn->arg_begin();
         auto* new_ptr = fn->arg_begin() + 1;
 
-        // Determine object size from type field
-        auto* obj_type_val = b.CreateLoad(i32_ty,
-            b.CreateStructGEP(header_ty, old_ptr, 0), "obj_type");
-
-        auto* string_sz = ConstantInt::get(i64_ty, 40);   // header(16) + len(8) + cap(8) + ptr(8)
-        auto* list_sz = ConstantInt::get(i64_ty, 40);      // header(16) + len(8) + cap(8) + ptr(8)
-        auto* record_sz = ConstantInt::get(i64_ty, 40);     // same layout
-        auto* exception_sz = ConstantInt::get(i64_ty, 24);  // header(16) + obj(8)
-        auto* closure_sz = ConstantInt::get(i64_ty, 48);    // header(16) + ptr(8) + i32(4) + i1(1) + ptr(8) + i32(4)
-        auto* bound_sz = ConstantInt::get(i64_ty, 32);      // header(16) + obj(8) + obj(8)
-        auto* default_sz = ConstantInt::get(i64_ty, 48);    // conservative default
-
-        // Align sizes up to 16
-        // Already aligned
-
-        // Use select chain for simplicity (switch with phi is more complex)
-        auto* is_string = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_STRING));
-        auto* sz1 = b.CreateSelect(is_string, string_sz, default_sz);
-        auto* is_list = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_LIST));
-        auto* sz2 = b.CreateSelect(is_list, list_sz, sz1);
-        auto* is_record = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_RECORD));
-        auto* sz3 = b.CreateSelect(is_record, record_sz, sz2);
-        auto* is_exception = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_EXCEPTION));
-        auto* sz4 = b.CreateSelect(is_exception, exception_sz, sz3);
-        auto* is_closure = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_CLOSURE));
-        auto* sz5 = b.CreateSelect(is_closure, closure_sz, sz4);
-        auto* is_bound = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_BOUND_METHOD));
-        auto* obj_size = b.CreateSelect(is_bound, bound_sz, sz5);
+        // Determine object size via helper (returns 16-aligned allocation size)
+        auto* obj_size = b.CreateCall(get_func("__ang_gc_obj_size"), {old_ptr}, "obj_size");
 
         // memcpy(new_ptr, old_ptr, size)
         auto* memcpy_fn = m_module.getFunction("memcpy");
@@ -1760,6 +1893,248 @@ void ChaperoneGC::generateFunctions() {
         b.CreateStore(fwd_meta, meta_addr);
 
         b.CreateRet(new_ptr);
+    }
+
+    // ===================================================================
+    // __ang_gc_update_ref_in_value(i8* val_addr, i64 old_i64, i64 new_i64) -> void
+    // Given a pointer to an AngaraObject, if its tag is TAG_OBJ and its
+    // payload matches old_i64, patch it to new_i64.
+    // ===================================================================
+    {
+        auto* fn_ty = FunctionType::get(void_ty, {i8_ptr, i64_ty, i64_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_gc_update_ref_in_value", fn_ty);
+        m_fn_gc_update_ref_in_value = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* is_obj_bb = BasicBlock::Create(m_ctx, "is_obj", fn);
+        auto* patch_bb = BasicBlock::Create(m_ctx, "patch", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+
+        IRBuilder<> b(entry);
+        auto* val_addr = fn->arg_begin();
+        auto* old_i64 = fn->arg_begin() + 1;
+        auto* new_i64 = fn->arg_begin() + 2;
+        auto* tag = b.CreateLoad(i32_ty, val_addr, "tag");
+        auto* is_obj = b.CreateICmpEQ(tag, ConstantInt::get(i32_ty, TAG_OBJ));
+        b.CreateCondBr(is_obj, is_obj_bb, done_bb);
+
+        IRBuilder<> bio(is_obj_bb);
+        auto* payload_addr = bio.CreateStructGEP(obj_ty, val_addr, 1);
+        auto* payload = bio.CreateLoad(i64_ty, payload_addr, "payload");
+        auto* matches = bio.CreateICmpEQ(payload, old_i64);
+        bio.CreateCondBr(matches, patch_bb, done_bb);
+
+        IRBuilder<> bp(patch_bb);
+        bp.CreateStore(new_i64, bp.CreateStructGEP(obj_ty, val_addr, 1));
+        bp.CreateBr(done_bb);
+
+        IRBuilder<> bd(done_bb);
+        bd.CreateRetVoid();
+    }
+
+    // ===================================================================
+    // __ang_gc_update_refs_heap(i64 old_i64, i64 new_i64) -> void
+    // Phase B of reference updating: walks the allocation linked list,
+    // scans all live objects' children, patches any reference matching
+    // old_i64 to new_i64. Uses the same type dispatch as __ang_gc_scan.
+    // ===================================================================
+    {
+        auto* fn_ty = FunctionType::get(void_ty, {i64_ty, i64_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_gc_update_refs_heap", fn_ty);
+        m_fn_gc_update_refs_heap = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* loop_bb = BasicBlock::Create(m_ctx, "loop", fn);
+        auto* check_live_bb = BasicBlock::Create(m_ctx, "check_live", fn);
+        auto* scan_dispatch_bb = BasicBlock::Create(m_ctx, "scan_dispatch", fn);
+        // Per-type scan blocks
+        auto* scan_list_bb = BasicBlock::Create(m_ctx, "scan_list", fn);
+        auto* scan_list_loop_bb = BasicBlock::Create(m_ctx, "scan_list_loop", fn);
+        auto* scan_list_body_bb = BasicBlock::Create(m_ctx, "scan_list_body", fn);
+        auto* scan_exception_bb = BasicBlock::Create(m_ctx, "scan_exception", fn);
+        auto* scan_closure_bb = BasicBlock::Create(m_ctx, "scan_closure", fn);
+        auto* scan_closure_loop_bb = BasicBlock::Create(m_ctx, "scan_closure_loop", fn);
+        auto* scan_closure_body_bb = BasicBlock::Create(m_ctx, "scan_closure_body", fn);
+        auto* scan_bound_bb = BasicBlock::Create(m_ctx, "scan_bound", fn);
+        auto* scan_thread_bb = BasicBlock::Create(m_ctx, "scan_thread", fn);
+        auto* scan_thread_loop_bb = BasicBlock::Create(m_ctx, "scan_thread_loop", fn);
+        auto* scan_thread_body_bb = BasicBlock::Create(m_ctx, "scan_thread_body", fn);
+        auto* scan_record_bb = BasicBlock::Create(m_ctx, "scan_record", fn);
+        auto* scan_record_loop_bb = BasicBlock::Create(m_ctx, "scan_record_loop", fn);
+        auto* scan_record_body_bb = BasicBlock::Create(m_ctx, "scan_record_body", fn);
+        auto* advance_bb = BasicBlock::Create(m_ctx, "advance", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+
+        auto* update_fn = get_func("__ang_gc_update_ref_in_value");
+
+        IRBuilder<> b(entry);
+        auto* old_i64 = fn->arg_begin();
+        auto* new_i64 = fn->arg_begin() + 1;
+        auto* head = b.CreateLoad(i8_ptr, m_g_gc_alloc_list, "head");
+        b.CreateBr(loop_bb);
+
+        IRBuilder<> bl(loop_bb);
+        auto* curr_phi = bl.CreatePHI(i8_ptr, 2, "curr");
+        curr_phi->addIncoming(head, entry);
+        auto* is_null = bl.CreateICmpEQ(curr_phi, ConstantPointerNull::get(i8_ptr));
+        bl.CreateCondBr(is_null, done_bb, check_live_bb);
+
+        IRBuilder<> bcl(check_live_bb);
+        auto* meta = bcl.CreateLoad(i32_ty,
+            bcl.CreateStructGEP(header_ty, curr_phi, 1), "meta");
+        auto* color = bcl.CreateAnd(meta, ConstantInt::get(i32_ty, 0xFF), "color");
+        auto* is_white = bcl.CreateICmpEQ(color, ConstantInt::get(i32_ty, COLOR_WHITE));
+        auto* is_forwarded = bcl.CreateICmpEQ(color, ConstantInt::get(i32_ty, COLOR_FORWARDED));
+        auto* skip = bcl.CreateOr(is_white, is_forwarded);
+        bcl.CreateCondBr(skip, advance_bb, scan_dispatch_bb);
+
+        IRBuilder<> bsd(scan_dispatch_bb);
+        auto* obj_type = bsd.CreateLoad(i32_ty,
+            bsd.CreateStructGEP(header_ty, curr_phi, 0), "obj_type");
+        auto* sw = bsd.CreateSwitch(obj_type, advance_bb, 6);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_LIST), scan_list_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_EXCEPTION), scan_exception_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_CLOSURE), scan_closure_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_BOUND_METHOD), scan_bound_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_THREAD), scan_thread_bb);
+        // RECORD, CLASS, INSTANCE, DATA_INSTANCE, ENUM_INSTANCE all share scan_record_bb
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_RECORD), scan_record_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_CLASS), scan_record_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_INSTANCE), scan_record_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_DATA_INSTANCE), scan_record_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_ENUM_INSTANCE), scan_record_bb);
+        // STRING, MUTEX, NATIVE_INSTANCE: no children -> fall through to advance_bb
+
+        // OBJ_LIST: loop over elems array
+        {
+            IRBuilder<> bsl(scan_list_bb);
+            auto* count = bsl.CreateLoad(i64_ty,
+                bsl.CreateStructGEP(m_list_type, curr_phi, 1), "count");
+            auto* elems = bsl.CreateLoad(PointerType::get(m_ctx, 0),
+                bsl.CreateStructGEP(m_list_type, curr_phi, 3), "elems");
+            auto* has_elems = bsl.CreateICmpNE(elems, ConstantPointerNull::get(i8_ptr));
+            bsl.CreateCondBr(has_elems, scan_list_loop_bb, advance_bb);
+
+            IRBuilder<> bsll(scan_list_loop_bb);
+            auto* i_phi = bsll.CreatePHI(i64_ty, 2, "i");
+            i_phi->addIncoming(ConstantInt::get(i64_ty, 0), scan_list_bb);
+            auto* cont = bsll.CreateICmpSLT(i_phi, count);
+            bsll.CreateCondBr(cont, scan_list_body_bb, advance_bb);
+
+            IRBuilder<> bslb(scan_list_body_bb);
+            auto* elem_addr = bslb.CreateGEP(obj_ty, elems, {i_phi});
+            bslb.CreateCall(update_fn, {elem_addr, old_i64, new_i64});
+            auto* next_i = bslb.CreateAdd(i_phi, ConstantInt::get(i64_ty, 1));
+            bslb.CreateBr(scan_list_loop_bb);
+            i_phi->addIncoming(next_i, scan_list_body_bb);
+        }
+
+        // OBJ_EXCEPTION: patch msg (field 1)
+        {
+            IRBuilder<> bse(scan_exception_bb);
+            auto* msg_addr = bse.CreateStructGEP(m_exception_type, curr_phi, 1);
+            bse.CreateCall(update_fn, {msg_addr, old_i64, new_i64});
+            bse.CreateBr(advance_bb);
+        }
+
+        // OBJ_CLOSURE: loop over env array
+        {
+            IRBuilder<> bsc(scan_closure_bb);
+            auto* env = bsc.CreateLoad(PointerType::get(m_ctx, 0),
+                bsc.CreateStructGEP(m_closure_type, curr_phi, 4), "env");
+            auto* env_count = bsc.CreateLoad(i32_ty,
+                bsc.CreateStructGEP(m_closure_type, curr_phi, 5), "env_count");
+            auto* env_count_ext = bsc.CreateZExt(env_count, i64_ty, "env_count_ext");
+            auto* has_env = bsc.CreateICmpNE(env, ConstantPointerNull::get(i8_ptr));
+            bsc.CreateCondBr(has_env, scan_closure_loop_bb, advance_bb);
+
+            IRBuilder<> bscl(scan_closure_loop_bb);
+            auto* i_phi = bscl.CreatePHI(i64_ty, 2, "i");
+            i_phi->addIncoming(ConstantInt::get(i64_ty, 0), scan_closure_bb);
+            auto* cont = bscl.CreateICmpSLT(i_phi, env_count_ext);
+            bscl.CreateCondBr(cont, scan_closure_body_bb, advance_bb);
+
+            IRBuilder<> bscb(scan_closure_body_bb);
+            auto* slot_addr = bscb.CreateGEP(obj_ty, env, {i_phi});
+            bscb.CreateCall(update_fn, {slot_addr, old_i64, new_i64});
+            auto* next_i = bscb.CreateAdd(i_phi, ConstantInt::get(i64_ty, 1));
+            bscb.CreateBr(scan_closure_loop_bb);
+            i_phi->addIncoming(next_i, scan_closure_body_bb);
+        }
+
+        // OBJ_BOUND_METHOD: patch receiver (field 1) and method (field 2)
+        {
+            IRBuilder<> bsb(scan_bound_bb);
+            auto* recv_addr = bsb.CreateStructGEP(m_bound_method_type, curr_phi, 1);
+            bsb.CreateCall(update_fn, {recv_addr, old_i64, new_i64});
+            auto* meth_addr = bsb.CreateStructGEP(m_bound_method_type, curr_phi, 2);
+            bsb.CreateCall(update_fn, {meth_addr, old_i64, new_i64});
+            bsb.CreateBr(advance_bb);
+        }
+
+        // OBJ_THREAD: patch closure (field 2), loop over args (field 4)
+        {
+            IRBuilder<> bst(scan_thread_bb);
+            auto* closure_addr = bst.CreateStructGEP(m_thread_type, curr_phi, 2);
+            bst.CreateCall(update_fn, {closure_addr, old_i64, new_i64});
+            auto* argc = bst.CreateLoad(i32_ty,
+                bst.CreateStructGEP(m_thread_type, curr_phi, 3), "argc");
+            auto* args = bst.CreateLoad(PointerType::get(m_ctx, 0),
+                bst.CreateStructGEP(m_thread_type, curr_phi, 4), "args");
+            auto* argc_ext = bst.CreateZExt(argc, i64_ty, "argc_ext");
+            auto* has_args = bst.CreateAnd(
+                bst.CreateICmpNE(args, ConstantPointerNull::get(i8_ptr)),
+                bst.CreateICmpSGT(argc_ext, ConstantInt::get(i64_ty, 0)));
+            bst.CreateCondBr(has_args, scan_thread_loop_bb, advance_bb);
+
+            IRBuilder<> bstl(scan_thread_loop_bb);
+            auto* i_phi = bstl.CreatePHI(i64_ty, 2, "i");
+            i_phi->addIncoming(ConstantInt::get(i64_ty, 0), scan_thread_bb);
+            auto* cont = bstl.CreateICmpSLT(i_phi, argc_ext);
+            bstl.CreateCondBr(cont, scan_thread_body_bb, advance_bb);
+
+            IRBuilder<> bstb(scan_thread_body_bb);
+            auto* slot_addr = bstb.CreateGEP(obj_ty, args, {i_phi});
+            bstb.CreateCall(update_fn, {slot_addr, old_i64, new_i64});
+            auto* next_i = bstb.CreateAdd(i_phi, ConstantInt::get(i64_ty, 1));
+            bstb.CreateBr(scan_thread_loop_bb);
+            i_phi->addIncoming(next_i, scan_thread_body_bb);
+        }
+
+        // OBJ_RECORD/CLASS/INSTANCE/DATA_INSTANCE/ENUM_INSTANCE: loop over entries
+        {
+            IRBuilder<> bsr(scan_record_bb);
+            auto* count = bsr.CreateLoad(i64_ty,
+                bsr.CreateStructGEP(m_record_type, curr_phi, 1), "count");
+            auto* entries = bsr.CreateLoad(PointerType::get(m_ctx, 0),
+                bsr.CreateStructGEP(m_record_type, curr_phi, 3), "entries");
+            auto* has_entries = bsr.CreateICmpNE(entries, ConstantPointerNull::get(i8_ptr));
+            bsr.CreateCondBr(has_entries, scan_record_loop_bb, advance_bb);
+
+            IRBuilder<> bsrl(scan_record_loop_bb);
+            auto* i_phi = bsrl.CreatePHI(i64_ty, 2, "i");
+            i_phi->addIncoming(ConstantInt::get(i64_ty, 0), scan_record_bb);
+            auto* cont = bsrl.CreateICmpSLT(i_phi, count);
+            bsrl.CreateCondBr(cont, scan_record_body_bb, advance_bb);
+
+            IRBuilder<> bsrb(scan_record_body_bb);
+            auto* entry_ptr = bsrb.CreateGEP(m_record_entry_type, entries, {i_phi});
+            auto* val_addr = bsrb.CreateStructGEP(m_record_entry_type, entry_ptr, 1);
+            bsrb.CreateCall(update_fn, {val_addr, old_i64, new_i64});
+            auto* next_i = bsrb.CreateAdd(i_phi, ConstantInt::get(i64_ty, 1));
+            bsrb.CreateBr(scan_record_loop_bb);
+            i_phi->addIncoming(next_i, scan_record_body_bb);
+        }
+
+        // Advance to next object in allocation list
+        IRBuilder<> ba(advance_bb);
+        auto* next_ptr = ba.CreateLoad(i8_ptr,
+            ba.CreateStructGEP(header_ty, curr_phi, 2), "next");
+        curr_phi->addIncoming(next_ptr, advance_bb);
+        ba.CreateBr(loop_bb);
+
+        IRBuilder<> bd(done_bb);
+        bd.CreateRetVoid();
     }
 
     // ===================================================================
@@ -1868,6 +2243,8 @@ void ChaperoneGC::generateFunctions() {
         thread_phi->addIncoming(next_thread, next_thread_bb);
 
         IRBuilder<> bd(done_bb);
+        // Phase B: scan all live heap objects for stale references
+        bd.CreateCall(get_func("__ang_gc_update_refs_heap"), {old_i64, new_i64});
         bd.CreateRetVoid();
     }
 
@@ -1962,15 +2339,21 @@ void ChaperoneGC::generateFunctions() {
             ArrayType::get(i8_ptr, 256), m_g_gc_arenas,
             {ConstantInt::get(i64_ty, 0), best_idx_phi});
         auto* src_arena = bfs.CreateLoad(i8_ptr, best_arena_addr, "src_arena");
-        auto* src_base = bfs.CreateLoad(i8_ptr,
-            bfs.CreateStructGEP(arena_ty, src_arena, 0), "src_base");
-        auto* src_bump = bfs.CreateLoad(i8_ptr,
-            bfs.CreateStructGEP(arena_ty, src_arena, 1), "src_bump");
-        bfs.CreateBr(walk_src_bb);
+        // Arena may have been recycled by a concurrent GC collection
+        auto* src_is_null = bfs.CreateICmpEQ(src_arena, ConstantPointerNull::get(i8_ptr));
+        auto* load_src_bb = BasicBlock::Create(m_ctx, "load_src", fn);
+        bfs.CreateCondBr(src_is_null, done_bb, load_src_bb);
+
+        IRBuilder<> bls(load_src_bb);
+        auto* src_base = bls.CreateLoad(i8_ptr,
+            bls.CreateStructGEP(arena_ty, src_arena, 0), "src_base");
+        auto* src_bump = bls.CreateLoad(i8_ptr,
+            bls.CreateStructGEP(arena_ty, src_arena, 1), "src_bump");
+        bls.CreateBr(walk_src_bb);
 
         IRBuilder<> bws(walk_src_bb);
         auto* cur_phi = bws.CreatePHI(i8_ptr, 2, "cur");
-        cur_phi->addIncoming(src_base, find_src_bb);
+        cur_phi->addIncoming(src_base, load_src_bb);
         auto* at_end2 = bws.CreateICmpUGE(cur_phi, src_bump);
         bws.CreateCondBr(at_end2, done_bb, walk_body_bb);  // no live obj found, done
 
@@ -1981,7 +2364,7 @@ void ChaperoneGC::generateFunctions() {
         auto* is_white = bwb.CreateICmpEQ(color, ConstantInt::get(i32_ty, COLOR_WHITE));
         auto* is_forwarded = bwb.CreateICmpEQ(color, ConstantInt::get(i32_ty, COLOR_FORWARDED));
         auto* is_dead = bwb.CreateOr(is_white, is_forwarded);
-        auto* stride = ConstantInt::get(i64_ty, 48);
+        auto* stride = bwb.CreateCall(get_func("__ang_gc_obj_size"), {cur_phi}, "stride");
         auto* next_cur = bwb.CreateGEP(i8_ty, cur_phi, {stride});
         bwb.CreateCondBr(is_dead, walk_src_bb, found_live_bb);
         cur_phi->addIncoming(next_cur, walk_body_bb);
@@ -1996,12 +2379,11 @@ void ChaperoneGC::generateFunctions() {
 
         IRBuilder<> bnp(not_pinned_bb);
         // Allocate destination in a different arena using bump allocator
-        // For simplicity, allocate through gc_alloc which handles arena selection
         auto* obj_type_val = bnp.CreateLoad(i32_ty,
             bnp.CreateStructGEP(header_ty, cur_phi, 0), "obj_type_val");
-        // Allocate new space via gc_alloc (size=48, type=obj_type)
+        auto* obj_alloc_size = bnp.CreateCall(get_func("__ang_gc_obj_size"), {cur_phi}, "obj_alloc_size");
         auto* alloc_fn = get_func("__ang_gc_alloc");
-        auto* dest = bnp.CreateCall(alloc_fn, {stride, obj_type_val}, "dest");
+        auto* dest = bnp.CreateCall(alloc_fn, {obj_alloc_size, obj_type_val}, "dest");
         bnp.CreateBr(do_move_bb);
 
         IRBuilder<> bdm(do_move_bb);
@@ -2108,27 +2490,17 @@ void ChaperoneGC::generateFunctions() {
         ba.CreateBr(done_bb);
 
         IRBuilder<> bsp(spawn_bb);
-        // Set active flag
+        // Chaperone compaction runs synchronously during GC collection,
+        // not as a background thread — avoids concurrency hazards with
+        // the allocation linked list's forward/next pointer overlap.
+        // Set active flag so stats/reporting can detect it.
         bsp.CreateStore(ConstantInt::getTrue(m_ctx), m_g_gc_chaperone_active);
-        // Allocate pthread_t storage (just use 8 bytes)
-        auto* malloc_fn_local = m_module.getFunction("malloc");
-        auto* thread_storage = bsp.CreateCall(malloc_fn_local,
-            {ConstantInt::get(i64_ty, 8)}, "thread_storage");
-        // Spawn thread: pthread_create(thread_storage, null, chaperone_main, null)
-        auto* pthread_create_fn = m_module.getFunction("pthread_create");
-        bsp.CreateCall(pthread_create_fn, {
-            thread_storage,
-            ConstantPointerNull::get(i8_ptr),
-            get_func("__ang_gc_chaperone_main"),
-            ConstantPointerNull::get(i8_ptr)
-        });
-        bsp.CreateStore(thread_storage, m_g_gc_chaperone_thread);
         bsp.CreateBr(done_bb);
 
         IRBuilder<> bd(done_bb);
         auto* result = bd.CreatePHI(i8_ptr, 2, "result");
         result->addIncoming(thread, already_active_bb);
-        result->addIncoming(thread_storage, spawn_bb);
+        result->addIncoming(ConstantPointerNull::get(i8_ptr), spawn_bb);
         bd.CreateRet(result);
     }
 }

@@ -82,6 +82,10 @@ namespace angara {
         /// Sets the diagnostic output format.
         void set_error_format(const std::string& fmt) { m_error_format = fmt; }
 
+        /// Sets the GC strategy ("chaperone" or "mark-sweep").
+        void set_gc_strategy(const std::string& s) { m_gc_strategy = s; }
+        const std::string& get_gc_strategy() const { return m_gc_strategy; }
+
         /// Compiles a root source file and all its transitive imports.
         /// Runs Lex -> Parse -> TypeCheck -> LLVM codegen for each module.
         /// @param project         The project configuration.
@@ -162,6 +166,7 @@ namespace angara {
         bool m_wall = false;
         std::set<std::string> m_suppressed_warnings;
         std::string m_error_format = "text";
+        std::string m_gc_strategy = "chaperone";
 
         std::set<std::string> m_generated_object_files;
         std::vector<std::string> m_angara_module_names;
