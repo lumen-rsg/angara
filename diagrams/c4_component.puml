@@ -8,7 +8,7 @@ Component(parser, "Parser", "C++", "Синтаксический анализа�
 Component(tc, "TypeChecker", "C++", "Проверка типов, разрешение символов,\nвалидация семантики (Visitor pattern)")
 Component(symtab, "SymbolTable", "C++", "Таблица символов\nУправление областями видимости")
 Component(llvm_be, "LLVMBackend", "C++", "Генерация LLVM IR из AST\n(dynamic_cast dispatch)")
-Component(rt_builder, "RuntimeBuilder", "C++", "Генерация runtime как LLVM IR\n(ARC, строки, списки, исключения)")
+Component(rt_builder, "RuntimeBuilder", "C++", "Генерация runtime как LLVM IR\n(GC, строки, списки, исключения)")
 Component(driver, "CompilerDriver", "C++", "Оркестрация: Lexer→Parser→TC→Backend\nРазрешение модулей, кэширование")
 Component(buildsys, "BuildSystem", "C++", "Сборка проекта, компиляция модулей,\nлинковка, кросс-компиляция")
 Component(config, "ConfigParser", "C++", "Парсинг конфигурационных файлов\nпроекта (project.an)")

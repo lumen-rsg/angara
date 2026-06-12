@@ -7,7 +7,7 @@
 
 ## Architecture: GC Interface
 
-The GC is abstracted behind a generic interface so multiple collector strategies (ARC, MarkSweep, Generational, etc.) can coexist. The interface is defined as LLVM IR generation methods — since the entire runtime is emitted as LLVM IR, the "interface" is a C++ abstract class whose implementations generate different LLVM IR for the same logical operations.
+The GC is abstracted behind a generic interface so multiple collector strategies (MarkSweep, Chaperone, Generational, etc.) can coexist. The interface is defined as LLVM IR generation methods — since the entire runtime is emitted as LLVM IR, the "interface" is a C++ abstract class whose implementations generate different LLVM IR for the same logical operations.
 
 ### GC Interface Methods
 Every GC implementation must provide:
@@ -26,8 +26,8 @@ Every GC implementation must provide:
 
 ### Implementations
 - `MarkSweepGC` — Precise mark-and-sweep with tri-color marking, per-function root frames, uniqueness bit
+- `ChaperoneGC` — Protein-folding-inspired GC: bump-arena allocation, mark-sweep collection, simulated-annealing compaction, arena recycling
 - (Future) `GenerationalGC` — Generational mark-and-sweep with nursery
-- (Legacy) `RefCountGC` — The original ARC (for backward compat or freestanding)
 
 ## Progress
 
@@ -137,9 +137,31 @@ Proof that GC collection is not the bottleneck: the gc_count fix (reset after sw
 
 ### Remaining optimization opportunities
 
-- **Bump allocator / slab allocation** — replacing the linked-list gc_alloc with a bump pointer would drastically reduce per-allocation overhead for the integer loop.
-- **Generational GC** — nursery-based collection would make short-lived objects nearly free.
 - **Unboxed primitives** — avoiding boxing for integers in tight loops would eliminate the 9x gap entirely.
+
+## Benchmark: ChaperoneGC vs MarkSweepGC vs C
+
+After ChaperoneGC implementation (bump-arena alloc, compaction, arena recycling), `--release` / `-O2`, 5-run averages:
+
+| Benchmark | Chaperone | MarkSweep | C -O2 | Chap/C | MS/C |
+|---|---|---|---|---|---|
+| Integer Loop (500M iter) | 0.020s | 0.020s | 0.018s | 1.11x | 1.11x |
+| Prime Sieve (1M) | 0.028s | 0.032s | 0.028s | 1.00x | 1.14x |
+| Recursive Fibonacci (n=40) | 0.284s | 0.272s | 0.280s | 1.01x | 0.97x |
+| Matrix Multiply (200x200) | 0.018s | 0.016s | 0.018s | 1.00x | 0.88x |
+| List Ops (1M items) | 0.016s | 0.018s | 0.016s | 1.00x | 1.12x |
+| Bubble Sort (20K) | 0.416s | 0.424s | 0.522s | **0.79x** | 0.81x |
+| String Building (100K) | 0.022s | 0.022s | 0.042s | **0.52x** | 0.52x |
+| Data Class Churn (500K) | 0.086s | 0.084s | 0.016s | 5.37x | 5.25x |
+| GC Stress (trees+strings+lists) | 0.032s | 0.036s | 0.046s | **0.69x** | 0.78x |
+
+### Analysis
+
+- **GC Stress beats C (0.69x)**. Bump-arena allocation is cheaper than malloc for short-lived objects. ChaperoneGC is 11% faster than MarkSweep on this benchmark.
+- **String Building beats C (0.52x)**. The is_unique optimization enables in-place string concatenation.
+- **Bubble Sort beats C (0.79x)**. Fewer allocations + cache-friendly arena layout.
+- **Data Class Churn (5.37x)**. Still slow due to heap allocation per instance. Unboxed primitives would close this gap.
+- **Most benchmarks at parity with C** (1.00x–1.11x). The GC overhead is negligible when allocation pressure is low.
 
 ## Stage 8: GC diagnostics
 

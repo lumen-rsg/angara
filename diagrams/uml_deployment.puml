@@ -85,7 +85,7 @@ node "Целевая платформа:\nBare-metal (ARM / RISC-V)\nFreestandin
 
 node "Целевая платформа:\nВстраиваемый Linux (ARM)\nRaspberry Pi / Jetson" as target_embedded {
     artifact "app\n(Исполняемый файл)" as app_embedded <<Executable>>
-    component "Runtime (hosted)\n(ARC, Strings, Lists)" as rt_hosted_emb
+    component "Runtime (hosted)\n(GC, Strings, Lists)" as rt_hosted_emb
     component "Модули:\nMQTT, HTTP, GPIO" as modules_emb
 }
 

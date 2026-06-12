@@ -423,6 +423,7 @@ Options:
   --target <triple>           Cross-compile for a target triple (e.g. aarch64, wasm32)
   --sysroot <path>            Set sysroot for cross-compilation
   --freestanding              Freestanding mode (no libc, bare-metal)
+  --gc <strategy>             Select GC strategy: mark-sweep (default), chaperone
   --nostdlib                  Don't link standard libraries (libc, libm, pthread)
 ```
 
