@@ -1,5 +1,7 @@
 #pragma once
 
+#include "GarbageCollector.h"
+
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/IRBuilder.h>
@@ -12,7 +14,6 @@
 
 namespace angara {
 
-class GarbageCollector;
 class MarkSweepGC;
 
 /// Tag values for the AngaraObject.type discriminant field.
@@ -50,7 +51,7 @@ public:
     /// @param builder      IR builder for generating instructions.
     /// @param freestanding If true, generates stubs instead of libc-dependent implementations.
     RuntimeBuilder(llvm::LLVMContext& context, llvm::Module& module, llvm::IRBuilder<>& builder,
-                   bool freestanding = false);
+                   bool freestanding = false, const std::string& gc_strategy = "chaperone");
 
     /// Destructor — defined in RuntimeBuilder.cpp where GarbageCollector is complete.
     ~RuntimeBuilder();
@@ -155,6 +156,11 @@ public:
     llvm::StructType* getGcThreadStateType() const;
     llvm::GlobalVariable* getGcThreadStateTLS() const;
     llvm::FunctionCallee getGcPrintStatsFunc() const;
+
+    /// Returns the initial meta value for newly allocated objects.
+    /// Delegates to the active GC's getInitialMetaConstant().
+    /// Defined in RuntimeBuilder.cpp (needs full GarbageCollector type).
+    llvm::ConstantInt* getGcInitialMeta() const;
 
 private:
     /// Creates all LLVM struct types for the runtime object model.

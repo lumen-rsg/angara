@@ -1,5 +1,4 @@
 #include "RuntimeBuilder.h"
-#include "MarkSweepGC.h"
 
 using namespace llvm;
 
@@ -460,7 +459,7 @@ void RuntimeBuilder::generateDeepClone() {
         auto* header = bs.CreateStructGEP(m_string_type, new_ptr, 0);
         bs.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING),
             bs.CreateStructGEP(m_obj_header_type, header, 0));
-        bs.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
+        bs.CreateStore(getGcInitialMeta(),
             bs.CreateStructGEP(m_obj_header_type, header, 1));
         bs.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             bs.CreateStructGEP(m_obj_header_type, header, 2));
@@ -489,7 +488,7 @@ void RuntimeBuilder::generateDeepClone() {
         auto* header = bl.CreateStructGEP(m_list_type, new_ptr, 0);
         bl.CreateStore(ConstantInt::get(i32_ty, OBJ_LIST),
             bl.CreateStructGEP(m_obj_header_type, header, 0));
-        bl.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
+        bl.CreateStore(getGcInitialMeta(),
             bl.CreateStructGEP(m_obj_header_type, header, 1));
         bl.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             bl.CreateStructGEP(m_obj_header_type, header, 2));
@@ -551,7 +550,7 @@ void RuntimeBuilder::generateDeepClone() {
         auto* header = br.CreateStructGEP(m_record_type, new_ptr, 0);
         br.CreateStore(ConstantInt::get(i32_ty, OBJ_RECORD),
             br.CreateStructGEP(m_obj_header_type, header, 0));
-        br.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
+        br.CreateStore(getGcInitialMeta(),
             br.CreateStructGEP(m_obj_header_type, header, 1));
         br.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             br.CreateStructGEP(m_obj_header_type, header, 2));
@@ -611,7 +610,7 @@ void RuntimeBuilder::generateDeepClone() {
         bc.CreateCall(memcpy_fn, {new_ptr, bc.CreateBitCast(closure_ptr, i8_ptr), closure_size});
         // Reset refcount to 1
         auto* header = bc.CreateStructGEP(m_closure_type, new_ptr, 0);
-        bc.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
+        bc.CreateStore(getGcInitialMeta(),
             bc.CreateStructGEP(m_obj_header_type, header, 1));
         bc.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             bc.CreateStructGEP(m_obj_header_type, header, 2));
@@ -633,7 +632,7 @@ void RuntimeBuilder::generateDeepClone() {
         auto* header = bb.CreateStructGEP(m_bound_method_type, new_ptr, 0);
         bb.CreateStore(ConstantInt::get(i32_ty, OBJ_BOUND_METHOD),
             bb.CreateStructGEP(m_obj_header_type, header, 0));
-        bb.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
+        bb.CreateStore(getGcInitialMeta(),
             bb.CreateStructGEP(m_obj_header_type, header, 1));
         bb.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             bb.CreateStructGEP(m_obj_header_type, header, 2));
@@ -661,7 +660,7 @@ void RuntimeBuilder::generateDeepClone() {
         auto* header = be.CreateStructGEP(m_exception_type, new_ptr, 0);
         be.CreateStore(ConstantInt::get(i32_ty, OBJ_EXCEPTION),
             be.CreateStructGEP(m_obj_header_type, header, 0));
-        be.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
+        be.CreateStore(getGcInitialMeta(),
             be.CreateStructGEP(m_obj_header_type, header, 1));
         be.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             be.CreateStructGEP(m_obj_header_type, header, 2));
@@ -684,7 +683,7 @@ void RuntimeBuilder::generateDeepClone() {
         bn2.CreateCall(memcpy_fn, {new_ptr, bn2.CreateBitCast(ni_ptr, i8_ptr), ni_size});
         // Reset refcount to 1
         auto* header = bn2.CreateStructGEP(m_native_instance_type, new_ptr, 0);
-        bn2.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
+        bn2.CreateStore(getGcInitialMeta(),
             bn2.CreateStructGEP(m_obj_header_type, header, 1));
         bn2.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             bn2.CreateStructGEP(m_obj_header_type, header, 2));
@@ -701,7 +700,7 @@ void RuntimeBuilder::generateDeepClone() {
         auto* new_ptr = bt.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_thr");
         bt.CreateCall(memcpy_fn, {new_ptr, bt.CreateBitCast(thr_ptr, i8_ptr), thr_size});
         auto* header = bt.CreateStructGEP(m_thread_type, new_ptr, 0);
-        bt.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
+        bt.CreateStore(getGcInitialMeta(),
             bt.CreateStructGEP(m_obj_header_type, header, 1));
         bt.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             bt.CreateStructGEP(m_obj_header_type, header, 2));
@@ -718,7 +717,7 @@ void RuntimeBuilder::generateDeepClone() {
         auto* new_ptr = bm.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_mtx");
         bm.CreateCall(memcpy_fn, {new_ptr, bm.CreateBitCast(mtx_ptr, i8_ptr), mtx_size});
         auto* header = bm.CreateStructGEP(m_mutex_type, new_ptr, 0);
-        bm.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
+        bm.CreateStore(getGcInitialMeta(),
             bm.CreateStructGEP(m_obj_header_type, header, 1));
         bm.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             bm.CreateStructGEP(m_obj_header_type, header, 2));

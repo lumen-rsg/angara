@@ -1,5 +1,4 @@
 #include "RuntimeBuilder.h"
-#include "MarkSweepGC.h"
 
 using namespace llvm;
 
@@ -196,7 +195,7 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* hdr = b.CreateStructGEP(m_native_instance_type, inst, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_NATIVE_INSTANCE),
                       b.CreateStructGEP(m_obj_header_type, hdr, 0));
-        b.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
+        b.CreateStore(getGcInitialMeta(),
                       b.CreateStructGEP(m_obj_header_type, hdr, 1));
         b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
                       b.CreateStructGEP(m_obj_header_type, hdr, 2));
@@ -314,7 +313,7 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* hdr = b.CreateStructGEP(m_string_type, str_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING),
                       b.CreateStructGEP(m_obj_header_type, hdr, 0));
-        b.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
+        b.CreateStore(getGcInitialMeta(),
                       b.CreateStructGEP(m_obj_header_type, hdr, 1));
         b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
                       b.CreateStructGEP(m_obj_header_type, hdr, 2));
@@ -341,7 +340,7 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* hdr = b.CreateStructGEP(m_string_type, str_ptr, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING),
                       b.CreateStructGEP(m_obj_header_type, hdr, 0));
-        b.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)),
+        b.CreateStore(getGcInitialMeta(),
                       b.CreateStructGEP(m_obj_header_type, hdr, 1));
         b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
                       b.CreateStructGEP(m_obj_header_type, hdr, 2));

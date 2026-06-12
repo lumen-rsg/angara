@@ -8,17 +8,23 @@
 
 namespace angara {
 
-/// Precise mark-and-sweep garbage collector with tri-color marking.
+/// ChaperoneGC: Protein-folding inspired garbage collector.
 ///
-/// ObjHeader layout: { i32 type, i32 meta, i8* next }
+/// Uses bump-arena allocation for fast allocation and a background
+/// "chaperone" thread that models the heap as a free-energy landscape,
+/// using simulated annealing to incrementally relocate hot objects
+/// into dense, cache-friendly clusters.
+///
+/// ObjHeader layout: { i32 type, i32 meta, i8* forward }
 ///   - type:  OBJ_* subtype tag
-///   - meta:  packed i32 with color (byte 0), is_unique (byte 1)
-///   - next:  intrusive linked-list pointer for the allocation list
-class MarkSweepGC : public GarbageCollector {
+///   - meta:  packed i32 with color (byte 0), is_unique (bit 8),
+///            pinned (bit 16), arena_id (byte 3)
+///   - forward: forwarding pointer for relocation (null during normal operation)
+class ChaperoneGC : public GarbageCollector {
 public:
-    MarkSweepGC(llvm::LLVMContext& ctx, llvm::Module& module, llvm::IRBuilder<>& builder);
+    ChaperoneGC(llvm::LLVMContext& ctx, llvm::Module& module, llvm::IRBuilder<>& builder);
 
-    const char* name() const override { return "mark-sweep"; }
+    const char* name() const override { return "chaperone"; }
 
     void generateTypes() override;
     void generateGlobals() override;
@@ -51,19 +57,22 @@ public:
     void setAngaraObjType(llvm::StructType* ty) override { m_angara_obj_type = ty; }
 
     // --- Constants ---
-    static constexpr int COLOR_WHITE = 0;
-    static constexpr int COLOR_GRAY  = 1;
-    static constexpr int COLOR_BLACK = 2;
-    static constexpr int UNIQUE_SHIFT = 8;
+    static constexpr int COLOR_WHITE    = 0;
+    static constexpr int COLOR_GRAY     = 1;
+    static constexpr int COLOR_BLACK    = 2;
+    static constexpr int COLOR_FORWARDED = 3;
+    static constexpr int UNIQUE_SHIFT   = 8;
+    static constexpr int PINNED_SHIFT   = 16;
 
-    static constexpr int packMeta(int color, bool is_unique) {
-        return color | (is_unique ? (1 << UNIQUE_SHIFT) : 0);
+    static constexpr int ARENA_SIZE = 1024 * 1024;  // 1MB per arena
+
+    static constexpr int packMeta(int color, bool is_unique, int arena_id = 0) {
+        return color
+             | (is_unique ? (1 << UNIQUE_SHIFT) : 0)
+             | ((arena_id & 0xFF) << 24);
     }
 
     // --- Additional accessors ---
-
-    /// Set all runtime struct types (called by RuntimeBuilder after generateTypes).
-    /// Needed by the GC scanner for type-dispatched child traversal.
     void setStructTypes(
         llvm::StructType* string_type,
         llvm::StructType* list_type,
@@ -92,10 +101,11 @@ private:
     llvm::IRBuilder<>&  m_builder;
 
     // --- LLVM struct types ---
-    llvm::StructType* m_angara_obj_type = nullptr;  // Set by RuntimeBuilder after generateTypes
+    llvm::StructType* m_angara_obj_type = nullptr;
     llvm::StructType* m_obj_header_type = nullptr;
     llvm::StructType* m_gc_thread_state_type = nullptr;
     llvm::StructType* m_gc_root_frame_type = nullptr;
+    llvm::StructType* m_arena_header_type = nullptr;
 
     // --- Runtime struct types (set by RuntimeBuilder after generateTypes) ---
     llvm::StructType* m_string_type = nullptr;
@@ -109,20 +119,33 @@ private:
     llvm::StructType* m_native_instance_type = nullptr;
 
     // --- LLVM globals ---
-    llvm::GlobalVariable* m_g_gc_head = nullptr;
-    llvm::GlobalVariable* m_g_gc_count = nullptr;
-    llvm::GlobalVariable* m_g_gc_threshold = nullptr;
-    llvm::GlobalVariable* m_g_gc_running = nullptr;
-    llvm::GlobalVariable* m_g_gc_threads = nullptr;
-    llvm::GlobalVariable* m_g_gc_thread_state_tls = nullptr;
+    llvm::GlobalVariable* m_g_gc_arenas = nullptr;         // [256 x i8*]
+    llvm::GlobalVariable* m_g_gc_alloc_list = nullptr;    // i8* (allocation linked list head)
+    llvm::GlobalVariable* m_g_gc_arena_count = nullptr;    // i64
+    llvm::GlobalVariable* m_g_gc_arena_free = nullptr;     // i8* (linked list)
+    llvm::GlobalVariable* m_g_gc_arena_lock = nullptr;     // i32 (spinlock)
+    llvm::GlobalVariable* m_g_gc_total_count = nullptr;    // i64
+    llvm::GlobalVariable* m_g_gc_threshold = nullptr;      // i64
+    llvm::GlobalVariable* m_g_gc_running = nullptr;        // i1
+    llvm::GlobalVariable* m_g_gc_threads = nullptr;        // i8*
+    llvm::GlobalVariable* m_g_gc_thread_state_tls = nullptr; // i8* (TLS)
 
     // --- Stats globals ---
     llvm::GlobalVariable* m_g_gc_collections = nullptr;
     llvm::GlobalVariable* m_g_gc_total_allocs = nullptr;
     llvm::GlobalVariable* m_g_gc_total_frees = nullptr;
     llvm::GlobalVariable* m_g_gc_total_bytes_alloc = nullptr;
+
+    // --- Chaperone globals ---
+    llvm::GlobalVariable* m_g_gc_chaperone_active = nullptr;  // i1
+    llvm::GlobalVariable* m_g_gc_temperature = nullptr;       // f64
+    llvm::GlobalVariable* m_g_gc_step_count = nullptr;        // i64
+    llvm::GlobalVariable* m_g_gc_chaperone_thread = nullptr;  // i8* (pthread_t)
+    llvm::GlobalVariable* m_g_gc_rand_state = nullptr;        // i64 (LCG state)
+
     // --- Function callees ---
     llvm::FunctionCallee m_fn_gc_alloc;
+    llvm::FunctionCallee m_fn_gc_alloc_slow;
     llvm::FunctionCallee m_fn_gc_collect;
     llvm::FunctionCallee m_fn_gc_mark_value;
     llvm::FunctionCallee m_fn_gc_mark;
@@ -140,6 +163,16 @@ private:
     llvm::FunctionCallee m_fn_gc_unpin;
     llvm::FunctionCallee m_fn_gc_print_stats;
     llvm::FunctionCallee m_fn_gc_read_barrier;
+    llvm::FunctionCallee m_fn_gc_chaperone_main;
+    llvm::FunctionCallee m_fn_gc_chaperone_step;
+    llvm::FunctionCallee m_fn_gc_compute_energy;
+    llvm::FunctionCallee m_fn_gc_relocate;
+    llvm::FunctionCallee m_fn_gc_update_refs;
+    llvm::FunctionCallee m_fn_gc_chaperone_spawn;
+    llvm::FunctionCallee m_fn_gc_obj_size;
+    llvm::FunctionCallee m_fn_gc_update_ref_in_value;
+    llvm::FunctionCallee m_fn_gc_update_refs_heap;
+    llvm::FunctionCallee m_fn_gc_recycle_arenas;
 
     llvm::Function* createRuntimeFunc(const std::string& name, llvm::FunctionType* type);
 };

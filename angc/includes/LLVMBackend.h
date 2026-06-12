@@ -42,7 +42,8 @@ namespace angara {
                     bool freestanding = false,
                     bool dump_ir = false,
                     bool debug = false,
-                    bool emit_llvm = false);
+                    bool emit_llvm = false,
+                    const std::string& gc_strategy = "chaperone");
 
         /// Releases LLVM objects (cleanup at process exit).
         ~LLVMBackend();
@@ -278,6 +279,7 @@ namespace angara {
         llvm::Value* m_pending_callback_context = nullptr;
 
         bool m_freestanding = false;
+        std::string m_gc_strategy;
         bool m_dump_ir = false;
         bool m_emit_llvm = false;
         bool m_debug = false;

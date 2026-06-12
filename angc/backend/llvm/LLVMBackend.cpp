@@ -17,8 +17,8 @@ namespace angara {
 
 LLVMBackend::~LLVMBackend() = default;
 
-LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir, bool debug, bool emit_llvm)
-    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm) {
+LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir, bool debug, bool emit_llvm, const std::string& gc_strategy)
+    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_gc_strategy(gc_strategy), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm) {
     ctx = std::make_unique<llvm::LLVMContext>();
     mod = std::make_unique<llvm::Module>("angara_module", *ctx);
     builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
@@ -52,7 +52,7 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
         m_di_cu = diCU;
     }
 
-    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding);
+    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding, m_gc_strategy);
     rt->generateRuntime();
     objType = rt->getAngaraObjType();
 }

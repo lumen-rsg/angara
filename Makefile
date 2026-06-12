@@ -40,7 +40,7 @@ CC  := clang
 CXX := clang++
 
 CFLAGS   := -fPIC -Wall -Wextra -g -MMD -MP -Iangc/includes
-CXXFLAGS := -std=c++23 -fPIC -Wall -Wextra -g -MMD -MP -Wno-trigraphs -Iangc/includes
+CXXFLAGS := -std=c++23 -fPIC -Wall -Wextra -g -MMD -MP -Wno-trigraphs -Iangc/includes $(EXTRA_CXXFLAGS)
 
 LDFLAGS_BIN := $(LLVM_LDFLAGS) $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS)
 
