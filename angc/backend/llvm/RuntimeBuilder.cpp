@@ -1,5 +1,6 @@
 #include "RuntimeBuilder.h"
 #include "MarkSweepGC.h"
+#include "ChaperoneGC.h"
 #include <llvm/IR/Verifier.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/Support/raw_ostream.h>
@@ -11,7 +12,11 @@ namespace angara {
 RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>& builder, bool freestanding)
     : m_ctx(context), m_module(module), m_builder(builder), m_freestanding(freestanding) {
     // Create the GC strategy
+#ifdef USE_CHAPERONE_GC
+    m_gc = std::make_unique<ChaperoneGC>(m_ctx, m_module, m_builder);
+#else
     m_gc = std::make_unique<MarkSweepGC>(m_ctx, m_module, m_builder);
+#endif
 }
 
 RuntimeBuilder::~RuntimeBuilder() = default;
