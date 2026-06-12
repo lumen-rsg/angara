@@ -294,8 +294,13 @@ llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string&
             }
         }
 
-        llvm::IRBuilder<> regBuilder(insertAfter ? insertAfter->getNextNode()
-                                                  : &fn->getEntryBlock().front());
+        // Use iterator-based insertion: insert right after gc_push_frame.
+        // getNextNode() can return null when the call is the last instruction
+        // (e.g. when all initializer expressions fold to constants), so use
+        // the iterator directly to handle that case.
+        auto insertPt = insertAfter ? std::next(insertAfter->getIterator())
+                                    : fn->getEntryBlock().begin();
+        llvm::IRBuilder<> regBuilder(&fn->getEntryBlock(), insertPt);
 
         // Store alloca address into frame slot
         auto* slot_addr = regBuilder.CreateGEP(m_gc_frame_type, m_gc_current_frame,
@@ -313,6 +318,18 @@ llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string&
     }
 
     return alloca;
+}
+
+llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string& name,
+                                            const std::shared_ptr<Type>& type) {
+    if (type && isUnboxableType(type)) {
+        // Raw primitive: allocate the native LLVM type, skip GC root registration
+        auto kind = localKindForType(type);
+        llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().getFirstInsertionPt());
+        return tmp.CreateAlloca(llvmTypeForLocalKind(kind), nullptr, name);
+    }
+    // Boxed or unknown: use the original allocLocal (objType + GC root)
+    return allocLocal(fn, name);
 }
 
 void LLVMBackend::emitGcPushFrame(llvm::Function* fn, int slot_count) {
@@ -420,6 +437,56 @@ llvm::Value* LLVMBackend::truncateForType(llvm::Value* val, const std::shared_pt
         : builder->CreateSExt(truncated, llvm::Type::getInt64Ty(*ctx), "sign_ext");
 
     return makeI64(extended);
+}
+
+// --- Unboxed primitive support ---
+
+bool LLVMBackend::isUnboxableType(const std::shared_ptr<Type>& type) {
+    if (!type || type->kind != TypeKind::PRIMITIVE) return false;
+    const auto& n = type->toString();
+    // String is a heap type — never unbox
+    if (n == "string") return false;
+    // All numeric and bool primitives are unboxable
+    return isInteger(type) || isFloat(type) || n == "bool";
+}
+
+LLVMBackend::LocalKind LLVMBackend::localKindForType(const std::shared_ptr<Type>& type) {
+    if (!type || type->kind != TypeKind::PRIMITIVE) return LocalKind::BOXED;
+    const auto& n = type->toString();
+    if (n == "bool") return LocalKind::RAW_I1;
+    if (isFloat(type)) return LocalKind::RAW_F64;
+    if (isInteger(type)) return LocalKind::RAW_I64;
+    return LocalKind::BOXED;
+}
+
+llvm::Type* LLVMBackend::llvmTypeForLocalKind(LocalKind kind) {
+    switch (kind) {
+        case LocalKind::RAW_I1:  return llvm::Type::getInt1Ty(*ctx);
+        case LocalKind::RAW_I64: return llvm::Type::getInt64Ty(*ctx);
+        case LocalKind::RAW_F64: return llvm::Type::getDoubleTy(*ctx);
+        case LocalKind::BOXED:   return objType;
+    }
+    return objType;
+}
+
+llvm::Value* LLVMBackend::boxRaw(llvm::Value* raw, LocalKind kind) {
+    switch (kind) {
+        case LocalKind::RAW_I1:  return makeBool(raw);
+        case LocalKind::RAW_I64: return makeI64(raw);
+        case LocalKind::RAW_F64: return makeF64(raw);
+        case LocalKind::BOXED:   return raw;
+    }
+    return raw;
+}
+
+llvm::Value* LLVMBackend::unboxToRaw(llvm::Value* objVal, LocalKind kind) {
+    switch (kind) {
+        case LocalKind::RAW_I1:  return getBool(objVal);
+        case LocalKind::RAW_I64: return getI64(objVal);
+        case LocalKind::RAW_F64: return getF64(objVal);
+        case LocalKind::BOXED:   return objVal;
+    }
+    return objVal;
 }
 
 llvm::Type* LLVMBackend::resolveCFieldType(const std::shared_ptr<Type>& type) {

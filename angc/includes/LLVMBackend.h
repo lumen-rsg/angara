@@ -184,6 +184,9 @@ namespace angara {
 
         /// Creates an alloca for an AngaraObject local variable at the function entry.
         llvm::AllocaInst* allocLocal(llvm::Function* fn, const std::string& name);
+        /// Type-aware overload: uses raw LLVM type for unboxable primitives, skips GC root.
+        llvm::AllocaInst* allocLocal(llvm::Function* fn, const std::string& name,
+                                      const std::shared_ptr<Type>& type);
         /// Loads a named variable from local scope or globals.
         llvm::Value* loadVar(const std::string& name);
         /// Stores a value to a named variable in local scope or globals.
@@ -197,6 +200,20 @@ namespace angara {
         static bool isSizedIntType(const std::shared_ptr<Type>& type);
         /// Returns the bit width of a sized integer type (8, 16, 32, or 64).
         static int getIntBitWidth(const std::shared_ptr<Type>& type);
+
+        // --- Unboxed primitive support ---
+        /// Kind of local variable storage: boxed (AngaraObject) or raw LLVM primitive.
+        enum class LocalKind { BOXED, RAW_I1, RAW_I64, RAW_F64 };
+        /// Returns true if a type can be stored as a raw LLVM primitive (not boxed).
+        static bool isUnboxableType(const std::shared_ptr<Type>& type);
+        /// Maps a semantic type to the appropriate LocalKind.
+        static LocalKind localKindForType(const std::shared_ptr<Type>& type);
+        /// Returns the raw LLVM type for a given LocalKind.
+        llvm::Type* llvmTypeForLocalKind(LocalKind kind);
+        /// Boxes a raw LLVM value into an AngaraObject.
+        llvm::Value* boxRaw(llvm::Value* raw, LocalKind kind);
+        /// Unboxes an AngaraObject to a raw LLVM value.
+        llvm::Value* unboxToRaw(llvm::Value* objVal, LocalKind kind);
 
         /// Produces a mangled function name: __ang_<module>_<name>.
         std::string mangle(const std::string& module, const std::string& name);
@@ -216,6 +233,7 @@ namespace angara {
 
         std::map<std::string, llvm::AllocaInst*> namedVals;
         std::map<std::string, std::shared_ptr<Type>> namedTypes;
+        std::map<std::string, LocalKind> namedKinds;
         std::map<std::string, llvm::GlobalVariable*> globals;
 
         // String literal intern cache: maps literal text -> module-level global
