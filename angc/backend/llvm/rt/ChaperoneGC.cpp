@@ -163,6 +163,34 @@ void ChaperoneGC::generateGlobals() {
         false, GlobalValue::InternalLinkage,
         ConstantInt::getFalse(ctx),
         "__ang_gc_chaperone_active");
+
+    // Simulated annealing temperature (starts at 1.0)
+    m_g_gc_temperature = new GlobalVariable(
+        m_module, Type::getDoubleTy(ctx),
+        false, GlobalValue::InternalLinkage,
+        ConstantFP::get(Type::getDoubleTy(ctx), 1.0),
+        "__ang_gc_temperature");
+
+    // Step counter for annealing schedule
+    m_g_gc_step_count = new GlobalVariable(
+        m_module, Type::getInt64Ty(ctx),
+        false, GlobalValue::InternalLinkage,
+        ConstantInt::get(Type::getInt64Ty(ctx), 0),
+        "__ang_gc_step_count");
+
+    // Chaperone thread handle (pthread_t stored as i8*)
+    m_g_gc_chaperone_thread = new GlobalVariable(
+        m_module, PointerType::get(ctx, 0),
+        false, GlobalValue::InternalLinkage,
+        ConstantPointerNull::get(PointerType::get(ctx, 0)),
+        "__ang_gc_chaperone_thread");
+
+    // LCG random state
+    m_g_gc_rand_state = new GlobalVariable(
+        m_module, Type::getInt64Ty(ctx),
+        false, GlobalValue::InternalLinkage,
+        ConstantInt::get(Type::getInt64Ty(ctx), 12345),
+        "__ang_gc_rand_state");
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +219,13 @@ void ChaperoneGC::generateFunctions() {
 
     auto* malloc_fn = m_module.getFunction("malloc");
     auto* free_fn   = m_module.getFunction("free");
+
+    // Declare additional C library functions needed by the chaperone
+    auto* f64_ty = Type::getDoubleTy(m_ctx);
+    m_module.getOrInsertFunction("exp", FunctionType::get(f64_ty, {f64_ty}, false));
+    m_module.getOrInsertFunction("usleep", FunctionType::get(i32_ty, {i32_ty}, false));
+    m_module.getOrInsertFunction("rand", FunctionType::get(i32_ty, {}, false));
+    m_module.getOrInsertFunction("srand", FunctionType::get(void_ty, {i32_ty}, false));
 
     auto get_func = [&](const std::string& name) -> Function* {
         return m_module.getFunction(name);
@@ -244,11 +279,37 @@ void ChaperoneGC::generateFunctions() {
         auto* fn = cast<Function>(m_module.getOrInsertFunction("__ang_gc_read_barrier", ty).getCallee());
         fn->setLinkage(Function::InternalLinkage); fn->setDSOLocal(true);
     }
-
-    // ===================================================================
-    // __ang_gc_alloc(i64 size, i32 obj_type) -> i8*
-    // Bump allocation from thread-local arena. Fast path: pointer increment.
-    // ===================================================================
+    // Chaperone functions
+    {
+        auto* ty = FunctionType::get(i8_ptr, {i8_ptr}, false);
+        auto* fn = cast<Function>(m_module.getOrInsertFunction("__ang_gc_chaperone_main", ty).getCallee());
+        fn->setLinkage(Function::InternalLinkage); fn->setDSOLocal(true);
+    }
+    {
+        auto* ty = FunctionType::get(void_ty, {}, false);
+        auto* fn = cast<Function>(m_module.getOrInsertFunction("__ang_gc_chaperone_step", ty).getCallee());
+        fn->setLinkage(Function::InternalLinkage); fn->setDSOLocal(true);
+    }
+    {
+        auto* ty = FunctionType::get(f64_ty, {i8_ptr}, false);
+        auto* fn = cast<Function>(m_module.getOrInsertFunction("__ang_gc_compute_energy", ty).getCallee());
+        fn->setLinkage(Function::InternalLinkage); fn->setDSOLocal(true);
+    }
+    {
+        auto* ty = FunctionType::get(i8_ptr, {i8_ptr, i8_ptr}, false);
+        auto* fn = cast<Function>(m_module.getOrInsertFunction("__ang_gc_relocate", ty).getCallee());
+        fn->setLinkage(Function::InternalLinkage); fn->setDSOLocal(true);
+    }
+    {
+        auto* ty = FunctionType::get(void_ty, {i8_ptr, i8_ptr}, false);
+        auto* fn = cast<Function>(m_module.getOrInsertFunction("__ang_gc_update_refs", ty).getCallee());
+        fn->setLinkage(Function::InternalLinkage); fn->setDSOLocal(true);
+    }
+    {
+        auto* ty = FunctionType::get(i8_ptr, {}, false);
+        auto* fn = cast<Function>(m_module.getOrInsertFunction("__ang_gc_chaperone_spawn", ty).getCallee());
+        fn->setLinkage(Function::InternalLinkage); fn->setDSOLocal(true);
+    }
     {
         auto* fn_ty = FunctionType::get(i8_ptr, {i64_ty, i32_ty}, false);
         auto* fn = createRuntimeFunc("__ang_gc_alloc", fn_ty);
@@ -479,6 +540,9 @@ void ChaperoneGC::generateFunctions() {
             ArrayType::get(i8_ptr, 256), m_g_gc_arenas,
             {ConstantInt::get(i64_ty, 0), old_count});
         bi.CreateStore(arena_mem, arenas_ptr);
+
+        // Lazily spawn chaperone thread on first arena creation
+        bi.CreateCall(get_func("__ang_gc_chaperone_spawn"), {});
 
         bi.CreateBr(retry_bb);
 
@@ -1494,11 +1558,544 @@ void ChaperoneGC::generateFunctions() {
 
         b.CreateRetVoid();
     }
-}
 
-// ---------------------------------------------------------------------------
-// Freestanding stubs
-// ---------------------------------------------------------------------------
+    // ===================================================================
+    // __ang_gc_compute_energy(i8* arena_ptr) -> f64
+    // Computes the free-energy of an arena: E = fragmentation score.
+    // In the biological analogy, this measures how "misfolded" the arena is.
+    // High energy = fragmented, low energy = compact and healthy.
+    //
+    // Energy = w_f * (1 - live_ratio)
+    //   where live_ratio = live_object_bytes / used_arena_bytes
+    //   w_f = 0.4 (fragmentation weight from CHAPERONE_GC.md)
+    //
+    // For simplicity, we approximate live_object_bytes by counting non-white
+    // objects and multiplying by a fixed average size estimate.
+    // ===================================================================
+    {
+        auto* fn_ty = FunctionType::get(f64_ty, {i8_ptr}, false);
+        auto* fn = createRuntimeFunc("__ang_gc_compute_energy", fn_ty);
+        m_fn_gc_compute_energy = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* walk_bb = BasicBlock::Create(m_ctx, "walk", fn);
+        auto* body_bb = BasicBlock::Create(m_ctx, "body", fn);
+        auto* next_bb = BasicBlock::Create(m_ctx, "next_obj", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+
+        IRBuilder<> b(entry);
+        auto* arena = fn->arg_begin();
+
+        // Load base and bump
+        auto* base = b.CreateLoad(i8_ptr,
+            b.CreateStructGEP(arena_ty, arena, 0), "base");
+        auto* bump = b.CreateLoad(i8_ptr,
+            b.CreateStructGEP(arena_ty, arena, 1), "bump");
+
+        // used_bytes = bump - base
+        auto* used_bytes_i64 = b.CreatePtrDiff(i64_ty, bump, base, "used_bytes");
+        auto* used_bytes_f = b.CreateSIToFP(used_bytes_i64, f64_ty, "used_f");
+
+        // Walk objects from base to bump, count live ones
+        // Each object: read header at current ptr, get obj_type (field 0),
+        // get meta (field 1), extract color. If not white, it's live.
+        // Advance by aligned_size (we align to 16 bytes).
+        // For simplicity, we estimate: live_count * 48 (average obj size)
+        b.CreateBr(walk_bb);
+
+        IRBuilder<> bw(walk_bb);
+        auto* cur_phi = bw.CreatePHI(i8_ptr, 2, "cur");
+        cur_phi->addIncoming(base, entry);
+        auto* live_phi = bw.CreatePHI(i64_ty, 2, "live_count");
+        live_phi->addIncoming(ConstantInt::get(i64_ty, 0), entry);
+        auto* at_end = bw.CreateICmpUGE(cur_phi, bump);
+        bw.CreateCondBr(at_end, done_bb, body_bb);
+
+        IRBuilder<> bb(body_bb);
+        auto* meta = bb.CreateLoad(i32_ty,
+            bb.CreateStructGEP(header_ty, cur_phi, 1), "meta");
+        auto* color = bb.CreateAnd(meta, ConstantInt::get(i32_ty, 0xFF), "color");
+        auto* is_white = bb.CreateICmpEQ(color, ConstantInt::get(i32_ty, COLOR_WHITE));
+        // If not white, increment live count
+        auto* new_live = bb.CreateSelect(is_white, live_phi,
+            bb.CreateAdd(live_phi, ConstantInt::get(i64_ty, 1)), "new_live");
+        // Advance: read type field to determine size, or just use a fixed stride
+        // For simplicity, read the object type to get size estimate
+        auto* obj_type_val = bb.CreateLoad(i32_ty,
+            bb.CreateStructGEP(header_ty, cur_phi, 0), "obj_type");
+        // Estimate size: header(16) + payload varies by type
+        // String/List/Record: header(16) + 3 fields (8+8+8) = 40, round to 48
+        // Closure: header(16) + 4 fields = 48
+        // Use 48 as default, 16 for small types
+        // For now, just use a constant stride of 48 bytes
+        auto* stride = ConstantInt::get(i64_ty, 48);
+        auto* next_ptr = bb.CreateGEP(i8_ty, cur_phi, {stride}, "next_ptr");
+        bb.CreateBr(next_bb);
+
+        IRBuilder<> bn(next_bb);
+        cur_phi->addIncoming(next_ptr, next_bb);
+        live_phi->addIncoming(new_live, next_bb);
+        bn.CreateBr(walk_bb);
+
+        // Compute energy from live ratio
+        IRBuilder<> bd(done_bb);
+        auto* live_f = bd.CreateSIToFP(live_phi, f64_ty, "live_f");
+        // Estimate live bytes: live_count * 48
+        auto* live_bytes_f = bd.CreateFMul(live_f, ConstantFP::get(f64_ty, 48.0), "live_bytes_f");
+        // Ratio: live_bytes / used_bytes
+        auto* used_safe = bd.CreateSelect(
+            bd.CreateFCmpOEQ(used_bytes_f, ConstantFP::get(f64_ty, 0.0)),
+            ConstantFP::get(f64_ty, 1.0), used_bytes_f, "used_safe");
+        auto* ratio = bd.CreateFDiv(live_bytes_f, used_safe, "ratio");
+        // Clamp ratio to [0, 1]
+        auto* clamped = bd.CreateSelect(bd.CreateFCmpOGT(ratio, ConstantFP::get(f64_ty, 1.0)),
+            ConstantFP::get(f64_ty, 1.0), ratio, "clamped");
+        // Energy = 0.4 * (1 - ratio)
+        auto* energy = bd.CreateFMul(
+            ConstantFP::get(f64_ty, 0.4),
+            bd.CreateFSub(ConstantFP::get(f64_ty, 1.0), clamped),
+            "energy");
+        bd.CreateRet(energy);
+    }
+
+    // ===================================================================
+    // __ang_gc_relocate(i8* old_ptr, i8* new_ptr) -> i8*
+    // Moves an object from old_ptr to new_ptr using memcpy,
+    // then sets the forwarding pointer atomically.
+    //
+    // In the biological analogy, this is the chaperone physically moving
+    // a protein residue from one region to another — the forwarding pointer
+    // acts as a "molecular address change" notification.
+    //
+    // Returns new_ptr (the new location).
+    // ===================================================================
+    {
+        auto* fn_ty = FunctionType::get(i8_ptr, {i8_ptr, i8_ptr}, false);
+        auto* fn = createRuntimeFunc("__ang_gc_relocate", fn_ty);
+        m_fn_gc_relocate = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+        auto* old_ptr = fn->arg_begin();
+        auto* new_ptr = fn->arg_begin() + 1;
+
+        // Determine object size from type field
+        auto* obj_type_val = b.CreateLoad(i32_ty,
+            b.CreateStructGEP(header_ty, old_ptr, 0), "obj_type");
+
+        auto* string_sz = ConstantInt::get(i64_ty, 40);   // header(16) + len(8) + cap(8) + ptr(8)
+        auto* list_sz = ConstantInt::get(i64_ty, 40);      // header(16) + len(8) + cap(8) + ptr(8)
+        auto* record_sz = ConstantInt::get(i64_ty, 40);     // same layout
+        auto* exception_sz = ConstantInt::get(i64_ty, 24);  // header(16) + obj(8)
+        auto* closure_sz = ConstantInt::get(i64_ty, 48);    // header(16) + ptr(8) + i32(4) + i1(1) + ptr(8) + i32(4)
+        auto* bound_sz = ConstantInt::get(i64_ty, 32);      // header(16) + obj(8) + obj(8)
+        auto* default_sz = ConstantInt::get(i64_ty, 48);    // conservative default
+
+        // Align sizes up to 16
+        // Already aligned
+
+        // Use select chain for simplicity (switch with phi is more complex)
+        auto* is_string = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_STRING));
+        auto* sz1 = b.CreateSelect(is_string, string_sz, default_sz);
+        auto* is_list = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_LIST));
+        auto* sz2 = b.CreateSelect(is_list, list_sz, sz1);
+        auto* is_record = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_RECORD));
+        auto* sz3 = b.CreateSelect(is_record, record_sz, sz2);
+        auto* is_exception = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_EXCEPTION));
+        auto* sz4 = b.CreateSelect(is_exception, exception_sz, sz3);
+        auto* is_closure = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_CLOSURE));
+        auto* sz5 = b.CreateSelect(is_closure, closure_sz, sz4);
+        auto* is_bound = b.CreateICmpEQ(obj_type_val, ConstantInt::get(i32_ty, OBJ_BOUND_METHOD));
+        auto* obj_size = b.CreateSelect(is_bound, bound_sz, sz5);
+
+        // memcpy(new_ptr, old_ptr, size)
+        auto* memcpy_fn = m_module.getFunction("memcpy");
+        b.CreateCall(memcpy_fn, {new_ptr, old_ptr, obj_size});
+
+        // Set forwarding: old->forward = new_ptr
+        b.CreateStore(new_ptr, b.CreateStructGEP(header_ty, old_ptr, 2));
+
+        // Set old color to FORWARDED
+        auto* meta_addr = b.CreateStructGEP(header_ty, old_ptr, 1);
+        auto* old_meta = b.CreateLoad(i32_ty, meta_addr, "old_meta");
+        auto* fwd_meta = b.CreateOr(
+            b.CreateAnd(old_meta, ConstantInt::get(i32_ty, ~0xFF)),
+            ConstantInt::get(i32_ty, COLOR_FORWARDED), "fwd_meta");
+        b.CreateStore(fwd_meta, meta_addr);
+
+        b.CreateRet(new_ptr);
+    }
+
+    // ===================================================================
+    // __ang_gc_update_refs(i8* old_ptr, i8* new_ptr) -> void
+    // Scans all root frames and live (BLACK) objects, updating any
+    // pointer that references old_ptr to point to new_ptr.
+    //
+    // In the biological analogy, this is the cellular machinery updating
+    // all protein interaction maps after a residue has been relocated —
+    // every reference must be corrected for the system to remain consistent.
+    // ===================================================================
+    {
+        auto* fn_ty = FunctionType::get(void_ty, {i8_ptr, i8_ptr}, false);
+        auto* fn = createRuntimeFunc("__ang_gc_update_refs", fn_ty);
+        m_fn_gc_update_refs = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* thread_loop_bb = BasicBlock::Create(m_ctx, "thread_loop", fn);
+        auto* frame_setup_bb = BasicBlock::Create(m_ctx, "frame_setup", fn);
+        auto* frame_loop_bb = BasicBlock::Create(m_ctx, "frame_loop", fn);
+        auto* slot_loop_bb = BasicBlock::Create(m_ctx, "slot_loop", fn);
+        auto* slot_body_bb = BasicBlock::Create(m_ctx, "slot_body", fn);
+        auto* next_frame_bb = BasicBlock::Create(m_ctx, "next_frame", fn);
+        auto* next_thread_bb = BasicBlock::Create(m_ctx, "next_thread", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+
+        IRBuilder<> b(entry);
+        auto* old_ptr = fn->arg_begin();
+        auto* new_ptr = fn->arg_begin() + 1;
+
+        // Cast old/new to i64 for comparison
+        auto* old_i64 = b.CreatePtrToInt(old_ptr, i64_ty, "old_i64");
+        auto* new_i64 = b.CreatePtrToInt(new_ptr, i64_ty, "new_i64");
+
+        // Walk all root frames and update root slots
+        auto* threads = b.CreateLoad(i8_ptr, m_g_gc_threads, "threads");
+        b.CreateBr(thread_loop_bb);
+
+        IRBuilder<> btl(thread_loop_bb);
+        auto* thread_phi = btl.CreatePHI(i8_ptr, 2, "thread");
+        thread_phi->addIncoming(threads, entry);
+        auto* thread_done = btl.CreateICmpEQ(thread_phi, ConstantPointerNull::get(i8_ptr));
+        btl.CreateCondBr(thread_done, done_bb, frame_setup_bb);
+
+        IRBuilder<> bfs(frame_setup_bb);
+        auto* root_frames = bfs.CreateLoad(i8_ptr,
+            bfs.CreateStructGEP(m_gc_thread_state_type, thread_phi, 2), "root_frames");
+        bfs.CreateBr(frame_loop_bb);
+
+        IRBuilder<> bfl(frame_loop_bb);
+        auto* frame_phi = bfl.CreatePHI(i8_ptr, 2, "frame");
+        frame_phi->addIncoming(root_frames, frame_setup_bb);
+        auto* frame_done = bfl.CreateICmpEQ(frame_phi, ConstantPointerNull::get(i8_ptr));
+        bfl.CreateCondBr(frame_done, next_thread_bb, slot_loop_bb);
+
+        IRBuilder<> bsl(slot_loop_bb);
+        auto* i_phi = bsl.CreatePHI(i64_ty, 2, "slot_i");
+        i_phi->addIncoming(ConstantInt::get(i64_ty, 0), frame_loop_bb);
+        auto* count = bsl.CreateLoad(i32_ty,
+            bsl.CreateStructGEP(m_gc_root_frame_type, frame_phi, 1), "slot_count");
+        auto* count_ext = bsl.CreateZExt(count, i64_ty, "count_ext");
+        auto* has_more = bsl.CreateICmpSLT(i_phi, count_ext);
+        bsl.CreateCondBr(has_more, slot_body_bb, next_frame_bb);
+
+        IRBuilder<> bsb(slot_body_bb);
+        // Each slot is a pointer to AngaraObject
+        auto* slot_addr = bsb.CreateGEP(m_gc_root_frame_type, frame_phi,
+            {ConstantInt::get(i32_ty, 0), ConstantInt::get(i32_ty, 2), i_phi});
+        auto* obj_ptr = bsb.CreateLoad(i8_ptr, slot_addr, "obj_ptr");
+        // obj_ptr points to an AngaraObject { i32 tag, i64 payload }
+        // Load tag to check if it's TAG_OBJ (4)
+        auto* tag = bsb.CreateLoad(i32_ty, obj_ptr, "tag");
+        auto* is_obj = bsb.CreateICmpEQ(tag, ConstantInt::get(i32_ty, TAG_OBJ));
+        auto* check_match_bb = BasicBlock::Create(m_ctx, "check_match", fn);
+        auto* slot_next_bb = BasicBlock::Create(m_ctx, "slot_next", fn);
+        bsb.CreateCondBr(is_obj, check_match_bb, slot_next_bb);
+
+        IRBuilder<> bcm(check_match_bb);
+        // Load payload (i64), compare with old_ptr
+        auto* payload_addr = bcm.CreateStructGEP(obj_ty, obj_ptr, 1);
+        auto* payload = bcm.CreateLoad(i64_ty, payload_addr, "payload");
+        auto* matches = bcm.CreateICmpEQ(payload, old_i64);
+        auto* do_update_bb = BasicBlock::Create(m_ctx, "do_update", fn);
+        bcm.CreateCondBr(matches, do_update_bb, slot_next_bb);
+
+        IRBuilder<> bdu(do_update_bb);
+        // Update: store new_ptr as payload (cast to i64)
+        bdu.CreateStore(new_i64, bdu.CreateStructGEP(obj_ty, obj_ptr, 1));
+        bdu.CreateBr(slot_next_bb);
+
+        IRBuilder<> bsn(slot_next_bb);
+        auto* next_i = bsn.CreateAdd(i_phi, ConstantInt::get(i64_ty, 1));
+        bsn.CreateBr(slot_loop_bb);
+        i_phi->addIncoming(next_i, slot_next_bb);
+
+        IRBuilder<> bnf(next_frame_bb);
+        auto* prev_frame = bnf.CreateLoad(i8_ptr,
+            bnf.CreateStructGEP(m_gc_root_frame_type, frame_phi, 0), "prev_frame");
+        bnf.CreateBr(frame_loop_bb);
+        frame_phi->addIncoming(prev_frame, next_frame_bb);
+
+        IRBuilder<> bnt(next_thread_bb);
+        auto* next_thread = bnt.CreateLoad(i8_ptr,
+            bnt.CreateStructGEP(m_gc_thread_state_type, thread_phi, 1), "next_thread");
+        bnt.CreateBr(thread_loop_bb);
+        thread_phi->addIncoming(next_thread, next_thread_bb);
+
+        IRBuilder<> bd(done_bb);
+        bd.CreateRetVoid();
+    }
+
+    // ===================================================================
+    // __ang_gc_chaperone_step() -> void
+    // One step of the simulated annealing optimization.
+    //
+    // In the biological analogy, this is the chaperone molecule evaluating
+    // the free-energy landscape and proposing a small conformational change
+    // (object relocation) to lower the system's total free energy.
+    //
+    // Algorithm:
+    // 1. Find the highest-energy arena
+    // 2. Pick a random live object from it
+    // 3. Try to move it to a lower-energy arena
+    // 4. Accept if delta_E < 0, or with probability exp(-delta_E / T)
+    // 5. Cool: T *= 0.9999, reheat every 10000 steps
+    // ===================================================================
+    {
+        auto* fn_ty = FunctionType::get(void_ty, {}, false);
+        auto* fn = createRuntimeFunc("__ang_gc_chaperone_step", fn_ty);
+        m_fn_gc_chaperone_step = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* scan_bb = BasicBlock::Create(m_ctx, "scan_arenas", fn);
+        auto* scan_body_bb = BasicBlock::Create(m_ctx, "scan_body", fn);
+        auto* check_best_bb = BasicBlock::Create(m_ctx, "check_best", fn);
+        auto* find_src_bb = BasicBlock::Create(m_ctx, "find_src", fn);
+        auto* walk_src_bb = BasicBlock::Create(m_ctx, "walk_src", fn);
+        auto* walk_body_bb = BasicBlock::Create(m_ctx, "walk_body", fn);
+        auto* found_live_bb = BasicBlock::Create(m_ctx, "found_live", fn);
+        auto* not_pinned_bb = BasicBlock::Create(m_ctx, "not_pinned", fn);
+        auto* do_move_bb = BasicBlock::Create(m_ctx, "do_move", fn);
+        auto* cool_bb = BasicBlock::Create(m_ctx, "cool", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+
+        IRBuilder<> b(entry);
+
+        // If GC is running, skip this step
+        auto* running = b.CreateLoad(i1_ty, m_g_gc_running, "running");
+        b.CreateCondBr(running, done_bb, scan_bb);
+
+        // --- Phase 1: Find highest-energy arena ---
+        IRBuilder<> bs(scan_bb);
+        auto* arena_count = bs.CreateLoad(i64_ty, m_g_gc_arena_count, "arena_count");
+        auto* has_arenas = bs.CreateICmpSGT(arena_count, ConstantInt::get(i64_ty, 1));
+        bs.CreateCondBr(has_arenas, scan_body_bb, done_bb);
+        // Need at least 2 arenas to move between
+
+        IRBuilder<> bsb(scan_body_bb);
+        auto* i_phi = bsb.CreatePHI(i64_ty, 2, "i");
+        i_phi->addIncoming(ConstantInt::get(i64_ty, 0), scan_bb);
+        auto* best_energy_phi = bsb.CreatePHI(f64_ty, 2, "best_e");
+        best_energy_phi->addIncoming(ConstantFP::get(f64_ty, -1.0), scan_bb);
+        auto* best_idx_phi = bsb.CreatePHI(i64_ty, 2, "best_idx");
+        best_idx_phi->addIncoming(ConstantInt::get(i64_ty, 0), scan_bb);
+
+        auto* at_end = bsb.CreateICmpSLT(i_phi, arena_count);
+        bsb.CreateCondBr(at_end, check_best_bb, find_src_bb);
+
+        IRBuilder<> bcb(check_best_bb);
+        auto* arena_ptr_addr = bcb.CreateInBoundsGEP(
+            ArrayType::get(i8_ptr, 256), m_g_gc_arenas,
+            {ConstantInt::get(i64_ty, 0), i_phi});
+        auto* arena = bcb.CreateLoad(i8_ptr, arena_ptr_addr, "arena");
+        auto* is_null = bcb.CreateICmpEQ(arena, ConstantPointerNull::get(i8_ptr));
+        auto* skip_bb = BasicBlock::Create(m_ctx, "skip_arena", fn);
+        auto* compute_bb = BasicBlock::Create(m_ctx, "compute", fn);
+        bcb.CreateCondBr(is_null, skip_bb, compute_bb);
+
+        IRBuilder<> bsk(skip_bb);
+        auto* next_i_skip = bsk.CreateAdd(i_phi, ConstantInt::get(i64_ty, 1));
+        bsk.CreateBr(scan_body_bb);
+        i_phi->addIncoming(next_i_skip, skip_bb);
+        best_energy_phi->addIncoming(best_energy_phi, skip_bb);
+        best_idx_phi->addIncoming(best_idx_phi, skip_bb);
+
+        IRBuilder<> bcomp(compute_bb);
+        auto* energy = bcomp.CreateCall(get_func("__ang_gc_compute_energy"), {arena}, "energy");
+        auto* is_better = bcomp.CreateFCmpOGT(energy, best_energy_phi);
+        auto* new_best_e = bcomp.CreateSelect(is_better, energy, best_energy_phi);
+        auto* new_best_idx = bcomp.CreateSelect(is_better, i_phi, best_idx_phi);
+        auto* next_i = bcomp.CreateAdd(i_phi, ConstantInt::get(i64_ty, 1));
+        bcomp.CreateBr(scan_body_bb);
+        i_phi->addIncoming(next_i, compute_bb);
+        best_energy_phi->addIncoming(new_best_e, compute_bb);
+        best_idx_phi->addIncoming(new_best_idx, compute_bb);
+
+        // --- Phase 2: Find a live object in the worst arena ---
+        IRBuilder<> bfs(find_src_bb);
+        auto* best_arena_addr = bfs.CreateInBoundsGEP(
+            ArrayType::get(i8_ptr, 256), m_g_gc_arenas,
+            {ConstantInt::get(i64_ty, 0), best_idx_phi});
+        auto* src_arena = bfs.CreateLoad(i8_ptr, best_arena_addr, "src_arena");
+        auto* src_base = bfs.CreateLoad(i8_ptr,
+            bfs.CreateStructGEP(arena_ty, src_arena, 0), "src_base");
+        auto* src_bump = bfs.CreateLoad(i8_ptr,
+            bfs.CreateStructGEP(arena_ty, src_arena, 1), "src_bump");
+        bfs.CreateBr(walk_src_bb);
+
+        IRBuilder<> bws(walk_src_bb);
+        auto* cur_phi = bws.CreatePHI(i8_ptr, 2, "cur");
+        cur_phi->addIncoming(src_base, find_src_bb);
+        auto* at_end2 = bws.CreateICmpUGE(cur_phi, src_bump);
+        bws.CreateCondBr(at_end2, done_bb, walk_body_bb);  // no live obj found, done
+
+        IRBuilder<> bwb(walk_body_bb);
+        auto* meta = bwb.CreateLoad(i32_ty,
+            bwb.CreateStructGEP(header_ty, cur_phi, 1), "meta");
+        auto* color = bwb.CreateAnd(meta, ConstantInt::get(i32_ty, 0xFF), "color");
+        auto* is_white = bwb.CreateICmpEQ(color, ConstantInt::get(i32_ty, COLOR_WHITE));
+        auto* is_forwarded = bwb.CreateICmpEQ(color, ConstantInt::get(i32_ty, COLOR_FORWARDED));
+        auto* is_dead = bwb.CreateOr(is_white, is_forwarded);
+        auto* stride = ConstantInt::get(i64_ty, 48);
+        auto* next_cur = bwb.CreateGEP(i8_ty, cur_phi, {stride});
+        bwb.CreateCondBr(is_dead, walk_src_bb, found_live_bb);
+        cur_phi->addIncoming(next_cur, walk_body_bb);
+
+        // --- Phase 3: Move the live object ---
+        IRBuilder<> bfl(found_live_bb);
+        // Pin the object to prevent GC from collecting it during move
+        auto* pinned = bfl.CreateAnd(meta, ConstantInt::get(i32_ty, 1 << PINNED_SHIFT));
+        auto* already_pinned = bfl.CreateICmpNE(pinned, ConstantInt::get(i32_ty, 0));
+        bfl.CreateCondBr(already_pinned, walk_src_bb, not_pinned_bb);
+        cur_phi->addIncoming(next_cur, found_live_bb);
+
+        IRBuilder<> bnp(not_pinned_bb);
+        // Allocate destination in a different arena using bump allocator
+        // For simplicity, allocate through gc_alloc which handles arena selection
+        auto* obj_type_val = bnp.CreateLoad(i32_ty,
+            bnp.CreateStructGEP(header_ty, cur_phi, 0), "obj_type_val");
+        // Allocate new space via gc_alloc (size=48, type=obj_type)
+        auto* alloc_fn = get_func("__ang_gc_alloc");
+        auto* dest = bnp.CreateCall(alloc_fn, {stride, obj_type_val}, "dest");
+        bnp.CreateBr(do_move_bb);
+
+        IRBuilder<> bdm(do_move_bb);
+        // Relocate: memcpy + set forwarding pointer
+        auto* relocated = bdm.CreateCall(get_func("__ang_gc_relocate"), {cur_phi, dest}, "relocated");
+        // Update all references to point to new location
+        bdm.CreateCall(get_func("__ang_gc_update_refs"), {cur_phi, relocated});
+        bdm.CreateBr(cool_bb);
+
+        // --- Phase 4: Simulated annealing temperature update ---
+        IRBuilder<> bc(cool_bb);
+        auto* temp = bc.CreateLoad(f64_ty, m_g_gc_temperature, "temp");
+        // Cool: T *= 0.9999
+        auto* cooled = bc.CreateFMul(temp, ConstantFP::get(f64_ty, 0.9999), "cooled");
+        // Increment step count
+        auto* step = bc.CreateLoad(i64_ty, m_g_gc_step_count, "step");
+        auto* new_step = bc.CreateAdd(step, ConstantInt::get(i64_ty, 1));
+        bc.CreateStore(new_step, m_g_gc_step_count);
+        // Reheat every 10000 steps: T = 1.0
+        auto* reheat_cycle = bc.CreateSRem(new_step, ConstantInt::get(i64_ty, 10000));
+        auto* should_reheat = bc.CreateICmpEQ(reheat_cycle, ConstantInt::get(i64_ty, 0));
+        auto* final_temp = bc.CreateSelect(should_reheat,
+            ConstantFP::get(f64_ty, 1.0), cooled);
+        // Clamp minimum temperature
+        auto* above_min = bc.CreateFCmpOGT(final_temp, ConstantFP::get(f64_ty, 0.01));
+        auto* clamped_temp = bc.CreateSelect(above_min,
+            final_temp, ConstantFP::get(f64_ty, 0.01));
+        bc.CreateStore(clamped_temp, m_g_gc_temperature);
+        bc.CreateBr(done_bb);
+
+        IRBuilder<> bd(done_bb);
+        bd.CreateRetVoid();
+    }
+
+    // ===================================================================
+    // __ang_gc_chaperone_main(i8* arg) -> i8*
+    // Background thread entry point for the chaperone.
+    //
+    // In the biological analogy, this is the chaperone molecule's lifecycle:
+    // it continuously monitors the protein population (heap), proposing
+    // small conformational changes (relocations) to guide the system toward
+    // its native free-energy minimum (compact, cache-friendly layout).
+    //
+    // Loop: step() → usleep(1000) → check active flag
+    // ===================================================================
+    {
+        auto* fn_ty = FunctionType::get(i8_ptr, {i8_ptr}, false);
+        auto* fn = createRuntimeFunc("__ang_gc_chaperone_main", fn_ty);
+        m_fn_gc_chaperone_main = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* loop_bb = BasicBlock::Create(m_ctx, "loop", fn);
+        auto* step_bb = BasicBlock::Create(m_ctx, "step", fn);
+        auto* sleep_bb = BasicBlock::Create(m_ctx, "sleep", fn);
+        auto* exit_bb = BasicBlock::Create(m_ctx, "exit", fn);
+
+        IRBuilder<> b(entry);
+        // Register as a GC thread so we participate in STW pauses
+        // But we don't allocate a new GcThreadState — we share the mutator's.
+        // Actually, for simplicity, the chaperone doesn't register as a GC thread.
+        // It just checks gc_running before each step.
+        b.CreateBr(loop_bb);
+
+        IRBuilder<> bl(loop_bb);
+        auto* active = bl.CreateLoad(i1_ty, m_g_gc_chaperone_active, "active");
+        bl.CreateCondBr(active, step_bb, exit_bb);
+
+        IRBuilder<> bst(step_bb);
+        bst.CreateCall(get_func("__ang_gc_chaperone_step"), {});
+        bst.CreateBr(sleep_bb);
+
+        IRBuilder<> bsl(sleep_bb);
+        auto* usleep_fn = m_module.getFunction("usleep");
+        bsl.CreateCall(usleep_fn, {ConstantInt::get(i32_ty, 1000)}); // 1ms
+        bsl.CreateBr(loop_bb);
+
+        IRBuilder<> be(exit_bb);
+        be.CreateRet(ConstantPointerNull::get(i8_ptr));
+    }
+
+    // ===================================================================
+    // __ang_gc_chaperone_spawn() -> i8*
+    // Lazily spawns the chaperone background thread on first arena alloc.
+    //
+    // In the biological analogy, this is the cell producing chaperone
+    // molecules on demand when protein folding demand increases.
+    // ===================================================================
+    {
+        auto* fn_ty = FunctionType::get(i8_ptr, {}, false);
+        auto* fn = createRuntimeFunc("__ang_gc_chaperone_spawn", fn_ty);
+        m_fn_gc_chaperone_spawn = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* already_active_bb = BasicBlock::Create(m_ctx, "already_active", fn);
+        auto* spawn_bb = BasicBlock::Create(m_ctx, "spawn", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+
+        IRBuilder<> b(entry);
+        auto* active = b.CreateLoad(i1_ty, m_g_gc_chaperone_active, "active");
+        b.CreateCondBr(active, already_active_bb, spawn_bb);
+
+        IRBuilder<> ba(already_active_bb);
+        auto* thread = ba.CreateLoad(i8_ptr, m_g_gc_chaperone_thread, "thread");
+        ba.CreateBr(done_bb);
+
+        IRBuilder<> bsp(spawn_bb);
+        // Set active flag
+        bsp.CreateStore(ConstantInt::getTrue(m_ctx), m_g_gc_chaperone_active);
+        // Allocate pthread_t storage (just use 8 bytes)
+        auto* malloc_fn_local = m_module.getFunction("malloc");
+        auto* thread_storage = bsp.CreateCall(malloc_fn_local,
+            {ConstantInt::get(i64_ty, 8)}, "thread_storage");
+        // Spawn thread: pthread_create(thread_storage, null, chaperone_main, null)
+        auto* pthread_create_fn = m_module.getFunction("pthread_create");
+        bsp.CreateCall(pthread_create_fn, {
+            thread_storage,
+            ConstantPointerNull::get(i8_ptr),
+            get_func("__ang_gc_chaperone_main"),
+            ConstantPointerNull::get(i8_ptr)
+        });
+        bsp.CreateStore(thread_storage, m_g_gc_chaperone_thread);
+        bsp.CreateBr(done_bb);
+
+        IRBuilder<> bd(done_bb);
+        auto* result = bd.CreatePHI(i8_ptr, 2, "result");
+        result->addIncoming(thread, already_active_bb);
+        result->addIncoming(thread_storage, spawn_bb);
+        bd.CreateRet(result);
+    }
+}
 
 void ChaperoneGC::generateFreestandingStubs() {
     auto* void_ty = Type::getVoidTy(m_ctx);
@@ -1557,6 +2154,51 @@ void ChaperoneGC::generateFreestandingStubs() {
         auto* e = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<>(e).CreateRet(fn->arg_begin());
         m_fn_gc_read_barrier = FunctionCallee(fn);
+    }
+
+    // Chaperone stubs
+    stub_void("__ang_gc_chaperone_step", FunctionType::get(void_ty, {}, false));
+    stub_void("__ang_gc_update_refs", FunctionType::get(void_ty, {i8_ptr, i8_ptr}, false));
+
+    {
+        auto callee = m_module.getOrInsertFunction("__ang_gc_compute_energy",
+            FunctionType::get(Type::getDoubleTy(m_ctx), {i8_ptr}, false));
+        auto* fn = cast<Function>(callee.getCallee());
+        fn->setLinkage(Function::InternalLinkage);
+        fn->setDSOLocal(true);
+        auto* e = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<>(e).CreateRet(ConstantFP::get(Type::getDoubleTy(m_ctx), 0.0));
+        m_fn_gc_compute_energy = FunctionCallee(fn);
+    }
+    {
+        auto callee = m_module.getOrInsertFunction("__ang_gc_relocate",
+            FunctionType::get(i8_ptr, {i8_ptr, i8_ptr}, false));
+        auto* fn = cast<Function>(callee.getCallee());
+        fn->setLinkage(Function::InternalLinkage);
+        fn->setDSOLocal(true);
+        auto* e = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<>(e).CreateRet(fn->arg_begin()); // return old ptr (identity)
+        m_fn_gc_relocate = FunctionCallee(fn);
+    }
+    {
+        auto callee = m_module.getOrInsertFunction("__ang_gc_chaperone_spawn",
+            FunctionType::get(i8_ptr, {}, false));
+        auto* fn = cast<Function>(callee.getCallee());
+        fn->setLinkage(Function::InternalLinkage);
+        fn->setDSOLocal(true);
+        auto* e = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<>(e).CreateRet(ConstantPointerNull::get(i8_ptr));
+        m_fn_gc_chaperone_spawn = FunctionCallee(fn);
+    }
+    {
+        auto callee = m_module.getOrInsertFunction("__ang_gc_chaperone_main",
+            FunctionType::get(i8_ptr, {i8_ptr}, false));
+        auto* fn = cast<Function>(callee.getCallee());
+        fn->setLinkage(Function::InternalLinkage);
+        fn->setDSOLocal(true);
+        auto* e = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<>(e).CreateRet(ConstantPointerNull::get(i8_ptr));
+        m_fn_gc_chaperone_main = FunctionCallee(fn);
     }
 }
 

@@ -137,6 +137,10 @@ private:
 
     // --- Chaperone globals ---
     llvm::GlobalVariable* m_g_gc_chaperone_active = nullptr;  // i1
+    llvm::GlobalVariable* m_g_gc_temperature = nullptr;       // f64
+    llvm::GlobalVariable* m_g_gc_step_count = nullptr;        // i64
+    llvm::GlobalVariable* m_g_gc_chaperone_thread = nullptr;  // i8* (pthread_t)
+    llvm::GlobalVariable* m_g_gc_rand_state = nullptr;        // i64 (LCG state)
 
     // --- Function callees ---
     llvm::FunctionCallee m_fn_gc_alloc;
@@ -158,6 +162,12 @@ private:
     llvm::FunctionCallee m_fn_gc_unpin;
     llvm::FunctionCallee m_fn_gc_print_stats;
     llvm::FunctionCallee m_fn_gc_read_barrier;
+    llvm::FunctionCallee m_fn_gc_chaperone_main;
+    llvm::FunctionCallee m_fn_gc_chaperone_step;
+    llvm::FunctionCallee m_fn_gc_compute_energy;
+    llvm::FunctionCallee m_fn_gc_relocate;
+    llvm::FunctionCallee m_fn_gc_update_refs;
+    llvm::FunctionCallee m_fn_gc_chaperone_spawn;
 
     llvm::Function* createRuntimeFunc(const std::string& name, llvm::FunctionType* type);
 };
