@@ -27,9 +27,9 @@
 
 namespace fs = std::filesystem;
 
-const std::string ANGC_VERSION    = "3.1.0";
-const std::string BACKEND_VERSION = "5.0.0";
-const std::string ANGARA_SPEC     = "v3.1";
+const std::string ANGC_VERSION    = "5.1.0";
+const std::string BACKEND_VERSION = "4.1.0";
+const std::string ANGARA_SPEC     = "v3.1.2";
 
 static constexpr const char* NATIVE_EXT = ANGARA_NATIVE_EXT;
 
