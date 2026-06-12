@@ -161,7 +161,12 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     auto saved_raw_ret = m_current_raw_return_kind;
     m_current_raw_return_kind = is_raw ? raw_info.return_kind : std::optional<LocalKind>{};
 
-    emitGcPushFrame(fn, 256);
+    // Only push GC frame if the function has heap-referencing values.
+    // Raw primitive-only functions (like fib) don't need GC at all.
+    bool needs_gc = !is_raw || functionNeedsGC(stmt);
+    if (needs_gc) {
+        emitGcPushFrame(fn, 256);
+    }
 
     if (stmt.body) {
         for (const auto& s : *stmt.body) {
@@ -1028,6 +1033,142 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
             }
         }
     }
+}
+
+// --- GC necessity scanner ---
+
+bool LLVMBackend::functionNeedsGC(const FuncStmt& stmt) {
+    if (!stmt.body) return false;
+    for (const auto& s : *stmt.body) {
+        if (stmtNeedsGC(s)) return true;
+    }
+    return false;
+}
+
+bool LLVMBackend::stmtNeedsGC(const std::shared_ptr<Stmt>& s) {
+    if (!s) return false;
+
+    if (auto* p = dynamic_cast<const VarDeclStmt*>(s.get())) {
+        // Check resolved type from type checker
+        auto type_it = m_type_checker.getVariableTypes().find(p);
+        if (type_it != m_type_checker.getVariableTypes().end()) {
+            if (!isUnboxableType(type_it->second)) return true; // boxed local needs GC
+        } else if (!p->typeAnnotation) {
+            return true; // no type info → assume boxed
+        }
+        // Also check initializer expression
+        if (p->initializer && exprNeedsGC(p->initializer)) return true;
+        return false;
+    }
+    if (auto* p = dynamic_cast<const BlockStmt*>(s.get())) {
+        for (auto& st : p->statements)
+            if (stmtNeedsGC(st)) return true;
+        return false;
+    }
+    if (auto* p = dynamic_cast<const IfStmt*>(s.get())) {
+        if (exprNeedsGC(p->condition)) return true;
+        if (stmtNeedsGC(p->thenBranch)) return true;
+        if (stmtNeedsGC(p->elseBranch)) return true;
+        return false;
+    }
+    if (auto* p = dynamic_cast<const WhileStmt*>(s.get())) {
+        if (exprNeedsGC(p->condition)) return true;
+        if (stmtNeedsGC(p->body)) return true;
+        return false;
+    }
+    if (auto* p = dynamic_cast<const ForStmt*>(s.get())) {
+        if (stmtNeedsGC(p->initializer)) return true;
+        if (p->condition && exprNeedsGC(p->condition)) return true;
+        if (p->increment && exprNeedsGC(p->increment)) return true;
+        if (stmtNeedsGC(p->body)) return true;
+        return false;
+    }
+    if (auto* p = dynamic_cast<const ForInStmt*>(s.get())) {
+        if (exprNeedsGC(p->collection)) return true;
+        if (stmtNeedsGC(p->body)) return true;
+        return false;
+    }
+    if (auto* p = dynamic_cast<const ReturnStmt*>(s.get())) {
+        return p->value ? exprNeedsGC(p->value) : false;
+    }
+    if (auto* p = dynamic_cast<const ExpressionStmt*>(s.get())) {
+        return exprNeedsGC(p->expression);
+    }
+    if (auto* p = dynamic_cast<const TryStmt*>(s.get())) {
+        if (stmtNeedsGC(p->tryBlock)) return true;
+        if (stmtNeedsGC(p->catchBlock)) return true;
+        return false;
+    }
+    if (auto* p = dynamic_cast<const ThrowStmt*>(s.get())) {
+        return exprNeedsGC(p->expression);
+    }
+    return false;
+}
+
+bool LLVMBackend::exprNeedsGC(const std::shared_ptr<Expr>& e) {
+    if (!e) return false;
+
+    // String literals are heap-allocated
+    if (auto* p = dynamic_cast<const Literal*>(e.get())) {
+        return p->token.type == TokenType::STRING;
+    }
+    // List construction is heap-allocated
+    if (dynamic_cast<const ListExpr*>(e.get())) return true;
+    // Record construction is heap-allocated
+    if (dynamic_cast<const RecordExpr*>(e.get())) return true;
+    // Lambda creates a closure (heap-allocated)
+    if (dynamic_cast<const LambdaExpr*>(e.get())) return true;
+
+    // Binary: recurse
+    if (auto* p = dynamic_cast<const Binary*>(e.get()))
+        return exprNeedsGC(p->left) || exprNeedsGC(p->right);
+    // Unary: recurse
+    if (auto* p = dynamic_cast<const Unary*>(e.get()))
+        return exprNeedsGC(p->right);
+    // Grouping: recurse
+    if (auto* p = dynamic_cast<const Grouping*>(e.get()))
+        return exprNeedsGC(p->expression);
+    // Call: check arguments
+    if (auto* p = dynamic_cast<const CallExpr*>(e.get())) {
+        for (auto& arg : p->arguments)
+            if (exprNeedsGC(arg)) return true;
+        return exprNeedsGC(p->callee);
+    }
+    // Get: recurse
+    if (auto* p = dynamic_cast<const GetExpr*>(e.get()))
+        return exprNeedsGC(p->object);
+    // Logical: recurse
+    if (auto* p = dynamic_cast<const LogicalExpr*>(e.get()))
+        return exprNeedsGC(p->left) || exprNeedsGC(p->right);
+    // Subscript: recurse
+    if (auto* p = dynamic_cast<const SubscriptExpr*>(e.get()))
+        return exprNeedsGC(p->object) || exprNeedsGC(p->index);
+    // Assign: recurse
+    if (auto* p = dynamic_cast<const AssignExpr*>(e.get()))
+        return exprNeedsGC(p->value);
+    // Update (++/--): recurse
+    if (auto* p = dynamic_cast<const UpdateExpr*>(e.get()))
+        return exprNeedsGC(p->target);
+    // Ternary: recurse
+    if (auto* p = dynamic_cast<const TernaryExpr*>(e.get()))
+        return exprNeedsGC(p->condition) || exprNeedsGC(p->thenBranch) || exprNeedsGC(p->elseBranch);
+    // Is: recurse
+    if (auto* p = dynamic_cast<const IsExpr*>(e.get()))
+        return exprNeedsGC(p->object);
+    // Cast: recurse
+    if (auto* p = dynamic_cast<const CastExpr*>(e.get()))
+        return exprNeedsGC(p->object);
+    // Deref: recurse
+    if (auto* p = dynamic_cast<const DerefExpr*>(e.get()))
+        return exprNeedsGC(p->right);
+    // Match: check condition and cases
+    if (auto* p = dynamic_cast<const MatchExpr*>(e.get())) {
+        if (exprNeedsGC(p->condition)) return true;
+        for (auto& cs : p->cases)
+            if (exprNeedsGC(cs.body)) return true;
+        return false;
+    }
+    return false;
 }
 
 }

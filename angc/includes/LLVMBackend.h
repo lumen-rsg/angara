@@ -133,6 +133,11 @@ namespace angara {
         void codegenForeignDataDecl(const DataStmt& stmt);
         void codegenEnumDecl(const EnumStmt& stmt);
 
+        /// Returns true if the function body contains any non-primitive values that need GC.
+        bool functionNeedsGC(const FuncStmt& stmt);
+        bool exprNeedsGC(const std::shared_ptr<Expr>& expr);
+        bool stmtNeedsGC(const std::shared_ptr<Stmt>& stmt);
+
         /// Resolves a semantic type to its C-compatible LLVM type for FFI.
         llvm::Type* resolveCFieldType(const std::shared_ptr<Type>& type);
         /// Converts a raw C value to an AngaraObject.
