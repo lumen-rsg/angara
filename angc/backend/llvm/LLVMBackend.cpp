@@ -391,13 +391,28 @@ void LLVMBackend::emitGcTeardown(llvm::Value* state_ptr) {
 }
 
 llvm::Value* LLVMBackend::loadVar(const std::string& n) {
-    if (auto it=namedVals.find(n); it!=namedVals.end()) return builder->CreateLoad(objType, it->second, n);
+    if (auto it=namedVals.find(n); it!=namedVals.end()) {
+        auto kit = namedKinds.find(n);
+        if (kit != namedKinds.end() && kit->second != LocalKind::BOXED) {
+            auto* raw = builder->CreateLoad(llvmTypeForLocalKind(kit->second), it->second, n);
+            return boxRaw(raw, kit->second);
+        }
+        return builder->CreateLoad(objType, it->second, n);
+    }
     if (auto it=globals.find(n); it!=globals.end()) return builder->CreateLoad(objType, it->second, n);
     if (auto it=globals.find("g_"+n); it!=globals.end()) return builder->CreateLoad(objType, it->second, n);
     return makeNil();
 }
 void LLVMBackend::storeVar(const std::string& n, llvm::Value* v) {
-    if (auto it=namedVals.find(n); it!=namedVals.end()) { builder->CreateStore(v,it->second); return; }
+    if (auto it=namedVals.find(n); it!=namedVals.end()) {
+        auto kit = namedKinds.find(n);
+        if (kit != namedKinds.end() && kit->second != LocalKind::BOXED) {
+            builder->CreateStore(unboxToRaw(v, kit->second), it->second);
+            return;
+        }
+        builder->CreateStore(v, it->second);
+        return;
+    }
     if (auto it=globals.find(n); it!=globals.end()) { builder->CreateStore(v,it->second); return; }
     if (auto it=globals.find("g_"+n); it!=globals.end()) { builder->CreateStore(v,it->second); return; }
 }

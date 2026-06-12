@@ -64,22 +64,30 @@ void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
     }
 
     if (auto* fn = builder->GetInsertBlock()->getParent()) {
-        auto* a = allocLocal(fn, s.name.lexeme);
-        builder->CreateStore(v, a);
+        auto* a = allocLocal(fn, s.name.lexeme, var_type);
         namedVals[s.name.lexeme] = a;
-        if (var_type) namedTypes[s.name.lexeme] = var_type;
+        if (var_type) {
+            namedTypes[s.name.lexeme] = var_type;
+            namedKinds[s.name.lexeme] = isUnboxableType(var_type)
+                ? localKindForType(var_type) : LocalKind::BOXED;
+        } else {
+            namedKinds[s.name.lexeme] = LocalKind::BOXED;
+        }
+        storeVar(s.name.lexeme, v);
     }
 }
 
 void LLVMBackend::cgBlock(const BlockStmt& s) {
     auto sv = namedVals;
     auto st = namedTypes;
+    auto sk = namedKinds;
     for (auto& stmt : s.statements) {
         if (builder->GetInsertBlock()->getTerminator()) break;
         cgStmt(stmt);
     }
     namedVals = sv;
     namedTypes = st;
+    namedKinds = sk;
 }
 
 void LLVMBackend::cgIf(const IfStmt& s) {
@@ -117,6 +125,7 @@ void LLVMBackend::cgFor(const ForStmt& s) {
     auto* fn = builder->GetInsertBlock()->getParent();
     auto sv = namedVals;
     auto stv = namedTypes;
+    auto skv = namedKinds;
     if (s.initializer) cgStmt(s.initializer);
     auto* lp = llvm::BasicBlock::Create(*ctx,"fc",fn);
     auto* bd = llvm::BasicBlock::Create(*ctx,"fb",fn);
@@ -136,23 +145,27 @@ void LLVMBackend::cgFor(const ForStmt& s) {
     if (s.increment) cg(s.increment);
     builder->CreateBr(lp);
     builder->SetInsertPoint(en);
-    loopExit = sv2; loopContinue = svc; loopDepth--; namedVals = sv; namedTypes = stv;
+    loopExit = sv2; loopContinue = svc; loopDepth--; namedVals = sv; namedTypes = stv; namedKinds = skv;
 }
 
 void LLVMBackend::cgForIn(const ForInStmt& s) {
     auto* fn = builder->GetInsertBlock()->getParent();
     auto sv = namedVals;
     auto stv = namedTypes;
+    auto skv = namedKinds;
     auto* iter = cg(s.collection);
     auto* len = callRtByName("__ang_len",{iter});
     auto* cnt = getI64(len);
     auto* ac = allocLocal(fn, s.name.lexeme);
     namedVals[s.name.lexeme] = ac;
+    namedKinds[s.name.lexeme] = LocalKind::BOXED;
     auto* lp = llvm::BasicBlock::Create(*ctx,"fic",fn);
     auto* bd = llvm::BasicBlock::Create(*ctx,"fib",fn);
     auto* en = llvm::BasicBlock::Create(*ctx,"fie",fn);
     auto* sv2 = loopExit; auto* svc = loopContinue; loopExit = en; loopContinue = lp; loopDepth++;
-    auto* ia = allocLocal(fn,"__fi");
+    // Raw i64 counter — no GC root needed (never holds heap pointers)
+    llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().getFirstInsertionPt());
+    auto* ia = tmp.CreateAlloca(llvm::Type::getInt64Ty(*ctx), nullptr, "__fi");
     builder->CreateStore(llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),0), ia);
     builder->CreateBr(lp);
     builder->SetInsertPoint(lp);
@@ -166,7 +179,7 @@ void LLVMBackend::cgForIn(const ForInStmt& s) {
         builder->CreateBr(lp);
     }
     builder->SetInsertPoint(en);
-    loopExit = sv2; loopContinue = svc; loopDepth--; namedVals = sv; namedTypes = stv;
+    loopExit = sv2; loopContinue = svc; loopDepth--; namedVals = sv; namedTypes = stv; namedKinds = skv;
 }
 
 void LLVMBackend::cgReturn(const ReturnStmt& s) {
@@ -234,12 +247,15 @@ void LLVMBackend::cgTry(const TryStmt& s) {
         auto* exc = builder->CreateLoad(objType, rt->getCurrentException(), "exc");
         auto sv = namedVals;
         auto st = namedTypes;
+        auto sk = namedKinds;
         auto* ea = allocLocal(fn, s.catchName.lexeme);
         builder->CreateStore(exc, ea);
         namedVals[s.catchName.lexeme] = ea;
+        namedKinds[s.catchName.lexeme] = LocalKind::BOXED;
         cgStmt(s.catchBlock);
         namedVals = sv;
         namedTypes = st;
+        namedKinds = sk;
     }
     if (!builder->GetInsertBlock()->getTerminator()) {
         builder->CreateBr(afterAll);

@@ -1461,6 +1461,7 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
 
     auto saved_values = std::move(namedVals);
     auto saved_types = std::move(namedTypes);
+    auto saved_kinds = std::move(namedKinds);
     auto* saved_ret_alloca = m_inlined_main_ret_alloca;
     auto* saved_cleanup_bb = m_inlined_main_cleanup_bb;
     auto* saved_gc_frame = m_gc_current_frame;
@@ -1471,6 +1472,7 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     m_gc_current_frame = nullptr;
     namedVals.clear();
     namedTypes.clear();
+    namedKinds.clear();
 
     // Load captured variables from the env pointer (3rd arg)
     auto* env_arg = lambda_fn->arg_begin() + 2;
@@ -1513,6 +1515,7 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
 
     namedVals = std::move(saved_values);
     namedTypes = std::move(saved_types);
+    namedKinds = std::move(saved_kinds);
     m_inlined_main_ret_alloca = saved_ret_alloca;
     m_inlined_main_cleanup_bb = saved_cleanup_bb;
     m_gc_current_frame = saved_gc_frame;

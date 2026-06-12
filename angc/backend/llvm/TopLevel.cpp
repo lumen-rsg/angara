@@ -90,14 +90,32 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
 
     auto saved_values = std::move(namedVals);
     auto saved_types = std::move(namedTypes);
+    auto saved_kinds = std::move(namedKinds);
     namedVals.clear();
     namedTypes.clear();
+    namedKinds.clear();
+
+    // Resolve parameter types for type-aware allocation
+    auto sem_sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(stmt.name.lexeme);
+    auto sem_fn_type = (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION)
+        ? std::dynamic_pointer_cast<FunctionType>(sem_sym->type) : nullptr;
 
     idx = 0;
     for (auto& arg : fn->args()) {
-        auto* alloca = allocLocal(fn, sanitize(stmt.params[idx].name.lexeme));
-        builder->CreateStore(&arg, alloca);
-        namedVals[sanitize(stmt.params[idx].name.lexeme)] = alloca;
+        auto pname = sanitize(stmt.params[idx].name.lexeme);
+        auto param_type = (sem_fn_type && idx < sem_fn_type->param_types.size())
+            ? sem_fn_type->param_types[idx] : nullptr;
+        auto* alloca = allocLocal(fn, pname, param_type);
+        namedVals[pname] = alloca;
+        if (param_type) {
+            namedTypes[pname] = param_type;
+            namedKinds[pname] = isUnboxableType(param_type)
+                ? localKindForType(param_type) : LocalKind::BOXED;
+        } else {
+            namedKinds[pname] = LocalKind::BOXED;
+        }
+        // storeVar handles unboxing if the alloca is raw
+        storeVar(pname, &arg);
         idx++;
     }
 
@@ -117,6 +135,7 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
 
     namedVals = std::move(saved_values);
     namedTypes = std::move(saved_types);
+    namedKinds = std::move(saved_kinds);
     m_di_scope = saved_di_scope;
     if (m_debug) builder->SetCurrentDebugLocation(llvm::DebugLoc());
 }
@@ -188,12 +207,15 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
 
             auto saved_values = std::move(namedVals);
             auto saved_types = std::move(namedTypes);
+            auto saved_kinds = std::move(namedKinds);
             namedVals.clear();
             namedTypes.clear();
+            namedKinds.clear();
 
             auto* this_alloca = allocLocal(fn, "this");
             builder->CreateStore(&*fn->arg_begin(), this_alloca);
             namedVals["this"] = this_alloca;
+            namedKinds["this"] = LocalKind::BOXED;
             auto sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(class_name);
             if (sym && sym->type->kind == TypeKind::CLASS) {
                 namedTypes["this"] = std::make_shared<InstanceType>(std::dynamic_pointer_cast<ClassType>(sym->type));
@@ -205,6 +227,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
                 auto* alloca = allocLocal(fn, pname);
                 builder->CreateStore(&*it, alloca);
                 namedVals[pname] = alloca;
+                namedKinds[pname] = LocalKind::BOXED;
             }
 
             emitGcPushFrame(fn, 256);
@@ -223,6 +246,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
 
             namedVals = std::move(saved_values);
             namedTypes = std::move(saved_types);
+            namedKinds = std::move(saved_kinds);
         }
     }
 
@@ -241,7 +265,9 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
         builder->SetInsertPoint(entry);
 
         auto saved_values = std::move(namedVals);
+        auto saved_kinds = std::move(namedKinds);
         namedVals.clear();
+        namedKinds.clear();
 
         llvm::Value* obj = callRtByName("__ang_record_new", {});
 
@@ -269,6 +295,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
 
         builder->CreateRet(obj);
         namedVals = std::move(saved_values);
+        namedKinds = std::move(saved_kinds);
     }
     constructorLookup[class_name] = ctor_name;
     m_current_superclass.clear();
@@ -291,7 +318,9 @@ void LLVMBackend::codegenDataDecl(const DataStmt& stmt) {
     builder->SetInsertPoint(entry);
 
     auto saved_values = std::move(namedVals);
+    auto saved_kinds = std::move(namedKinds);
     namedVals.clear();
+    namedKinds.clear();
 
     llvm::Value* obj = callRtByName("__ang_record_new", {});
 
@@ -304,6 +333,7 @@ void LLVMBackend::codegenDataDecl(const DataStmt& stmt) {
 
     builder->CreateRet(obj);
     namedVals = std::move(saved_values);
+    namedKinds = std::move(saved_kinds);
     constructorLookup[data_name] = "Angara_data_new_" + data_name;
 }
 
@@ -520,7 +550,9 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
     builder->SetInsertPoint(entry);
 
     auto saved_values = std::move(namedVals);
+    auto saved_kinds = std::move(namedKinds);
     namedVals.clear();
+    namedKinds.clear();
 
     // Build a mapping: wrapper_arg_index -> c_param_index
     std::vector<size_t> wrapper_to_c;  // wrapper arg index -> C param index
@@ -592,8 +624,8 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
     }
 
     namedVals = std::move(saved_values);
+    namedKinds = std::move(saved_kinds);
 }
-
 void LLVMBackend::codegenEnumDecl(const EnumStmt& stmt) {
     for (size_t i = 0; i < stmt.variants.size(); i++) {
         const auto& variant = stmt.variants[i];
@@ -625,7 +657,9 @@ void LLVMBackend::codegenEnumDecl(const EnumStmt& stmt) {
             builder->SetInsertPoint(entry);
 
             auto saved_values = std::move(namedVals);
+            auto saved_kinds = std::move(namedKinds);
             namedVals.clear();
+            namedKinds.clear();
 
             // Create a record to hold the variant data
             llvm::Value* record = callRtByName("__ang_record_new", {});
@@ -648,6 +682,7 @@ void LLVMBackend::codegenEnumDecl(const EnumStmt& stmt) {
 
             builder->CreateRet(record);
             namedVals = std::move(saved_values);
+            namedKinds = std::move(saved_kinds);
 
             constructorLookup[stmt.name.lexeme + "." + variant->name.lexeme] = ctor_name;
         }
@@ -685,6 +720,7 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
 
     namedVals.clear();
     namedTypes.clear();
+    namedKinds.clear();
 
     // GC: register main thread and push root frame
     llvm::Value* gc_thread_state = nullptr;
@@ -778,8 +814,10 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
             // Save/restore namedVals so top-level vars remain accessible
             auto saved_values = std::move(namedVals);
             auto saved_types = std::move(namedTypes);
+            auto saved_kinds = std::move(namedKinds);
             namedVals.clear();
             namedTypes.clear();
+            namedKinds.clear();
 
             // Create a return-value alloca and a cleanup block
             auto* ret_alloca = builder->CreateAlloca(llvm::Type::getInt32Ty(*ctx));
@@ -815,6 +853,7 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
 
             namedVals = std::move(saved_values);
             namedTypes = std::move(saved_types);
+            namedKinds = std::move(saved_kinds);
             break;
         }
     }
