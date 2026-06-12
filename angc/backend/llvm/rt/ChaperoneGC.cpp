@@ -33,14 +33,15 @@ void ChaperoneGC::generateTypes() {
         PointerType::get(ctx, 0)   // field 2: forward (forwarding pointer / allocation link)
     }, "ObjHeader");
 
-    // ArenaHeader: { i8* base, i8* bump, i8* limit, i64 object_count, i32 arena_id, i8* next_arena }
+    // ArenaHeader: { i8* base, i8* bump, i8* limit, i64 object_count, i32 arena_id, i8* next_arena, i8* free_list }
     m_arena_header_type = StructType::create(ctx, {
         PointerType::get(ctx, 0),  // base   (start of usable memory after this header)
         PointerType::get(ctx, 0),  // bump   (current bump pointer)
         PointerType::get(ctx, 0),  // limit  (end of the arena)
         Type::getInt64Ty(ctx),     // object_count (live objects in this arena)
         Type::getInt32Ty(ctx),     // arena_id
-        PointerType::get(ctx, 0)   // next_arena (linked list for this thread's arenas)
+        PointerType::get(ctx, 0),  // next_arena (linked list for this thread's arenas)
+        PointerType::get(ctx, 0)   // free_list (linked list of recycled object slots)
     }, "ArenaHeader");
 
     // GcThreadState: per-thread data for the collector
@@ -371,7 +372,42 @@ void ChaperoneGC::generateFunctions() {
 
         // If no arena yet, go slow
         auto* has_arena = bla.CreateICmpNE(arena, ConstantPointerNull::get(i8_ptr));
-        bla.CreateCondBr(has_arena, bump_ok_bb, slow_bb);
+        auto* try_free_bb = BasicBlock::Create(m_ctx, "try_free", fn);
+        bla.CreateCondBr(has_arena, try_free_bb, slow_bb);
+
+        // Try to reuse a freed slot from the arena's free list
+        IRBuilder<> btf(try_free_bb);
+        auto* free_list = btf.CreateLoad(i8_ptr,
+            btf.CreateStructGEP(m_arena_header_type, arena, 6), "free_list");
+        auto* has_free = btf.CreateICmpNE(free_list, ConstantPointerNull::get(i8_ptr));
+        auto* use_free_bb = BasicBlock::Create(m_ctx, "use_free", fn);
+        btf.CreateCondBr(has_free, use_free_bb, bump_ok_bb);
+
+        // Pop from free list: slot = free_list; free_list = slot->forward
+        IRBuilder<> buf(use_free_bb);
+        auto* next_free = buf.CreateLoad(i8_ptr,
+            buf.CreateStructGEP(header_ty, free_list, 2), "next_free");
+        buf.CreateStore(next_free, buf.CreateStructGEP(m_arena_header_type, arena, 6));
+        // Initialize header for reused slot (keep arena_id from previous occupant)
+        buf.CreateStore(type_arg, buf.CreateStructGEP(header_ty, free_list, 0));
+        auto* old_meta = buf.CreateLoad(i32_ty,
+            buf.CreateStructGEP(header_ty, free_list, 1), "old_meta");
+        auto* old_arena_id = buf.CreateAnd(old_meta, ConstantInt::get(i32_ty, 0xFF000000));
+        auto* new_meta = buf.CreateOr(ConstantInt::get(i32_ty, packMeta(COLOR_WHITE, true)),
+            old_arena_id);
+        buf.CreateStore(new_meta, buf.CreateStructGEP(header_ty, free_list, 1));
+        buf.CreateStore(ConstantPointerNull::get(i8_ptr),
+            buf.CreateStructGEP(header_ty, free_list, 2));
+        // Stats
+        auto* total_allocs = buf.CreateLoad(i64_ty, m_g_gc_total_allocs, "total_allocs");
+        buf.CreateStore(buf.CreateAdd(total_allocs, ConstantInt::get(i64_ty, 1)), m_g_gc_total_allocs);
+        auto* total_bytes = buf.CreateLoad(i64_ty, m_g_gc_total_bytes_alloc, "total_bytes");
+        buf.CreateStore(buf.CreateAdd(total_bytes, ConstantInt::get(i64_ty, 48)), m_g_gc_total_bytes_alloc);
+        auto* ret_free_bb = BasicBlock::Create(m_ctx, "ret_free", fn);
+        buf.CreateBr(ret_free_bb);
+
+        IRBuilder<> brf(ret_free_bb);
+        brf.CreateRet(free_list);
 
         // Bump allocation: load bump, advance, check limit
         IRBuilder<> bb(bump_ok_bb);
@@ -404,20 +440,27 @@ void ChaperoneGC::generateFunctions() {
         auto* type_addr = bdb.CreateStructGEP(header_ty, bump, 0);
         bdb.CreateStore(type_arg, type_addr);
         auto* meta_addr = bdb.CreateStructGEP(header_ty, bump, 1);
-        bdb.CreateStore(ConstantInt::get(i32_ty, packMeta(COLOR_WHITE, true)), meta_addr);
+        // Include arena_id in meta for free-list recycling during sweep
+        auto* arena_id = bdb.CreateLoad(i32_ty,
+            bdb.CreateStructGEP(m_arena_header_type, arena, 4), "arena_id");
+        auto* arena_id_shifted = bdb.CreateShl(
+            bdb.CreateAnd(arena_id, ConstantInt::get(i32_ty, 0xFF)),
+            ConstantInt::get(i32_ty, 24), "arena_id_shifted");
+        auto* base_meta = ConstantInt::get(i32_ty, packMeta(COLOR_WHITE, true));
+        bdb.CreateStore(bdb.CreateOr(base_meta, arena_id_shifted), meta_addr);
         auto* fwd_addr = bdb.CreateStructGEP(header_ty, bump, 2);
         bdb.CreateStore(ConstantPointerNull::get(i8_ptr), fwd_addr);
 
         // Stats
-        auto* total_count = bdb.CreateLoad(i64_ty, m_g_gc_total_count, "total_count");
-        bdb.CreateStore(bdb.CreateAdd(total_count, ConstantInt::get(i64_ty, 1)), m_g_gc_total_count);
-        auto* total_allocs = bdb.CreateLoad(i64_ty, m_g_gc_total_allocs, "total_allocs");
-        bdb.CreateStore(bdb.CreateAdd(total_allocs, ConstantInt::get(i64_ty, 1)), m_g_gc_total_allocs);
-        auto* total_bytes = bdb.CreateLoad(i64_ty, m_g_gc_total_bytes_alloc, "total_bytes");
-        bdb.CreateStore(bdb.CreateAdd(total_bytes, size_arg), m_g_gc_total_bytes_alloc);
+        auto* total_count2 = bdb.CreateLoad(i64_ty, m_g_gc_total_count, "total_count");
+        bdb.CreateStore(bdb.CreateAdd(total_count2, ConstantInt::get(i64_ty, 1)), m_g_gc_total_count);
+        auto* total_allocs2 = bdb.CreateLoad(i64_ty, m_g_gc_total_allocs, "total_allocs");
+        bdb.CreateStore(bdb.CreateAdd(total_allocs2, ConstantInt::get(i64_ty, 1)), m_g_gc_total_allocs);
+        auto* total_bytes2 = bdb.CreateLoad(i64_ty, m_g_gc_total_bytes_alloc, "total_bytes");
+        bdb.CreateStore(bdb.CreateAdd(total_bytes2, size_arg), m_g_gc_total_bytes_alloc);
 
         // Check threshold
-        auto* new_total = bdb.CreateAdd(total_count, ConstantInt::get(i64_ty, 1));
+        auto* new_total = bdb.CreateAdd(total_count2, ConstantInt::get(i64_ty, 1));
         auto* threshold = bdb.CreateLoad(i64_ty, m_g_gc_threshold, "threshold");
         auto* over = bdb.CreateICmpSGE(new_total, threshold, "over_threshold");
         auto* collect_bb = BasicBlock::Create(m_ctx, "do_collect", fn);
@@ -520,6 +563,8 @@ void ChaperoneGC::generateFunctions() {
         bi.CreateStore(limit_ptr, bi.CreateStructGEP(m_arena_header_type, arena_mem, 2)); // limit
         bi.CreateStore(ConstantInt::get(i64_ty, 0),
             bi.CreateStructGEP(m_arena_header_type, arena_mem, 3)); // object_count = 0
+        bi.CreateStore(ConstantPointerNull::get(i8_ptr),
+            bi.CreateStructGEP(m_arena_header_type, arena_mem, 6)); // free_list = null
 
         // Get new arena_id atomically
         auto* old_count = bi.CreateLoad(i64_ty, m_g_gc_arena_count, "old_arena_count");
@@ -1046,8 +1091,22 @@ void ChaperoneGC::generateFunctions() {
 
         IRBuilder<> bf(free_obj_bb);
         bf.CreateCall(get_func("__ang_gc_finalize"), {curr_phi});
-        // Note: do NOT free the object pointer — it's bump-allocated within an arena.
-        // Arena memory is freed as a whole when recycled.
+        // Push freed slot onto arena's free list for reuse
+        // Extract arena_id from meta (bits 24-31)
+        auto* arena_id_val = bf.CreateLShr(
+            bf.CreateAnd(meta, ConstantInt::get(i32_ty, 0xFF000000)),
+            ConstantInt::get(i32_ty, 24), "arena_id_val");
+        auto* arena_id_ext = bf.CreateZExt(arena_id_val, i64_ty, "arena_id_ext");
+        auto* freed_arena_addr = bf.CreateInBoundsGEP(
+            ArrayType::get(i8_ptr, 256), m_g_gc_arenas,
+            {ConstantInt::get(i64_ty, 0), arena_id_ext});
+        auto* freed_arena = bf.CreateLoad(i8_ptr, freed_arena_addr, "freed_arena");
+        // Push: curr->forward = arena->free_list; arena->free_list = curr
+        auto* old_free_list = bf.CreateLoad(i8_ptr,
+            bf.CreateStructGEP(m_arena_header_type, freed_arena, 6), "old_free");
+        bf.CreateStore(old_free_list, bf.CreateStructGEP(header_ty, curr_phi, 2));
+        bf.CreateStore(curr_phi, bf.CreateStructGEP(m_arena_header_type, freed_arena, 6));
+        // Stats
         auto* frees = bf.CreateLoad(i64_ty, m_g_gc_total_frees, "frees");
         bf.CreateStore(bf.CreateAdd(frees, ConstantInt::get(i64_ty, 1)), m_g_gc_total_frees);
         bf.CreateBr(advance_bb);
@@ -1075,59 +1134,36 @@ void ChaperoneGC::generateFunctions() {
     }
 
     // ===================================================================
-    // Patch __ang_gc_alloc: link new objects into the allocation list
-    // after the bump allocation succeeds.
+    // Patch __ang_gc_alloc: link ALL returned objects into the allocation list.
     // The list head is __ang_gc_arenas[0]; forward field (index 2) = next.
     // ===================================================================
     {
         auto* fn = get_func("__ang_gc_alloc");
-        // Find the block with the ReturnInst and insert list linking before it
+        // Collect all return instructions, then patch each one
+        std::vector<ReturnInst*> rets;
         for (auto& bb : *fn) {
-            auto* term = bb.getTerminator();
-            if (auto* ret = dyn_cast<ReturnInst>(term)) {
-                if (auto* ret_val = ret->getReturnValue()) {
-                    // Only patch the fast-path return (which returns the bump pointer)
-                    // The slow path returns a call result — we'll handle that separately
-                    if (!isa<CallInst>(ret_val)) {
-                        auto* link_bb = BasicBlock::Create(m_ctx, "link", fn);
-                        IRBuilder<> bl(link_bb);
-                        auto* arenas_ptr = bl.CreateInBoundsGEP(
-                            ArrayType::get(i8_ptr, 256), m_g_gc_arenas,
-                            {ConstantInt::get(i64_ty, 0), ConstantInt::get(i64_ty, 0)});
-                        auto* old_head = bl.CreateLoad(i8_ptr, arenas_ptr, "old_head");
-                        bl.CreateStore(old_head, bl.CreateStructGEP(header_ty, ret_val, 2));
-                        bl.CreateStore(ret_val, arenas_ptr);
-                        bl.CreateRet(ret_val);
-                        ret->eraseFromParent();
-                        IRBuilder<> br(&bb);
-                        br.CreateBr(link_bb);
-                        break;
-                    }
+            if (auto* ret = dyn_cast<ReturnInst>(bb.getTerminator())) {
+                if (ret->getReturnValue()) {
+                    rets.push_back(ret);
                 }
             }
         }
-        // Also patch the slow path return (alloc_slow result)
-        for (auto& bb : *fn) {
-            auto* term = bb.getTerminator();
-            if (auto* ret = dyn_cast<ReturnInst>(term)) {
-                if (auto* ret_val = ret->getReturnValue()) {
-                    if (auto* call = dyn_cast<CallInst>(ret_val)) {
-                        auto* link_bb = BasicBlock::Create(m_ctx, "link_slow", fn);
-                        IRBuilder<> bl(link_bb);
-                        auto* arenas_ptr = bl.CreateInBoundsGEP(
-                            ArrayType::get(i8_ptr, 256), m_g_gc_arenas,
-                            {ConstantInt::get(i64_ty, 0), ConstantInt::get(i64_ty, 0)});
-                        auto* old_head = bl.CreateLoad(i8_ptr, arenas_ptr, "old_head");
-                        bl.CreateStore(old_head, bl.CreateStructGEP(header_ty, call, 2));
-                        bl.CreateStore(call, arenas_ptr);
-                        bl.CreateRet(call);
-                        ret->eraseFromParent();
-                        IRBuilder<> br(&bb);
-                        br.CreateBr(link_bb);
-                        break;
-                    }
-                }
-            }
+        for (auto* ret : rets) {
+            auto* ret_val = ret->getReturnValue();
+            auto* link_bb = BasicBlock::Create(m_ctx, "link", fn);
+            IRBuilder<> bl(link_bb);
+            auto* arenas_ptr = bl.CreateInBoundsGEP(
+                ArrayType::get(i8_ptr, 256), m_g_gc_arenas,
+                {ConstantInt::get(i64_ty, 0), ConstantInt::get(i64_ty, 0)});
+            auto* old_head = bl.CreateLoad(i8_ptr, arenas_ptr, "old_head");
+            bl.CreateStore(old_head, bl.CreateStructGEP(header_ty, ret_val, 2));
+            bl.CreateStore(ret_val, arenas_ptr);
+            bl.CreateRet(ret_val);
+            // Replace the return with a branch to link_bb
+            auto* parent = ret->getParent();
+            ret->eraseFromParent();
+            IRBuilder<> br(parent);
+            br.CreateBr(link_bb);
         }
     }
 

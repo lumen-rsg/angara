@@ -113,9 +113,11 @@ Every pointer dereference checks the FORWARDED color. If set, the `forward` fiel
 - [x] Verify: all LLVM tests pass with chaperone thread running
 
 ### Stage 4: Optimizations
-- [ ] Free-list within arenas
-- [ ] Inline read barrier
-- [ ] Generational hints
+- [x] Free-list within arenas (arena.free_list field, reused slots from sweep)
+- [x] Arena_id in object meta (bits 24-31) for free-list routing during sweep
+- [x] Unified alloc patching: all return paths link into allocation list
+- [x] Generational hints via arena_id (older arenas = more stable objects)
+- [ ] Inline read barrier (codegen change)
 - [ ] Multi-chaperone threads
 
 ## Notes
