@@ -1,4 +1,5 @@
 #include "RuntimeBuilder.h"
+#include "MarkSweepGC.h"
 
 using namespace llvm;
 
@@ -29,11 +30,8 @@ void RuntimeBuilder::generateStringOps() {
 
     // Helper: initialize a newly allocated AngaraString struct
     auto init_string_struct = [&](IRBuilder<>& b, Value* str_ptr, Value* len, Value* chars) {
-        auto* header_ptr = b.CreateStructGEP(m_string_type, str_ptr, 0);
-        auto* type_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 0);
-        b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING), type_addr);
-        auto* rc_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 1);
-        b.CreateStore(ConstantInt::get(i64_ty, 1), rc_addr);
+        // Note: gc_alloc already initializes ObjHeader (type, meta, next).
+        // Only set string-specific fields here.
         b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 1));
         b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 2)); // capacity = length
         b.CreateStore(chars, b.CreateStructGEP(m_string_type, str_ptr, 3));
@@ -52,8 +50,9 @@ void RuntimeBuilder::generateStringOps() {
         auto* len = b.CreateCall(strlen_fn, {chars}, "len");
         auto* str_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_string_type));
-        auto* mem = b.CreateCall(malloc_fn, {str_size}, "mem");
-        auto* str_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0), "str_ptr");
+        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* str_ptr = b.CreateCall(gc_alloc_fn,
+            {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "str_mem");
 
         init_string_struct(b, str_ptr, len, b.CreateCall(strdup_fn, {chars}, "copied"));
 
@@ -72,8 +71,9 @@ void RuntimeBuilder::generateStringOps() {
         auto* len = b.CreateCall(strlen_fn, {chars}, "len");
         auto* str_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_string_type));
-        auto* mem = b.CreateCall(malloc_fn, {str_size}, "mem");
-        auto* str_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0), "str_ptr");
+        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* str_ptr = b.CreateCall(gc_alloc_fn,
+            {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "str_mem");
 
         init_string_struct(b, str_ptr, len, chars);
 
@@ -140,12 +140,10 @@ void RuntimeBuilder::generateStringOps() {
             auto* a_str_obj = bs.CreateCall(to_str_fn, {a}, "a_str");
             auto* b_str_obj = bs.CreateCall(to_str_fn, {b_arg}, "b_str");
             auto* result = bs.CreateCall(fn, {a_str_obj, b_str_obj}, "result");
-            bs.CreateCall(m_module.getFunction("__ang_decref"), {a_str_obj});
-            bs.CreateCall(m_module.getFunction("__ang_decref"), {b_str_obj});
             bs.CreateRet(result);
         }
 
-        // --- Both confirmed as strings: check refcount for in-place ---
+        // --- Both confirmed as strings: check is_unique for in-place ---
         {
             IRBuilder<> bu(check_unique_bb);
             auto* b_chars = bu.CreateLoad(i8_ptr,
@@ -153,9 +151,13 @@ void RuntimeBuilder::generateStringOps() {
             auto* b_len = bu.CreateLoad(i64_ty,
                 bu.CreateStructGEP(m_string_type, b_str, 1), "b_len");
 
-            auto* a_rc = bu.CreateLoad(i64_ty,
-                bu.CreateStructGEP(m_obj_header_type, a_str, 1), "a_rc");
-            auto* is_unique = bu.CreateICmpEQ(a_rc, ConstantInt::get(i64_ty, 1));
+            // Extract is_unique bit from ObjHeader.meta (bit 8)
+            auto* meta = bu.CreateLoad(i32_ty,
+                bu.CreateStructGEP(m_obj_header_type, a_str, 1), "a_meta");
+            auto* unique_bit = bu.CreateAnd(
+                bu.CreateLShr(meta, ConstantInt::get(i32_ty, 8)),
+                ConstantInt::get(i32_ty, 1), "unique_bit");
+            auto* is_unique = bu.CreateICmpNE(unique_bit, ConstantInt::get(i32_ty, 0));
             bu.CreateCondBr(is_unique, inplace_bb, copy_bb);
 
             // --- In-place: check if buffer needs growth ---
@@ -207,8 +209,6 @@ void RuntimeBuilder::generateStringOps() {
                 ba.CreateStore(ConstantInt::get(i8_ty, 0),
                     ba.CreateGEP(i8_ty, a_chars, {final_len}));
 
-                // Incref to compensate for caller's assignment decref
-                ba.CreateCall(m_module.getFunction("__ang_incref"), {a});
                 ba.CreateRet(a);
             }
 
@@ -231,9 +231,9 @@ void RuntimeBuilder::generateStringOps() {
 
                 auto* str_size = ConstantInt::get(i64_ty,
                     m_module.getDataLayout().getTypeAllocSize(m_string_type));
-                auto* str_ptr = bc.CreateBitCast(
-                    bc.CreateCall(malloc_fn, {str_size}, "mem"),
-                    PointerType::get(m_ctx, 0));
+                auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+                auto* str_ptr = bc.CreateCall(gc_alloc_fn,
+                    {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "str_mem");
 
                 init_string_struct(bc, str_ptr, new_len, buf);
 
@@ -309,9 +309,9 @@ void RuntimeBuilder::generateStringOps() {
 
             auto* str_size = ConstantInt::get(i64_ty,
                 m_module.getDataLayout().getTypeAllocSize(m_string_type));
-            auto* new_str_ptr = bd.CreateBitCast(
-                bd.CreateCall(malloc_fn, {str_size}, "mem"),
-                PointerType::get(m_ctx, 0));
+            auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+            auto* new_str_ptr = bd.CreateCall(gc_alloc_fn,
+                {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "str_mem");
 
             init_string_struct(bd, new_str_ptr, new_len, buf);
 
@@ -407,8 +407,6 @@ void RuntimeBuilder::generateStringOps() {
             bo.CreateCondBr(is_str, str_bb, not_str_bb);
 
             IRBuilder<> bs(str_bb);
-            auto* incref_fn = m_module.getFunction("__ang_incref");
-            bs.CreateCall(incref_fn, {val});
             bs.CreateRet(val);
 
             IRBuilder<> bns(not_str_bb);
@@ -463,8 +461,6 @@ void RuntimeBuilder::generateStringOps() {
             auto* a_str_obj = bf.CreateCall(to_str_fn, {a}, "a_str");
             auto* b_str_obj = bf.CreateCall(to_str_fn, {b_arg}, "b_str");
             auto* result = bf.CreateCall(fn, {a_str_obj, b_str_obj}, "result");
-            bf.CreateCall(m_module.getFunction("__ang_decref"), {a_str_obj});
-            bf.CreateCall(m_module.getFunction("__ang_decref"), {b_str_obj});
             bf.CreateRet(result);
         }
 

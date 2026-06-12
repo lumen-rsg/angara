@@ -1,4 +1,5 @@
 #include "RuntimeBuilder.h"
+#include "MarkSweepGC.h"
 
 using namespace llvm;
 
@@ -22,8 +23,10 @@ void RuntimeBuilder::generateFreestandingStubs() {
         auto* fn = createRuntimeFunc(name, ty); fc = FunctionCallee(fn);
         auto* e = BasicBlock::Create(m_ctx, "entry", fn); IRBuilder<> b(e); b.CreateRet(make_nil(b));
     };
-    stub_void("__ang_decref", FunctionType::get(void_ty, {obj_ty}, false), m_fn_decref);
-    stub_void("__ang_incref", FunctionType::get(void_ty, {obj_ty}, false), m_fn_incref);
+
+    // GC stubs for freestanding mode
+    m_gc->generateFreestandingStubs();
+
     {
         auto* fn = createRuntimeFunc("__ang_equals", FunctionType::get(obj_ty, {obj_ty, obj_ty}, false));
         m_fn_equals = FunctionCallee(fn);

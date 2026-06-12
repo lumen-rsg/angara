@@ -206,12 +206,11 @@ llvm::Value* LLVMBackend::makeF64(llvm::Value* v) {
 }
 llvm::Value* LLVMBackend::makeStr(const std::string& s) {
     // Intern string literals: each unique literal is allocated once per module
-    // and reused across all references. The global holds a permanent reference
-    // (never decref'd), so the string lives for the program's lifetime.
+    // and reused across all references. Under GC, the global is a permanent root
+    // so the string lives for the program's lifetime — no incref needed.
     auto it = m_string_literal_cache.find(s);
     if (it != m_string_literal_cache.end()) {
         auto* cached = builder->CreateLoad(objType, it->second, "strlit");
-        callRtByName("__ang_incref", {cached});
         return cached;
     }
 
@@ -234,14 +233,17 @@ llvm::Value* LLVMBackend::makeStr(const std::string& s) {
     auto savedIP = builder->saveIP();
     builder->SetInsertPoint(&entry, entry.getFirstInsertionPt());
     auto* new_str = callRtByName("__ang_string_from_c", {gsptr});
+    // Pin the string literal so the GC never collects it.
+    // String literals are stored in globals, not root frames, so without
+    // pinning they'd be invisible to the collector and freed as unreachable.
+    callRtByName("__ang_gc_pin", {new_str});
     builder->CreateStore(new_str, global);
     builder->restoreIP(savedIP);
 
     m_string_literal_cache[s] = global;
 
-    // At the current position, load from the global and incref
+    // Load from the global — no incref under GC
     auto* loaded = builder->CreateLoad(objType, global, "strlit");
-    callRtByName("__ang_incref", {loaded});
     return loaded;
 }
 
@@ -270,17 +272,147 @@ llvm::Value* LLVMBackend::callRtByName(const std::string& name, const std::vecto
 
 llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string& name) {
     llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().begin());
-    return tmp.CreateAlloca(objType, nullptr, name);
+    auto* alloca = tmp.CreateAlloca(objType, nullptr, name);
+
+    // Track in GC root frame if active — register in entry block to avoid
+    // re-registering (and incrementing count) inside loops.
+    // Insert AFTER the gc_push_frame call (which is near the end of entry block)
+    if (m_gc_current_frame && m_gc_frame_slot_idx < m_gc_frame_max_slots) {
+        auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
+        auto* i64_ty = llvm::Type::getInt64Ty(*ctx);
+        auto* i8_ptr = llvm::PointerType::get(*ctx, 0);
+
+        // Find the gc_push_frame call to insert after it
+        llvm::Instruction* insertAfter = nullptr;
+        for (auto& inst : fn->getEntryBlock()) {
+            if (auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
+                if (call->getCalledFunction() &&
+                    call->getCalledFunction()->getName() == "__ang_gc_push_frame") {
+                    insertAfter = &inst;
+                    break;
+                }
+            }
+        }
+
+        // Use iterator-based insertion: insert right after gc_push_frame.
+        // getNextNode() can return null when the call is the last instruction
+        // (e.g. when all initializer expressions fold to constants), so use
+        // the iterator directly to handle that case.
+        auto insertPt = insertAfter ? std::next(insertAfter->getIterator())
+                                    : fn->getEntryBlock().begin();
+        llvm::IRBuilder<> regBuilder(&fn->getEntryBlock(), insertPt);
+
+        // Store alloca address into frame slot
+        auto* slot_addr = regBuilder.CreateGEP(m_gc_frame_type, m_gc_current_frame,
+            {llvm::ConstantInt::get(i32_ty, 0), llvm::ConstantInt::get(i32_ty, 2),
+             llvm::ConstantInt::get(i64_ty, m_gc_frame_slot_idx)});
+        auto* alloca_i8 = regBuilder.CreateBitCast(alloca, i8_ptr);
+        regBuilder.CreateStore(alloca_i8, slot_addr);
+
+        // Increment frame count
+        auto* count_addr = regBuilder.CreateStructGEP(m_gc_frame_type, m_gc_current_frame, 1);
+        auto* count = regBuilder.CreateLoad(i32_ty, count_addr, "frame_count");
+        regBuilder.CreateStore(regBuilder.CreateAdd(count, llvm::ConstantInt::get(i32_ty, 1)), count_addr);
+
+        m_gc_frame_slot_idx++;
+    }
+
+    return alloca;
+}
+
+llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string& name,
+                                            const std::shared_ptr<Type>& type) {
+    if (type && isUnboxableType(type)) {
+        // Raw primitive: allocate the native LLVM type, skip GC root registration
+        auto kind = localKindForType(type);
+        llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().getFirstInsertionPt());
+        return tmp.CreateAlloca(llvmTypeForLocalKind(kind), nullptr, name);
+    }
+    // Boxed or unknown: use the original allocLocal (objType + GC root)
+    return allocLocal(fn, name);
+}
+
+void LLVMBackend::emitGcPushFrame(llvm::Function* fn, int slot_count) {
+    // Create concrete frame type if not yet created
+    if (!m_gc_frame_type) {
+        auto* i8_ptr = llvm::PointerType::get(*ctx, 0);
+        m_gc_frame_type = llvm::StructType::create(*ctx, {
+            i8_ptr,                                             // prev_frame
+            llvm::Type::getInt32Ty(*ctx),                      // count
+            llvm::ArrayType::get(i8_ptr, slot_count)           // slots
+        }, "GcFrame");
+    }
+
+    // Alloca at entry block beginning (before any other instructions)
+    auto& entry = fn->getEntryBlock();
+    llvm::IRBuilder<> tmp(&entry, entry.begin());
+    m_gc_current_frame = tmp.CreateAlloca(m_gc_frame_type, nullptr, "gc_frame");
+
+    // Init count = 0
+    auto* count_addr = tmp.CreateStructGEP(m_gc_frame_type, m_gc_current_frame, 1);
+    tmp.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0), count_addr);
+
+    // Call __ang_gc_push_frame at current builder position
+    auto* frame_i8 = builder->CreateBitCast(m_gc_current_frame, llvm::PointerType::get(*ctx, 0));
+    callRtByName("__ang_gc_push_frame", {frame_i8});
+
+    m_gc_frame_slot_idx = 0;
+    m_gc_frame_max_slots = slot_count;
+}
+
+void LLVMBackend::emitGcPopFrame() {
+    callRtByName("__ang_gc_pop_frame", {});
+    m_gc_current_frame = nullptr;
+    m_gc_frame_slot_idx = 0;
+}
+
+llvm::Value* LLVMBackend::emitGcThreadSetup() {
+    auto* state_type = rt->getGcThreadStateType();
+    auto& dl = mod->getDataLayout();
+    uint64_t state_size_val = dl.getTypeAllocSize(state_type);
+    auto* state_size = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), state_size_val);
+
+    // malloc a GcThreadState
+    auto* state_raw = callRtByName("malloc", {state_size});
+    auto* state_ptr = builder->CreateBitCast(state_raw, llvm::PointerType::get(*ctx, 0), "gc_state");
+
+    // Zero-init
+    callRtByName("memset", {state_ptr, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0), state_size});
+
+    // Register with GC
+    callRtByName("__ang_gc_thread_register", {state_ptr});
+
+    return state_ptr;
+}
+
+void LLVMBackend::emitGcTeardown(llvm::Value* state_ptr) {
+    callRtByName("__ang_gc_thread_unregister", {state_ptr});
+    callRtByName("free", {state_ptr});
 }
 
 llvm::Value* LLVMBackend::loadVar(const std::string& n) {
-    if (auto it=namedVals.find(n); it!=namedVals.end()) return builder->CreateLoad(objType, it->second, n);
+    if (auto it=namedVals.find(n); it!=namedVals.end()) {
+        auto kit = namedKinds.find(n);
+        if (kit != namedKinds.end() && kit->second != LocalKind::BOXED) {
+            auto* raw = builder->CreateLoad(llvmTypeForLocalKind(kit->second), it->second, n);
+            return boxRaw(raw, kit->second);
+        }
+        return builder->CreateLoad(objType, it->second, n);
+    }
     if (auto it=globals.find(n); it!=globals.end()) return builder->CreateLoad(objType, it->second, n);
     if (auto it=globals.find("g_"+n); it!=globals.end()) return builder->CreateLoad(objType, it->second, n);
     return makeNil();
 }
 void LLVMBackend::storeVar(const std::string& n, llvm::Value* v) {
-    if (auto it=namedVals.find(n); it!=namedVals.end()) { builder->CreateStore(v,it->second); return; }
+    if (auto it=namedVals.find(n); it!=namedVals.end()) {
+        auto kit = namedKinds.find(n);
+        if (kit != namedKinds.end() && kit->second != LocalKind::BOXED) {
+            builder->CreateStore(unboxToRaw(v, kit->second), it->second);
+            return;
+        }
+        builder->CreateStore(v, it->second);
+        return;
+    }
     if (auto it=globals.find(n); it!=globals.end()) { builder->CreateStore(v,it->second); return; }
     if (auto it=globals.find("g_"+n); it!=globals.end()) { builder->CreateStore(v,it->second); return; }
 }
@@ -320,6 +452,56 @@ llvm::Value* LLVMBackend::truncateForType(llvm::Value* val, const std::shared_pt
         : builder->CreateSExt(truncated, llvm::Type::getInt64Ty(*ctx), "sign_ext");
 
     return makeI64(extended);
+}
+
+// --- Unboxed primitive support ---
+
+bool LLVMBackend::isUnboxableType(const std::shared_ptr<Type>& type) {
+    if (!type || type->kind != TypeKind::PRIMITIVE) return false;
+    const auto& n = type->toString();
+    // String is a heap type — never unbox
+    if (n == "string") return false;
+    // All numeric and bool primitives are unboxable
+    return isInteger(type) || isFloat(type) || n == "bool";
+}
+
+LLVMBackend::LocalKind LLVMBackend::localKindForType(const std::shared_ptr<Type>& type) {
+    if (!type || type->kind != TypeKind::PRIMITIVE) return LocalKind::BOXED;
+    const auto& n = type->toString();
+    if (n == "bool") return LocalKind::RAW_I1;
+    if (isFloat(type)) return LocalKind::RAW_F64;
+    if (isInteger(type)) return LocalKind::RAW_I64;
+    return LocalKind::BOXED;
+}
+
+llvm::Type* LLVMBackend::llvmTypeForLocalKind(LocalKind kind) {
+    switch (kind) {
+        case LocalKind::RAW_I1:  return llvm::Type::getInt1Ty(*ctx);
+        case LocalKind::RAW_I64: return llvm::Type::getInt64Ty(*ctx);
+        case LocalKind::RAW_F64: return llvm::Type::getDoubleTy(*ctx);
+        case LocalKind::BOXED:   return objType;
+    }
+    return objType;
+}
+
+llvm::Value* LLVMBackend::boxRaw(llvm::Value* raw, LocalKind kind) {
+    switch (kind) {
+        case LocalKind::RAW_I1:  return makeBool(raw);
+        case LocalKind::RAW_I64: return makeI64(raw);
+        case LocalKind::RAW_F64: return makeF64(raw);
+        case LocalKind::BOXED:   return raw;
+    }
+    return raw;
+}
+
+llvm::Value* LLVMBackend::unboxToRaw(llvm::Value* objVal, LocalKind kind) {
+    switch (kind) {
+        case LocalKind::RAW_I1:  return getBool(objVal);
+        case LocalKind::RAW_I64: return getI64(objVal);
+        case LocalKind::RAW_F64: return getF64(objVal);
+        case LocalKind::BOXED:   return objVal;
+    }
+    return objVal;
 }
 
 llvm::Type* LLVMBackend::resolveCFieldType(const std::shared_ptr<Type>& type) {

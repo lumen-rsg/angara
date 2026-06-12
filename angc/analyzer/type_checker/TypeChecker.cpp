@@ -2,10 +2,6 @@
 #include <stdexcept>
 #include "ErrorHandler.h"
 namespace angara {
-
-    // Pull free functions from Type.h into class scope so visitor files
-    // that call isInteger/isFloat/isNumeric/isUnsignedInteger unqualified
-    // find them via argument-dependent lookup.
     using angara::isInteger;
     using angara::isFloat;
     using angara::isNumeric;
@@ -115,8 +111,6 @@ namespace angara {
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "Exception", 0, 0), exception_constructor_type, true);
 
-        // Global println/print builtins — variadic, any args, returns nil.
-        // Codegen rewrites these to __ang_io_println/__ang_io_print with stdout.
         const auto println_type = std::make_shared<FunctionType>(
             std::vector<std::shared_ptr<Type>>{m_type_any},
             m_type_nil,
@@ -458,7 +452,6 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         auto inner = resolveType(owned->inner_type);
         if (inner->kind == TypeKind::ERROR) return m_type_error;
         if (inner->kind != TypeKind::PRIMITIVE) {
-            // Only string makes sense for @own
             return inner;
         }
         auto prim = std::make_shared<PrimitiveType>(

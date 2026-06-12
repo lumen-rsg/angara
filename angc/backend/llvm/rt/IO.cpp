@@ -147,7 +147,6 @@ void RuntimeBuilder::generateIOOps() {
         auto* fprintf_fn = m_module.getFunction("fprintf");
         auto* fmt = b.CreateGlobalString("%s");
         b.CreateCall(fprintf_fn, {file_ptr, fmt, cstr});
-        b.CreateCall(m_module.getFunction("__ang_decref"), {str_obj});
         b.CreateRetVoid();
     }
 
@@ -176,7 +175,6 @@ void RuntimeBuilder::generateIOOps() {
         auto* fprintf_fn = m_module.getFunction("fprintf");
         auto* fmt = b.CreateGlobalString("%s\n");
         b.CreateCall(fprintf_fn, {file_ptr, fmt, cstr});
-        b.CreateCall(m_module.getFunction("__ang_decref"), {str_obj});
         b.CreateRetVoid();
     }
 
@@ -206,7 +204,6 @@ void RuntimeBuilder::generateIOOps() {
         auto* fprintf_fn = m_module.getFunction("fprintf");
         auto* fmt = b.CreateGlobalString("%s");
         b.CreateCall(fprintf_fn, {file_ptr, fmt, cstr});
-        b.CreateCall(m_module.getFunction("__ang_decref"), {str_obj});
         b.CreateRetVoid();
     }
 

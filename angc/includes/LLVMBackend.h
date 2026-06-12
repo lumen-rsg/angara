@@ -21,6 +21,7 @@ namespace angara { class RuntimeBuilder; }
 #include <vector>
 #include <map>
 #include <set>
+#include <optional>
 
 namespace angara {
 
@@ -132,6 +133,11 @@ namespace angara {
         void codegenForeignDataDecl(const DataStmt& stmt);
         void codegenEnumDecl(const EnumStmt& stmt);
 
+        /// Returns true if the function body contains any non-primitive values that need GC.
+        bool functionNeedsGC(const FuncStmt& stmt);
+        bool exprNeedsGC(const std::shared_ptr<Expr>& expr);
+        bool stmtNeedsGC(const std::shared_ptr<Stmt>& stmt);
+
         /// Resolves a semantic type to its C-compatible LLVM type for FFI.
         llvm::Type* resolveCFieldType(const std::shared_ptr<Type>& type);
         /// Converts a raw C value to an AngaraObject.
@@ -184,6 +190,9 @@ namespace angara {
 
         /// Creates an alloca for an AngaraObject local variable at the function entry.
         llvm::AllocaInst* allocLocal(llvm::Function* fn, const std::string& name);
+        /// Type-aware overload: uses raw LLVM type for unboxable primitives, skips GC root.
+        llvm::AllocaInst* allocLocal(llvm::Function* fn, const std::string& name,
+                                      const std::shared_ptr<Type>& type);
         /// Loads a named variable from local scope or globals.
         llvm::Value* loadVar(const std::string& name);
         /// Stores a value to a named variable in local scope or globals.
@@ -197,6 +206,20 @@ namespace angara {
         static bool isSizedIntType(const std::shared_ptr<Type>& type);
         /// Returns the bit width of a sized integer type (8, 16, 32, or 64).
         static int getIntBitWidth(const std::shared_ptr<Type>& type);
+
+        // --- Unboxed primitive support ---
+        /// Kind of local variable storage: boxed (AngaraObject) or raw LLVM primitive.
+        enum class LocalKind { BOXED, RAW_I1, RAW_I64, RAW_F64 };
+        /// Returns true if a type can be stored as a raw LLVM primitive (not boxed).
+        static bool isUnboxableType(const std::shared_ptr<Type>& type);
+        /// Maps a semantic type to the appropriate LocalKind.
+        static LocalKind localKindForType(const std::shared_ptr<Type>& type);
+        /// Returns the raw LLVM type for a given LocalKind.
+        llvm::Type* llvmTypeForLocalKind(LocalKind kind);
+        /// Boxes a raw LLVM value into an AngaraObject.
+        llvm::Value* boxRaw(llvm::Value* raw, LocalKind kind);
+        /// Unboxes an AngaraObject to a raw LLVM value.
+        llvm::Value* unboxToRaw(llvm::Value* objVal, LocalKind kind);
 
         /// Produces a mangled function name: __ang_<module>_<name>.
         std::string mangle(const std::string& module, const std::string& name);
@@ -216,6 +239,7 @@ namespace angara {
 
         std::map<std::string, llvm::AllocaInst*> namedVals;
         std::map<std::string, std::shared_ptr<Type>> namedTypes;
+        std::map<std::string, LocalKind> namedKinds;
         std::map<std::string, llvm::GlobalVariable*> globals;
 
         // String literal intern cache: maps literal text -> module-level global
@@ -239,6 +263,17 @@ namespace angara {
         // Variadic foreign functions: maps C function name -> semantic FunctionType
         std::map<std::string, std::shared_ptr<FunctionType>> m_variadic_foreign_funcs;
 
+        // Raw (unboxed) function signatures: maps mangled name -> pair(param LocalKinds, return LocalKind)
+        // If a function is in this map, it uses raw LLVM types instead of objType
+        struct RawFuncInfo {
+            std::vector<LocalKind> param_kinds;
+            LocalKind return_kind;
+        };
+        std::map<std::string, RawFuncInfo> m_raw_functions;
+
+        // When inside a raw-signature function, holds the return kind (empty otherwise)
+        std::optional<LocalKind> m_current_raw_return_kind;
+
         // Callback context: set by marshalAngaraToC for FUNCTION params (heap-allocated closure)
         llvm::Value* m_pending_callback_context = nullptr;
 
@@ -258,6 +293,17 @@ namespace angara {
         void setDebugLoc(int line, int col);
 
         int m_lambda_counter = 0;
+
+        // GC root frame state
+        llvm::Value* m_gc_current_frame = nullptr;
+        int m_gc_frame_slot_idx = 0;
+        int m_gc_frame_max_slots = 0;
+        llvm::StructType* m_gc_frame_type = nullptr;
+
+        void emitGcPushFrame(llvm::Function* fn, int slot_count);
+        void emitGcPopFrame();
+        llvm::Value* emitGcThreadSetup();
+        void emitGcTeardown(llvm::Value* state_ptr);
 
         std::string objPath;
         std::string irPath;

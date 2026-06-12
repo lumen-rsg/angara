@@ -1,4 +1,5 @@
 #include "RuntimeBuilder.h"
+#include "MarkSweepGC.h"
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -7,7 +8,17 @@ using namespace llvm;
 namespace angara {
 
 RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>& builder, bool freestanding)
-    : m_ctx(context), m_module(module), m_builder(builder), m_freestanding(freestanding) {}
+    : m_ctx(context), m_module(module), m_builder(builder), m_freestanding(freestanding) {
+    // Create the GC strategy
+    m_gc = std::make_unique<MarkSweepGC>(m_ctx, m_module, m_builder);
+}
+
+RuntimeBuilder::~RuntimeBuilder() = default;
+
+llvm::StructType* RuntimeBuilder::getGcRootFrameType() const { return m_gc->getGcRootFrameType(); }
+llvm::StructType* RuntimeBuilder::getGcThreadStateType() const { return m_gc->getGcThreadStateType(); }
+llvm::GlobalVariable* RuntimeBuilder::getGcThreadStateTLS() const { return m_gc->getGcThreadStateTLS(); }
+llvm::FunctionCallee RuntimeBuilder::getGcPrintStatsFunc() const { return m_gc->getGcPrintStatsFunc(); }
 
 void RuntimeBuilder::generateRuntime() {
     generateTypes();
@@ -18,6 +29,11 @@ void RuntimeBuilder::generateRuntime() {
     }
 
     declareCLibFunctions();
+
+    // GC: generate globals and functions
+    m_gc->generateGlobals();
+    m_gc->generateFunctions();
+
     generateMemoryManagement();
     generateStringOps();
     generateEquality();
@@ -47,10 +63,13 @@ void RuntimeBuilder::generateTypes() {
         Type::getInt64Ty(m_ctx)
     }, "AngaraObject");
 
-    m_obj_header_type = StructType::create(m_ctx, {
-        Type::getInt32Ty(m_ctx),
-        Type::getInt64Ty(m_ctx)
-    }, "ObjHeader");
+    // Let the GC create its header type
+    m_gc->generateTypes();
+    m_obj_header_type = m_gc->getHeaderType();
+
+    // Give the GC access to the AngaraObject type for function signatures
+    auto* ms_gc = static_cast<MarkSweepGC*>(m_gc.get());
+    ms_gc->setAngaraObjType(m_angara_obj_type);
 
     m_string_type = StructType::create(m_ctx, {
         m_obj_header_type,
@@ -89,7 +108,8 @@ void RuntimeBuilder::generateTypes() {
         fn_ptr_type,
         Type::getInt32Ty(m_ctx),
         Type::getInt1Ty(m_ctx),
-        PointerType::get(m_ctx, 0)   // env: pointer to captured variables array
+        PointerType::get(m_ctx, 0),   // env: pointer to captured variables array
+        Type::getInt32Ty(m_ctx)       // env_count: number of captured variables (for GC scanning)
     }, "AngaraClosure");
 
     m_bound_method_type = StructType::create(m_ctx, {
@@ -117,6 +137,12 @@ void RuntimeBuilder::generateTypes() {
         m_obj_header_type,
         ArrayType::get(Type::getInt8Ty(m_ctx), 64)
     }, "AngaraMutex");
+
+    // Give the GC access to all runtime struct types for scanner traversal
+    ms_gc->setStructTypes(
+        m_string_type, m_list_type, m_record_type, m_record_entry_type,
+        m_exception_type, m_closure_type, m_bound_method_type,
+        m_thread_type, m_native_instance_type);
 
     m_g_exception_chain = new GlobalVariable(
         m_module, PointerType::get(m_ctx, 0),

@@ -1,57 +1,84 @@
 @startuml lexer_state_machine
 skinparam monochrome false
+skinparam linetype ortho
+skinparam nodesep 20
+skinparam ranksep 50
 
-title Диаграмма конечного автомата: Лексический анализатор (Lexer)
+title Диаграмма конечного автомата:\nЛексический анализатор (Lexer)
 
-[*] --> Start
+' ──────────────────────────────
+' Начальное состояние
+' ──────────────────────────────
+[*] --> ScanChar
 
-state Start {
-    [*] --> ScanChar
-    ScanChar --> IsAlpha : буква / _
-    ScanChar --> IsDigit : цифра
-    ScanChar --> IsQuote : " или """
-    ScanChar --> IsOperator : + - * / = < > ! & | % ^ ~ . :
-    ScanChar --> IsWhitespace : пробел / таб / newline
-    ScanChar --> IsSlash : /
-    ScanChar --> IsEOF : конец файла
+state ScanChar as "ScanChar\n(Чтение следующего символа)"
 
-    IsAlpha --> Identifier : accumulate()
-    Identifier --> ScanChar : не буква/цифра → addToken(KEYWORD/IDENT)
+' ──────────────────────────────
+' Идентификаторы и ключевые слова
+' ──────────────────────────────
+ScanChar --> IsAlpha : буква / _
+IsAlpha --> Identifier : accumulate()
+Identifier --> ScanChar : не буква/цифра\n→ addToken(KEYWORD / IDENT)
 
-    IsDigit --> Number : accumulate()
-    Number --> ScanChar : не цифра/точка → addToken(NUMBER)
-    Number --> FloatPart : точка
-    FloatPart --> ScanChar : не цифра → addToken(NUMBER)
+' ──────────────────────────────
+' Числа (целые и вещественные)
+' ──────────────────────────────
+ScanChar --> IsDigit : цифра
+IsDigit --> Number : accumulate()
+Number --> FloatPart : точка
+Number --> ScanChar : не цифра/точка\n→ addToken(NUMBER)
+FloatPart --> ScanChar : не цифра\n→ addToken(NUMBER)
 
-    IsQuote --> String : открывающая кавычка
-    String --> ScanChar : закрывающая кавычка → addToken(STRING)
-    String --> EscapeSequence : обратный слеш
+' ──────────────────────────────
+' Строковые литералы
+' ──────────────────────────────
+ScanChar --> IsQuote : " или """
+IsQuote --> String : открывающая кавычка
+String --> EscapeSequence : обратный слеш
+EscapeSequence --> String : обработать\n\\n \\t \\\\ \\"
+String --> ScanChar : закрывающая кавычка\n→ addToken(STRING)
 
-    IsOperator --> Operator1 : одиночный символ
-    Operator1 --> ScanChar : нет продолжения → addToken(OP)
-    Operator1 --> Operator2 : возможен +=, ==, !=, <=, >=, &&, ||, ++, --, ::
-    Operator2 --> ScanChar : addToken(COMPOUND_OP)
+' ──────────────────────────────
+' Операторы (одиночные и составные)
+' ──────────────────────────────
+ScanChar --> IsOperator : + - * / = < >\n! & | % ^ ~ . :
+IsOperator --> Operator1 : одиночный символ
+Operator1 --> Operator2 : возможен +=, ==, !=,\n<=, >=, &&, ||, ++, --, ::
+Operator1 --> ScanChar : нет продолжения\n→ addToken(OP)
+Operator2 --> ScanChar : addToken(COMPOUND_OP)
 
-    IsSlash --> LineComment : /
-    IsSlash --> BlockComment : *
-    IsSlash --> ScanChar : addToken(SLASH)
+' ──────────────────────────────
+' Комментарии и символ /
+' ──────────────────────────────
+ScanChar --> IsSlash : /
+IsSlash --> LineComment : /
+IsSlash --> BlockComment : *
+IsSlash --> ScanChar : addToken(SLASH)
+LineComment --> ScanChar : newline → пропустить
+BlockComment --> ScanChar : */ → пропустить
 
-    LineComment --> ScanChar : newline → пропустить
-    BlockComment --> ScanChar : */ → пропустить
+' ──────────────────────────────
+' Пробельные символы
+' ──────────────────────────────
+ScanChar --> IsWhitespace : пробел / таб / newline
+IsWhitespace --> ScanChar : пропустить\n(newline → line++)
 
-    IsWhitespace --> ScanChar : пропустить (newline → line++)
-    IsEOF --> [*] : addToken(EOF)
+' ──────────────────────────────
+' Конец файла
+' ──────────────────────────────
+ScanChar --> IsEOF : конец файла
 
-    EscapeSequence --> String : обработать \\n \\t \\\\ \\"
-}
+' ──────────────────────────────
+' Поток токенов
+' ──────────────────────────────
+IsEOF --> TokenStream : addToken(EOF)
 
-state "Token Stream" as TokenStream {
+state "Token Stream\n(Поток токенов)" as TokenStream {
     [*] --> Collect
     Collect --> Collect : addToken(type, literal)
     Collect --> [*] : EOF
 }
 
-ScanChar --> TokenStream : каждый распознанный токен
 TokenStream --> [*] : return vector<Token>
 
 @enduml

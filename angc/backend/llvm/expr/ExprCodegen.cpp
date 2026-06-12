@@ -65,7 +65,8 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
                 wrapper_fn,
                 llvm::ConstantInt::get(i32_ty, arity),
                 llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0),
-                llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0))
+                llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)),
+                llvm::ConstantInt::get(i32_ty, 0)  // env_count = 0 (no captures)
             });
         }
         return loadVar(p->name.lexeme);
@@ -110,6 +111,13 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
     auto* l = cg(e.left), *r = cg(e.right);
     if (!l||!r) return makeNil();
 
+    // Compile-time type lookup for fast-path arithmetic
+    auto lt_it = m_type_checker.getExpressionTypes().find(e.left.get());
+    auto rt_it = m_type_checker.getExpressionTypes().find(e.right.get());
+    bool left_typed = lt_it != m_type_checker.getExpressionTypes().end();
+    bool right_typed = rt_it != m_type_checker.getExpressionTypes().end();
+    bool types_known = left_typed && right_typed;
+
     // Helper: convert an AngaraObject to double based on its runtime tag.
     // If TAG_F64, bitcast payload; if TAG_I64, SIToFP convert.
     auto* f64_ty = llvm::Type::getDoubleTy(*ctx);
@@ -123,6 +131,18 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
 
     switch (e.op.type) {
         case TokenType::PLUS: {
+            // Fast path: typed primitives — skip tag dispatch entirely
+            if (types_known) {
+                auto& ltype = lt_it->second;
+                auto& rtype = rt_it->second;
+                if (isInteger(ltype) && isInteger(rtype))
+                    return makeI64(builder->CreateAdd(getI64(l), getI64(r)));
+                if (isFloat(ltype) || isFloat(rtype)) {
+                    auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
+                    auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
+                    return makeF64(builder->CreateFAdd(ld, rd));
+                }
+            }
             // If the type checker knows either operand is a string, skip the
             // runtime tag dispatch and call __ang_string_concat directly.
             {
@@ -171,6 +191,18 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             return phi;
         }
         case TokenType::MINUS: {
+            // Fast path: typed primitives
+            if (types_known) {
+                auto& ltype = lt_it->second;
+                auto& rtype = rt_it->second;
+                if (isInteger(ltype) && isInteger(rtype))
+                    return makeI64(builder->CreateSub(getI64(l), getI64(r)));
+                if (isFloat(ltype) || isFloat(rtype)) {
+                    auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
+                    auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
+                    return makeF64(builder->CreateFSub(ld, rd));
+                }
+            }
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
             auto* eitherF64 = builder->CreateOr(
@@ -195,6 +227,18 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             return phi;
         }
         case TokenType::STAR: {
+            // Fast path: typed primitives
+            if (types_known) {
+                auto& ltype = lt_it->second;
+                auto& rtype = rt_it->second;
+                if (isInteger(ltype) && isInteger(rtype))
+                    return makeI64(builder->CreateMul(getI64(l), getI64(r)));
+                if (isFloat(ltype) || isFloat(rtype)) {
+                    auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
+                    auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
+                    return makeF64(builder->CreateFMul(ld, rd));
+                }
+            }
             {
                 auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
                 if (lt != m_type_checker.getExpressionTypes().end() && lt->second->toString() == "string") {
@@ -225,6 +269,21 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             return phi;
         }
         case TokenType::SLASH: {
+            // Fast path: typed primitives
+            if (types_known) {
+                auto& ltype = lt_it->second;
+                auto& rtype = rt_it->second;
+                if (isInteger(ltype) && isInteger(rtype)) {
+                    bool unsign = isUnsignedIntType(ltype) || isUnsignedIntType(rtype);
+                    return makeI64(unsign ? builder->CreateUDiv(getI64(l), getI64(r))
+                                          : builder->CreateSDiv(getI64(l), getI64(r)));
+                }
+                if (isFloat(ltype) || isFloat(rtype)) {
+                    auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
+                    auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
+                    return makeF64(builder->CreateFDiv(ld, rd));
+                }
+            }
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
             auto* eitherF64 = builder->CreateOr(
@@ -254,6 +313,21 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             return phi;
         }
         case TokenType::PERCENT: {
+            // Fast path: typed primitives
+            if (types_known) {
+                auto& ltype = lt_it->second;
+                auto& rtype = rt_it->second;
+                if (isInteger(ltype) && isInteger(rtype)) {
+                    bool unsign = isUnsignedIntType(ltype) || isUnsignedIntType(rtype);
+                    return makeI64(unsign ? builder->CreateURem(getI64(l), getI64(r))
+                                          : builder->CreateSRem(getI64(l), getI64(r)));
+                }
+                if (isFloat(ltype) || isFloat(rtype)) {
+                    auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
+                    auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
+                    return makeF64(builder->CreateFRem(ld, rd));
+                }
+            }
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
             auto* eitherF64 = builder->CreateOr(
@@ -313,7 +387,37 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
                     return makeBool(bool_val);
                 }
             }
-            // Numeric comparison (original code)
+            // Fast path: typed primitives — skip tag dispatch
+            if (types_known) {
+                auto& ltype = lt_it->second;
+                auto& rtype = rt_it->second;
+                if (isInteger(ltype) && isInteger(rtype)) {
+                    bool unsign = isUnsignedIntType(ltype) || isUnsignedIntType(rtype);
+                    llvm::Value* cmp;
+                    switch (e.op.type) {
+                        case TokenType::LESS:          cmp = unsign ? builder->CreateICmpULT(getI64(l), getI64(r)) : builder->CreateICmpSLT(getI64(l), getI64(r)); break;
+                        case TokenType::LESS_EQUAL:    cmp = unsign ? builder->CreateICmpULE(getI64(l), getI64(r)) : builder->CreateICmpSLE(getI64(l), getI64(r)); break;
+                        case TokenType::GREATER:       cmp = unsign ? builder->CreateICmpUGT(getI64(l), getI64(r)) : builder->CreateICmpSGT(getI64(l), getI64(r)); break;
+                        case TokenType::GREATER_EQUAL: cmp = unsign ? builder->CreateICmpUGE(getI64(l), getI64(r)) : builder->CreateICmpSGE(getI64(l), getI64(r)); break;
+                        default: cmp = builder->CreateICmpSLT(getI64(l), getI64(r)); break;
+                    }
+                    return makeBool(cmp);
+                }
+                if (isFloat(ltype) || isFloat(rtype)) {
+                    auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
+                    auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
+                    llvm::Value* cmp;
+                    switch (e.op.type) {
+                        case TokenType::LESS:          cmp = builder->CreateFCmpOLT(ld, rd); break;
+                        case TokenType::LESS_EQUAL:    cmp = builder->CreateFCmpOLE(ld, rd); break;
+                        case TokenType::GREATER:       cmp = builder->CreateFCmpOGT(ld, rd); break;
+                        case TokenType::GREATER_EQUAL: cmp = builder->CreateFCmpOGE(ld, rd); break;
+                        default: cmp = builder->CreateFCmpOLT(ld, rd); break;
+                    }
+                    return makeBool(cmp);
+                }
+            }
+            // Numeric comparison (original tag-dispatch code)
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
             auto* eitherF64 = builder->CreateOr(
@@ -394,37 +498,8 @@ llvm::Value* LLVMBackend::cgUnary(const Unary& e) {
 llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
     auto* v = cg(e.value);
     if (auto* var = dynamic_cast<const VarExpr*>(e.target.get())) {
-        // Decref old value to prevent memory leak on reassignment.
-        // Skip for simple self-assignment (x = x) to avoid double-free.
-        auto sname = sanitize(var->name.lexeme);
-        if (namedVals.find(sname) != namedVals.end()) {
-            bool is_self_assign = false;
-            if (auto* rhs_var = dynamic_cast<const VarExpr*>(e.value.get())) {
-                if (sanitize(rhs_var->name.lexeme) == sname) {
-                    is_self_assign = true;
-                }
-            }
-            if (!is_self_assign) {
-                // Use compile-time type info when available to decide
-                // whether a decref is needed at all — skip entirely for
-                // primitive types that can never hold an object reference.
-                auto type_it = namedTypes.find(var->name.lexeme);
-                bool may_be_obj = true;
-                if (type_it != namedTypes.end()) {
-                    auto& t = type_it->second;
-                    auto ts = t->toString();
-                    if (ts == "i64" || ts == "i32" || ts == "i16" || ts == "i8" ||
-                        ts == "u64" || ts == "u32" || ts == "u16" || ts == "u8" ||
-                        ts == "f64" || ts == "f32" || ts == "bool" || ts == "nil") {
-                        may_be_obj = false;
-                    }
-                }
-                if (may_be_obj) {
-                    auto* old = loadVar(var->name.lexeme);
-                    callRtByName("__ang_decref", {old});
-                }
-            }
-        }
+        // Under GC, assignment just overwrites the alloca. The old value's
+        // lifetime is determined by reachability — no manual decref needed.
         auto type_it = namedTypes.find(var->name.lexeme);
         if (type_it != namedTypes.end() && isSizedIntType(type_it->second)) {
             v = truncateForType(v, type_it->second);
@@ -962,42 +1037,68 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
     if (!f) f = this->mod->getFunction("__ang_"+sanitize(fn));
 
     if (!f) {
-        std::string declName = mangled;
-        auto* fnTy = llvm::FunctionType::get(objType,
-            std::vector<llvm::Type*>(args.size(), objType), false);
-        f = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage, declName, this->mod.get());
+        // Check if we know this is a raw-signature function
+        auto raw_it = m_raw_functions.find(mangled);
+        if (raw_it != m_raw_functions.end()) {
+            auto& info = raw_it->second;
+            std::vector<llvm::Type*> ptypes;
+            for (auto& k : info.param_kinds) ptypes.push_back(llvmTypeForLocalKind(k));
+            auto* fnTy = llvm::FunctionType::get(llvmTypeForLocalKind(info.return_kind), ptypes, false);
+            f = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage, mangled, this->mod.get());
+        } else {
+            std::string declName = mangled;
+            auto* fnTy = llvm::FunctionType::get(objType,
+                std::vector<llvm::Type*>(args.size(), objType), false);
+            f = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage, declName, this->mod.get());
+        }
     }
 
     auto ft = f->getFunctionType();
-    bool direct_call = true;
+
+    // Check for native module calling convention (i32 argc, void* args)
     if (ft->getNumParams() == 2 &&
         ft->getParamType(0)->isIntegerTy(32) &&
         ft->getParamType(1)->isPointerTy()) {
-        direct_call = false;
-    }
-
-    if (direct_call) {
         std::vector<llvm::Value*> llvmArgs;
-        for (auto& a : args) llvmArgs.push_back(cg(a));
-        while (llvmArgs.size() < ft->getNumParams()) llvmArgs.push_back(makeNil());
+        auto cnt = args.size();
+        llvmArgs.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx),(int)cnt));
+        if (cnt > 0) {
+            auto* aa = builder->CreateAlloca(llvm::ArrayType::get(objType,cnt));
+            for (size_t i=0; i<cnt; i++) {
+                auto* ep = builder->CreateGEP(llvm::ArrayType::get(objType,cnt), aa,
+                    {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),0),
+                     llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),i)});
+                builder->CreateStore(cg(args[i]), ep);
+            }
+            llvmArgs.push_back(builder->CreateBitCast(aa, llvm::PointerType::get(*ctx, 0)));
+        } else {
+            llvmArgs.push_back(llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)));
+        }
         return builder->CreateCall(f, llvmArgs);
     }
 
-    std::vector<llvm::Value*> llvmArgs;
-    auto cnt = args.size();
-    llvmArgs.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx),(int)cnt));
-    if (cnt > 0) {
-        auto* aa = builder->CreateAlloca(llvm::ArrayType::get(objType,cnt));
-        for (size_t i=0; i<cnt; i++) {
-            auto* ep = builder->CreateGEP(llvm::ArrayType::get(objType,cnt), aa,
-                {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),0),
-                 llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),i)});
-            builder->CreateStore(cg(args[i]), ep);
+    // Check if this is a raw-signature function
+    auto raw_it = m_raw_functions.find(mangled);
+    if (raw_it != m_raw_functions.end()) {
+        auto& info = raw_it->second;
+        std::vector<llvm::Value*> llvmArgs;
+        for (size_t i = 0; i < args.size() && i < info.param_kinds.size(); i++) {
+            auto* boxed = cg(args[i]);
+            llvmArgs.push_back(unboxToRaw(boxed, info.param_kinds[i]));
         }
-        llvmArgs.push_back(builder->CreateBitCast(aa, llvm::PointerType::get(*ctx, 0)));
-    } else {
-        llvmArgs.push_back(llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)));
+        while (llvmArgs.size() < ft->getNumParams()) {
+            auto kind = llvmArgs.size() < info.param_kinds.size()
+                ? info.param_kinds[llvmArgs.size()] : LocalKind::RAW_I64;
+            llvmArgs.push_back(llvm::ConstantInt::get(llvmTypeForLocalKind(kind), 0));
+        }
+        auto* raw_result = builder->CreateCall(f, llvmArgs);
+        return boxRaw(raw_result, info.return_kind);
     }
+
+    // Standard boxed call
+    std::vector<llvm::Value*> llvmArgs;
+    for (auto& a : args) llvmArgs.push_back(cg(a));
+    while (llvmArgs.size() < ft->getNumParams()) llvmArgs.push_back(makeNil());
     return builder->CreateCall(f, llvmArgs);
 }
 
@@ -1489,12 +1590,18 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
 
     auto saved_values = std::move(namedVals);
     auto saved_types = std::move(namedTypes);
+    auto saved_kinds = std::move(namedKinds);
     auto* saved_ret_alloca = m_inlined_main_ret_alloca;
     auto* saved_cleanup_bb = m_inlined_main_cleanup_bb;
+    auto* saved_gc_frame = m_gc_current_frame;
+    int saved_gc_slot_idx = m_gc_frame_slot_idx;
+    int saved_gc_max_slots = m_gc_frame_max_slots;
     m_inlined_main_ret_alloca = nullptr;
     m_inlined_main_cleanup_bb = nullptr;
+    m_gc_current_frame = nullptr;
     namedVals.clear();
     namedTypes.clear();
+    namedKinds.clear();
 
     // Load captured variables from the env pointer (3rd arg)
     auto* env_arg = lambda_fn->arg_begin() + 2;
@@ -1524,18 +1631,25 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
         namedVals[pname] = alloca;
     }
 
+    emitGcPushFrame(lambda_fn, 256);
+
     for (const auto& stmt : e.body) {
         cgStmt(stmt);
     }
 
     if (!builder->GetInsertBlock()->getTerminator()) {
+        if (m_gc_current_frame) emitGcPopFrame();
         builder->CreateRet(makeNil());
     }
 
     namedVals = std::move(saved_values);
     namedTypes = std::move(saved_types);
+    namedKinds = std::move(saved_kinds);
     m_inlined_main_ret_alloca = saved_ret_alloca;
     m_inlined_main_cleanup_bb = saved_cleanup_bb;
+    m_gc_current_frame = saved_gc_frame;
+    m_gc_frame_slot_idx = saved_gc_slot_idx;
+    m_gc_frame_max_slots = saved_gc_max_slots;
 
     if (saved_insert_block) {
         builder->SetInsertPoint(saved_insert_block);
@@ -1546,7 +1660,8 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
         lambda_fn,
         llvm::ConstantInt::get(i32_ty, arity),
         llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 0),
-        env_ptr
+        env_ptr,
+        llvm::ConstantInt::get(i32_ty, capture_count)
     });
 }
 

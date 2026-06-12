@@ -8,8 +8,12 @@
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constant.h>
 #include <llvm/IR/GlobalVariable.h>
+#include <memory>
 
 namespace angara {
+
+class GarbageCollector;
+class MarkSweepGC;
 
 /// Tag values for the AngaraObject.type discriminant field.
 /// TAG_NIL through TAG_F64 are unboxed (payload stored inline).
@@ -47,6 +51,9 @@ public:
     /// @param freestanding If true, generates stubs instead of libc-dependent implementations.
     RuntimeBuilder(llvm::LLVMContext& context, llvm::Module& module, llvm::IRBuilder<>& builder,
                    bool freestanding = false);
+
+    /// Destructor — defined in RuntimeBuilder.cpp where GarbageCollector is complete.
+    ~RuntimeBuilder();
 
     /// Generates all runtime types, function declarations, and implementations.
     /// Must be called once before any codegen. In freestanding mode, generates
@@ -92,8 +99,6 @@ public:
     llvm::FunctionCallee getFuncRecordNew()       const { return m_fn_record_new; }
     llvm::FunctionCallee getFuncRecordGet()       const { return m_fn_record_get; }
     llvm::FunctionCallee getFuncRecordSet()       const { return m_fn_record_set; }
-    llvm::FunctionCallee getFuncIncref()          const { return m_fn_incref; }
-    llvm::FunctionCallee getFuncDecref()          const { return m_fn_decref; }
     llvm::FunctionCallee getFuncEquals()          const { return m_fn_equals; }
     llvm::FunctionCallee getFuncDeepClone()       const { return m_fn_deep_clone; }
     llvm::FunctionCallee getFuncToI64()           const { return m_fn_to_i64; }
@@ -139,6 +144,18 @@ public:
     /// Returns the AngaraNativeInstance struct type.
     llvm::StructType* getNativeInstanceType() const { return m_native_instance_type; }
 
+    // --- GC interface ---
+
+    /// Returns the active garbage collector instance.
+    GarbageCollector* gc() const { return m_gc.get(); }
+
+    // --- GC type / global accessors (defined in RuntimeBuilder.cpp) ---
+
+    llvm::StructType* getGcRootFrameType() const;
+    llvm::StructType* getGcThreadStateType() const;
+    llvm::GlobalVariable* getGcThreadStateTLS() const;
+    llvm::FunctionCallee getGcPrintStatsFunc() const;
+
 private:
     /// Creates all LLVM struct types for the runtime object model.
     void generateTypes();
@@ -146,7 +163,7 @@ private:
     /// Declares external libc functions (malloc, free, printf, pthreads, etc.).
     void declareCLibFunctions();
 
-    /// Generates reference counting (incref/decref) and object deallocation.
+    /// Generates memory management via the active GC strategy.
     void generateMemoryManagement();
     /// Generates string allocation, concatenation, repetition, and to_string.
     void generateStringOps();
@@ -215,8 +232,6 @@ private:
     llvm::FunctionCallee m_fn_record_new;
     llvm::FunctionCallee m_fn_record_get;
     llvm::FunctionCallee m_fn_record_set;
-    llvm::FunctionCallee m_fn_incref;
-    llvm::FunctionCallee m_fn_decref;
     llvm::FunctionCallee m_fn_equals;
     llvm::FunctionCallee m_fn_deep_clone;
     llvm::FunctionCallee m_fn_to_i64;
@@ -250,6 +265,8 @@ private:
     llvm::GlobalVariable* m_g_current_exception = nullptr;
 
     llvm::GlobalVariable* m_api_vtable = nullptr;
+
+    std::unique_ptr<GarbageCollector> m_gc;
 
     bool m_freestanding = false;
 };

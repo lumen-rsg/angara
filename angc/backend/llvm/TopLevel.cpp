@@ -53,8 +53,45 @@ void LLVMBackend::codegenGlobalVarDecl(const VarDeclStmt& stmt) {
 void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& module_name) {
     const std::string func_name = mangle(module_name, stmt.name.lexeme);
 
-    std::vector<llvm::Type*> param_types(stmt.params.size(), objType);
-    auto* fn_type = llvm::FunctionType::get(objType, param_types, false);
+    // Resolve semantic function type
+    auto sem_sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(stmt.name.lexeme);
+    auto sem_fn_type = (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION)
+        ? std::dynamic_pointer_cast<FunctionType>(sem_sym->type) : nullptr;
+
+    // Check if this function can use a raw (unboxed) signature
+    bool is_raw = false;
+    RawFuncInfo raw_info;
+    raw_info.return_kind = LocalKind::BOXED;
+
+    if (sem_fn_type && stmt.type_params.empty()) {
+        auto ret_type = sem_fn_type->return_type;
+        bool all_unboxable = ret_type && isUnboxableType(ret_type);
+        raw_info.return_kind = all_unboxable ? localKindForType(ret_type) : LocalKind::BOXED;
+
+        for (size_t i = 0; i < sem_fn_type->param_types.size() && all_unboxable; i++) {
+            if (!isUnboxableType(sem_fn_type->param_types[i])) all_unboxable = false;
+        }
+
+        if (all_unboxable) {
+            is_raw = true;
+            for (size_t i = 0; i < sem_fn_type->param_types.size(); i++) {
+                raw_info.param_kinds.push_back(localKindForType(sem_fn_type->param_types[i]));
+            }
+            m_raw_functions[func_name] = raw_info;
+        }
+    }
+
+    // Build LLVM function signature
+    std::vector<llvm::Type*> param_types;
+    if (is_raw) {
+        for (auto& kind : raw_info.param_kinds) {
+            param_types.push_back(llvmTypeForLocalKind(kind));
+        }
+    } else {
+        param_types.assign(stmt.params.size(), objType);
+    }
+    auto* fn_ret_type = is_raw ? llvmTypeForLocalKind(raw_info.return_kind) : objType;
+    auto* fn_type = llvm::FunctionType::get(fn_ret_type, param_types, false);
 
     auto* fn = mod->getFunction(func_name);
     if (!fn) {
@@ -90,15 +127,45 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
 
     auto saved_values = std::move(namedVals);
     auto saved_types = std::move(namedTypes);
+    auto saved_kinds = std::move(namedKinds);
     namedVals.clear();
     namedTypes.clear();
+    namedKinds.clear();
 
+    // Register parameters
     idx = 0;
     for (auto& arg : fn->args()) {
-        auto* alloca = allocLocal(fn, sanitize(stmt.params[idx].name.lexeme));
-        builder->CreateStore(&arg, alloca);
-        namedVals[sanitize(stmt.params[idx].name.lexeme)] = alloca;
+        auto pname = sanitize(stmt.params[idx].name.lexeme);
+        auto param_type = (sem_fn_type && idx < sem_fn_type->param_types.size())
+            ? sem_fn_type->param_types[idx] : nullptr;
+        auto* alloca = allocLocal(fn, pname, param_type);
+        namedVals[pname] = alloca;
+        if (param_type) {
+            namedTypes[pname] = param_type;
+            namedKinds[pname] = isUnboxableType(param_type)
+                ? localKindForType(param_type) : LocalKind::BOXED;
+        } else {
+            namedKinds[pname] = LocalKind::BOXED;
+        }
+        if (is_raw) {
+            // Raw arg arrives as raw type — store directly
+            builder->CreateStore(&arg, alloca);
+        } else {
+            // Boxed arg arrives as objType — storeVar handles unboxing if raw alloca
+            storeVar(pname, &arg);
+        }
         idx++;
+    }
+
+    // Track whether we're inside a raw-signature function
+    auto saved_raw_ret = m_current_raw_return_kind;
+    m_current_raw_return_kind = is_raw ? raw_info.return_kind : std::optional<LocalKind>{};
+
+    // Only push GC frame if the function has heap-referencing values.
+    // Raw primitive-only functions (like fib) don't need GC at all.
+    bool needs_gc = !is_raw || functionNeedsGC(stmt);
+    if (needs_gc) {
+        emitGcPushFrame(fn, 256);
     }
 
     if (stmt.body) {
@@ -108,11 +175,20 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
         }
     }
 
-    if (!builder->GetInsertBlock()->getTerminator())
-        builder->CreateRet(makeNil());
+    if (!builder->GetInsertBlock()->getTerminator()) {
+        if (m_gc_current_frame) emitGcPopFrame();
+        if (is_raw) {
+            auto* zero = llvm::ConstantInt::get(llvmTypeForLocalKind(raw_info.return_kind), 0);
+            builder->CreateRet(zero);
+        } else {
+            builder->CreateRet(makeNil());
+        }
+    }
 
     namedVals = std::move(saved_values);
     namedTypes = std::move(saved_types);
+    namedKinds = std::move(saved_kinds);
+    m_current_raw_return_kind = saved_raw_ret;
     m_di_scope = saved_di_scope;
     if (m_debug) builder->SetCurrentDebugLocation(llvm::DebugLoc());
 }
@@ -184,12 +260,15 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
 
             auto saved_values = std::move(namedVals);
             auto saved_types = std::move(namedTypes);
+            auto saved_kinds = std::move(namedKinds);
             namedVals.clear();
             namedTypes.clear();
+            namedKinds.clear();
 
             auto* this_alloca = allocLocal(fn, "this");
             builder->CreateStore(&*fn->arg_begin(), this_alloca);
             namedVals["this"] = this_alloca;
+            namedKinds["this"] = LocalKind::BOXED;
             auto sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(class_name);
             if (sym && sym->type->kind == TypeKind::CLASS) {
                 namedTypes["this"] = std::make_shared<InstanceType>(std::dynamic_pointer_cast<ClassType>(sym->type));
@@ -201,7 +280,10 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
                 auto* alloca = allocLocal(fn, pname);
                 builder->CreateStore(&*it, alloca);
                 namedVals[pname] = alloca;
+                namedKinds[pname] = LocalKind::BOXED;
             }
+
+            emitGcPushFrame(fn, 256);
 
             if (method_stmt->body) {
                 for (const auto& s : *method_stmt->body) {
@@ -210,11 +292,14 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
                 }
             }
 
-            if (!builder->GetInsertBlock()->getTerminator())
+            if (!builder->GetInsertBlock()->getTerminator()) {
+                if (m_gc_current_frame) emitGcPopFrame();
                 builder->CreateRet(makeNil());
+            }
 
             namedVals = std::move(saved_values);
             namedTypes = std::move(saved_types);
+            namedKinds = std::move(saved_kinds);
         }
     }
 
@@ -233,7 +318,9 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
         builder->SetInsertPoint(entry);
 
         auto saved_values = std::move(namedVals);
+        auto saved_kinds = std::move(namedKinds);
         namedVals.clear();
+        namedKinds.clear();
 
         llvm::Value* obj = callRtByName("__ang_record_new", {});
 
@@ -261,6 +348,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
 
         builder->CreateRet(obj);
         namedVals = std::move(saved_values);
+        namedKinds = std::move(saved_kinds);
     }
     constructorLookup[class_name] = ctor_name;
     m_current_superclass.clear();
@@ -283,7 +371,9 @@ void LLVMBackend::codegenDataDecl(const DataStmt& stmt) {
     builder->SetInsertPoint(entry);
 
     auto saved_values = std::move(namedVals);
+    auto saved_kinds = std::move(namedKinds);
     namedVals.clear();
+    namedKinds.clear();
 
     llvm::Value* obj = callRtByName("__ang_record_new", {});
 
@@ -296,6 +386,7 @@ void LLVMBackend::codegenDataDecl(const DataStmt& stmt) {
 
     builder->CreateRet(obj);
     namedVals = std::move(saved_values);
+    namedKinds = std::move(saved_kinds);
     constructorLookup[data_name] = "Angara_data_new_" + data_name;
 }
 
@@ -512,7 +603,9 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
     builder->SetInsertPoint(entry);
 
     auto saved_values = std::move(namedVals);
+    auto saved_kinds = std::move(namedKinds);
     namedVals.clear();
+    namedKinds.clear();
 
     // Build a mapping: wrapper_arg_index -> c_param_index
     std::vector<size_t> wrapper_to_c;  // wrapper arg index -> C param index
@@ -584,8 +677,8 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
     }
 
     namedVals = std::move(saved_values);
+    namedKinds = std::move(saved_kinds);
 }
-
 void LLVMBackend::codegenEnumDecl(const EnumStmt& stmt) {
     for (size_t i = 0; i < stmt.variants.size(); i++) {
         const auto& variant = stmt.variants[i];
@@ -617,7 +710,9 @@ void LLVMBackend::codegenEnumDecl(const EnumStmt& stmt) {
             builder->SetInsertPoint(entry);
 
             auto saved_values = std::move(namedVals);
+            auto saved_kinds = std::move(namedKinds);
             namedVals.clear();
+            namedKinds.clear();
 
             // Create a record to hold the variant data
             llvm::Value* record = callRtByName("__ang_record_new", {});
@@ -640,6 +735,7 @@ void LLVMBackend::codegenEnumDecl(const EnumStmt& stmt) {
 
             builder->CreateRet(record);
             namedVals = std::move(saved_values);
+            namedKinds = std::move(saved_kinds);
 
             constructorLookup[stmt.name.lexeme + "." + variant->name.lexeme] = ctor_name;
         }
@@ -677,6 +773,14 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
 
     namedVals.clear();
     namedTypes.clear();
+    namedKinds.clear();
+
+    // GC: register main thread and push root frame
+    llvm::Value* gc_thread_state = nullptr;
+    if (!m_freestanding) {
+        gc_thread_state = emitGcThreadSetup();
+        emitGcPushFrame(main_fn, 256);
+    }
 
     if (!m_freestanding) {
         auto* vtable = rt->getAPIVtable();
@@ -763,8 +867,10 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
             // Save/restore namedVals so top-level vars remain accessible
             auto saved_values = std::move(namedVals);
             auto saved_types = std::move(namedTypes);
+            auto saved_kinds = std::move(namedKinds);
             namedVals.clear();
             namedTypes.clear();
+            namedKinds.clear();
 
             // Create a return-value alloca and a cleanup block
             auto* ret_alloca = builder->CreateAlloca(llvm::Type::getInt32Ty(*ctx));
@@ -786,19 +892,9 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
                 builder->CreateBr(cleanup_bb);
             }
 
-            // Cleanup block: decref locals, branch to exit
+            // Cleanup block: pop frame, teardown GC thread, branch to exit
             builder->SetInsertPoint(cleanup_bb);
-            if (!m_freestanding) {
-                for (const auto& [name, alloca] : namedVals) {
-                    llvm::Value* val = builder->CreateLoad(objType, alloca);
-                    callRtByName("__ang_decref", {val});
-                }
-            }
-            // Also decref top-level saved values
-            for (const auto& [name, alloca] : saved_values) {
-                llvm::Value* val = builder->CreateLoad(objType, alloca);
-                callRtByName("__ang_decref", {val});
-            }
+            if (m_gc_current_frame) emitGcPopFrame();
             builder->CreateBr(exit_bb);
 
             // Exit block: load return value and return
@@ -810,14 +906,8 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
 
             namedVals = std::move(saved_values);
             namedTypes = std::move(saved_types);
+            namedKinds = std::move(saved_kinds);
             break;
-        }
-    }
-
-    if (!m_freestanding) {
-        for (const auto& [name, alloca] : namedVals) {
-            llvm::Value* val = builder->CreateLoad(objType, alloca);
-            callRtByName("__ang_decref", {val});
         }
     }
 
@@ -827,6 +917,12 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
         builder->SetInsertPoint(halt_bb);
         builder->CreateBr(halt_bb);
     } else {
+        if (gc_thread_state) {
+            // Print GC stats before teardown
+            auto print_stats = rt->getGcPrintStatsFunc();
+            builder->CreateCall(print_stats);
+            emitGcTeardown(gc_thread_state);
+        }
         builder->CreateRet(exit_code);
     }
 }
@@ -937,6 +1033,142 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
             }
         }
     }
+}
+
+// --- GC necessity scanner ---
+
+bool LLVMBackend::functionNeedsGC(const FuncStmt& stmt) {
+    if (!stmt.body) return false;
+    for (const auto& s : *stmt.body) {
+        if (stmtNeedsGC(s)) return true;
+    }
+    return false;
+}
+
+bool LLVMBackend::stmtNeedsGC(const std::shared_ptr<Stmt>& s) {
+    if (!s) return false;
+
+    if (auto* p = dynamic_cast<const VarDeclStmt*>(s.get())) {
+        // Check resolved type from type checker
+        auto type_it = m_type_checker.getVariableTypes().find(p);
+        if (type_it != m_type_checker.getVariableTypes().end()) {
+            if (!isUnboxableType(type_it->second)) return true; // boxed local needs GC
+        } else if (!p->typeAnnotation) {
+            return true; // no type info → assume boxed
+        }
+        // Also check initializer expression
+        if (p->initializer && exprNeedsGC(p->initializer)) return true;
+        return false;
+    }
+    if (auto* p = dynamic_cast<const BlockStmt*>(s.get())) {
+        for (auto& st : p->statements)
+            if (stmtNeedsGC(st)) return true;
+        return false;
+    }
+    if (auto* p = dynamic_cast<const IfStmt*>(s.get())) {
+        if (exprNeedsGC(p->condition)) return true;
+        if (stmtNeedsGC(p->thenBranch)) return true;
+        if (stmtNeedsGC(p->elseBranch)) return true;
+        return false;
+    }
+    if (auto* p = dynamic_cast<const WhileStmt*>(s.get())) {
+        if (exprNeedsGC(p->condition)) return true;
+        if (stmtNeedsGC(p->body)) return true;
+        return false;
+    }
+    if (auto* p = dynamic_cast<const ForStmt*>(s.get())) {
+        if (stmtNeedsGC(p->initializer)) return true;
+        if (p->condition && exprNeedsGC(p->condition)) return true;
+        if (p->increment && exprNeedsGC(p->increment)) return true;
+        if (stmtNeedsGC(p->body)) return true;
+        return false;
+    }
+    if (auto* p = dynamic_cast<const ForInStmt*>(s.get())) {
+        if (exprNeedsGC(p->collection)) return true;
+        if (stmtNeedsGC(p->body)) return true;
+        return false;
+    }
+    if (auto* p = dynamic_cast<const ReturnStmt*>(s.get())) {
+        return p->value ? exprNeedsGC(p->value) : false;
+    }
+    if (auto* p = dynamic_cast<const ExpressionStmt*>(s.get())) {
+        return exprNeedsGC(p->expression);
+    }
+    if (auto* p = dynamic_cast<const TryStmt*>(s.get())) {
+        if (stmtNeedsGC(p->tryBlock)) return true;
+        if (stmtNeedsGC(p->catchBlock)) return true;
+        return false;
+    }
+    if (auto* p = dynamic_cast<const ThrowStmt*>(s.get())) {
+        return exprNeedsGC(p->expression);
+    }
+    return false;
+}
+
+bool LLVMBackend::exprNeedsGC(const std::shared_ptr<Expr>& e) {
+    if (!e) return false;
+
+    // String literals are heap-allocated
+    if (auto* p = dynamic_cast<const Literal*>(e.get())) {
+        return p->token.type == TokenType::STRING;
+    }
+    // List construction is heap-allocated
+    if (dynamic_cast<const ListExpr*>(e.get())) return true;
+    // Record construction is heap-allocated
+    if (dynamic_cast<const RecordExpr*>(e.get())) return true;
+    // Lambda creates a closure (heap-allocated)
+    if (dynamic_cast<const LambdaExpr*>(e.get())) return true;
+
+    // Binary: recurse
+    if (auto* p = dynamic_cast<const Binary*>(e.get()))
+        return exprNeedsGC(p->left) || exprNeedsGC(p->right);
+    // Unary: recurse
+    if (auto* p = dynamic_cast<const Unary*>(e.get()))
+        return exprNeedsGC(p->right);
+    // Grouping: recurse
+    if (auto* p = dynamic_cast<const Grouping*>(e.get()))
+        return exprNeedsGC(p->expression);
+    // Call: check arguments
+    if (auto* p = dynamic_cast<const CallExpr*>(e.get())) {
+        for (auto& arg : p->arguments)
+            if (exprNeedsGC(arg)) return true;
+        return exprNeedsGC(p->callee);
+    }
+    // Get: recurse
+    if (auto* p = dynamic_cast<const GetExpr*>(e.get()))
+        return exprNeedsGC(p->object);
+    // Logical: recurse
+    if (auto* p = dynamic_cast<const LogicalExpr*>(e.get()))
+        return exprNeedsGC(p->left) || exprNeedsGC(p->right);
+    // Subscript: recurse
+    if (auto* p = dynamic_cast<const SubscriptExpr*>(e.get()))
+        return exprNeedsGC(p->object) || exprNeedsGC(p->index);
+    // Assign: recurse
+    if (auto* p = dynamic_cast<const AssignExpr*>(e.get()))
+        return exprNeedsGC(p->value);
+    // Update (++/--): recurse
+    if (auto* p = dynamic_cast<const UpdateExpr*>(e.get()))
+        return exprNeedsGC(p->target);
+    // Ternary: recurse
+    if (auto* p = dynamic_cast<const TernaryExpr*>(e.get()))
+        return exprNeedsGC(p->condition) || exprNeedsGC(p->thenBranch) || exprNeedsGC(p->elseBranch);
+    // Is: recurse
+    if (auto* p = dynamic_cast<const IsExpr*>(e.get()))
+        return exprNeedsGC(p->object);
+    // Cast: recurse
+    if (auto* p = dynamic_cast<const CastExpr*>(e.get()))
+        return exprNeedsGC(p->object);
+    // Deref: recurse
+    if (auto* p = dynamic_cast<const DerefExpr*>(e.get()))
+        return exprNeedsGC(p->right);
+    // Match: check condition and cases
+    if (auto* p = dynamic_cast<const MatchExpr*>(e.get())) {
+        if (exprNeedsGC(p->condition)) return true;
+        for (auto& cs : p->cases)
+            if (exprNeedsGC(cs.body)) return true;
+        return false;
+    }
+    return false;
 }
 
 }
