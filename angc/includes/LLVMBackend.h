@@ -21,6 +21,7 @@ namespace angara { class RuntimeBuilder; }
 #include <vector>
 #include <map>
 #include <set>
+#include <optional>
 
 namespace angara {
 
@@ -256,6 +257,17 @@ namespace angara {
 
         // Variadic foreign functions: maps C function name -> semantic FunctionType
         std::map<std::string, std::shared_ptr<FunctionType>> m_variadic_foreign_funcs;
+
+        // Raw (unboxed) function signatures: maps mangled name -> pair(param LocalKinds, return LocalKind)
+        // If a function is in this map, it uses raw LLVM types instead of objType
+        struct RawFuncInfo {
+            std::vector<LocalKind> param_kinds;
+            LocalKind return_kind;
+        };
+        std::map<std::string, RawFuncInfo> m_raw_functions;
+
+        // When inside a raw-signature function, holds the return kind (empty otherwise)
+        std::optional<LocalKind> m_current_raw_return_kind;
 
         // Callback context: set by marshalAngaraToC for FUNCTION params (heap-allocated closure)
         llvm::Value* m_pending_callback_context = nullptr;

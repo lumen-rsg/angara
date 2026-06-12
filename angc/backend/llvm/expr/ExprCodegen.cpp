@@ -1037,42 +1037,68 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
     if (!f) f = this->mod->getFunction("__ang_"+sanitize(fn));
 
     if (!f) {
-        std::string declName = mangled;
-        auto* fnTy = llvm::FunctionType::get(objType,
-            std::vector<llvm::Type*>(args.size(), objType), false);
-        f = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage, declName, this->mod.get());
+        // Check if we know this is a raw-signature function
+        auto raw_it = m_raw_functions.find(mangled);
+        if (raw_it != m_raw_functions.end()) {
+            auto& info = raw_it->second;
+            std::vector<llvm::Type*> ptypes;
+            for (auto& k : info.param_kinds) ptypes.push_back(llvmTypeForLocalKind(k));
+            auto* fnTy = llvm::FunctionType::get(llvmTypeForLocalKind(info.return_kind), ptypes, false);
+            f = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage, mangled, this->mod.get());
+        } else {
+            std::string declName = mangled;
+            auto* fnTy = llvm::FunctionType::get(objType,
+                std::vector<llvm::Type*>(args.size(), objType), false);
+            f = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage, declName, this->mod.get());
+        }
     }
 
     auto ft = f->getFunctionType();
-    bool direct_call = true;
+
+    // Check for native module calling convention (i32 argc, void* args)
     if (ft->getNumParams() == 2 &&
         ft->getParamType(0)->isIntegerTy(32) &&
         ft->getParamType(1)->isPointerTy()) {
-        direct_call = false;
-    }
-
-    if (direct_call) {
         std::vector<llvm::Value*> llvmArgs;
-        for (auto& a : args) llvmArgs.push_back(cg(a));
-        while (llvmArgs.size() < ft->getNumParams()) llvmArgs.push_back(makeNil());
+        auto cnt = args.size();
+        llvmArgs.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx),(int)cnt));
+        if (cnt > 0) {
+            auto* aa = builder->CreateAlloca(llvm::ArrayType::get(objType,cnt));
+            for (size_t i=0; i<cnt; i++) {
+                auto* ep = builder->CreateGEP(llvm::ArrayType::get(objType,cnt), aa,
+                    {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),0),
+                     llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),i)});
+                builder->CreateStore(cg(args[i]), ep);
+            }
+            llvmArgs.push_back(builder->CreateBitCast(aa, llvm::PointerType::get(*ctx, 0)));
+        } else {
+            llvmArgs.push_back(llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)));
+        }
         return builder->CreateCall(f, llvmArgs);
     }
 
-    std::vector<llvm::Value*> llvmArgs;
-    auto cnt = args.size();
-    llvmArgs.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx),(int)cnt));
-    if (cnt > 0) {
-        auto* aa = builder->CreateAlloca(llvm::ArrayType::get(objType,cnt));
-        for (size_t i=0; i<cnt; i++) {
-            auto* ep = builder->CreateGEP(llvm::ArrayType::get(objType,cnt), aa,
-                {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),0),
-                 llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),i)});
-            builder->CreateStore(cg(args[i]), ep);
+    // Check if this is a raw-signature function
+    auto raw_it = m_raw_functions.find(mangled);
+    if (raw_it != m_raw_functions.end()) {
+        auto& info = raw_it->second;
+        std::vector<llvm::Value*> llvmArgs;
+        for (size_t i = 0; i < args.size() && i < info.param_kinds.size(); i++) {
+            auto* boxed = cg(args[i]);
+            llvmArgs.push_back(unboxToRaw(boxed, info.param_kinds[i]));
         }
-        llvmArgs.push_back(builder->CreateBitCast(aa, llvm::PointerType::get(*ctx, 0)));
-    } else {
-        llvmArgs.push_back(llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)));
+        while (llvmArgs.size() < ft->getNumParams()) {
+            auto kind = llvmArgs.size() < info.param_kinds.size()
+                ? info.param_kinds[llvmArgs.size()] : LocalKind::RAW_I64;
+            llvmArgs.push_back(llvm::ConstantInt::get(llvmTypeForLocalKind(kind), 0));
+        }
+        auto* raw_result = builder->CreateCall(f, llvmArgs);
+        return boxRaw(raw_result, info.return_kind);
     }
+
+    // Standard boxed call
+    std::vector<llvm::Value*> llvmArgs;
+    for (auto& a : args) llvmArgs.push_back(cg(a));
+    while (llvmArgs.size() < ft->getNumParams()) llvmArgs.push_back(makeNil());
     return builder->CreateCall(f, llvmArgs);
 }
 

@@ -190,6 +190,12 @@ void LLVMBackend::cgReturn(const ReturnStmt& s) {
         auto* exit_code = builder->CreateTrunc(raw_i64, llvm::Type::getInt32Ty(*ctx));
         builder->CreateStore(exit_code, m_inlined_main_ret_alloca);
         builder->CreateBr(m_inlined_main_cleanup_bb);
+    } else if (m_current_raw_return_kind) {
+        // Raw-signature function: unbox the return value
+        auto* result = s.value ? cg(s.value) : makeNil();
+        auto* raw = unboxToRaw(result, *m_current_raw_return_kind);
+        if (m_gc_current_frame) emitGcPopFrame();
+        builder->CreateRet(raw);
     } else {
         if (m_gc_current_frame) emitGcPopFrame();
         builder->CreateRet(s.value ? cg(s.value) : makeNil());

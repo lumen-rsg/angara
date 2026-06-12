@@ -53,8 +53,45 @@ void LLVMBackend::codegenGlobalVarDecl(const VarDeclStmt& stmt) {
 void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& module_name) {
     const std::string func_name = mangle(module_name, stmt.name.lexeme);
 
-    std::vector<llvm::Type*> param_types(stmt.params.size(), objType);
-    auto* fn_type = llvm::FunctionType::get(objType, param_types, false);
+    // Resolve semantic function type
+    auto sem_sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(stmt.name.lexeme);
+    auto sem_fn_type = (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION)
+        ? std::dynamic_pointer_cast<FunctionType>(sem_sym->type) : nullptr;
+
+    // Check if this function can use a raw (unboxed) signature
+    bool is_raw = false;
+    RawFuncInfo raw_info;
+    raw_info.return_kind = LocalKind::BOXED;
+
+    if (sem_fn_type && stmt.type_params.empty()) {
+        auto ret_type = sem_fn_type->return_type;
+        bool all_unboxable = ret_type && isUnboxableType(ret_type);
+        raw_info.return_kind = all_unboxable ? localKindForType(ret_type) : LocalKind::BOXED;
+
+        for (size_t i = 0; i < sem_fn_type->param_types.size() && all_unboxable; i++) {
+            if (!isUnboxableType(sem_fn_type->param_types[i])) all_unboxable = false;
+        }
+
+        if (all_unboxable) {
+            is_raw = true;
+            for (size_t i = 0; i < sem_fn_type->param_types.size(); i++) {
+                raw_info.param_kinds.push_back(localKindForType(sem_fn_type->param_types[i]));
+            }
+            m_raw_functions[func_name] = raw_info;
+        }
+    }
+
+    // Build LLVM function signature
+    std::vector<llvm::Type*> param_types;
+    if (is_raw) {
+        for (auto& kind : raw_info.param_kinds) {
+            param_types.push_back(llvmTypeForLocalKind(kind));
+        }
+    } else {
+        param_types.assign(stmt.params.size(), objType);
+    }
+    auto* fn_ret_type = is_raw ? llvmTypeForLocalKind(raw_info.return_kind) : objType;
+    auto* fn_type = llvm::FunctionType::get(fn_ret_type, param_types, false);
 
     auto* fn = mod->getFunction(func_name);
     if (!fn) {
@@ -95,11 +132,7 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     namedTypes.clear();
     namedKinds.clear();
 
-    // Resolve parameter types for type-aware allocation
-    auto sem_sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(stmt.name.lexeme);
-    auto sem_fn_type = (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION)
-        ? std::dynamic_pointer_cast<FunctionType>(sem_sym->type) : nullptr;
-
+    // Register parameters
     idx = 0;
     for (auto& arg : fn->args()) {
         auto pname = sanitize(stmt.params[idx].name.lexeme);
@@ -114,10 +147,19 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
         } else {
             namedKinds[pname] = LocalKind::BOXED;
         }
-        // storeVar handles unboxing if the alloca is raw
-        storeVar(pname, &arg);
+        if (is_raw) {
+            // Raw arg arrives as raw type — store directly
+            builder->CreateStore(&arg, alloca);
+        } else {
+            // Boxed arg arrives as objType — storeVar handles unboxing if raw alloca
+            storeVar(pname, &arg);
+        }
         idx++;
     }
+
+    // Track whether we're inside a raw-signature function
+    auto saved_raw_ret = m_current_raw_return_kind;
+    m_current_raw_return_kind = is_raw ? raw_info.return_kind : std::optional<LocalKind>{};
 
     emitGcPushFrame(fn, 256);
 
@@ -130,12 +172,18 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
 
     if (!builder->GetInsertBlock()->getTerminator()) {
         if (m_gc_current_frame) emitGcPopFrame();
-        builder->CreateRet(makeNil());
+        if (is_raw) {
+            auto* zero = llvm::ConstantInt::get(llvmTypeForLocalKind(raw_info.return_kind), 0);
+            builder->CreateRet(zero);
+        } else {
+            builder->CreateRet(makeNil());
+        }
     }
 
     namedVals = std::move(saved_values);
     namedTypes = std::move(saved_types);
     namedKinds = std::move(saved_kinds);
+    m_current_raw_return_kind = saved_raw_ret;
     m_di_scope = saved_di_scope;
     if (m_debug) builder->SetCurrentDebugLocation(llvm::DebugLoc());
 }
