@@ -119,7 +119,6 @@ private:
     llvm::GlobalVariable* m_g_gc_total_allocs = nullptr;
     llvm::GlobalVariable* m_g_gc_total_frees = nullptr;
     llvm::GlobalVariable* m_g_gc_total_bytes_alloc = nullptr;
-
     // --- Function callees ---
     llvm::FunctionCallee m_fn_gc_alloc;
     llvm::FunctionCallee m_fn_gc_collect;

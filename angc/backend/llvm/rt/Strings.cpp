@@ -30,13 +30,8 @@ void RuntimeBuilder::generateStringOps() {
 
     // Helper: initialize a newly allocated AngaraString struct
     auto init_string_struct = [&](IRBuilder<>& b, Value* str_ptr, Value* len, Value* chars) {
-        auto* header_ptr = b.CreateStructGEP(m_string_type, str_ptr, 0);
-        auto* type_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 0);
-        b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING), type_addr);
-        auto* meta_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 1);
-        b.CreateStore(ConstantInt::get(i32_ty, MarkSweepGC::packMeta(MarkSweepGC::COLOR_WHITE, true)), meta_addr);
-        auto* next_addr = b.CreateStructGEP(m_obj_header_type, header_ptr, 2);
-        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)), next_addr);
+        // Note: gc_alloc already initializes ObjHeader (type, meta, next).
+        // Only set string-specific fields here.
         b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 1));
         b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 2)); // capacity = length
         b.CreateStore(chars, b.CreateStructGEP(m_string_type, str_ptr, 3));
