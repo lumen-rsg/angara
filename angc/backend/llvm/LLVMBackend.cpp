@@ -233,6 +233,10 @@ llvm::Value* LLVMBackend::makeStr(const std::string& s) {
     auto savedIP = builder->saveIP();
     builder->SetInsertPoint(&entry, entry.getFirstInsertionPt());
     auto* new_str = callRtByName("__ang_string_from_c", {gsptr});
+    // Pin the string literal so the GC never collects it.
+    // String literals are stored in globals, not root frames, so without
+    // pinning they'd be invisible to the collector and freed as unreachable.
+    callRtByName("__ang_gc_pin", {new_str});
     builder->CreateStore(new_str, global);
     builder->restoreIP(savedIP);
 

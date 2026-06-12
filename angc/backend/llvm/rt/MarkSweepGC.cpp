@@ -835,11 +835,12 @@ void MarkSweepGC::generateFunctions() {
         bf.CreateStore(bf.CreateAdd(frees, ConstantInt::get(i64_ty, 1)), m_g_gc_total_frees);
         bf.CreateBr(advance_bb);
 
-        // BLACK: reset to WHITE + unique for next cycle, advance prev
+        // BLACK: reset color to WHITE, preserve pinned/unique bits, advance prev
         IRBuilder<> bbk(is_black_bb);
         auto* next_ptr2 = bbk.CreateLoad(i8_ptr,
             bbk.CreateStructGEP(header_ty, curr_phi, 2), "next2");
-        auto* reset_meta = ConstantInt::get(i32_ty, packMeta(COLOR_WHITE, true));
+        // Clear color bits (byte 0) to WHITE, keep all other bits (pinned, unique, etc.)
+        auto* reset_meta = bbk.CreateAnd(meta, ConstantInt::get(i32_ty, ~0xFF), "reset_meta");
         bbk.CreateStore(reset_meta, bbk.CreateStructGEP(header_ty, curr_phi, 1));
         bbk.CreateBr(advance_bb);
 
