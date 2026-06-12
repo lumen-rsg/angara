@@ -37,6 +37,7 @@ public:
     llvm::FunctionCallee getThreadUnregisterFunc() const override { return m_fn_gc_thread_unregister; }
     llvm::FunctionCallee getGcPinFunc() const override { return m_fn_gc_pin; }
     llvm::FunctionCallee getGcUnpinFunc() const override { return m_fn_gc_unpin; }
+    llvm::FunctionCallee getGcPrintStatsFunc() const override { return m_fn_gc_print_stats; }
 
     void generateFreestandingStubs() override;
 
@@ -113,6 +114,12 @@ private:
     llvm::GlobalVariable* m_g_gc_threads = nullptr;
     llvm::GlobalVariable* m_g_gc_thread_state_tls = nullptr;
 
+    // --- Stats globals ---
+    llvm::GlobalVariable* m_g_gc_collections = nullptr;
+    llvm::GlobalVariable* m_g_gc_total_allocs = nullptr;
+    llvm::GlobalVariable* m_g_gc_total_frees = nullptr;
+    llvm::GlobalVariable* m_g_gc_total_bytes_alloc = nullptr;
+
     // --- Function callees ---
     llvm::FunctionCallee m_fn_gc_alloc;
     llvm::FunctionCallee m_fn_gc_collect;
@@ -130,6 +137,7 @@ private:
     llvm::FunctionCallee m_fn_gc_clear_unique;
     llvm::FunctionCallee m_fn_gc_pin;
     llvm::FunctionCallee m_fn_gc_unpin;
+    llvm::FunctionCallee m_fn_gc_print_stats;
 
     llvm::Function* createRuntimeFunc(const std::string& name, llvm::FunctionType* type);
 };

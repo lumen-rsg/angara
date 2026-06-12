@@ -90,6 +90,31 @@ void MarkSweepGC::generateGlobals() {
         ConstantPointerNull::get(PointerType::get(ctx, 0)),
         "__ang_gc_thread_state");
     m_g_gc_thread_state_tls->setThreadLocal(true);
+
+    // Stats counters
+    m_g_gc_collections = new GlobalVariable(
+        m_module, Type::getInt64Ty(ctx),
+        false, GlobalValue::InternalLinkage,
+        ConstantInt::get(Type::getInt64Ty(ctx), 0),
+        "__ang_gc_collections");
+
+    m_g_gc_total_allocs = new GlobalVariable(
+        m_module, Type::getInt64Ty(ctx),
+        false, GlobalValue::InternalLinkage,
+        ConstantInt::get(Type::getInt64Ty(ctx), 0),
+        "__ang_gc_total_allocs");
+
+    m_g_gc_total_frees = new GlobalVariable(
+        m_module, Type::getInt64Ty(ctx),
+        false, GlobalValue::InternalLinkage,
+        ConstantInt::get(Type::getInt64Ty(ctx), 0),
+        "__ang_gc_total_frees");
+
+    m_g_gc_total_bytes_alloc = new GlobalVariable(
+        m_module, Type::getInt64Ty(ctx),
+        false, GlobalValue::InternalLinkage,
+        ConstantInt::get(Type::getInt64Ty(ctx), 0),
+        "__ang_gc_total_bytes_alloc");
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +262,12 @@ void MarkSweepGC::generateFunctions() {
         auto* count = ba.CreateLoad(i64_ty, m_g_gc_count, "count");
         auto* new_count = ba.CreateAdd(count, ConstantInt::get(i64_ty, 1), "new_count");
         ba.CreateStore(new_count, m_g_gc_count);
+
+        // Stats: increment total_allocs and total_bytes_alloc
+        auto* total_allocs = ba.CreateLoad(i64_ty, m_g_gc_total_allocs, "total_allocs");
+        ba.CreateStore(ba.CreateAdd(total_allocs, ConstantInt::get(i64_ty, 1)), m_g_gc_total_allocs);
+        auto* total_bytes = ba.CreateLoad(i64_ty, m_g_gc_total_bytes_alloc, "total_bytes");
+        ba.CreateStore(ba.CreateAdd(total_bytes, size_arg), m_g_gc_total_bytes_alloc);
 
         // Check threshold
         auto* threshold = ba.CreateLoad(i64_ty, m_g_gc_threshold, "threshold");
@@ -719,6 +750,9 @@ void MarkSweepGC::generateFunctions() {
         IRBuilder<> bf(free_obj_bb);
         bf.CreateCall(get_func("__ang_gc_finalize"), {curr_phi});
         bf.CreateCall(free_fn, {curr_phi});
+        // Stats: increment total_frees
+        auto* frees = bf.CreateLoad(i64_ty, m_g_gc_total_frees, "frees");
+        bf.CreateStore(bf.CreateAdd(frees, ConstantInt::get(i64_ty, 1)), m_g_gc_total_frees);
         bf.CreateBr(advance_bb);
 
         // BLACK: reset to WHITE + unique for next cycle, advance prev
@@ -853,6 +887,10 @@ void MarkSweepGC::generateFunctions() {
 
         // Sweep unreachable objects
         b.CreateCall(get_func("__ang_gc_sweep"), {});
+
+        // Stats: increment collections
+        auto* cols = b.CreateLoad(i64_ty, m_g_gc_collections, "cols");
+        b.CreateStore(b.CreateAdd(cols, ConstantInt::get(i64_ty, 1)), m_g_gc_collections);
 
         // Reset allocation count so next collection triggers after threshold fresh allocations
         b.CreateStore(ConstantInt::get(i64_ty, 0), m_g_gc_count);
@@ -1142,6 +1180,45 @@ void MarkSweepGC::generateFunctions() {
         IRBuilder<> bd(done_bb);
         bd.CreateRetVoid();
     }
+
+    // ===================================================================
+    // __ang_gc_print_stats() -> void
+    // Print GC statistics via individual printf calls to avoid variadic
+    // ABI issues on arm64 (2+ variadic i64 args cause crashes).
+    // ===================================================================
+    {
+        auto* fn_ty = FunctionType::get(void_ty, {}, false);
+        auto* fn = createRuntimeFunc("__ang_gc_print_stats", fn_ty);
+        m_fn_gc_print_stats = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+
+        // Load stats
+        auto* cols = b.CreateLoad(i64_ty, m_g_gc_collections, "cols");
+        auto* allocs = b.CreateLoad(i64_ty, m_g_gc_total_allocs, "allocs");
+        auto* frees = b.CreateLoad(i64_ty, m_g_gc_total_frees, "frees");
+        auto* live = b.CreateSub(allocs, frees, "live");
+
+        auto* printf_ty = FunctionType::get(i32_ty, {PointerType::get(m_ctx, 0)}, true);
+        auto* printf_fn = cast<Function>(
+            m_module.getOrInsertFunction("printf", printf_ty).getCallee());
+
+        // Print each stat individually (1 variadic arg per call)
+        auto* f1 = b.CreateGlobalStringPtr("[GC] collections: %lld | ", "f1");
+        b.CreateCall(printf_fn, {f1, cols});
+
+        auto* f2 = b.CreateGlobalStringPtr("allocs: %lld | ", "f2");
+        b.CreateCall(printf_fn, {f2, allocs});
+
+        auto* f3 = b.CreateGlobalStringPtr("freed: %lld | ", "f3");
+        b.CreateCall(printf_fn, {f3, frees});
+
+        auto* f4 = b.CreateGlobalStringPtr("live: %lld\n", "f4");
+        b.CreateCall(printf_fn, {f4, live});
+
+        b.CreateRetVoid();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1193,6 +1270,7 @@ void MarkSweepGC::generateFreestandingStubs() {
     stub_void("__ang_gc_clear_unique", FunctionType::get(void_ty, {obj_ty}, false));
     stub_void("__ang_gc_pin", FunctionType::get(void_ty, {obj_ty}, false));
     stub_void("__ang_gc_unpin", FunctionType::get(void_ty, {obj_ty}, false));
+    stub_void("__ang_gc_print_stats", FunctionType::get(void_ty, {}, false));
 }
 
 } // namespace angara

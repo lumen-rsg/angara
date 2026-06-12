@@ -18,6 +18,7 @@ RuntimeBuilder::~RuntimeBuilder() = default;
 llvm::StructType* RuntimeBuilder::getGcRootFrameType() const { return m_gc->getGcRootFrameType(); }
 llvm::StructType* RuntimeBuilder::getGcThreadStateType() const { return m_gc->getGcThreadStateType(); }
 llvm::GlobalVariable* RuntimeBuilder::getGcThreadStateTLS() const { return m_gc->getGcThreadStateTLS(); }
+llvm::FunctionCallee RuntimeBuilder::getGcPrintStatsFunc() const { return m_gc->getGcPrintStatsFunc(); }
 
 void RuntimeBuilder::generateRuntime() {
     generateTypes();

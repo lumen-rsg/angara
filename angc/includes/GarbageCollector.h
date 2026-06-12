@@ -45,6 +45,7 @@ public:
     virtual llvm::FunctionCallee getThreadUnregisterFunc() const = 0;
     virtual llvm::FunctionCallee getGcPinFunc() const = 0;
     virtual llvm::FunctionCallee getGcUnpinFunc() const = 0;
+    virtual llvm::FunctionCallee getGcPrintStatsFunc() const = 0;
 
     virtual void generateFreestandingStubs() = 0;
 

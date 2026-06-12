@@ -125,8 +125,34 @@ After gc_count reset, threshold raise (65536), string concat is_unique fix, and 
 - **Integer loop (9x):** Still slow because it creates 500M boxed integers. The bottleneck is allocation overhead (gc_alloc linked-list prepend + tagged union boxing), not GC collection frequency. A generational collector with bump allocation would help here.
 - **Under 2x:** Most benchmarks remain in the 1.1–1.9x range, which is typical for a managed runtime with boxed primitives.
 
+### Bottleneck analysis: Integer Loop (9x)
+
+The integer loop creates 500M boxed integers (`AngaraObject {i32 tag, i64 payload}` wrapping an `ObjHeader`-carrying heap allocation). The 9x gap is NOT caused by GC collection — it's per-allocation overhead:
+
+1. **gc_alloc cost:** Each allocation increments `gc_count`, compares against threshold, prepends to a linked list (store to global head), and returns. With 500M calls this dominates even though collections are rare (~7630 with threshold=65536).
+2. **Tagged union boxing:** Every integer requires constructing an `AngaraObject` on the stack and a heap allocation for the boxed value. C operates on raw `i64` in registers.
+3. **No allocation amortization:** Each `gc_alloc` is an individual `malloc`-equivalent call. A bump allocator would reduce this to a pointer increment.
+
+Proof that GC collection is not the bottleneck: the gc_count fix (reset after sweep) reduced collections from ~500M to ~7630 with no measurable time difference (0.842s → 0.792s). The time is spent in the 500M individual gc_alloc calls, not in the ~7630 collections.
+
 ### Remaining optimization opportunities
 
 - **Bump allocator / slab allocation** — replacing the linked-list gc_alloc with a bump pointer would drastically reduce per-allocation overhead for the integer loop.
 - **Generational GC** — nursery-based collection would make short-lived objects nearly free.
 - **Unboxed primitives** — avoiding boxing for integers in tight loops would eliminate the 9x gap entirely.
+
+## Stage 8: GC diagnostics
+
+Add runtime introspection to measure memory behavior during execution.
+
+### Goals
+- Expose GC stats (live objects, total allocated, bytes used, collection count) via runtime functions
+- Allow programs to query GC state for profiling and debugging
+- Enable a future tool/IDE integration layer
+
+### Tasks
+- [ ] Add GC stats globals (collections_count, live_count, total_bytes)
+- [ ] Generate `__ang_gc_stats` function returning snapshot
+- [ ] Wire stats into collect/sweep/alloc
+- [ ] Write memory benchmark program
+- [ ] Verify: stats accurately reflect GC behavior

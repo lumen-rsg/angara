@@ -154,6 +154,7 @@ public:
     llvm::StructType* getGcRootFrameType() const;
     llvm::StructType* getGcThreadStateType() const;
     llvm::GlobalVariable* getGcThreadStateTLS() const;
+    llvm::FunctionCallee getGcPrintStatsFunc() const;
 
 private:
     /// Creates all LLVM struct types for the runtime object model.

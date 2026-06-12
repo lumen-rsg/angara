@@ -146,7 +146,7 @@ void RuntimeBuilder::generateStringOps() {
             bs.CreateRet(result);
         }
 
-        // --- Both confirmed as strings: check is_unique for in-place ---
+        // --- Both confirmed as strings: check refcount for in-place ---
         {
             IRBuilder<> bu(check_unique_bb);
             auto* b_chars = bu.CreateLoad(i8_ptr,
@@ -154,13 +154,9 @@ void RuntimeBuilder::generateStringOps() {
             auto* b_len = bu.CreateLoad(i64_ty,
                 bu.CreateStructGEP(m_string_type, b_str, 1), "b_len");
 
-            // Extract is_unique bit from ObjHeader.meta (bit 8)
-            auto* meta = bu.CreateLoad(i32_ty,
-                bu.CreateStructGEP(m_obj_header_type, a_str, 1), "a_meta");
-            auto* unique_bit = bu.CreateAnd(
-                bu.CreateLShr(meta, ConstantInt::get(i32_ty, 8)),
-                ConstantInt::get(i32_ty, 1), "unique_bit");
-            auto* is_unique = bu.CreateICmpNE(unique_bit, ConstantInt::get(i32_ty, 0));
+            auto* a_rc = bu.CreateLoad(i64_ty,
+                bu.CreateStructGEP(m_obj_header_type, a_str, 1), "a_rc");
+            auto* is_unique = bu.CreateICmpEQ(a_rc, ConstantInt::get(i64_ty, 1));
             bu.CreateCondBr(is_unique, inplace_bb, copy_bb);
 
             // --- In-place: check if buffer needs growth ---
@@ -234,14 +230,11 @@ void RuntimeBuilder::generateStringOps() {
 
                 auto* str_size = ConstantInt::get(i64_ty,
                     m_module.getDataLayout().getTypeAllocSize(m_string_type));
-                auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
-                auto* str_ptr = bc.CreateCall(gc_alloc_fn,
-                    {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "str_mem");
+                auto* str_ptr = bc.CreateBitCast(
+                    bc.CreateCall(malloc_fn, {str_size}, "mem"),
+                    PointerType::get(m_ctx, 0));
 
-                // gc_alloc initializes the header — only set string-specific fields
-                bc.CreateStore(new_len, bc.CreateStructGEP(m_string_type, str_ptr, 1));
-                bc.CreateStore(new_len, bc.CreateStructGEP(m_string_type, str_ptr, 2));
-                bc.CreateStore(buf, bc.CreateStructGEP(m_string_type, str_ptr, 3));
+                init_string_struct(bc, str_ptr, new_len, buf);
 
                 bc.CreateRet(pack_obj(bc, str_ptr));
             }
