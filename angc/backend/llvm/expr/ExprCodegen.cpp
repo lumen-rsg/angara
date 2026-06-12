@@ -111,6 +111,13 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
     auto* l = cg(e.left), *r = cg(e.right);
     if (!l||!r) return makeNil();
 
+    // Compile-time type lookup for fast-path arithmetic
+    auto lt_it = m_type_checker.getExpressionTypes().find(e.left.get());
+    auto rt_it = m_type_checker.getExpressionTypes().find(e.right.get());
+    bool left_typed = lt_it != m_type_checker.getExpressionTypes().end();
+    bool right_typed = rt_it != m_type_checker.getExpressionTypes().end();
+    bool types_known = left_typed && right_typed;
+
     // Helper: convert an AngaraObject to double based on its runtime tag.
     // If TAG_F64, bitcast payload; if TAG_I64, SIToFP convert.
     auto* f64_ty = llvm::Type::getDoubleTy(*ctx);
@@ -124,6 +131,18 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
 
     switch (e.op.type) {
         case TokenType::PLUS: {
+            // Fast path: typed primitives — skip tag dispatch entirely
+            if (types_known) {
+                auto& ltype = lt_it->second;
+                auto& rtype = rt_it->second;
+                if (isInteger(ltype) && isInteger(rtype))
+                    return makeI64(builder->CreateAdd(getI64(l), getI64(r)));
+                if (isFloat(ltype) || isFloat(rtype)) {
+                    auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
+                    auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
+                    return makeF64(builder->CreateFAdd(ld, rd));
+                }
+            }
             // If the type checker knows either operand is a string, skip the
             // runtime tag dispatch and call __ang_string_concat directly.
             {
@@ -172,6 +191,18 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             return phi;
         }
         case TokenType::MINUS: {
+            // Fast path: typed primitives
+            if (types_known) {
+                auto& ltype = lt_it->second;
+                auto& rtype = rt_it->second;
+                if (isInteger(ltype) && isInteger(rtype))
+                    return makeI64(builder->CreateSub(getI64(l), getI64(r)));
+                if (isFloat(ltype) || isFloat(rtype)) {
+                    auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
+                    auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
+                    return makeF64(builder->CreateFSub(ld, rd));
+                }
+            }
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
             auto* eitherF64 = builder->CreateOr(
@@ -196,6 +227,18 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             return phi;
         }
         case TokenType::STAR: {
+            // Fast path: typed primitives
+            if (types_known) {
+                auto& ltype = lt_it->second;
+                auto& rtype = rt_it->second;
+                if (isInteger(ltype) && isInteger(rtype))
+                    return makeI64(builder->CreateMul(getI64(l), getI64(r)));
+                if (isFloat(ltype) || isFloat(rtype)) {
+                    auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
+                    auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
+                    return makeF64(builder->CreateFMul(ld, rd));
+                }
+            }
             {
                 auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
                 if (lt != m_type_checker.getExpressionTypes().end() && lt->second->toString() == "string") {
@@ -226,6 +269,21 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             return phi;
         }
         case TokenType::SLASH: {
+            // Fast path: typed primitives
+            if (types_known) {
+                auto& ltype = lt_it->second;
+                auto& rtype = rt_it->second;
+                if (isInteger(ltype) && isInteger(rtype)) {
+                    bool unsign = isUnsignedIntType(ltype) || isUnsignedIntType(rtype);
+                    return makeI64(unsign ? builder->CreateUDiv(getI64(l), getI64(r))
+                                          : builder->CreateSDiv(getI64(l), getI64(r)));
+                }
+                if (isFloat(ltype) || isFloat(rtype)) {
+                    auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
+                    auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
+                    return makeF64(builder->CreateFDiv(ld, rd));
+                }
+            }
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
             auto* eitherF64 = builder->CreateOr(
@@ -255,6 +313,21 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             return phi;
         }
         case TokenType::PERCENT: {
+            // Fast path: typed primitives
+            if (types_known) {
+                auto& ltype = lt_it->second;
+                auto& rtype = rt_it->second;
+                if (isInteger(ltype) && isInteger(rtype)) {
+                    bool unsign = isUnsignedIntType(ltype) || isUnsignedIntType(rtype);
+                    return makeI64(unsign ? builder->CreateURem(getI64(l), getI64(r))
+                                          : builder->CreateSRem(getI64(l), getI64(r)));
+                }
+                if (isFloat(ltype) || isFloat(rtype)) {
+                    auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
+                    auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
+                    return makeF64(builder->CreateFRem(ld, rd));
+                }
+            }
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
             auto* eitherF64 = builder->CreateOr(
@@ -314,7 +387,37 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
                     return makeBool(bool_val);
                 }
             }
-            // Numeric comparison (original code)
+            // Fast path: typed primitives — skip tag dispatch
+            if (types_known) {
+                auto& ltype = lt_it->second;
+                auto& rtype = rt_it->second;
+                if (isInteger(ltype) && isInteger(rtype)) {
+                    bool unsign = isUnsignedIntType(ltype) || isUnsignedIntType(rtype);
+                    llvm::Value* cmp;
+                    switch (e.op.type) {
+                        case TokenType::LESS:          cmp = unsign ? builder->CreateICmpULT(getI64(l), getI64(r)) : builder->CreateICmpSLT(getI64(l), getI64(r)); break;
+                        case TokenType::LESS_EQUAL:    cmp = unsign ? builder->CreateICmpULE(getI64(l), getI64(r)) : builder->CreateICmpSLE(getI64(l), getI64(r)); break;
+                        case TokenType::GREATER:       cmp = unsign ? builder->CreateICmpUGT(getI64(l), getI64(r)) : builder->CreateICmpSGT(getI64(l), getI64(r)); break;
+                        case TokenType::GREATER_EQUAL: cmp = unsign ? builder->CreateICmpUGE(getI64(l), getI64(r)) : builder->CreateICmpSGE(getI64(l), getI64(r)); break;
+                        default: cmp = builder->CreateICmpSLT(getI64(l), getI64(r)); break;
+                    }
+                    return makeBool(cmp);
+                }
+                if (isFloat(ltype) || isFloat(rtype)) {
+                    auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
+                    auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
+                    llvm::Value* cmp;
+                    switch (e.op.type) {
+                        case TokenType::LESS:          cmp = builder->CreateFCmpOLT(ld, rd); break;
+                        case TokenType::LESS_EQUAL:    cmp = builder->CreateFCmpOLE(ld, rd); break;
+                        case TokenType::GREATER:       cmp = builder->CreateFCmpOGT(ld, rd); break;
+                        case TokenType::GREATER_EQUAL: cmp = builder->CreateFCmpOGE(ld, rd); break;
+                        default: cmp = builder->CreateFCmpOLT(ld, rd); break;
+                    }
+                    return makeBool(cmp);
+                }
+            }
+            // Numeric comparison (original tag-dispatch code)
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
             auto* eitherF64 = builder->CreateOr(
