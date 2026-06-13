@@ -926,9 +926,11 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
         builder->CreateBr(halt_bb);
     } else {
         if (gc_thread_state) {
-            // Print GC stats before teardown
-            auto print_stats = rt->getGcPrintStatsFunc();
-            builder->CreateCall(print_stats);
+            // Print GC stats before teardown (debug builds only)
+            if (m_debug) {
+                auto print_stats = rt->getGcPrintStatsFunc();
+                builder->CreateCall(print_stats);
+            }
             emitGcTeardown(gc_thread_state);
         }
         builder->CreateRet(exit_code);
