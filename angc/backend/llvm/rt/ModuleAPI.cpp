@@ -301,24 +301,27 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* src = fn_string_len->arg_begin();
         auto* len = fn_string_len->arg_begin() + 1;
 
+        // Copy the caller's bytes into a fresh buffer.
         auto* buf_size = b.CreateAdd(len, ConstantInt::get(i64_ty, 1));
         auto* buf = b.CreateCall(malloc_fn, {buf_size});
         b.CreateCall(memcpy_fn, {buf, src, len});
         b.CreateStore(ConstantInt::get(i8_ty, 0), b.CreateGEP(i8_ty, buf, {len}));
 
-        auto* str_size = ConstantInt::get(i64_ty, 32);
-        auto* mem = b.CreateCall(malloc_fn, {str_size});
-        auto* str_ptr = b.CreateBitCast(mem, ptr_ty);
+        // Allocate the String struct through the GC so it is tracked
+        // (linked into the allocation list, walked by mark/sweep, freed
+        // by the runtime rather than by raw free()).  __ang_gc_alloc
+        // initializes the ObjHeader (type, meta, forward/next); we only
+        // set the string-specific fields below.  Using getTypeAllocSize
+        // also fixes a latent under-allocation: AngaraString is 40 bytes,
+        // not the 32 that was hardcoded here previously.
+        auto* str_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_string_type));
+        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* str_ptr = b.CreateCall(gc_alloc_fn,
+            {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "str_mem");
 
-        auto* hdr = b.CreateStructGEP(m_string_type, str_ptr, 0);
-        b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING),
-                      b.CreateStructGEP(m_obj_header_type, hdr, 0));
-        b.CreateStore(getGcInitialMeta(),
-                      b.CreateStructGEP(m_obj_header_type, hdr, 1));
-        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
-                      b.CreateStructGEP(m_obj_header_type, hdr, 2));
         b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 1));
-        b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 2));
+        b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 2)); // capacity = length
         b.CreateStore(buf, b.CreateStructGEP(m_string_type, str_ptr, 3));
 
         b.CreateRet(packObj(b, str_ptr));
@@ -333,19 +336,17 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* src = fn_string_no_copy->arg_begin();
         auto* len = fn_string_no_copy->arg_begin() + 1;
 
-        auto* str_size = ConstantInt::get(i64_ty, 32);
-        auto* mem = b.CreateCall(malloc_fn, {str_size});
-        auto* str_ptr = b.CreateBitCast(mem, ptr_ty);
+        // Adopt the caller's buffer without copying.  The runtime takes
+        // ownership and will free(buffer) when the string is collected.
+        // Same GC-allocation rationale as fn_string_len above.
+        auto* str_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_string_type));
+        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* str_ptr = b.CreateCall(gc_alloc_fn,
+            {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "str_mem");
 
-        auto* hdr = b.CreateStructGEP(m_string_type, str_ptr, 0);
-        b.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING),
-                      b.CreateStructGEP(m_obj_header_type, hdr, 0));
-        b.CreateStore(getGcInitialMeta(),
-                      b.CreateStructGEP(m_obj_header_type, hdr, 1));
-        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
-                      b.CreateStructGEP(m_obj_header_type, hdr, 2));
         b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 1));
-        b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 2));
+        b.CreateStore(len, b.CreateStructGEP(m_string_type, str_ptr, 2)); // capacity = length
         b.CreateStore(src, b.CreateStructGEP(m_string_type, str_ptr, 3));
 
         b.CreateRet(packObj(b, str_ptr));

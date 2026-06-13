@@ -1,0 +1,373 @@
+// =============================================================
+// angfetch — A fastfetch-style system information tool in Angara
+// =============================================================
+//
+// Lays out an ASCII logo next to key facts about the host:
+// OS, kernel, uptime, packages, shell, CPU, memory, disk, terminal.
+//
+// Build:  angc angfetch.an -o angfetch
+// Run:    ./angfetch
+//
+// Demonstrates:
+//   * Composing stdlib modules (os, env, fs, color, adv_string, time)
+//   * Data classes for typed info rows
+//   * Pure-Angara string parsing and formatting helpers
+//   * ANSI true-color output via the color module
+//
+// =============================================================
+
+attach io;
+attach os;
+attach env;
+attach fs;
+attach color;
+attach adv_string;
+attach time;
+
+// =============================================================
+// Types
+// =============================================================
+
+// A single rendered row, represented as a record:
+//   { "label": "OS", "value": "macOS 14" }
+// Records (dynamic key-value maps) are used instead of data classes
+// here because data-class field access inside `for` loops has a known
+// memory bug as of this build; records are stable.
+
+// =============================================================
+// Brand palette (matches docs/index.html accents)
+// =============================================================
+
+func cyan()    -> string { return color.rgb_fg(56, 189, 248); }
+func violet()  -> string { return color.rgb_fg(167, 139, 250); }
+func green()   -> string { return color.rgb_fg(52, 211, 153); }
+func orange()  -> string { return color.rgb_fg(251, 146, 60); }
+func dim_fg()  -> string { return color.rgb_fg(100, 116, 139); }
+func bold()    -> string { return color.bold(); }
+func reset()   -> string { return color.reset(); }
+
+// =============================================================
+// Helpers
+// =============================================================
+
+// Run a shell command, return trimmed stdout. Empty string on failure.
+func sh(cmd as string) -> string {
+    let r = os.run(cmd);
+    return adv_string.trim(string(r["stdout"]));
+}
+
+// Last path component: "/bin/zsh" -> "zsh"
+func basename(p as string) -> string {
+    let parts = adv_string.split(p, "/");
+    if (len(parts) == 0) { return p; }
+    return parts[len(parts) - 1];
+}
+
+// Manual string -> i64. Returns -1 if the string isn't a valid non-negative
+// integer. The compiler's i64() cast is only documented for float->int, so
+// we parse digit by digit to be safe.
+func parse_int(s as string) -> i64 {
+    let n = len(s);
+    if (n == 0) { return -1; }
+    let result = 0;
+    let i = 0;
+    // Skip leading whitespace
+    while (i < n) {
+        let ch = adv_string.substring(s, i, i + 1);
+        if (!adv_string.is_whitespace(ch)) { break; }
+        i = i + 1;
+    }
+    let digits_seen = 0;
+    let digit_map = "0123456789";
+    while (i < n) {
+        let ch = adv_string.substring(s, i, i + 1);
+        if (!adv_string.is_digit(ch)) { break; }
+        let d = adv_string.index_of(digit_map, ch);  // 0..9
+        result = result * 10 + d;
+        i = i + 1;
+        digits_seen = digits_seen + 1;
+    }
+    if (digits_seen == 0) { return -1; }
+    return result;
+}
+
+// Convert bytes to binary human-readable form: 17179869184 -> "16.0 GiB"
+func fmt_bytes(bytes as i64) -> string {
+    if (bytes <= 0) { return "0 B"; }
+    let units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+    let size as f64 = f64(bytes);
+    let u = 0;
+    while (size >= 1024.0 && u < 5) {
+        size = size / 1024.0;
+        u = u + 1;
+    }
+    let whole = i64(size);
+    let frac = i64((size - f64(whole)) * 10.0);
+    return string(whole) + "." + string(frac) + " " + units[u];
+}
+
+// Seconds -> "2d 3h 13m" (drops sub-minute precision)
+func fmt_uptime(seconds as i64) -> string {
+    if (seconds < 60) { return "< 1m"; }
+    let days = seconds / 86400;
+    let hours = (seconds % 86400) / 3600;
+    let mins = (seconds % 3600) / 60;
+    let parts as list<string> = [];
+    if (days > 0)  { parts.push(string(days)  + "d"); }
+    if (hours > 0) { parts.push(string(hours) + "h"); }
+    if (mins > 0)  { parts.push(string(mins)  + "m"); }
+    if (len(parts) == 0) { return "< 1m"; }
+    return adv_string.join(parts, " ");
+}
+
+// Pull the first base-10 integer appearing at or after `marker` in `s`.
+// Returns -1 if `marker` isn't found or no digits follow.
+func int_after(s as string, marker as string) -> i64 {
+    let idx = adv_string.index_of(s, marker);
+    if (idx < 0) { return -1; }
+    let start = idx + len(marker);
+    let n = len(s);
+    let i = start;
+    while (i < n) {
+        let ch = adv_string.substring(s, i, i + 1);
+        if (adv_string.is_digit(ch)) { break; }
+        i = i + 1;
+    }
+    if (i >= n) { return -1; }
+    let j = i;
+    while (j < n) {
+        let ch = adv_string.substring(s, j, j + 1);
+        if (!adv_string.is_digit(ch)) { break; }
+        j = j + 1;
+    }
+    return parse_int(adv_string.substring(s, i, j));
+}
+
+// =============================================================
+// Info gatherers — each returns the value string for one row
+// =============================================================
+
+func g_user() -> string {
+    return env.get("USER") ?? "unknown";
+}
+
+func g_host() -> string {
+    return env.hostname();
+}
+
+func g_os() -> string {
+    let name = sh("sw_vers -productName");
+    let ver  = sh("sw_vers -productVersion");
+    if (name == "") { return "macOS (unknown)"; }
+    if (ver == "")  { return name; }
+    return name + " " + ver;
+}
+
+func g_kernel() -> string {
+    let k = sh("uname -r");
+    if (k == "") { return "unknown"; }
+    return "Darwin " + k;
+}
+
+func g_uptime() -> string {
+    let boot_str = sh("sysctl -n kern.boottime");
+    let boot_sec = int_after(boot_str, "sec = ");
+    if (boot_sec <= 0) { return "unknown"; }
+    let now = time.unix();
+    let up = now - boot_sec;
+    if (up < 0) { up = 0; }
+    return fmt_uptime(up);
+}
+
+func g_shell() -> string {
+    let s = env.get("SHELL") ?? "";
+    if (s == "") { return "unknown"; }
+    return basename(s);
+}
+
+func g_terminal() -> string {
+    let t = env.get("TERM_PROGRAM") ?? "";
+    if (t != "") { return t; }
+    let term = env.get("TERM") ?? "";
+    if (term == "") { return "unknown"; }
+    return term;
+}
+
+func g_cpu() -> string {
+    let brand = sh("sysctl -n machdep.cpu.brand_string");
+    let cores = parse_int(sh("sysctl -n hw.logicalcpu"));
+    if (brand == "") { return "unknown"; }
+    if (cores > 0) {
+        return brand + " (" + string(cores) + ")";
+    }
+    return brand;
+}
+
+func g_arch() -> string {
+    let a = sh("uname -m");
+    if (a == "") { return "unknown"; }
+    return a;
+}
+
+func g_memory() -> string {
+    let total = parse_int(sh("sysctl -n hw.memsize"));
+    if (total <= 0) { return "unknown"; }
+    let vm = sh("vm_stat");
+    let page = int_after(vm, "page size of ");
+    let active     = int_after(vm, "Pages active:");
+    let wired      = int_after(vm, "wired down:");
+    let compressed = int_after(vm, "occupied by compressor:");
+    if (page <= 0) { return "? / " + fmt_bytes(total); }
+    let used = (active + wired + compressed) * page;
+    if (used < 0) { used = 0; }
+    return fmt_bytes(used) + " / " + fmt_bytes(total);
+}
+
+func g_disk() -> string {
+    // df -k / | awk 'NR==2 {print $3, $2, $5}' -> "used_kb total_kb cap%"
+    let out = sh("df -k / | awk 'NR==2 {print $3, $2, $5}'");
+    let parts = adv_string.split(out, " ");
+    if (len(parts) < 3) { return "unknown"; }
+    let used_kb  = parse_int(parts[0]);
+    let total_kb = parse_int(parts[1]);
+    if (used_kb < 0 || total_kb <= 0) { return "unknown"; }
+    let cap = parts[2];
+    return fmt_bytes(used_kb * 1024) + " / " + fmt_bytes(total_kb * 1024) + " (" + cap + ")";
+}
+
+func g_packages() -> string {
+    let cellar = "/opt/homebrew/Cellar";
+    if (!fs.exists(cellar)) { cellar = "/usr/local/Cellar"; }
+    if (!fs.exists(cellar)) { return "0"; }
+    let entries = fs.list_dir(cellar);
+    let n = len(entries);
+    return string(n) + " (brew)";
+}
+
+// =============================================================
+// Logo — stylized Apple, gradient-colored at render time
+// =============================================================
+
+func logo_lines() -> list<string> {
+    return [
+        "         'c.",
+        "      ,xNMM.",
+        "    .OMMMMo",
+        "    OMMM0,",
+        "    .;loddo:'",
+        "  cKMMMMMMMMMMk",
+        ". KMMMMMMMMMMMWd.",
+        " XMMMMMMMMMMMMMX:",
+        " kMMMMMMMMMMMMMMO.",
+        "  'XMMMMMMMMMMMMK.",
+        "    'kMMMMMMMMMMo",
+        "      .OMMMMMMML",
+        "       .OMMMMMM.",
+        "         ;xOdk'"
+    ];
+}
+
+// Per-line color for the logo gradient: cyan -> violet -> green.
+func logo_color(i as i64) -> string {
+    if (i < 4) { return cyan(); }
+    if (i < 9) { return violet(); }
+    return green();
+}
+
+// =============================================================
+// Render
+// =============================================================
+
+// Width of the widest logo line (used to right-pad shorter lines
+// so the info column always starts at the same offset).
+func logo_width(logo as list<string>) -> i64 {
+    let w = 0;
+    for (line in logo) {
+        let l = len(line);
+        if (l > w) { w = l; }
+    }
+    return w;
+}
+
+// Build a single Row record.
+func row(label as string, value as string) -> record {
+    return { "label": label, "value": value };
+}
+
+// Compose a list of rows, the title, then print everything two-column.
+func render() -> nil {
+    let title = g_user() + " @ " + g_host();
+    let rows = [
+        row("OS",        g_os()),
+        row("Kernel",    g_kernel()),
+        row("Uptime",    g_uptime()),
+        row("Packages",  g_packages()),
+        row("Shell",     g_shell()),
+        row("Terminal",  g_terminal()),
+        row("CPU",       g_cpu()),
+        row("Arch",      g_arch()),
+        row("Memory",    g_memory()),
+        row("Disk (/)",  g_disk())
+    ];
+
+    let logo = logo_lines();
+    let lw = logo_width(logo);
+    let pad = "  ";
+
+    // Total height: cover logo + title + underline + blank + rows
+    let info_h = 2 + len(rows);  // title + underline + rows (blank absorbed into underline)
+    let h = lw;  // placeholder
+    if (info_h > h) { h = info_h; }
+    if (len(logo) > h) { h = len(logo); }
+
+    // Compute label column width so values align
+    let label_w = 0;
+    for (r in rows) {
+        let l = len(string(r["label"]));
+        if (l > label_w) { label_w = l; }
+    }
+
+    for (let i = 0; i < h; i = i + 1) {
+        // Left column: logo line or blank
+        let left = "";
+        if (i < len(logo)) {
+            let line = logo[i];
+            left = logo_color(i) + line + reset()
+                 + adv_string.repeat(" ", lw - len(line));
+        } else {
+            left = adv_string.repeat(" ", lw);
+        }
+
+        // Right column: title/underline/blank/row
+        let right = "";
+        if (i == 0) {
+            right = bold() + green() + title + reset();
+        } else if (i == 1) {
+            // Underline matching title length
+            right = green() + adv_string.repeat("-", len(title)) + reset();
+        } else {
+            let ri = i - 2;
+            if (ri < len(rows)) {
+                let r = rows[ri];
+                let lbl = string(r["label"]);
+                let val = string(r["value"]);
+                right = bold() + violet() + adv_string.pad_end(lbl, label_w, " ")
+                     + reset() + dim_fg() + ": " + reset() + val;
+            }
+        }
+
+        io.println(1, left + pad + right);
+    }
+
+    io.println(1, "");
+    io.println(1, dim_fg() + "          fetched in Angara -- github.com/lumen-rsg/angara" + reset());
+}
+
+// =============================================================
+// Main
+// =============================================================
+
+export func main() -> i64 {
+    render();
+    return 0;
+}

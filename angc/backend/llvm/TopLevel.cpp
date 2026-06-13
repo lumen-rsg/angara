@@ -811,6 +811,14 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
         }
     }
 
+    // Initialize all interned string literals before any user code runs.
+    // The init function is created eagerly in generate()/generateIR() and
+    // accumulates init calls as makeStr discovers literals during codegen.
+    // Since the function body is finalized at module emission time (after all
+    // codegen), this call always executes every init, even for literals first
+    // referenced in functions compiled after this call site.
+    builder->CreateCall(m_strlit_init_fn);
+
     for (const auto& stmt : statements) {
         if (std::dynamic_pointer_cast<const FuncStmt>(stmt)) continue;
         if (std::dynamic_pointer_cast<const ClassStmt>(stmt)) continue;

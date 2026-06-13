@@ -87,6 +87,7 @@ LLVMBackend::generateIR(const std::vector<std::shared_ptr<Stmt>>& stmts,
                         const std::shared_ptr<ModuleType>& moduleType,
                         std::vector<std::string>& allMods) {
     moduleName = moduleType ? moduleType->name : "main";
+    createStrlitInitFn();
     codegenTopLevelDecls(stmts);
     bool has_user_main = false;
     for (const auto& stmt : stmts) {
@@ -102,6 +103,7 @@ LLVMBackend::generateIR(const std::vector<std::shared_ptr<Stmt>>& stmts,
 bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     const std::shared_ptr<ModuleType>& moduleType, std::vector<std::string>& allMods) {
     moduleName = moduleType ? moduleType->name : "main";
+    createStrlitInitFn();
     codegenTopLevelDecls(stmts);
     bool has_user_main = false;
     for (const auto& stmt : stmts) {
@@ -204,6 +206,19 @@ llvm::Value* LLVMBackend::makeF64(llvm::Value* v) {
     r = builder->CreateInsertValue(r, builder->CreateBitCast(v, llvm::Type::getInt64Ty(*ctx)), {1});
     return r;
 }
+
+void LLVMBackend::createStrlitInitFn() {
+    if (m_strlit_init_fn) return;
+    auto* fn_type = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(*ctx), false);
+    m_strlit_init_fn = llvm::Function::Create(fn_type,
+        llvm::Function::InternalLinkage,
+        "__ang_strlit_init", mod.get());
+    m_strlit_init_fn->setDSOLocal(true);
+    auto* entry_bb = llvm::BasicBlock::Create(*ctx, "entry", m_strlit_init_fn);
+    llvm::IRBuilder<>(entry_bb).CreateRetVoid();
+}
+
 llvm::Value* LLVMBackend::makeStr(const std::string& s) {
     // Intern string literals: each unique literal is allocated once per module
     // and reused across all references. Under GC, the global is a permanent root
@@ -215,9 +230,11 @@ llvm::Value* LLVMBackend::makeStr(const std::string& s) {
     }
 
     // First occurrence: create a global variable and initialize it in the
-    // function's entry block (after allocas) so it always executes, even if
-    // the first codegen reference is inside a conditional branch like a match
-    // case that may not run.
+    // centralized __ang_strlit_init function.  All literal init is collected
+    // there and called once from main before any user code runs.  This avoids
+    // a load-before-init bug where a literal whose init code was placed in
+    // whichever function first referenced it during compilation gets loaded
+    // by a different function that executes earlier at runtime.
     auto* gsptr = builder->CreateGlobalString(s);
 
     auto* global = new llvm::GlobalVariable(
@@ -227,16 +244,21 @@ llvm::Value* LLVMBackend::makeStr(const std::string& s) {
         "__ang_strlit_" + std::to_string(m_string_literal_cache.size()));
     global->setDSOLocal(true);
 
-    // Emit the init call in the function's entry block, right after allocas
-    auto* fn = builder->GetInsertBlock()->getParent();
-    auto& entry = fn->getEntryBlock();
+    // m_strlit_init_fn is created eagerly in generate()/generateIR().
+    // Emit init calls at the top of the init function (before its ret void).
     auto savedIP = builder->saveIP();
-    builder->SetInsertPoint(&entry, entry.getFirstInsertionPt());
+    auto& init_entry = m_strlit_init_fn->getEntryBlock();
+    builder->SetInsertPoint(&init_entry, init_entry.getFirstInsertionPt());
     auto* new_str = callRtByName("__ang_string_from_c", {gsptr});
     // Pin the string literal so the GC never collects it.
     // String literals are stored in globals, not root frames, so without
     // pinning they'd be invisible to the collector and freed as unreachable.
     callRtByName("__ang_gc_pin", {new_str});
+    // Clear is_unique so the __ang_string_concat in-place fast path never
+    // fires on a shared global literal.  Without this, the first concat
+    // that uses a literal as its left operand mutates the interned buffer
+    // in place, corrupting every subsequent reference to that literal.
+    callRtByName("__ang_gc_clear_unique", {new_str});
     builder->CreateStore(new_str, global);
     builder->restoreIP(savedIP);
 

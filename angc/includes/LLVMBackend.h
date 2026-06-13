@@ -172,6 +172,7 @@ namespace angara {
         llvm::Value* makeF64(llvm::Value* val);
         /// Constructs an AngaraObject string from a compile-time C string literal.
         llvm::Value* makeStr(const std::string& str);
+        void createStrlitInitFn();
 
         /// Extracts the i64 payload from an AngaraObject.
         llvm::Value* getI64(llvm::Value* obj);
@@ -245,6 +246,14 @@ namespace angara {
 
         // String literal intern cache: maps literal text -> module-level global
         std::map<std::string, llvm::GlobalVariable*> m_string_literal_cache;
+
+        // Centralized string-literal initialization function.  All per-literal
+        // init calls (string_from_c + gc_pin + gc_clear_unique) are emitted here
+        // instead of in whichever function first references the literal during
+        // compilation.  This avoids a load-before-init bug where a literal whose
+        // init code lives in function B (compiled first) is loaded by function A
+        // (executed first) and reads zeroinitializer (NIL).
+        llvm::Function* m_strlit_init_fn = nullptr;
 
         std::map<std::string, std::string> constructorLookup;
         std::map<std::string, int> enumVariantIndex;  // "EnumName.VariantName" -> declaration order index
