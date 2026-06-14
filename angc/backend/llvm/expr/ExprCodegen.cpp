@@ -48,8 +48,24 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
             if (!target_fn) target_fn = this->mod->getFunction("__ang_" + sanitize(p->name.lexeme));
 
             if (target_fn) {
-                auto* result = builder->CreateCall(target_fn, direct_args);
-                builder->CreateRet(result);
+                auto raw_it = m_raw_functions.find(mangled);
+                if (raw_it != m_raw_functions.end()) {
+                    // Target uses a raw (unboxed) LLVM signature: unbox each
+                    // argument and box the result so the wrapper still returns
+                    // an AngaraObject.
+                    const auto& info = raw_it->second;
+                    std::vector<llvm::Value*> raw_args;
+                    for (int i = 0; i < arity; i++) {
+                        auto kind = (i < (int)info.param_kinds.size())
+                            ? info.param_kinds[i] : LocalKind::BOXED;
+                        raw_args.push_back(unboxToRaw(direct_args[i], kind));
+                    }
+                    auto* raw_result = builder->CreateCall(target_fn, raw_args);
+                    builder->CreateRet(boxRaw(raw_result, info.return_kind));
+                } else {
+                    auto* result = builder->CreateCall(target_fn, direct_args);
+                    builder->CreateRet(result);
+                }
             } else {
                 auto* direct_fn_type = llvm::FunctionType::get(objType,
                     std::vector<llvm::Type*>(arity, objType), false);
