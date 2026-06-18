@@ -375,7 +375,15 @@ AngaraObject Angara_term_table(int arg_count, AngaraObject* args) {
         ang_api->decref(row);
     }
 
-    size_t total = (ncols * 30 + nrows * ncols * 50) + 256;
+    // BUG-14: size the buffer from the real column widths rather than a fixed
+    // heuristic. Each emitted row is sum(widths) + (ncols-1)*2 separators + a
+    // newline; there is one header row, one rule row, and `nrows` data rows.
+    // Long cells previously overflowed the heuristic buffer via unbounded
+    // memcpy/pad. (ncols >= 1 here — the ncols == 0 case returned early above.)
+    size_t sum_widths = 0;
+    for (size_t c = 0; c < ncols; c++) sum_widths += widths[c];
+    size_t row_bytes = sum_widths + (ncols - 1) * 2 + 1;
+    size_t total = (nrows + 2) * row_bytes + 16;   // +NUL + slack
     char* buf = (char*)malloc(total);
     size_t pos = 0;
 

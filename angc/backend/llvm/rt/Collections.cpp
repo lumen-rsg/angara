@@ -64,16 +64,30 @@ void RuntimeBuilder::generateListOps() {
         auto* list_ptr = b.CreateCall(gc_alloc_fn,
             {list_size, ConstantInt::get(i32_ty, OBJ_LIST)}, "list_mem");
 
-        // gc_alloc already initializes ObjHeader. Only set list-specific fields.
-        b.CreateStore(count, b.CreateStructGEP(m_list_type, list_ptr, 1));
-        b.CreateStore(count, b.CreateStructGEP(m_list_type, list_ptr, 2));
-
+        // BUG-7: size the element buffer with an overflow-checked multiply.
+        // count*elem_size previously wrapped to a small value, so the stored
+        // count/cap described a buffer larger than the allocation and every
+        // later indexed access was OOB. On overflow (a pathological count with
+        // no realistic caller — list literals) clamp to an empty list.
         auto* elem_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(obj_ty));
-        auto* total = b.CreateMul(count, elem_size);
-        auto* elems_mem = b.CreateCall(malloc_fn, {total});
+        auto* umul_fn = Intrinsic::getOrInsertDeclaration(&m_module,
+            Intrinsic::umul_with_overflow, {i64_ty});
+        auto* mul_res = b.CreateCall(umul_fn, {count, elem_size}, "mul_ovf");
+        auto* total = b.CreateExtractValue(mul_res, {0}, "total");
+        auto* overflow = b.CreateExtractValue(mul_res, {1}, "overflow");
+        auto* safe_count = b.CreateSelect(overflow,
+            ConstantInt::get(i64_ty, 0), count, "safe_count");
+        auto* safe_total = b.CreateSelect(overflow,
+            ConstantInt::get(i64_ty, 0), total, "safe_total");
+
+        // gc_alloc already initializes ObjHeader. Only set list-specific fields.
+        b.CreateStore(safe_count, b.CreateStructGEP(m_list_type, list_ptr, 1));
+        b.CreateStore(safe_count, b.CreateStructGEP(m_list_type, list_ptr, 2));
+
+        auto* elems_mem = b.CreateCall(malloc_fn, {safe_total});
         b.CreateCall(m_module.getFunction("memcpy"),
-            {elems_mem, b.CreateBitCast(elems, i8_ptr), total});
+            {elems_mem, b.CreateBitCast(elems, i8_ptr), safe_total});
         b.CreateStore(b.CreateBitCast(elems_mem, PointerType::get(m_ctx, 0)),
             b.CreateStructGEP(m_list_type, list_ptr, 3));
 
@@ -85,7 +99,7 @@ void RuntimeBuilder::generateListOps() {
         IRBuilder<> bl(loop_bb);
         auto* i_phi = bl.CreatePHI(i64_ty, 2, "i");
         i_phi->addIncoming(ConstantInt::get(i64_ty, 0), entry);
-        auto* cmp = bl.CreateICmpSLT(i_phi, count);
+        auto* cmp = bl.CreateICmpSLT(i_phi, safe_count);
         bl.CreateCondBr(cmp, body_bb, done_bb);
 
         IRBuilder<> bb(body_bb);
@@ -198,6 +212,9 @@ void RuntimeBuilder::generateListOps() {
         m_fn_list_set = FunctionCallee(fn);
 
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* store_bb = BasicBlock::Create(m_ctx, "set_store", fn);
+        auto* done_bb = BasicBlock::Create(m_ctx, "set_done", fn);
+
         IRBuilder<> b(entry);
         auto* list_arg = fn->arg_begin();
         auto* idx_arg = fn->arg_begin() + 1;
@@ -210,13 +227,25 @@ void RuntimeBuilder::generateListOps() {
         auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
         auto* list_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
 
-        auto* elems = b.CreateLoad(PointerType::get(m_ctx, 0),
-            b.CreateStructGEP(m_list_type, list_ptr, 3), "elems");
-        auto* elem_ptr = b.CreateGEP(obj_ty, elems, {idx});
+        // BUG-3: bounds-check the index (list_get/remove_at already do). An
+        // out-of-bounds set is a silent no-op — there is no error channel here,
+        // matching list_get's nil-on-OOB behaviour.
+        auto* count = b.CreateLoad(i64_ty,
+            b.CreateStructGEP(m_list_type, list_ptr, 1), "count");
+        auto* in_bounds = b.CreateAnd(
+            b.CreateICmpSGE(idx, ConstantInt::get(i64_ty, 0)),
+            b.CreateICmpSLT(idx, count), "in_bounds");
+        b.CreateCondBr(in_bounds, store_bb, done_bb);
 
-        b.CreateStore(val_arg, elem_ptr);
+        IRBuilder<> bs(store_bb);
+        auto* elems = bs.CreateLoad(PointerType::get(m_ctx, 0),
+            bs.CreateStructGEP(m_list_type, list_ptr, 3), "elems");
+        auto* elem_ptr = bs.CreateGEP(obj_ty, elems, {idx});
+        bs.CreateStore(val_arg, elem_ptr);
+        bs.CreateBr(done_bb);
 
-        b.CreateRetVoid();
+        IRBuilder<> bd(done_bb);
+        bd.CreateRetVoid();
     }
 
     // __ang_list_remove_at: remove element at index, return removed value
@@ -229,6 +258,7 @@ void RuntimeBuilder::generateListOps() {
         auto* shift_bb = BasicBlock::Create(m_ctx, "shift", fn);
         auto* shift_body_bb = BasicBlock::Create(m_ctx, "shift_body", fn);
         auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
+        auto* oob_bb = BasicBlock::Create(m_ctx, "rm_oob", fn);
 
         IRBuilder<> b(entry);
         auto* list_arg = fn->arg_begin();
@@ -246,7 +276,7 @@ void RuntimeBuilder::generateListOps() {
         auto* in_bounds = b.CreateAnd(
             b.CreateICmpSGE(idx, ConstantInt::get(i64_ty, 0)),
             b.CreateICmpSLT(idx, count), "in_bounds");
-        b.CreateCondBr(in_bounds, in_bounds_bb, done_bb);
+        b.CreateCondBr(in_bounds, in_bounds_bb, oob_bb);
 
         IRBuilder<> bib(in_bounds_bb);
         auto* elems = bib.CreateLoad(PointerType::get(m_ctx, 0),
@@ -274,16 +304,21 @@ void RuntimeBuilder::generateListOps() {
         bsb.CreateBr(shift_bb);
         j_phi->addIncoming(inc, shift_body_bb);
 
+        // In-bounds completion: done_bb is reached only from shift_bb, so
+        // decrement count and return the removed element.
         IRBuilder<> bd(done_bb);
-        auto* phi = bd.CreatePHI(obj_ty, 2, "result");
-        phi->addIncoming(removed, shift_bb);
-        Value* nil_val = UndefValue::get(obj_ty);
-        nil_val = bd.CreateInsertValue(nil_val, ConstantInt::get(i32_ty, TAG_NIL), {0});
-        nil_val = bd.CreateInsertValue(nil_val, ConstantInt::get(i64_ty, 0), {1});
-        phi->addIncoming(nil_val, entry);
-        auto* final_count = bd.CreateLoad(i64_ty, count_addr);
+        auto* final_count = bd.CreateLoad(i64_ty, count_addr, "final_count");
         bd.CreateStore(bd.CreateSub(final_count, ConstantInt::get(i64_ty, 1)), count_addr);
-        bd.CreateRet(phi);
+        bd.CreateRet(removed);
+
+        // BUG-8: out-of-bounds path returns nil WITHOUT touching count. The old
+        // code shared done_bb, decrementing on the OOB edge too and underflowing
+        // count to 2^64-1 (making every later access OOB).
+        IRBuilder<> bo(oob_bb);
+        Value* nil_val = UndefValue::get(obj_ty);
+        nil_val = bo.CreateInsertValue(nil_val, ConstantInt::get(i32_ty, TAG_NIL), {0});
+        nil_val = bo.CreateInsertValue(nil_val, ConstantInt::get(i64_ty, 0), {1});
+        bo.CreateRet(nil_val);
     }
 
     // __ang_list_remove: remove first element matching value, return bool
@@ -379,6 +414,7 @@ void RuntimeBuilder::generateRecordOps() {
 
     auto* malloc_fn = m_module.getFunction("malloc");
     auto* realloc_fn = m_module.getFunction("realloc");
+    auto* free_fn = m_module.getFunction("free");
 
     auto pack_obj = [&](IRBuilder<>& b, Value* raw_ptr) -> Value* {
         auto* ptr_i8 = b.CreateBitCast(raw_ptr, i8_ptr);
@@ -667,8 +703,17 @@ void RuntimeBuilder::generateRecordOps() {
         i_phi->addIncoming(next_i, next_bb);
         bn.CreateBr(loop_bb);
 
-        // Found — shift entries left
+        // Found — free the removed key, then shift entries left.
+        // BUG-10: keys are strdup'd on insert; the shift overwrites the matched
+        // entry's key pointer without freeing it, leaking the char*. Record
+        // finalization walks [0,count) so the post-shift tail (a shared
+        // duplicate pointer beyond the new count) is never freed — no
+        // double-free — but the removed key itself must be released here.
         IRBuilder<> bf(found_bb);
+        auto* rm_entry = bf.CreateGEP(m_record_entry_type, entries, {i_phi});
+        auto* rm_key = bf.CreateLoad(i8_ptr,
+            bf.CreateStructGEP(m_record_entry_type, rm_entry, 0), "rm_key");
+        bf.CreateCall(free_fn, {rm_key});
         bf.CreateBr(shift_bb);
 
         IRBuilder<> bsh(shift_bb);

@@ -476,7 +476,6 @@ void RuntimeBuilder::generateDeepClone() {
         IRBuilder<> bl(is_list_bb);
         auto* list_ptr = bl.CreateBitCast(ptr, PointerType::get(m_ctx, 0));
         auto* count = bl.CreateLoad(i64_ty, bl.CreateStructGEP(m_list_type, list_ptr, 1), "count");
-        auto* cap = bl.CreateLoad(i64_ty, bl.CreateStructGEP(m_list_type, list_ptr, 2), "cap");
         auto* elems = bl.CreateLoad(PointerType::get(m_ctx, 0),
             bl.CreateStructGEP(m_list_type, list_ptr, 3), "elems");
 
@@ -492,8 +491,12 @@ void RuntimeBuilder::generateDeepClone() {
             bl.CreateStructGEP(m_obj_header_type, header, 1));
         bl.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             bl.CreateStructGEP(m_obj_header_type, header, 2));
+        // BUG-4: stored cap must match the allocation. The element buffer below
+        // is sized count*elem_size; copying the source's cap left cap>count, so
+        // the next push (which grows only when count==cap) skipped the grow and
+        // wrote past the buffer.
         bl.CreateStore(count, bl.CreateStructGEP(m_list_type, new_ptr, 1));
-        bl.CreateStore(cap, bl.CreateStructGEP(m_list_type, new_ptr, 2));
+        bl.CreateStore(count, bl.CreateStructGEP(m_list_type, new_ptr, 2));
 
         // Allocate element array
         auto* elem_size = ConstantInt::get(i64_ty,

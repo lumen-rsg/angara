@@ -200,10 +200,16 @@ void RuntimeBuilder::generateStringOps() {
                     ba.CreateStructGEP(m_string_type, a_str, 1));
                 auto* a_chars = ba.CreateLoad(i8_ptr,
                     ba.CreateStructGEP(m_string_type, a_str, 3), "cur_chars");
+                // BUG-11: b_chars was loaded in check_unique_bb before the
+                // in-place grow's realloc, which may move a's buffer. When
+                // a==b that pointer is now dangling, so reload it here, after
+                // any realloc. b_len is a stable length, not a pointer.
+                auto* b_chars_cur = ba.CreateLoad(i8_ptr,
+                    ba.CreateStructGEP(m_string_type, b_str, 3), "b_chars_cur");
 
                 auto* final_len = ba.CreateAdd(a_len, b_len, "final_len");
                 ba.CreateCall(memcpy_fn,
-                    {ba.CreateGEP(i8_ty, a_chars, {a_len}), b_chars, b_len});
+                    {ba.CreateGEP(i8_ty, a_chars, {a_len}), b_chars_cur, b_len});
                 ba.CreateStore(final_len, ba.CreateStructGEP(m_string_type, a_str, 1));
                 ba.CreateStore(ConstantInt::get(i8_ty, 0),
                     ba.CreateGEP(i8_ty, a_chars, {final_len}));
@@ -280,14 +286,25 @@ void RuntimeBuilder::generateStringOps() {
         auto* src_len = bp.CreateLoad(i64_ty,
             bp.CreateStructGEP(m_string_type, str_ptr, 1), "src_len");
 
-        auto* new_len = bp.CreateMul(src_len, count_val, "new_len");
-        auto* buf_size = bp.CreateAdd(new_len, ConstantInt::get(i64_ty, 1));
-        auto* buf = bp.CreateCall(malloc_fn, {buf_size}, "buf");
-        bp.CreateBr(loop_bb);
+        // BUG-12: overflow-checked multiply. A wrapping new_len allocated a
+        // small buffer but the loop below still ran count_val iterations, each
+        // writing src_len bytes -> heap overflow. On overflow, return "".
+        auto* umul_fn = Intrinsic::getOrInsertDeclaration(&m_module,
+            Intrinsic::umul_with_overflow, {i64_ty});
+        auto* mul_res = bp.CreateCall(umul_fn, {src_len, count_val}, "mul_ovf");
+        auto* new_len = bp.CreateExtractValue(mul_res, {0}, "new_len");
+        auto* overflow = bp.CreateExtractValue(mul_res, {1}, "overflow");
+        auto* alloc_bb = BasicBlock::Create(m_ctx, "alloc", fn);
+        bp.CreateCondBr(overflow, zero_bb, alloc_bb);
+
+        IRBuilder<> ba(alloc_bb);
+        auto* buf_size = ba.CreateAdd(new_len, ConstantInt::get(i64_ty, 1));
+        auto* buf = ba.CreateCall(malloc_fn, {buf_size}, "buf");
+        ba.CreateBr(loop_bb);
 
         IRBuilder<> bl(loop_bb);
         auto* i_phi = bl.CreatePHI(i64_ty, 2, "i");
-        i_phi->addIncoming(ConstantInt::get(i64_ty, 0), prep_bb);
+        i_phi->addIncoming(ConstantInt::get(i64_ty, 0), alloc_bb);
         auto* cont = bl.CreateICmpSLT(i_phi, count_val);
         bl.CreateCondBr(cont, body_bb, done_bb);
 

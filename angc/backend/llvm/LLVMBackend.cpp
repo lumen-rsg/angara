@@ -374,6 +374,15 @@ void LLVMBackend::emitGcPushFrame(llvm::Function* fn, int slot_count) {
     auto* count_addr = tmp.CreateStructGEP(m_gc_frame_type, m_gc_current_frame, 1);
     tmp.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0), count_addr);
 
+    // BUG-5: snapshot the exception-chain pointer at function entry. Non-local
+    // exits (return / fall-through) restore this in emitGcPopFrame, popping any
+    // try frames left on the chain by a return/break/continue inside a try.
+    if (auto* chain_gv = rt->getExceptionChain()) {
+        auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
+        m_exc_chain_save = tmp.CreateAlloca(ptr_ty, nullptr, "exc_chain_save");
+        tmp.CreateStore(tmp.CreateLoad(ptr_ty, chain_gv, "entry_chain"), m_exc_chain_save);
+    }
+
     // Call __ang_gc_push_frame at current builder position
     auto* frame_i8 = builder->CreateBitCast(m_gc_current_frame, llvm::PointerType::get(*ctx, 0));
     callRtByName("__ang_gc_push_frame", {frame_i8});
@@ -384,6 +393,15 @@ void LLVMBackend::emitGcPushFrame(llvm::Function* fn, int slot_count) {
 
 void LLVMBackend::emitGcPopFrame() {
     callRtByName("__ang_gc_pop_frame", {});
+    // BUG-5: restore the exception chain to its function-entry value, popping
+    // any try frames left on the chain by a return/break/continue that exited a
+    // try body without reaching its fall-through __ang_try_end. Idempotent when
+    // the chain is already balanced (normal try completion).
+    if (m_exc_chain_save) {
+        auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
+        builder->CreateStore(builder->CreateLoad(ptr_ty, m_exc_chain_save, "saved_chain"),
+                             rt->getExceptionChain());
+    }
     m_gc_current_frame = nullptr;
     m_gc_frame_slot_idx = 0;
 }

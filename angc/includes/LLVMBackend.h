@@ -311,6 +311,15 @@ namespace angara {
         int m_gc_frame_max_slots = 0;
         llvm::StructType* m_gc_frame_type = nullptr;
 
+        // BUG-5: exception-frame leak. A `try` pushes a frame onto the global
+        // exception chain; the pop (__ang_try_end) is only emitted on the
+        // fall-through path, so a return/break/continue out of a try body leaves
+        // a stale frame — a later throw longjmps into it (dead stack). We save
+        // the chain pointer at function entry and restore it on every function
+        // exit (emitGcPopFrame), and save/restore per-loop for break/continue.
+        llvm::Value* m_exc_chain_save = nullptr;          // function-entry chain
+        std::vector<llvm::Value*> m_exc_loop_chain_saves; // one per enclosing loop
+
         void emitGcPushFrame(llvm::Function* fn, int slot_count);
         void emitGcPopFrame();
         llvm::Value* emitGcThreadSetup();

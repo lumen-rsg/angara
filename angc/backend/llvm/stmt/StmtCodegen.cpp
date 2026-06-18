@@ -16,8 +16,32 @@ void LLVMBackend::cgStmt(const std::shared_ptr<Stmt>& s) {
     else if (auto* p = dynamic_cast<const ForStmt*>(s.get())) { setDebugLoc(p->keyword); cgFor(*p); }
     else if (auto* p = dynamic_cast<const ForInStmt*>(s.get())) { setDebugLoc(p->keyword); cgForIn(*p); }
     else if (auto* p = dynamic_cast<const ReturnStmt*>(s.get())) { setDebugLoc(p->keyword); cgReturn(*p); }
-    else if (auto* p = dynamic_cast<const BreakStmt*>(s.get())) { setDebugLoc(0, 0); if (loopExit) builder->CreateBr(loopExit); }
-    else if (auto* p = dynamic_cast<const ContinueStmt*>(s.get())) { setDebugLoc(0, 0); if (loopContinue) builder->CreateBr(loopContinue); }
+    else if (auto* p = dynamic_cast<const BreakStmt*>(s.get())) {
+        setDebugLoc(0, 0);
+        if (loopExit) {
+            // BUG-5: pop try frames pushed inside this loop before leaving it,
+            // so a later throw can't longjmp into a stale frame.
+            if (!m_exc_loop_chain_saves.empty()) {
+                auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
+                builder->CreateStore(builder->CreateLoad(ptr_ty, m_exc_loop_chain_saves.back(), "brk_chain"),
+                                     rt->getExceptionChain());
+            }
+            builder->CreateBr(loopExit);
+        }
+    }
+    else if (auto* p = dynamic_cast<const ContinueStmt*>(s.get())) {
+        setDebugLoc(0, 0);
+        if (loopContinue) {
+            // BUG-5: continue re-enters the loop body; a try started in this
+            // iteration must be popped so the next iteration is clean.
+            if (!m_exc_loop_chain_saves.empty()) {
+                auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
+                builder->CreateStore(builder->CreateLoad(ptr_ty, m_exc_loop_chain_saves.back(), "cont_chain"),
+                                     rt->getExceptionChain());
+            }
+            builder->CreateBr(loopContinue);
+        }
+    }
     else if (auto* p = dynamic_cast<const ThrowStmt*>(s.get())) { setDebugLoc(p->keyword); cgThrow(*p); }
     else if (auto* p = dynamic_cast<const TryStmt*>(s.get())) { setDebugLoc(p->catchName); cgTry(*p); }
     else if (auto* p = dynamic_cast<const UnsafeBlockStmt*>(s.get())) {
@@ -111,6 +135,15 @@ void LLVMBackend::cgWhile(const WhileStmt& s) {
     auto* bd = llvm::BasicBlock::Create(*ctx,"wb",fn);
     auto* en = llvm::BasicBlock::Create(*ctx,"we",fn);
     auto* sv = loopExit; auto* svc = loopContinue; loopExit = en; loopContinue = lp; loopDepth++;
+    // BUG-5: snapshot the exception chain at loop entry so break/continue can
+    // restore it, popping try frames pushed inside the loop body.
+    if (auto* chain_gv = rt->getExceptionChain()) {
+        llvm::IRBuilder<> lexc(&fn->getEntryBlock(), fn->getEntryBlock().getFirstInsertionPt());
+        auto* loop_exc_save = lexc.CreateAlloca(llvm::PointerType::get(*ctx, 0), nullptr, "loop_exc_save");
+        builder->CreateStore(builder->CreateLoad(llvm::PointerType::get(*ctx, 0), chain_gv),
+                             loop_exc_save);
+        m_exc_loop_chain_saves.push_back(loop_exc_save);
+    }
     builder->CreateBr(lp);
     builder->SetInsertPoint(lp);
     builder->CreateCondBr(isTruthy(cg(s.condition)), bd, en);
@@ -118,6 +151,7 @@ void LLVMBackend::cgWhile(const WhileStmt& s) {
     cgStmt(s.body);
     if (!builder->GetInsertBlock()->getTerminator()) builder->CreateBr(lp);
     builder->SetInsertPoint(en);
+    if (rt->getExceptionChain()) m_exc_loop_chain_saves.pop_back();
     loopExit = sv; loopContinue = svc; loopDepth--;
 }
 
@@ -132,6 +166,14 @@ void LLVMBackend::cgFor(const ForStmt& s) {
     auto* en = llvm::BasicBlock::Create(*ctx,"fe",fn);
     auto* inc = llvm::BasicBlock::Create(*ctx,"finc",fn);
     auto* sv2 = loopExit; auto* svc = loopContinue; loopExit = en; loopContinue = inc; loopDepth++;
+    // BUG-5: snapshot the exception chain at loop entry (see cgWhile).
+    if (auto* chain_gv = rt->getExceptionChain()) {
+        llvm::IRBuilder<> lexc(&fn->getEntryBlock(), fn->getEntryBlock().getFirstInsertionPt());
+        auto* loop_exc_save = lexc.CreateAlloca(llvm::PointerType::get(*ctx, 0), nullptr, "loop_exc_save");
+        builder->CreateStore(builder->CreateLoad(llvm::PointerType::get(*ctx, 0), chain_gv),
+                             loop_exc_save);
+        m_exc_loop_chain_saves.push_back(loop_exc_save);
+    }
     builder->CreateBr(lp);
     builder->SetInsertPoint(lp);
     if (s.condition) builder->CreateCondBr(isTruthy(cg(s.condition)), bd, en);
@@ -145,6 +187,7 @@ void LLVMBackend::cgFor(const ForStmt& s) {
     if (s.increment) cg(s.increment);
     builder->CreateBr(lp);
     builder->SetInsertPoint(en);
+    if (rt->getExceptionChain()) m_exc_loop_chain_saves.pop_back();
     loopExit = sv2; loopContinue = svc; loopDepth--; namedVals = sv; namedTypes = stv; namedKinds = skv;
 }
 
@@ -163,6 +206,14 @@ void LLVMBackend::cgForIn(const ForInStmt& s) {
     auto* bd = llvm::BasicBlock::Create(*ctx,"fib",fn);
     auto* en = llvm::BasicBlock::Create(*ctx,"fie",fn);
     auto* sv2 = loopExit; auto* svc = loopContinue; loopExit = en; loopContinue = lp; loopDepth++;
+    // BUG-5: snapshot the exception chain at loop entry (see cgWhile).
+    if (auto* chain_gv = rt->getExceptionChain()) {
+        llvm::IRBuilder<> lexc(&fn->getEntryBlock(), fn->getEntryBlock().getFirstInsertionPt());
+        auto* loop_exc_save = lexc.CreateAlloca(llvm::PointerType::get(*ctx, 0), nullptr, "loop_exc_save");
+        builder->CreateStore(builder->CreateLoad(llvm::PointerType::get(*ctx, 0), chain_gv),
+                             loop_exc_save);
+        m_exc_loop_chain_saves.push_back(loop_exc_save);
+    }
     // Raw i64 counter — no GC root needed (never holds heap pointers)
     llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().getFirstInsertionPt());
     auto* ia = tmp.CreateAlloca(llvm::Type::getInt64Ty(*ctx), nullptr, "__fi");
@@ -179,6 +230,7 @@ void LLVMBackend::cgForIn(const ForInStmt& s) {
         builder->CreateBr(lp);
     }
     builder->SetInsertPoint(en);
+    if (rt->getExceptionChain()) m_exc_loop_chain_saves.pop_back();
     loopExit = sv2; loopContinue = svc; loopDepth--; namedVals = sv; namedTypes = stv; namedKinds = skv;
 }
 

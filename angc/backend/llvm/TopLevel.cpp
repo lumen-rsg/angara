@@ -1105,9 +1105,11 @@ bool LLVMBackend::stmtNeedsGC(const std::shared_ptr<Stmt>& s) {
         return exprNeedsGC(p->expression);
     }
     if (auto* p = dynamic_cast<const TryStmt*>(s.get())) {
-        if (stmtNeedsGC(p->tryBlock)) return true;
-        if (stmtNeedsGC(p->catchBlock)) return true;
-        return false;
+        // BUG-5: a try needs the enclosing function to carry a GC frame so the
+        // exception-chain save/restore in emitGcPushFrame/emitGcPopFrame runs —
+        // otherwise a return/break/continue out of the try leaks the frame.
+        (void)p;
+        return true;
     }
     if (auto* p = dynamic_cast<const ThrowStmt*>(s.get())) {
         return exprNeedsGC(p->expression);

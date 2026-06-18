@@ -188,7 +188,10 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         auto* fin_arg   = fn_native_instance_new->arg_begin() + 1;
         auto* name_arg  = fn_native_instance_new->arg_begin() + 2;
 
-        auto* size = ConstantInt::get(i64_ty, 40);
+        // BUG-15: derive the size from the LLVM type (matches every sibling
+        // allocator) instead of a hardcoded 40 — fragile if the struct grows.
+        auto* size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_native_instance_type));
         auto* mem = b.CreateCall(malloc_fn, {size});
         auto* inst = b.CreateBitCast(mem, ptr_ty);
 

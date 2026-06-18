@@ -1610,6 +1610,7 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     auto* saved_ret_alloca = m_inlined_main_ret_alloca;
     auto* saved_cleanup_bb = m_inlined_main_cleanup_bb;
     auto* saved_gc_frame = m_gc_current_frame;
+    auto* saved_exc_chain = m_exc_chain_save;
     int saved_gc_slot_idx = m_gc_frame_slot_idx;
     int saved_gc_max_slots = m_gc_frame_max_slots;
     m_inlined_main_ret_alloca = nullptr;
@@ -1664,6 +1665,7 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     m_inlined_main_ret_alloca = saved_ret_alloca;
     m_inlined_main_cleanup_bb = saved_cleanup_bb;
     m_gc_current_frame = saved_gc_frame;
+    m_exc_chain_save = saved_exc_chain;
     m_gc_frame_slot_idx = saved_gc_slot_idx;
     m_gc_frame_max_slots = saved_gc_max_slots;
 
