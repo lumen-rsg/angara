@@ -339,7 +339,7 @@ void RuntimeBuilder::generateThreadOps() {
         auto* arg = trampoline->arg_begin();
 
         // GC: register this thread
-        auto* gc_state_type = m_gc->getGcThreadStateType();
+        auto* gc_state_type = m_gc_thread_state_type;
         auto& dl = m_module.getDataLayout();
         uint64_t state_size_val = dl.getTypeAllocSize(gc_state_type);
         auto* state_size = ConstantInt::get(i64_ty, state_size_val);

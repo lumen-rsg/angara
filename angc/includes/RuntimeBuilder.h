@@ -1,7 +1,5 @@
 #pragma once
 
-#include "GarbageCollector.h"
-
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/IRBuilder.h>
@@ -13,8 +11,6 @@
 #include <memory>
 
 namespace angara {
-
-class MarkSweepGC;
 
 /// Tag values for the AngaraObject.type discriminant field.
 /// TAG_NIL through TAG_F64 are unboxed (payload stored inline).
@@ -51,7 +47,7 @@ public:
     /// @param builder      IR builder for generating instructions.
     /// @param freestanding If true, generates stubs instead of libc-dependent implementations.
     RuntimeBuilder(llvm::LLVMContext& context, llvm::Module& module, llvm::IRBuilder<>& builder,
-                   bool freestanding = false, const std::string& gc_strategy = "chaperone");
+                   bool freestanding = false);
 
     /// Destructor — defined in RuntimeBuilder.cpp where GarbageCollector is complete.
     ~RuntimeBuilder();
@@ -145,22 +141,27 @@ public:
     /// Returns the AngaraNativeInstance struct type.
     llvm::StructType* getNativeInstanceType() const { return m_native_instance_type; }
 
-    // --- GC interface ---
+    // --- Memory management (no GC — direct malloc/free via the allocator) ---
 
-    /// Returns the active garbage collector instance.
-    GarbageCollector* gc() const { return m_gc.get(); }
+    llvm::FunctionCallee getAllocFunc()           const { return m_fn_gc_alloc; }
+    llvm::FunctionCallee getStoreTrackFunc()      const { return m_fn_gc_clear_unique; }
+    llvm::FunctionCallee getPushFrameFunc()       const { return m_fn_gc_push_frame; }
+    llvm::FunctionCallee getPopFrameFunc()        const { return m_fn_gc_pop_frame; }
+    llvm::FunctionCallee getThreadRegisterFunc()  const { return m_fn_gc_thread_register; }
+    llvm::FunctionCallee getThreadUnregisterFunc() const { return m_fn_gc_thread_unregister; }
+    llvm::FunctionCallee getGcPinFunc()           const { return m_fn_gc_pin; }
+    llvm::FunctionCallee getGcUnpinFunc()         const { return m_fn_gc_unpin; }
+    llvm::FunctionCallee getGcPrintStatsFunc()    const { return m_fn_gc_print_stats; }
+    llvm::FunctionCallee getReadBarrierFunc()     const { return m_fn_gc_read_barrier; }
 
-    // --- GC type / global accessors (defined in RuntimeBuilder.cpp) ---
+    unsigned headerTypeIndex() const { return 0; }
+    unsigned headerMetaIndex() const { return 1; }
+    int      headerNextIndex() const { return 2; }
 
-    llvm::StructType* getGcRootFrameType() const;
-    llvm::StructType* getGcThreadStateType() const;
-    llvm::GlobalVariable* getGcThreadStateTLS() const;
-    llvm::FunctionCallee getGcPrintStatsFunc() const;
-
-    /// Returns the initial meta value for newly allocated objects.
-    /// Delegates to the active GC's getInitialMetaConstant().
-    /// Defined in RuntimeBuilder.cpp (needs full GarbageCollector type).
-    llvm::ConstantInt* getGcInitialMeta() const;
+    llvm::StructType*   getGcRootFrameType()   const { return m_gc_root_frame_type; }
+    llvm::StructType*   getGcThreadStateType()  const { return m_gc_thread_state_type; }
+    llvm::GlobalVariable* getGcThreadStateTLS() const { return m_g_thread_state_tls; }
+    llvm::ConstantInt*  getGcInitialMeta()      const { return m_gc_initial_meta; }
 
 private:
     /// Creates all LLVM struct types for the runtime object model.
@@ -272,7 +273,26 @@ private:
 
     llvm::GlobalVariable* m_api_vtable = nullptr;
 
-    std::unique_ptr<GarbageCollector> m_gc;
+    // --- No-GC runtime types, globals, and callees ---
+    llvm::StructType*     m_gc_root_frame_type    = nullptr;
+    llvm::StructType*     m_gc_thread_state_type   = nullptr;
+    llvm::GlobalVariable* m_g_thread_state_tls     = nullptr;
+    llvm::ConstantInt*    m_gc_initial_meta        = nullptr;
+
+    llvm::FunctionCallee m_fn_gc_alloc;
+    llvm::FunctionCallee m_fn_gc_clear_unique;
+    llvm::FunctionCallee m_fn_gc_push_frame;
+    llvm::FunctionCallee m_fn_gc_pop_frame;
+    llvm::FunctionCallee m_fn_gc_thread_register;
+    llvm::FunctionCallee m_fn_gc_thread_unregister;
+    llvm::FunctionCallee m_fn_gc_pin;
+    llvm::FunctionCallee m_fn_gc_unpin;
+    llvm::FunctionCallee m_fn_gc_print_stats;
+    llvm::FunctionCallee m_fn_gc_read_barrier;
+    llvm::FunctionCallee m_fn_gc_collect;
+    llvm::FunctionCallee m_fn_gc_finalize;
+    llvm::FunctionCallee m_fn_gc_obj_size;
+    llvm::FunctionCallee m_fn_gc_safepoint;
 
     bool m_freestanding = false;
 };

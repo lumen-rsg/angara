@@ -52,7 +52,7 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
         m_di_cu = diCU;
     }
 
-    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding, m_gc_strategy);
+    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding);
     rt->generateRuntime();
     objType = rt->getAngaraObjType();
 }
