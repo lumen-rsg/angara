@@ -39,16 +39,12 @@ void RuntimeBuilder::generateClosureOps() {
 
         auto* closure_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_closure_type));
-        auto* mem = b.CreateCall(malloc_fn, {closure_size});
-        auto* closure_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
+        // BUG-6: route through __ang_gc_alloc so the closure is linked into the
+        // GC alloc list (tracked/swept/finalized) -- raw malloc leaked forever
+        // and the native finalizer never ran. gc_alloc inits the ObjHeader.
+        auto* closure_ptr = b.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+            {closure_size, ConstantInt::get(i32_ty, OBJ_CLOSURE)}, "closure_mem");
 
-        auto* header_ptr = b.CreateStructGEP(m_closure_type, closure_ptr, 0);
-        b.CreateStore(ConstantInt::get(i32_ty, OBJ_CLOSURE),
-            b.CreateStructGEP(m_obj_header_type, header_ptr, 0));
-        b.CreateStore(getGcInitialMeta(),
-            b.CreateStructGEP(m_obj_header_type, header_ptr, 1));
-        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
-            b.CreateStructGEP(m_obj_header_type, header_ptr, 2));
         b.CreateStore(fn_arg, b.CreateStructGEP(m_closure_type, closure_ptr, 1));
         b.CreateStore(arity_arg, b.CreateStructGEP(m_closure_type, closure_ptr, 2));
         b.CreateStore(native_arg, b.CreateStructGEP(m_closure_type, closure_ptr, 3));
@@ -143,16 +139,10 @@ void RuntimeBuilder::generateClosureOps() {
 
         auto* bm_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_bound_method_type));
-        auto* mem = b.CreateCall(malloc_fn, {bm_size});
-        auto* bm_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
+        // BUG-6: route through __ang_gc_alloc (see __ang_closure_new).
+        auto* bm_ptr = b.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+            {bm_size, ConstantInt::get(i32_ty, OBJ_BOUND_METHOD)}, "bm_mem");
 
-        auto* header_ptr = b.CreateStructGEP(m_bound_method_type, bm_ptr, 0);
-        b.CreateStore(ConstantInt::get(i32_ty, OBJ_BOUND_METHOD),
-            b.CreateStructGEP(m_obj_header_type, header_ptr, 0));
-        b.CreateStore(getGcInitialMeta(),
-            b.CreateStructGEP(m_obj_header_type, header_ptr, 1));
-        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
-            b.CreateStructGEP(m_obj_header_type, header_ptr, 2));
         b.CreateStore(recv_arg, b.CreateStructGEP(m_bound_method_type, bm_ptr, 1));
         b.CreateStore(closure_arg, b.CreateStructGEP(m_bound_method_type, bm_ptr, 2));
 
@@ -190,16 +180,10 @@ void RuntimeBuilder::generateExceptionOps() {
 
         auto* exc_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_exception_type));
-        auto* mem = b.CreateCall(malloc_fn, {exc_size});
-        auto* exc_ptr = b.CreateBitCast(mem, PointerType::get(m_ctx, 0));
+        // BUG-6: route through __ang_gc_alloc (see __ang_closure_new).
+        auto* exc_ptr = b.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+            {exc_size, ConstantInt::get(i32_ty, OBJ_EXCEPTION)}, "exc_mem");
 
-        auto* header_ptr = b.CreateStructGEP(m_exception_type, exc_ptr, 0);
-        b.CreateStore(ConstantInt::get(i32_ty, OBJ_EXCEPTION),
-            b.CreateStructGEP(m_obj_header_type, header_ptr, 0));
-        b.CreateStore(getGcInitialMeta(),
-            b.CreateStructGEP(m_obj_header_type, header_ptr, 1));
-        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
-            b.CreateStructGEP(m_obj_header_type, header_ptr, 2));
         b.CreateStore(msg, b.CreateStructGEP(m_exception_type, exc_ptr, 1));
 
         b.CreateRet(pack_obj(b, exc_ptr));

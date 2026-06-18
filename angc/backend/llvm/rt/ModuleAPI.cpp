@@ -192,16 +192,12 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         // allocator) instead of a hardcoded 40 — fragile if the struct grows.
         auto* size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_native_instance_type));
-        auto* mem = b.CreateCall(malloc_fn, {size});
-        auto* inst = b.CreateBitCast(mem, ptr_ty);
+        // BUG-6: route through __ang_gc_alloc so native instances are GC-tracked
+        // -- swept and finalized, so the native finalize callback (sqlite3_close,
+        // fd close, ...) actually runs instead of leaking forever.
+        auto* inst = b.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+            {size, ConstantInt::get(i32_ty, OBJ_NATIVE_INSTANCE)}, "ni_mem");
 
-        auto* hdr = b.CreateStructGEP(m_native_instance_type, inst, 0);
-        b.CreateStore(ConstantInt::get(i32_ty, OBJ_NATIVE_INSTANCE),
-                      b.CreateStructGEP(m_obj_header_type, hdr, 0));
-        b.CreateStore(getGcInitialMeta(),
-                      b.CreateStructGEP(m_obj_header_type, hdr, 1));
-        b.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
-                      b.CreateStructGEP(m_obj_header_type, hdr, 2));
         b.CreateStore(data_arg, b.CreateStructGEP(m_native_instance_type, inst, 1));
         b.CreateStore(fin_arg,   b.CreateStructGEP(m_native_instance_type, inst, 2));
         auto* name_copy = b.CreateCall(strdup_fn, {name_arg});

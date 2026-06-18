@@ -452,17 +452,10 @@ void RuntimeBuilder::generateDeepClone() {
 
         auto* str_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_string_type));
-        auto* mem = bs.CreateCall(malloc_fn, {str_size}, "mem");
-        auto* new_ptr = bs.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_str");
-
-        // Init header: type=OBJ_STRING, refcount=1
-        auto* header = bs.CreateStructGEP(m_string_type, new_ptr, 0);
-        bs.CreateStore(ConstantInt::get(i32_ty, OBJ_STRING),
-            bs.CreateStructGEP(m_obj_header_type, header, 0));
-        bs.CreateStore(getGcInitialMeta(),
-            bs.CreateStructGEP(m_obj_header_type, header, 1));
-        bs.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
-            bs.CreateStructGEP(m_obj_header_type, header, 2));
+        // BUG-6: route through __ang_gc_alloc so the clone is tracked/swept/
+        // finalized (raw malloc leaked clones forever). gc_alloc inits the header.
+        auto* new_ptr = bs.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+            {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "new_str");
         bs.CreateStore(len, bs.CreateStructGEP(m_string_type, new_ptr, 1));
         bs.CreateStore(len, bs.CreateStructGEP(m_string_type, new_ptr, 2));
         bs.CreateStore(bs.CreateCall(strdup_fn, {chars}, "copied_chars"),
@@ -481,16 +474,9 @@ void RuntimeBuilder::generateDeepClone() {
 
         auto* list_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_list_type));
-        auto* mem = bl.CreateCall(malloc_fn, {list_size}, "mem");
-        auto* new_ptr = bl.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_list");
-
-        auto* header = bl.CreateStructGEP(m_list_type, new_ptr, 0);
-        bl.CreateStore(ConstantInt::get(i32_ty, OBJ_LIST),
-            bl.CreateStructGEP(m_obj_header_type, header, 0));
-        bl.CreateStore(getGcInitialMeta(),
-            bl.CreateStructGEP(m_obj_header_type, header, 1));
-        bl.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
-            bl.CreateStructGEP(m_obj_header_type, header, 2));
+        // BUG-6: route through __ang_gc_alloc (see clone string).
+        auto* new_ptr = bl.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+            {list_size, ConstantInt::get(i32_ty, OBJ_LIST)}, "new_list");
         // BUG-4: stored cap must match the allocation. The element buffer below
         // is sized count*elem_size; copying the source's cap left cap>count, so
         // the next push (which grows only when count==cap) skipped the grow and
@@ -547,16 +533,9 @@ void RuntimeBuilder::generateDeepClone() {
 
         auto* rec_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_record_type));
-        auto* mem = br.CreateCall(malloc_fn, {rec_size}, "mem");
-        auto* new_ptr = br.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_rec");
-
-        auto* header = br.CreateStructGEP(m_record_type, new_ptr, 0);
-        br.CreateStore(ConstantInt::get(i32_ty, OBJ_RECORD),
-            br.CreateStructGEP(m_obj_header_type, header, 0));
-        br.CreateStore(getGcInitialMeta(),
-            br.CreateStructGEP(m_obj_header_type, header, 1));
-        br.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
-            br.CreateStructGEP(m_obj_header_type, header, 2));
+        // BUG-6: route through __ang_gc_alloc (see clone string).
+        auto* new_ptr = br.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+            {rec_size, ConstantInt::get(i32_ty, OBJ_RECORD)}, "new_rec");
         br.CreateStore(count, br.CreateStructGEP(m_record_type, new_ptr, 1));
         br.CreateStore(cap, br.CreateStructGEP(m_record_type, new_ptr, 2));
 
@@ -629,16 +608,9 @@ void RuntimeBuilder::generateDeepClone() {
 
         auto* bm_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_bound_method_type));
-        auto* mem = bb.CreateCall(malloc_fn, {bm_size}, "mem");
-        auto* new_ptr = bb.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_bm");
-
-        auto* header = bb.CreateStructGEP(m_bound_method_type, new_ptr, 0);
-        bb.CreateStore(ConstantInt::get(i32_ty, OBJ_BOUND_METHOD),
-            bb.CreateStructGEP(m_obj_header_type, header, 0));
-        bb.CreateStore(getGcInitialMeta(),
-            bb.CreateStructGEP(m_obj_header_type, header, 1));
-        bb.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
-            bb.CreateStructGEP(m_obj_header_type, header, 2));
+        // BUG-6: route through __ang_gc_alloc (see clone string).
+        auto* new_ptr = bb.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+            {bm_size, ConstantInt::get(i32_ty, OBJ_BOUND_METHOD)}, "new_bm");
 
         auto* clone_fn = m_module.getFunction("__ang_deep_clone");
         bb.CreateStore(bb.CreateCall(clone_fn, {recv}, "cloned_recv"),
@@ -657,16 +629,9 @@ void RuntimeBuilder::generateDeepClone() {
 
         auto* exc_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_exception_type));
-        auto* mem = be.CreateCall(malloc_fn, {exc_size}, "mem");
-        auto* new_ptr = be.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_exc");
-
-        auto* header = be.CreateStructGEP(m_exception_type, new_ptr, 0);
-        be.CreateStore(ConstantInt::get(i32_ty, OBJ_EXCEPTION),
-            be.CreateStructGEP(m_obj_header_type, header, 0));
-        be.CreateStore(getGcInitialMeta(),
-            be.CreateStructGEP(m_obj_header_type, header, 1));
-        be.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
-            be.CreateStructGEP(m_obj_header_type, header, 2));
+        // BUG-6: route through __ang_gc_alloc (see clone string).
+        auto* new_ptr = be.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+            {exc_size, ConstantInt::get(i32_ty, OBJ_EXCEPTION)}, "new_exc");
 
         auto* clone_fn = m_module.getFunction("__ang_deep_clone");
         be.CreateStore(be.CreateCall(clone_fn, {msg}, "cloned_msg"),

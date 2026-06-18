@@ -299,7 +299,7 @@ llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string&
     // Track in GC root frame if active — register in entry block to avoid
     // re-registering (and incrementing count) inside loops.
     // Insert AFTER the gc_push_frame call (which is near the end of entry block)
-    if (m_gc_current_frame && m_gc_frame_slot_idx < m_gc_frame_max_slots) {
+    if (m_gc_current_frame) {
         auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
         auto* i64_ty = llvm::Type::getInt64Ty(*ctx);
         auto* i8_ptr = llvm::PointerType::get(*ctx, 0);
@@ -324,19 +324,33 @@ llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string&
                                     : fn->getEntryBlock().begin();
         llvm::IRBuilder<> regBuilder(&fn->getEntryBlock(), insertPt);
 
-        // Store alloca address into frame slot
-        auto* slot_addr = regBuilder.CreateGEP(m_gc_frame_type, m_gc_current_frame,
-            {llvm::ConstantInt::get(i32_ty, 0), llvm::ConstantInt::get(i32_ty, 2),
-             llvm::ConstantInt::get(i64_ty, m_gc_frame_slot_idx)});
-        auto* alloca_i8 = regBuilder.CreateBitCast(alloca, i8_ptr);
-        regBuilder.CreateStore(alloca_i8, slot_addr);
+        if (m_gc_frame_slot_idx < m_gc_frame_max_slots) {
+            // Store alloca address into frame slot
+            auto* slot_addr = regBuilder.CreateGEP(m_gc_frame_type, m_gc_current_frame,
+                {llvm::ConstantInt::get(i32_ty, 0), llvm::ConstantInt::get(i32_ty, 2),
+                 llvm::ConstantInt::get(i64_ty, m_gc_frame_slot_idx)});
+            auto* alloca_i8 = regBuilder.CreateBitCast(alloca, i8_ptr);
+            regBuilder.CreateStore(alloca_i8, slot_addr);
 
-        // Increment frame count
-        auto* count_addr = regBuilder.CreateStructGEP(m_gc_frame_type, m_gc_current_frame, 1);
-        auto* count = regBuilder.CreateLoad(i32_ty, count_addr, "frame_count");
-        regBuilder.CreateStore(regBuilder.CreateAdd(count, llvm::ConstantInt::get(i32_ty, 1)), count_addr);
+            // Increment frame count
+            auto* count_addr = regBuilder.CreateStructGEP(m_gc_frame_type, m_gc_current_frame, 1);
+            auto* count = regBuilder.CreateLoad(i32_ty, count_addr, "frame_count");
+            regBuilder.CreateStore(regBuilder.CreateAdd(count, llvm::ConstantInt::get(i32_ty, 1)), count_addr);
 
-        m_gc_frame_slot_idx++;
+            m_gc_frame_slot_idx++;
+        } else {
+            // BUG-13: GC root frame is full (>256 tracked locals in one
+            // function). Emit a trap (once, when first exceeded) so a lost
+            // root is loud, not a silent collection of a still-reachable
+            // object. Extremely rare in practice. The slot_idx increment
+            // below ensures the trap is emitted only on the first overflow.
+            if (m_gc_frame_slot_idx == m_gc_frame_max_slots) {
+                auto* trap_fn = llvm::Intrinsic::getOrInsertDeclaration(
+                    mod.get(), llvm::Intrinsic::trap);
+                regBuilder.CreateCall(trap_fn);
+            }
+            m_gc_frame_slot_idx++;
+        }
     }
 
     return alloca;

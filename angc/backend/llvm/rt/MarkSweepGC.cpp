@@ -675,10 +675,17 @@ void MarkSweepGC::generateFunctions() {
         auto* type_gaddr = b.CreateStructGEP(header_ty, obj_ptr, 0);
         auto* obj_type = b.CreateLoad(i32_ty, type_gaddr, "obj_type");
 
-        auto* sw = b.CreateSwitch(obj_type, done_bb, 4);
+        // BUG-9: CLASS/INSTANCE/DATA_INSTANCE/ENUM_INSTANCE share the record
+        // layout (the scan switch treats them as records). Route them through
+        // the same finalize path so their entries arrays + keys are freed.
+        auto* sw = b.CreateSwitch(obj_type, done_bb, 8);
         sw->addCase(ConstantInt::get(i32_ty, OBJ_STRING), string_bb);
         sw->addCase(ConstantInt::get(i32_ty, OBJ_LIST), list_bb);
         sw->addCase(ConstantInt::get(i32_ty, OBJ_RECORD), record_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_CLASS), record_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_INSTANCE), record_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_DATA_INSTANCE), record_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_ENUM_INSTANCE), record_bb);
         sw->addCase(ConstantInt::get(i32_ty, OBJ_NATIVE_INSTANCE), native_bb);
 
         // OBJ_STRING: free chars buffer (field 3 of AngaraString)

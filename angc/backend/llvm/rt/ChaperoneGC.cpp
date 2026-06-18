@@ -955,6 +955,7 @@ void ChaperoneGC::generateFunctions() {
         auto* record_free_entries_bb = BasicBlock::Create(m_ctx, "rec_free_entries", fn);
         auto* native_bb = BasicBlock::Create(m_ctx, "native", fn);
         auto* call_finalize_bb = BasicBlock::Create(m_ctx, "call_finalize", fn);
+        auto* closure_bb = BasicBlock::Create(m_ctx, "fin_closure", fn);
         auto* done_bb = BasicBlock::Create(m_ctx, "done", fn);
 
         IRBuilder<> b(entry);
@@ -962,11 +963,20 @@ void ChaperoneGC::generateFunctions() {
         auto* type_gaddr = b.CreateStructGEP(header_ty, obj_ptr, 0);
         auto* obj_type = b.CreateLoad(i32_ty, type_gaddr, "obj_type");
 
-        auto* sw = b.CreateSwitch(obj_type, done_bb, 4);
+        // BUG-9: CLASS/INSTANCE/DATA_INSTANCE/ENUM_INSTANCE share the record
+        // layout (header + count + cap + entries) -- the scan switch already
+        // treats them as records. Route them through the same finalize path so
+        // their entries arrays and strdup'd keys are freed on collection.
+        auto* sw = b.CreateSwitch(obj_type, done_bb, 9);
         sw->addCase(ConstantInt::get(i32_ty, OBJ_STRING), string_bb);
         sw->addCase(ConstantInt::get(i32_ty, OBJ_LIST), list_bb);
         sw->addCase(ConstantInt::get(i32_ty, OBJ_RECORD), record_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_CLASS), record_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_INSTANCE), record_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_DATA_INSTANCE), record_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_ENUM_INSTANCE), record_bb);
         sw->addCase(ConstantInt::get(i32_ty, OBJ_NATIVE_INSTANCE), native_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_CLOSURE), closure_bb);
 
         // OBJ_STRING
         {
@@ -1024,9 +1034,15 @@ void ChaperoneGC::generateFunctions() {
             brfe.CreateBr(done_bb);
         }
 
-        // OBJ_NATIVE_INSTANCE
+        // OBJ_NATIVE_INSTANCE: call the native finalize callback (sqlite3_close,
+        // fd close, ...) and free the strdup'd name. BUG-6 now tracks native
+        // instances, so this finalize actually runs.
         {
             IRBuilder<> bn(native_bb);
+            // BUG-9: free the strdup'd name (field 3); free(NULL) is safe.
+            auto* name = bn.CreateLoad(i8_ptr,
+                bn.CreateStructGEP(m_native_instance_type, obj_ptr, 3), "name");
+            bn.CreateCall(free_fn, {name});
             auto* finalize_fn = bn.CreateLoad(i8_ptr,
                 bn.CreateStructGEP(m_native_instance_type, obj_ptr, 2), "finalize_fn");
             auto* has_fn = bn.CreateICmpNE(finalize_fn, ConstantPointerNull::get(i8_ptr));
@@ -1038,6 +1054,17 @@ void ChaperoneGC::generateFunctions() {
             auto* finalize_ty = FunctionType::get(void_ty, {i8_ptr}, false);
             bcf.CreateCall(finalize_ty, finalize_fn, {data});
             bcf.CreateBr(done_bb);
+        }
+
+        // OBJ_CLOSURE: free the malloc'd env array (field 4). The captured
+        // AngaraObject elements are GC-tracked and scanned separately, so only
+        // the backing array is released here.
+        {
+            IRBuilder<> bcl(closure_bb);
+            auto* env = bcl.CreateLoad(PointerType::get(m_ctx, 0),
+                bcl.CreateStructGEP(m_closure_type, obj_ptr, 4), "env");
+            bcl.CreateCall(free_fn, {bcl.CreateBitCast(env, i8_ptr)});
+            bcl.CreateBr(done_bb);
         }
 
         IRBuilder<> bd(done_bb);
