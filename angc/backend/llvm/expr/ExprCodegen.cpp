@@ -1609,13 +1609,9 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     auto saved_kinds = std::move(namedKinds);
     auto* saved_ret_alloca = m_inlined_main_ret_alloca;
     auto* saved_cleanup_bb = m_inlined_main_cleanup_bb;
-    auto* saved_gc_frame = m_gc_current_frame;
     auto* saved_exc_chain = m_exc_chain_save;
-    int saved_gc_slot_idx = m_gc_frame_slot_idx;
-    int saved_gc_max_slots = m_gc_frame_max_slots;
     m_inlined_main_ret_alloca = nullptr;
     m_inlined_main_cleanup_bb = nullptr;
-    m_gc_current_frame = nullptr;
     namedVals.clear();
     namedTypes.clear();
     namedKinds.clear();
@@ -1655,7 +1651,7 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     }
 
     if (!builder->GetInsertBlock()->getTerminator()) {
-        if (m_gc_current_frame) emitGcPopFrame();
+        if (m_exc_chain_save) emitGcPopFrame();
         builder->CreateRet(makeNil());
     }
 
@@ -1664,10 +1660,7 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     namedKinds = std::move(saved_kinds);
     m_inlined_main_ret_alloca = saved_ret_alloca;
     m_inlined_main_cleanup_bb = saved_cleanup_bb;
-    m_gc_current_frame = saved_gc_frame;
     m_exc_chain_save = saved_exc_chain;
-    m_gc_frame_slot_idx = saved_gc_slot_idx;
-    m_gc_frame_max_slots = saved_gc_max_slots;
 
     if (saved_insert_block) {
         builder->SetInsertPoint(saved_insert_block);

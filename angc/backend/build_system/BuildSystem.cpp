@@ -373,7 +373,6 @@ namespace angara {
         CompilerDriver driver;
         driver.set_paths(m_std_lib_path, m_native_lib_path);
         driver.set_workspace_projects(project_entries);
-        driver.set_gc_strategy("chaperone");
 
         if (!m_target_triple.empty()) driver.set_target(m_target_triple);
         else if (!config.profile.target.empty()) driver.set_target(config.profile.target);

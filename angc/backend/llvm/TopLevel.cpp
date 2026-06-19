@@ -176,7 +176,7 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     }
 
     if (!builder->GetInsertBlock()->getTerminator()) {
-        if (m_gc_current_frame) emitGcPopFrame();
+        if (m_exc_chain_save) emitGcPopFrame();
         if (is_raw) {
             auto* zero = llvm::ConstantInt::get(llvmTypeForLocalKind(raw_info.return_kind), 0);
             builder->CreateRet(zero);
@@ -293,7 +293,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
             }
 
             if (!builder->GetInsertBlock()->getTerminator()) {
-                if (m_gc_current_frame) emitGcPopFrame();
+                if (m_exc_chain_save) emitGcPopFrame();
                 builder->CreateRet(makeNil());
             }
 
@@ -902,7 +902,7 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
 
             // Cleanup block: pop frame, teardown GC thread, branch to exit
             builder->SetInsertPoint(cleanup_bb);
-            if (m_gc_current_frame) emitGcPopFrame();
+            if (m_exc_chain_save) emitGcPopFrame();
             builder->CreateBr(exit_bb);
 
             // Exit block: load return value and return

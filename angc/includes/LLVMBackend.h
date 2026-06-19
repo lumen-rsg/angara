@@ -42,8 +42,7 @@ namespace angara {
                     bool freestanding = false,
                     bool dump_ir = false,
                     bool debug = false,
-                    bool emit_llvm = false,
-                    const std::string& gc_strategy = "chaperone");
+                    bool emit_llvm = false);
 
         /// Releases LLVM objects (cleanup at process exit).
         ~LLVMBackend();
@@ -288,7 +287,6 @@ namespace angara {
         llvm::Value* m_pending_callback_context = nullptr;
 
         bool m_freestanding = false;
-        std::string m_gc_strategy;
         bool m_dump_ir = false;
         bool m_emit_llvm = false;
         bool m_debug = false;
@@ -306,10 +304,6 @@ namespace angara {
         int m_lambda_counter = 0;
 
         // GC root frame state
-        llvm::Value* m_gc_current_frame = nullptr;
-        int m_gc_frame_slot_idx = 0;
-        int m_gc_frame_max_slots = 0;
-        llvm::StructType* m_gc_frame_type = nullptr;
 
         // BUG-5: exception-frame leak. A `try` pushes a frame onto the global
         // exception chain; the pop (__ang_try_end) is only emitted on the

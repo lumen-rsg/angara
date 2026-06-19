@@ -17,8 +17,8 @@ namespace angara {
 
 LLVMBackend::~LLVMBackend() = default;
 
-LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir, bool debug, bool emit_llvm, const std::string& gc_strategy)
-    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_gc_strategy(gc_strategy), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm) {
+LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir, bool debug, bool emit_llvm)
+    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm) {
     ctx = std::make_unique<llvm::LLVMContext>();
     mod = std::make_unique<llvm::Module>("angara_module", *ctx);
     builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
@@ -296,63 +296,6 @@ llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string&
     llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().begin());
     auto* alloca = tmp.CreateAlloca(objType, nullptr, name);
 
-    // Track in GC root frame if active — register in entry block to avoid
-    // re-registering (and incrementing count) inside loops.
-    // Insert AFTER the gc_push_frame call (which is near the end of entry block)
-    if (m_gc_current_frame) {
-        auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
-        auto* i64_ty = llvm::Type::getInt64Ty(*ctx);
-        auto* i8_ptr = llvm::PointerType::get(*ctx, 0);
-
-        // Find the gc_push_frame call to insert after it
-        llvm::Instruction* insertAfter = nullptr;
-        for (auto& inst : fn->getEntryBlock()) {
-            if (auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
-                if (call->getCalledFunction() &&
-                    call->getCalledFunction()->getName() == "__ang_gc_push_frame") {
-                    insertAfter = &inst;
-                    break;
-                }
-            }
-        }
-
-        // Use iterator-based insertion: insert right after gc_push_frame.
-        // getNextNode() can return null when the call is the last instruction
-        // (e.g. when all initializer expressions fold to constants), so use
-        // the iterator directly to handle that case.
-        auto insertPt = insertAfter ? std::next(insertAfter->getIterator())
-                                    : fn->getEntryBlock().begin();
-        llvm::IRBuilder<> regBuilder(&fn->getEntryBlock(), insertPt);
-
-        if (m_gc_frame_slot_idx < m_gc_frame_max_slots) {
-            // Store alloca address into frame slot
-            auto* slot_addr = regBuilder.CreateGEP(m_gc_frame_type, m_gc_current_frame,
-                {llvm::ConstantInt::get(i32_ty, 0), llvm::ConstantInt::get(i32_ty, 2),
-                 llvm::ConstantInt::get(i64_ty, m_gc_frame_slot_idx)});
-            auto* alloca_i8 = regBuilder.CreateBitCast(alloca, i8_ptr);
-            regBuilder.CreateStore(alloca_i8, slot_addr);
-
-            // Increment frame count
-            auto* count_addr = regBuilder.CreateStructGEP(m_gc_frame_type, m_gc_current_frame, 1);
-            auto* count = regBuilder.CreateLoad(i32_ty, count_addr, "frame_count");
-            regBuilder.CreateStore(regBuilder.CreateAdd(count, llvm::ConstantInt::get(i32_ty, 1)), count_addr);
-
-            m_gc_frame_slot_idx++;
-        } else {
-            // BUG-13: GC root frame is full (>256 tracked locals in one
-            // function). Emit a trap (once, when first exceeded) so a lost
-            // root is loud, not a silent collection of a still-reachable
-            // object. Extremely rare in practice. The slot_idx increment
-            // below ensures the trap is emitted only on the first overflow.
-            if (m_gc_frame_slot_idx == m_gc_frame_max_slots) {
-                auto* trap_fn = llvm::Intrinsic::getOrInsertDeclaration(
-                    mod.get(), llvm::Intrinsic::trap);
-                regBuilder.CreateCall(trap_fn);
-            }
-            m_gc_frame_slot_idx++;
-        }
-    }
-
     return alloca;
 }
 
@@ -368,56 +311,23 @@ llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string&
     return allocLocal(fn, name);
 }
 
-void LLVMBackend::emitGcPushFrame(llvm::Function* fn, int slot_count) {
-    // Create concrete frame type if not yet created
-    if (!m_gc_frame_type) {
-        auto* i8_ptr = llvm::PointerType::get(*ctx, 0);
-        m_gc_frame_type = llvm::StructType::create(*ctx, {
-            i8_ptr,                                             // prev_frame
-            llvm::Type::getInt32Ty(*ctx),                      // count
-            llvm::ArrayType::get(i8_ptr, slot_count)           // slots
-        }, "GcFrame");
-    }
-
-    // Alloca at entry block beginning (before any other instructions)
-    auto& entry = fn->getEntryBlock();
-    llvm::IRBuilder<> tmp(&entry, entry.begin());
-    m_gc_current_frame = tmp.CreateAlloca(m_gc_frame_type, nullptr, "gc_frame");
-
-    // Init count = 0
-    auto* count_addr = tmp.CreateStructGEP(m_gc_frame_type, m_gc_current_frame, 1);
-    tmp.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0), count_addr);
-
-    // BUG-5: snapshot the exception-chain pointer at function entry. Non-local
-    // exits (return / fall-through) restore this in emitGcPopFrame, popping any
-    // try frames left on the chain by a return/break/continue inside a try.
+void LLVMBackend::emitGcPushFrame(llvm::Function* fn, int /*slot_count*/) {
+    // v5: no GC frame. Only the BUG-5 exception-chain snapshot remains.
     if (auto* chain_gv = rt->getExceptionChain()) {
         auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
+        llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().begin());
         m_exc_chain_save = tmp.CreateAlloca(ptr_ty, nullptr, "exc_chain_save");
         tmp.CreateStore(tmp.CreateLoad(ptr_ty, chain_gv, "entry_chain"), m_exc_chain_save);
     }
-
-    // Call __ang_gc_push_frame at current builder position
-    auto* frame_i8 = builder->CreateBitCast(m_gc_current_frame, llvm::PointerType::get(*ctx, 0));
-    callRtByName("__ang_gc_push_frame", {frame_i8});
-
-    m_gc_frame_slot_idx = 0;
-    m_gc_frame_max_slots = slot_count;
 }
 
 void LLVMBackend::emitGcPopFrame() {
-    callRtByName("__ang_gc_pop_frame", {});
-    // BUG-5: restore the exception chain to its function-entry value, popping
-    // any try frames left on the chain by a return/break/continue that exited a
-    // try body without reaching its fall-through __ang_try_end. Idempotent when
-    // the chain is already balanced (normal try completion).
+    // v5: no GC frame pop. Only the BUG-5 exception-chain restore remains.
     if (m_exc_chain_save) {
         auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
         builder->CreateStore(builder->CreateLoad(ptr_ty, m_exc_chain_save, "saved_chain"),
                              rt->getExceptionChain());
     }
-    m_gc_current_frame = nullptr;
-    m_gc_frame_slot_idx = 0;
 }
 
 llvm::Value* LLVMBackend::emitGcThreadSetup() {

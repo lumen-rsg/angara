@@ -246,10 +246,10 @@ void LLVMBackend::cgReturn(const ReturnStmt& s) {
         // Raw-signature function: unbox the return value
         auto* result = s.value ? cg(s.value) : makeNil();
         auto* raw = unboxToRaw(result, *m_current_raw_return_kind);
-        if (m_gc_current_frame) emitGcPopFrame();
+        if (m_exc_chain_save) emitGcPopFrame();
         builder->CreateRet(raw);
     } else {
-        if (m_gc_current_frame) emitGcPopFrame();
+        if (m_exc_chain_save) emitGcPopFrame();
         builder->CreateRet(s.value ? cg(s.value) : makeNil());
     }
 }

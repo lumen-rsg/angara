@@ -57,7 +57,6 @@ struct CliFlags {
     bool werror = false;
     std::vector<std::string> suppress_warnings;
     std::string error_format = "text";
-    std::string gc = "chaperone";
 
     static CliFlags parse(std::vector<std::string>& args) {
         CliFlags flags;
@@ -110,9 +109,6 @@ struct CliFlags {
                 args.erase(args.begin() + i);
             } else if (args[i] == "--error-format" && i + 1 < args.size()) {
                 flags.error_format = args[i + 1];
-                args.erase(args.begin() + i, args.begin() + i + 2);
-            } else if (args[i] == "--gc" && i + 1 < args.size()) {
-                flags.gc = args[i + 1];
                 args.erase(args.begin() + i, args.begin() + i + 2);
             } else {
                 ++i;
@@ -222,7 +218,6 @@ static void print_help() {
     std::cout << "  --sysroot <path>            Set sysroot for cross-compilation linker\n";
     std::cout << "  --freestanding              Freestanding mode (no libc, bare-metal)\n";
     std::cout << "  --nostdlib                  Don't link standard libraries\n";
-    std::cout << "  --gc <chaperone|mark-sweep> Select garbage collector (default: chaperone)\n";
     std::cout << std::endl;
 }
 
@@ -381,7 +376,6 @@ static int cmd_compile_single_file(const std::string& source_file, const CliFlag
     driver.set_paths("/opt/angara/src/modules", native_mod_path);
 
     if (!flags.error_format.empty()) driver.set_error_format(flags.error_format);
-    driver.set_gc_strategy(flags.gc);
 
     verbose("Compiling '" + source_file + "'...");
     for (const auto& o : driver.get_generated_object_files()) {
