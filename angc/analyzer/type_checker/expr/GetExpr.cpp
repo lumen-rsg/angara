@@ -17,6 +17,11 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         unwrapped_object_type = std::dynamic_pointer_cast<OptionalType>(object_type)->wrapped_type;
     }
 
+    // v5: ref<T> — transparently unwrap for field/method access.
+    if (object_type->kind == TypeKind::REF) {
+        unwrapped_object_type = std::dynamic_pointer_cast<RefType>(object_type)->inner_type;
+    }
+
     if (object_type->kind == TypeKind::OPTIONAL && !is_optional_chain) {
         error(expr.op, "Cannot access property on an optional type '" + object_type->toString() + "' — use '?.' for safe access, or unwrap the value first.", "E333");
         pushAndSave(&expr, m_type_error);

@@ -73,6 +73,8 @@ bool Chaperone::isTrackedVar(Context& ctx, const VarDeclStmt& var) {
     auto it = types.find(&var);
     if (it == types.end() || !it->second) return false;
     auto& type = it->second;
+    // ref<T> is NOT tracked — it's a non-owning reference (no drop needed).
+    if (type->kind == TypeKind::REF) return false;
     // class and instance types are tracked.
     if (type->kind == TypeKind::CLASS || type->kind == TypeKind::INSTANCE) return true;
     // data types are tracked only if declared `owned` (check by name).
