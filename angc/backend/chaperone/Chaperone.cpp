@@ -78,7 +78,7 @@ bool Chaperone::isTrackedVar(Context& ctx, const VarDeclStmt& var) {
 // ============================================================================
 
 void Chaperone::analyzeExpr(Context& ctx,
-    const std::shared_ptr<Expr>& expr, const StateMap& state)
+    const std::shared_ptr<Expr>& expr, StateMap& state)
 {
     if (!expr) return;
 
@@ -128,11 +128,65 @@ void Chaperone::analyzeExpr(Context& ctx,
         return;
     }
 
-    // CallExpr: walk callee + all arguments.
+    // CallExpr: walk callee + all arguments, then transition tracked args
+    // based on the callee's interprocedural summary.
     if (auto* call = dynamic_cast<const CallExpr*>(expr.get())) {
         analyzeExpr(ctx, call->callee, state);
         for (const auto& arg : call->arguments)
             analyzeExpr(ctx, arg, state);
+
+        // Interprocedural: determine the callee name.
+        std::string callee_name;
+        if (auto* ve = dynamic_cast<const VarExpr*>(call->callee.get())) {
+            callee_name = ve->name.lexeme;
+        } else if (auto* get = dynamic_cast<const GetExpr*>(call->callee.get())) {
+            if (auto* ve2 = dynamic_cast<const VarExpr*>(get->object.get()))
+                callee_name = ve2->name.lexeme + "." + get->name.lexeme;
+        }
+
+        // Look up the summary. Unknown functions → conservative (Escaped).
+        auto sum_it = ctx.summaries.find(callee_name);
+        if (sum_it != ctx.summaries.end()) {
+            const auto& summary = sum_it->second;
+            for (size_t i = 0; i < call->arguments.size(); i++) {
+                // Resolve the parameter name for this position.
+                // The summary maps param_name → behavior. We need the i-th param.
+                // For simplicity: if there's only one tracked param, match it.
+                // Otherwise, match by position (the summary was built from the
+                // function signature, so param order is known).
+                auto* arg = call->arguments[i].get();
+                if (auto* ve3 = dynamic_cast<const VarExpr*>(arg)) {
+                    auto st_it = state.find(ve3->name.lexeme);
+                    if (st_it != state.end() && st_it->second == State::Live) {
+                        // Check if the i-th parameter is in the summary.
+                        // The summary keys are param names; we match by scanning
+                        // for any param that has behavior != Borrowed.
+                        // For now: if the summary has exactly one entry and this
+                        // arg is tracked, apply it.
+                        if (summary.size() == 1) {
+                            auto& [pname, behavior] = *summary.begin();
+                            if (behavior == ParamBehavior::Dropped)
+                                st_it->second = State::Dropped;
+                            else if (behavior == ParamBehavior::Escaped)
+                                st_it->second = State::Escaped;
+                            // Borrowed: stays Live (no transition).
+                        } else {
+                            // Multi-param: conservative — assume Escaped.
+                            st_it->second = State::Escaped;
+                        }
+                    }
+                }
+            }
+        } else {
+            // Unknown function: conservatively escape tracked args.
+            for (const auto& arg : call->arguments) {
+                if (auto* ve3 = dynamic_cast<const VarExpr*>(arg.get())) {
+                    auto st_it = state.find(ve3->name.lexeme);
+                    if (st_it != state.end() && st_it->second == State::Live)
+                        st_it->second = State::Escaped;
+                }
+            }
+        }
         return;
     }
 
@@ -218,6 +272,7 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
     StateMap state;
 
     // Register tracked parameters.
+    std::set<std::string> param_names;  // Track which names are params (not locals).
     auto sem_sym = const_cast<SymbolTable&>(ctx.tc.getSymbolTable()).resolve(func.name.lexeme);
     if (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION) {
         auto fn_type = std::dynamic_pointer_cast<FunctionType>(sem_sym->type);
@@ -227,6 +282,7 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
             if (pt->kind == TypeKind::CLASS || pt->kind == TypeKind::INSTANCE ||
                 (pt->kind == TypeKind::DATA && ctx.tracked_types.count(pt->toString()))) {
                 state[func.params[i].name.lexeme] = State::Live;
+                param_names.insert(func.params[i].name.lexeme);
             }
         }
     }
@@ -238,7 +294,9 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
 
     if (!terminates) {
         for (auto& [name, st] : state) {
-            if (st == State::Live) {
+            if (st == State::Live && param_names.count(name) == 0) {
+                // Only report leaks for locals allocated inside this function,
+                // not for borrowed parameters (the caller owns those).
                 ctx.eh.report(func.name,
                     "🧬 Unfolded molecule — `" + name + "` is live when function `" +
                     func.name.lexeme + "` exits but was never dropped or returned. "
@@ -247,6 +305,31 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
             }
         }
     }
+
+    // Phase 4: build the function summary for interprocedural analysis.
+    FunctionSummary summary;
+    if (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION) {
+        auto fn_type = std::dynamic_pointer_cast<FunctionType>(sem_sym->type);
+        for (size_t i = 0; i < fn_type->param_types.size() && i < func.params.size(); i++) {
+            auto& pt = fn_type->param_types[i];
+            if (!pt) continue;
+            if (pt->kind == TypeKind::CLASS || pt->kind == TypeKind::INSTANCE ||
+                (pt->kind == TypeKind::DATA && ctx.tracked_types.count(pt->toString()))) {
+                std::string pname = func.params[i].name.lexeme;
+                auto st_it = state.find(pname);
+                if (st_it != state.end()) {
+                    if (st_it->second == State::Dropped)
+                        summary[pname] = ParamBehavior::Dropped;
+                    else if (st_it->second == State::Escaped)
+                        summary[pname] = ParamBehavior::Escaped;
+                    else
+                        summary[pname] = ParamBehavior::Borrowed;
+                }
+            }
+        }
+    }
+    ctx.summaries[func.name.lexeme] = std::move(summary);
+
     ctx.current_function.clear();
 }
 

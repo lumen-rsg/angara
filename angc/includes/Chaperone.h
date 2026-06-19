@@ -62,6 +62,10 @@ private:
     /// Join two state maps (element-wise).
     static StateMap join_maps(const StateMap& a, const StateMap& b);
 
+    // --- Function summaries (interprocedural) ---
+    enum class ParamBehavior { Borrowed, Dropped, Escaped };
+    using FunctionSummary = std::map<std::string, ParamBehavior>;
+
     // --- Analysis context ---
     struct Context {
         const TypeChecker& tc;
@@ -69,6 +73,7 @@ private:
         std::set<std::string> tracked_types;  // names of class + owned types
         std::string current_function;
         DropPlan& drop_plan;
+        std::map<std::string, FunctionSummary> summaries;
 
         Context(const TypeChecker& t, ErrorHandler& e, DropPlan& dp)
             : tc(t), eh(e), drop_plan(dp) {}
@@ -95,10 +100,11 @@ private:
         StateMap& state, bool& terminates);
 
     /// Walk an expression tree and report E502 for any reference to a
-    /// variable in the Dropped state (use-after-free).
+    /// variable in the Dropped state (use-after-free). Also transitions
+    /// tracked argument states based on callee summaries (interprocedural).
     static void analyzeExpr(Context& ctx,
         const std::shared_ptr<struct Expr>& expr,
-        const StateMap& state);
+        StateMap& state);
 
     // --- Phase 3: Exception unwinding ---
     /// Collect all Live tracked variables in scope, insert DropStmts before
