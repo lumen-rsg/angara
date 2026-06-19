@@ -47,6 +47,12 @@ namespace angara {
         /// Releases LLVM objects (cleanup at process exit).
         ~LLVMBackend();
 
+        /// v5: Sets the Chaperone's exception-unwind drop plan. The codegen
+        /// reads this in cgThrow to auto-drop live tracked variables.
+        void setDropPlan(std::map<const void*, std::vector<std::string>> plan) {
+            m_drop_plan = std::move(plan);
+        }
+
         /// Runs the full codegen pipeline: top-level declarations, main function,
         /// IR verification, optimization passes, and object file emission.
         /// @param statements        Root AST statements.
@@ -314,6 +320,9 @@ namespace angara {
         // exit (emitGcPopFrame), and save/restore per-loop for break/continue.
         llvm::Value* m_exc_chain_save = nullptr;          // function-entry chain
         std::vector<llvm::Value*> m_exc_loop_chain_saves; // one per enclosing loop
+
+        // v5: Chaperone exception-unwind plan (ThrowStmt* → vars to auto-drop).
+        std::map<const void*, std::vector<std::string>> m_drop_plan;
 
         void emitGcPushFrame(llvm::Function* fn, int slot_count);
         void emitGcPopFrame();

@@ -28,14 +28,21 @@ struct Token;
 /// use-after-free, double-free, and reference cycles.
 class Chaperone {
 public:
+    /// Maps each ThrowStmt (by pointer) to the tracked variable names that are
+    /// Live at the throw point and must be auto-dropped before the longjmp.
+    /// The codegen reads this in cgThrow.
+    using DropPlan = std::map<const void*, std::vector<std::string>>;
+
     /// Runs the pass on the entire program.
-    /// @param program   Root AST statements (all modules combined).
-    /// @param tc        Completed type checker with resolved types.
-    /// @param eh        Error handler for diagnostics.
+    /// @param program    Root AST statements (all modules combined).
+    /// @param tc         Completed type checker with resolved types.
+    /// @param eh         Error handler for diagnostics.
+    /// @param drop_plan  Output: throw-stmt → vars to auto-drop (for codegen).
     /// @return True if no errors were found.
     static bool run(const std::vector<std::shared_ptr<Stmt>>& program,
                     const TypeChecker& tc,
-                    ErrorHandler& eh);
+                    ErrorHandler& eh,
+                    DropPlan& drop_plan);
 
 private:
     // --- Allocation state (the abstract domain) ---
@@ -61,9 +68,10 @@ private:
         ErrorHandler& eh;
         std::set<std::string> tracked_types;  // names of class + owned types
         std::string current_function;
-        int current_line = 0;
+        DropPlan& drop_plan;
 
-        Context(const TypeChecker& t, ErrorHandler& e) : tc(t), eh(e) {}
+        Context(const TypeChecker& t, ErrorHandler& e, DropPlan& dp)
+            : tc(t), eh(e), drop_plan(dp) {}
     };
 
     // --- Phase 1: Collect tracked types ---
@@ -97,7 +105,8 @@ private:
     /// the given ThrowStmt in its enclosing BlockStmt.
     static void unwindAtThrow(Context& ctx,
         const StateMap& state,
-        const Token& throw_tok);
+        const Token& throw_tok,
+        const void* throw_ptr);
 
     // --- Phase 4: Cycle detection ---
     static void detectCycles(Context& ctx,

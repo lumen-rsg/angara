@@ -256,6 +256,22 @@ void LLVMBackend::cgReturn(const ReturnStmt& s) {
 }
 
 void LLVMBackend::cgThrow(const ThrowStmt& s) {
+    // v5: Chaperone exception unwinding — auto-drop live tracked variables
+    // before the longjmp. The Chaperone populated m_drop_plan for this throw.
+    auto it = m_drop_plan.find(static_cast<const void*>(&s));
+    if (it != m_drop_plan.end()) {
+        for (const auto& name : it->second) {
+            auto var_it = namedVals.find(name);
+            if (var_it == namedVals.end()) continue;
+            auto* val = builder->CreateLoad(objType, var_it->second, "unwind_val");
+            auto* payload = builder->CreateExtractValue(val, {1});
+            auto* ptr_i64 = builder->CreateBitCast(payload, llvm::Type::getInt64Ty(*ctx));
+            auto* obj_ptr = builder->CreateIntToPtr(ptr_i64, llvm::PointerType::get(*ctx, 0));
+            callRtByName("__ang_gc_finalize", {obj_ptr});
+            callRtByName("__ang_gc_free", {obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
+            builder->CreateStore(makeNil(), var_it->second);
+        }
+    }
     // The expression (e.g. Exception("msg")) already creates the exception
     // object via __ang_exception_new in cgCall, so just throw it directly.
     callRtByName("__ang_throw", {cg(s.expression)});

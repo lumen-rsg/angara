@@ -331,7 +331,7 @@ void Chaperone::analyzeStmt(Context& ctx,
     // --- ThrowStmt ---
     if (auto* thr = dynamic_cast<const ThrowStmt*>(stmt.get())) {
         analyzeExpr(ctx, thr->expression, state);
-        unwindAtThrow(ctx, state, thr->keyword);
+        unwindAtThrow(ctx, state, thr->keyword, thr);
         terminates = true;
         return;
     }
@@ -432,14 +432,35 @@ void Chaperone::analyzeStmt(Context& ctx,
 
     // --- TryStmt ---
     if (auto* tryS = dynamic_cast<const TryStmt*>(stmt.get())) {
-        StateMap try_state = state, catch_state = state;
-        bool try_term = false, catch_term = false;
+        // Snapshot pre-try state — any variable that gets auto-dropped on a
+        // throw inside the try body should be Dropped in the catch block.
+        StateMap pre_try = state;
+        StateMap try_state = state;
+        bool try_term = false;
         if (tryS->tryBlock) {
             if (auto* blk = dynamic_cast<const BlockStmt*>(tryS->tryBlock.get()))
                 try_state = analyzeBlock(ctx, blk->statements, try_state, try_term);
             else
                 analyzeStmt(ctx, tryS->tryBlock, try_state, try_term);
         }
+
+        // Build the catch state: start from pre-try, then mark any variable
+        // that appears in any DropPlan entry for a throw inside the try body
+        // as Dropped (it was freed during the unwind).
+        StateMap catch_state = pre_try;
+        // Check all DropPlan entries — if any throw inside this try auto-dropped
+        // a variable, that variable is Dropped in the catch.
+        // (Conservative: any throw could have fired; we don't know which.)
+        for (auto& [throw_ptr, vars] : ctx.drop_plan) {
+            for (const auto& var_name : vars) {
+                auto it = catch_state.find(var_name);
+                if (it != catch_state.end() && it->second == State::Live) {
+                    it->second = State::Dropped;
+                }
+            }
+        }
+
+        bool catch_term = false;
         if (tryS->catchBlock) {
             if (auto* blk = dynamic_cast<const BlockStmt*>(tryS->catchBlock.get()))
                 catch_state = analyzeBlock(ctx, blk->statements, catch_state, catch_term);
@@ -466,15 +487,18 @@ void Chaperone::analyzeStmt(Context& ctx,
 // Phase 3: Exception unwinding
 // ============================================================================
 
-void Chaperone::unwindAtThrow(Context& ctx, const StateMap& state, const Token& throw_tok) {
+void Chaperone::unwindAtThrow(Context& ctx, const StateMap& state,
+    const Token& throw_tok, const void* throw_ptr)
+{
+    std::vector<std::string> to_drop;
     for (auto& [name, st] : state) {
         if (st == State::Live) {
-            ctx.eh.warning(throw_tok,
-                "🧬 `" + name + "` is live when `throw` at line " +
-                std::to_string(throw_tok.line) + " — the Chaperone will auto-drop "
-                "it on the unwind path. Consider an explicit `drop " + name + ";`.",
-                "W510");
+            to_drop.push_back(name);
         }
+    }
+    if (!to_drop.empty()) {
+        // Record in the DropPlan for the codegen.
+        ctx.drop_plan[throw_ptr] = std::move(to_drop);
     }
 }
 
@@ -548,9 +572,10 @@ void Chaperone::detectCycles(Context& ctx,
 // ============================================================================
 
 bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
-                    const TypeChecker& tc, ErrorHandler& eh)
+                    const TypeChecker& tc, ErrorHandler& eh,
+                    DropPlan& drop_plan)
 {
-    Context ctx(tc, eh);
+    Context ctx(tc, eh, drop_plan);
     collectTrackedTypes(ctx, program);
     detectCycles(ctx, program);
 
