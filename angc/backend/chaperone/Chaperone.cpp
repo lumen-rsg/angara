@@ -1,5 +1,6 @@
 #include "Chaperone.h"
 #include "Stmt.h"
+#include "Expr.h"
 #include "TypeChecker.h"
 #include "ErrorHandler.h"
 #include "Token.h"
@@ -73,6 +74,142 @@ bool Chaperone::isTrackedVar(Context& ctx, const VarDeclStmt& var) {
 }
 
 // ============================================================================
+// Expression analysis — E502 use-after-free detection
+// ============================================================================
+
+void Chaperone::analyzeExpr(Context& ctx,
+    const std::shared_ptr<Expr>& expr, const StateMap& state)
+{
+    if (!expr) return;
+
+    // VarExpr: the key check — is this variable Dropped?
+    if (auto* ve = dynamic_cast<const VarExpr*>(expr.get())) {
+        auto it = state.find(ve->name.lexeme);
+        if (it != state.end() && it->second == State::Dropped) {
+            ctx.eh.report(ve->name,
+                "💀 Dead reference — `" + ve->name.lexeme + "` was dropped but "
+                "is used here. The molecule has already been released.",
+                "E502");
+        }
+        return;
+    }
+
+    // Binary: walk both sides.
+    if (auto* bin = dynamic_cast<const Binary*>(expr.get())) {
+        analyzeExpr(ctx, bin->left, state);
+        analyzeExpr(ctx, bin->right, state);
+        return;
+    }
+
+    // Unary: walk operand.
+    if (auto* un = dynamic_cast<const Unary*>(expr.get())) {
+        analyzeExpr(ctx, un->right, state);
+        return;
+    }
+
+    // Grouping: unwrap.
+    if (auto* grp = dynamic_cast<const Grouping*>(expr.get())) {
+        analyzeExpr(ctx, grp->expression, state);
+        return;
+    }
+
+    // AssignExpr: walk value being assigned.
+    if (auto* asgn = dynamic_cast<const AssignExpr*>(expr.get())) {
+        analyzeExpr(ctx, asgn->value, state);
+        // The target variable is being overwritten — if it was Live, that's a
+        // leak (the old allocation is lost). The VarDecl handler catches this
+        // for `let` re-declarations; this catches `x = expr` assignments.
+        return;
+    }
+
+    // UpdateExpr (x++, ++x): walk the target.
+    if (auto* upd = dynamic_cast<const UpdateExpr*>(expr.get())) {
+        analyzeExpr(ctx, upd->target, state);
+        return;
+    }
+
+    // CallExpr: walk callee + all arguments.
+    if (auto* call = dynamic_cast<const CallExpr*>(expr.get())) {
+        analyzeExpr(ctx, call->callee, state);
+        for (const auto& arg : call->arguments)
+            analyzeExpr(ctx, arg, state);
+        return;
+    }
+
+    // GetExpr (x.field): walk the object.
+    if (auto* get = dynamic_cast<const GetExpr*>(expr.get())) {
+        analyzeExpr(ctx, get->object, state);
+        return;
+    }
+
+    // ListExpr: walk all elements.
+    if (auto* list = dynamic_cast<const ListExpr*>(expr.get())) {
+        for (const auto& elem : list->elements)
+            analyzeExpr(ctx, elem, state);
+        return;
+    }
+
+    // LogicalExpr (&&, ||): walk both sides.
+    if (auto* log = dynamic_cast<const LogicalExpr*>(expr.get())) {
+        analyzeExpr(ctx, log->left, state);
+        analyzeExpr(ctx, log->right, state);
+        return;
+    }
+
+    // SubscriptExpr (xs[i]): walk both.
+    if (auto* sub = dynamic_cast<const SubscriptExpr*>(expr.get())) {
+        analyzeExpr(ctx, sub->object, state);
+        analyzeExpr(ctx, sub->index, state);
+        return;
+    }
+
+    // RecordExpr: walk all values.
+    if (auto* rec = dynamic_cast<const RecordExpr*>(expr.get())) {
+        for (const auto& val : rec->values)
+            analyzeExpr(ctx, val, state);
+        return;
+    }
+
+    // TernaryExpr: walk all three.
+    if (auto* tern = dynamic_cast<const TernaryExpr*>(expr.get())) {
+        analyzeExpr(ctx, tern->condition, state);
+        analyzeExpr(ctx, tern->thenBranch, state);
+        analyzeExpr(ctx, tern->elseBranch, state);
+        return;
+    }
+
+    // IsExpr: walk the object.
+    if (auto* is = dynamic_cast<const IsExpr*>(expr.get())) {
+        analyzeExpr(ctx, is->object, state);
+        return;
+    }
+
+    // CastExpr: walk the object.
+    if (auto* cast = dynamic_cast<const CastExpr*>(expr.get())) {
+        analyzeExpr(ctx, cast->object, state);
+        return;
+    }
+
+    // DerefExpr: walk the right.
+    if (auto* deref = dynamic_cast<const DerefExpr*>(expr.get())) {
+        analyzeExpr(ctx, deref->right, state);
+        return;
+    }
+
+    // MatchExpr: walk the condition + all case bodies.
+    if (auto* match = dynamic_cast<const MatchExpr*>(expr.get())) {
+        analyzeExpr(ctx, match->condition, state);
+        for (const auto& cs : match->cases) {
+            if (cs.body) analyzeExpr(ctx, cs.body, state);
+        }
+        return;
+    }
+
+    // Literal, ThisExpr, SuperExpr, LambdaExpr: no variable references to check
+    // (literals have no vars; this/super are not droppable; lambdas are scoped).
+}
+
+// ============================================================================
 // Phase 2: Per-function data-flow analysis
 // ============================================================================
 
@@ -134,6 +271,9 @@ void Chaperone::analyzeStmt(Context& ctx,
 
     // --- VarDeclStmt ---
     if (auto* var = dynamic_cast<const VarDeclStmt*>(stmt.get())) {
+        // Check the initializer expression for use-after-free.
+        if (var->initializer)
+            analyzeExpr(ctx, var->initializer, state);
         auto it = state.find(var->name.lexeme);
         if (it != state.end() && it->second == State::Live) {
             ctx.eh.report(var->name,
@@ -169,6 +309,7 @@ void Chaperone::analyzeStmt(Context& ctx,
     // --- ReturnStmt ---
     if (auto* ret = dynamic_cast<const ReturnStmt*>(stmt.get())) {
         if (ret->value) {
+            analyzeExpr(ctx, ret->value, state);
             if (auto* ve = dynamic_cast<const VarExpr*>(ret->value.get())) {
                 auto it = state.find(ve->name.lexeme);
                 if (it != state.end() && it->second == State::Live)
@@ -189,6 +330,7 @@ void Chaperone::analyzeStmt(Context& ctx,
 
     // --- ThrowStmt ---
     if (auto* thr = dynamic_cast<const ThrowStmt*>(stmt.get())) {
+        analyzeExpr(ctx, thr->expression, state);
         unwindAtThrow(ctx, state, thr->keyword);
         terminates = true;
         return;
@@ -196,6 +338,7 @@ void Chaperone::analyzeStmt(Context& ctx,
 
     // --- IfStmt ---
     if (auto* ifs = dynamic_cast<const IfStmt*>(stmt.get())) {
+        analyzeExpr(ctx, ifs->condition, state);
         StateMap then_state = state, else_state = state;
         bool then_term = false, else_term = false;
 
@@ -310,7 +453,13 @@ void Chaperone::analyzeStmt(Context& ctx,
         return;
     }
 
-    // --- UnsafeBlockStmt / ExpressionStmt / others: skip ---
+    // --- ExpressionStmt: walk for use-after-free ---
+    if (auto* exprstmt = dynamic_cast<const ExpressionStmt*>(stmt.get())) {
+        analyzeExpr(ctx, exprstmt->expression, state);
+        return;
+    }
+
+    // --- UnsafeBlockStmt / others: skip ---
 }
 
 // ============================================================================

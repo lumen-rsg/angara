@@ -11,6 +11,7 @@ namespace angara {
 
 // Forward declarations from the AST.
 struct Stmt;
+struct Expr;
 struct FuncStmt;
 struct DataStmt;
 struct ClassStmt;
@@ -84,6 +85,12 @@ private:
     static void analyzeStmt(Context& ctx,
         const std::shared_ptr<Stmt>& stmt,
         StateMap& state, bool& terminates);
+
+    /// Walk an expression tree and report E502 for any reference to a
+    /// variable in the Dropped state (use-after-free).
+    static void analyzeExpr(Context& ctx,
+        const std::shared_ptr<struct Expr>& expr,
+        const StateMap& state);
 
     // --- Phase 3: Exception unwinding ---
     /// Collect all Live tracked variables in scope, insert DropStmts before
