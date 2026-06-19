@@ -9,6 +9,15 @@
 
 namespace angara {
 
+// Helper: report as error (normal) or warning (inside @unsafe).
+void Chaperone::diag(Context& ctx, const Token& tok,
+                     const std::string& msg, const std::string& code) {
+    if (ctx.in_unsafe)
+        ctx.eh.warning(tok, msg + " [in @unsafe — reported as warning]", code);
+    else
+        ctx.eh.report(tok, msg, code);
+}
+
 // ============================================================================
 // State machine helpers
 // ============================================================================
@@ -86,7 +95,7 @@ void Chaperone::analyzeExpr(Context& ctx,
     if (auto* ve = dynamic_cast<const VarExpr*>(expr.get())) {
         auto it = state.find(ve->name.lexeme);
         if (it != state.end() && it->second == State::Dropped) {
-            ctx.eh.report(ve->name,
+            diag(ctx, ve->name,
                 "💀 Dead reference — `" + ve->name.lexeme + "` was dropped but "
                 "is used here. The molecule has already been released.",
                 "E502");
@@ -178,14 +187,10 @@ void Chaperone::analyzeExpr(Context& ctx,
                 }
             }
         } else {
-            // Unknown function: conservatively escape tracked args.
-            for (const auto& arg : call->arguments) {
-                if (auto* ve3 = dynamic_cast<const VarExpr*>(arg.get())) {
-                    auto st_it = state.find(ve3->name.lexeme);
-                    if (st_it != state.end() && st_it->second == State::Live)
-                        st_it->second = State::Escaped;
-                }
-            }
+            // Unknown function (foreign, module, or not yet analyzed):
+            // default is BORROW — the argument stays Live. This is correct
+            // for ~90% of FFI (io.println, string(), etc.). Functions that
+            // consume or escape need @consumes / @escape annotations.
         }
         return;
     }
@@ -297,7 +302,7 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
             if (st == State::Live && param_names.count(name) == 0) {
                 // Only report leaks for locals allocated inside this function,
                 // not for borrowed parameters (the caller owns those).
-                ctx.eh.report(func.name,
+                diag(ctx, func.name,
                     "🧬 Unfolded molecule — `" + name + "` is live when function `" +
                     func.name.lexeme + "` exits but was never dropped or returned. "
                     "Add `drop " + name + ";` before the function ends.",
@@ -359,7 +364,7 @@ void Chaperone::analyzeStmt(Context& ctx,
             analyzeExpr(ctx, var->initializer, state);
         auto it = state.find(var->name.lexeme);
         if (it != state.end() && it->second == State::Live) {
-            ctx.eh.report(var->name,
+            diag(ctx, var->name,
                 "🧬 Unfolded molecule — `" + var->name.lexeme + "` held a live "
                 "allocation that is now overwritten without being dropped.",
                 "E501");
@@ -372,15 +377,15 @@ void Chaperone::analyzeStmt(Context& ctx,
     if (auto* drop = dynamic_cast<const DropStmt*>(stmt.get())) {
         auto it = state.find(drop->name.lexeme);
         if (it == state.end() || it->second == State::Uninit) {
-            ctx.eh.report(drop->name,
+            diag(ctx, drop->name,
                 "⚠️ Cannot drop `" + drop->name.lexeme + "` — not a tracked allocation.",
                 "E503");
         } else if (it->second == State::Dropped) {
-            ctx.eh.report(drop->name,
+            diag(ctx, drop->name,
                 "⚠️ Double denaturation — `" + drop->name.lexeme + "` was already dropped.",
                 "E503");
         } else if (it->second == State::Escaped) {
-            ctx.eh.report(drop->name,
+            diag(ctx, drop->name,
                 "⚠️ Cannot drop `" + drop->name.lexeme + "` — ownership was transferred.",
                 "E503");
         } else {
@@ -401,7 +406,7 @@ void Chaperone::analyzeStmt(Context& ctx,
         }
         for (auto& [name, st] : state) {
             if (st == State::Live) {
-                ctx.eh.report(ret->keyword,
+                diag(ctx, ret->keyword,
                     "🧬 Unfolded molecule — `" + name + "` leaks on the return at line " +
                     std::to_string(ret->keyword.line) + ". Add `drop " + name + ";`.",
                     "E501");
@@ -474,7 +479,7 @@ void Chaperone::analyzeStmt(Context& ctx,
             if (st_pre == State::Live) {
                 auto it2 = body_state.find(name);
                 if (it2 != body_state.end() && it2->second == State::Dropped) {
-                    ctx.eh.report(kw,
+                    diag(ctx, kw,
                         "🔄 `" + name + "` is dropped inside the loop but allocated "
                         "before it — double-free on iteration 2+.",
                         "E506");
@@ -563,7 +568,18 @@ void Chaperone::analyzeStmt(Context& ctx,
         return;
     }
 
-    // --- UnsafeBlockStmt / others: skip ---
+    // --- UnsafeBlockStmt: analyze but report warnings, not errors ---
+    if (auto* unsafe = dynamic_cast<const UnsafeBlockStmt*>(stmt.get())) {
+        bool was_unsafe = ctx.in_unsafe;
+        ctx.in_unsafe = true;
+        if (unsafe->block) {
+            bool blk_term = false;
+            state = analyzeBlock(ctx, unsafe->block->statements, state, blk_term);
+            if (blk_term) terminates = true;
+        }
+        ctx.in_unsafe = was_unsafe;
+        return;
+    }
 }
 
 // ============================================================================
@@ -627,7 +643,7 @@ void Chaperone::detectCycles(Context& ctx,
             std::string cycle;
             for (auto i = it; i != path.end(); ++i) cycle += *i + " → ";
             cycle += node;
-            ctx.eh.report(Token{}, "🔗 Tangled molecule — reference cycle: " + cycle +
+            diag(ctx, Token{}, "🔗 Tangled molecule — reference cycle: " + cycle +
                 ". Use `borrow<T>` for non-owning back-references.", "E504");
             return true;
         }

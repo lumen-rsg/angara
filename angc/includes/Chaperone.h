@@ -66,18 +66,23 @@ private:
     enum class ParamBehavior { Borrowed, Dropped, Escaped };
     using FunctionSummary = std::map<std::string, ParamBehavior>;
 
-    // --- Analysis context ---
+    // --- Analysis context (must be before diag which takes Context&) ---
     struct Context {
         const TypeChecker& tc;
         ErrorHandler& eh;
-        std::set<std::string> tracked_types;  // names of class + owned types
+        std::set<std::string> tracked_types;
         std::string current_function;
         DropPlan& drop_plan;
         std::map<std::string, FunctionSummary> summaries;
+        bool in_unsafe = false;
 
         Context(const TypeChecker& t, ErrorHandler& e, DropPlan& dp)
             : tc(t), eh(e), drop_plan(dp) {}
     };
+
+    // --- Helper: report as error (normal) or warning (inside @unsafe) ---
+    static void diag(Context& ctx, const Token& tok,
+                     const std::string& msg, const std::string& code);
 
     // --- Phase 1: Collect tracked types ---
     static void collectTrackedTypes(Context& ctx,
