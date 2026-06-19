@@ -83,6 +83,11 @@ namespace angara {
                     throw error(previous(), "'attach' statements import symbols and cannot be marked 'export'.", "E137");
                 }
                 return attachStatement();
+            } else if (match({TokenType::OWNED})) {
+                auto data_decl = std::static_pointer_cast<DataStmt>(dataDeclaration());
+                data_decl->is_owned = true;
+                data_decl->is_exported = is_exported;
+                return data_decl;
             } else if (match({TokenType::DATA})) {
                 auto data_decl = std::static_pointer_cast<DataStmt>(dataDeclaration());
                 data_decl->is_exported = is_exported;

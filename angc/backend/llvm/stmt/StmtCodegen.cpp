@@ -44,6 +44,7 @@ void LLVMBackend::cgStmt(const std::shared_ptr<Stmt>& s) {
     }
     else if (auto* p = dynamic_cast<const ThrowStmt*>(s.get())) { setDebugLoc(p->keyword); cgThrow(*p); }
     else if (auto* p = dynamic_cast<const TryStmt*>(s.get())) { setDebugLoc(p->catchName); cgTry(*p); }
+    else if (auto* p = dynamic_cast<const DropStmt*>(s.get())) { setDebugLoc(p->name); cgDrop(*p); }
     else if (auto* p = dynamic_cast<const UnsafeBlockStmt*>(s.get())) {
         if (p->block) {
             for (auto& st : p->block->statements) {
@@ -320,6 +321,29 @@ void LLVMBackend::cgTry(const TryStmt& s) {
     }
 
     builder->SetInsertPoint(afterAll);
+}
+
+void LLVMBackend::cgDrop(const DropStmt& s) {
+    auto it = namedVals.find(s.name.lexeme);
+    if (it == namedVals.end()) return;
+
+    auto* alloca = it->second;
+    auto* val = builder->CreateLoad(objType, alloca, "drop_val");
+
+    // Extract the heap pointer from the AngaraObject payload.
+    auto* payload = builder->CreateExtractValue(val, {1});
+    auto* ptr_i64 = builder->CreateBitCast(payload, llvm::Type::getInt64Ty(*ctx));
+    auto* obj_ptr = builder->CreateIntToPtr(ptr_i64, llvm::PointerType::get(*ctx, 0));
+
+    // Call finalize (no-op stub for now — real finalizers come with Stage 3).
+    callRtByName("__ang_gc_finalize", {obj_ptr});
+
+    // Free via the Allocator.
+    callRtByName("__ang_gc_free", {obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
+
+    // Invalidate the variable (store nil — the Chaperone pass in Stage 3 will
+    // enforce that it's not used after this point).
+    builder->CreateStore(makeNil(), alloca);
 }
 
 }

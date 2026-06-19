@@ -42,6 +42,8 @@ namespace angara {
             {"data",     TokenType::DATA},
             {"enum",     TokenType::ENUM},
             {"union",    TokenType::UNION},
+            {"owned",    TokenType::OWNED},
+            {"drop",     TokenType::DROP},
             {"match",    TokenType::MATCH},
             {"case",     TokenType::CASE},
             {"foreign",   TokenType::FOREIGN},

@@ -122,6 +122,7 @@ namespace angara {
         void cgReturn(const ReturnStmt& s);
         void cgThrow(const ThrowStmt& s);
         void cgTry(const TryStmt& s);
+        void cgDrop(const DropStmt& s);
 
         /// Emits top-level declarations (globals, functions, classes, data, enums).
         void codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>& statements);

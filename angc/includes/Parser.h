@@ -106,6 +106,9 @@ namespace angara {
         /// @return The parsed throw-statement node.
         std::shared_ptr<Stmt> throwStatement();
 
+        /// Parses a `drop` statement (v5: explicit deallocation).
+        std::shared_ptr<Stmt> dropStatement();
+
         /// Parses a `try` / `catch` statement.
         /// @return The parsed try-statement node.
         std::shared_ptr<Stmt> tryStatement();
