@@ -1,3 +1,4 @@
+#include "Chaperone.h"
 #include "CompilerDriver.h"
 #include "ErrorHandler.h"
 #include "Lexer.h"
@@ -396,8 +397,9 @@ namespace angara {
         }
 
         try {
-            if (!m_quiet) {
-            }
+            // v5: Chaperone pass — compile-time memory verification.
+            Chaperone::run(statements, typeChecker, errorHandler);
+
             LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding, m_dump_ir, m_debug, m_emit_llvm);
             if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
                 m_had_error = true;

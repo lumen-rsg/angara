@@ -1,0 +1,418 @@
+#include "Chaperone.h"
+#include "Stmt.h"
+#include "TypeChecker.h"
+#include "ErrorHandler.h"
+#include "Token.h"
+
+#include <functional>
+
+namespace angara {
+
+// ============================================================================
+// State machine helpers
+// ============================================================================
+
+Chaperone::State Chaperone::join(State a, State b) {
+    if (a == b) return a;
+    if (a == State::Live || b == State::Live) return State::Live;
+    return State::Dropped;  // Conservative for Dropped≠Escaped, Dropped≠Uninit, etc.
+}
+
+Chaperone::StateMap Chaperone::join_maps(const StateMap& a, const StateMap& b) {
+    StateMap result = a;
+    for (auto& [key, val_b] : b) {
+        auto it = result.find(key);
+        if (it == result.end()) {
+            result[key] = val_b;
+        } else {
+            it->second = join(it->second, val_b);
+        }
+    }
+    return result;
+}
+
+// ============================================================================
+// Phase 1: Collect tracked types (class + owned)
+// ============================================================================
+
+void Chaperone::collectTrackedTypes(Context& ctx,
+    const std::vector<std::shared_ptr<Stmt>>& program)
+{
+    for (const auto& stmt : program) {
+        if (!stmt) continue;
+        if (auto* cls = dynamic_cast<const ClassStmt*>(stmt.get())) {
+            ctx.tracked_types.insert(cls->name.lexeme);
+        } else if (auto* data = dynamic_cast<const DataStmt*>(stmt.get())) {
+            if (data->is_owned) {
+                ctx.tracked_types.insert(data->name.lexeme);
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Type helpers
+// ============================================================================
+
+bool Chaperone::isTrackedType(Context& ctx, const std::string& type_name) {
+    return ctx.tracked_types.count(type_name) > 0;
+}
+
+bool Chaperone::isTrackedVar(Context& ctx, const VarDeclStmt& var) {
+    auto& types = ctx.tc.getVariableTypes();
+    auto it = types.find(&var);
+    if (it == types.end() || !it->second) return false;
+    auto& type = it->second;
+    // class and instance types are tracked.
+    if (type->kind == TypeKind::CLASS || type->kind == TypeKind::INSTANCE) return true;
+    // data types are tracked only if declared `owned` (check by name).
+    if (type->kind == TypeKind::DATA) {
+        return ctx.tracked_types.count(type->toString()) > 0;
+    }
+    return false;
+}
+
+// ============================================================================
+// Phase 2: Per-function data-flow analysis
+// ============================================================================
+
+void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
+    ctx.current_function = func.name.lexeme;
+    StateMap state;
+
+    // Register tracked parameters.
+    auto sem_sym = const_cast<SymbolTable&>(ctx.tc.getSymbolTable()).resolve(func.name.lexeme);
+    if (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION) {
+        auto fn_type = std::dynamic_pointer_cast<FunctionType>(sem_sym->type);
+        for (size_t i = 0; i < fn_type->param_types.size() && i < func.params.size(); i++) {
+            auto& pt = fn_type->param_types[i];
+            if (!pt) continue;
+            if (pt->kind == TypeKind::CLASS || pt->kind == TypeKind::INSTANCE ||
+                (pt->kind == TypeKind::DATA && ctx.tracked_types.count(pt->toString()))) {
+                state[func.params[i].name.lexeme] = State::Live;
+            }
+        }
+    }
+
+    bool terminates = false;
+    if (func.body) {
+        analyzeBlock(ctx, *func.body, state, terminates);
+    }
+
+    if (!terminates) {
+        for (auto& [name, st] : state) {
+            if (st == State::Live) {
+                ctx.eh.report(func.name,
+                    "🧬 Unfolded molecule — `" + name + "` is live when function `" +
+                    func.name.lexeme + "` exits but was never dropped or returned. "
+                    "Add `drop " + name + ";` before the function ends.",
+                    "E501");
+            }
+        }
+    }
+    ctx.current_function.clear();
+}
+
+Chaperone::StateMap Chaperone::analyzeBlock(Context& ctx,
+    const std::vector<std::shared_ptr<Stmt>>& statements,
+    StateMap state, bool& terminates)
+{
+    terminates = false;
+    for (const auto& stmt : statements) {
+        if (!stmt) continue;
+        analyzeStmt(ctx, stmt, state, terminates);
+        if (terminates) break;
+    }
+    return state;
+}
+
+void Chaperone::analyzeStmt(Context& ctx,
+    const std::shared_ptr<Stmt>& stmt, StateMap& state, bool& terminates)
+{
+    terminates = false;
+    if (!stmt) return;
+
+    // --- VarDeclStmt ---
+    if (auto* var = dynamic_cast<const VarDeclStmt*>(stmt.get())) {
+        auto it = state.find(var->name.lexeme);
+        if (it != state.end() && it->second == State::Live) {
+            ctx.eh.report(var->name,
+                "🧬 Unfolded molecule — `" + var->name.lexeme + "` held a live "
+                "allocation that is now overwritten without being dropped.",
+                "E501");
+        }
+        state[var->name.lexeme] = isTrackedVar(ctx, *var) ? State::Live : State::Uninit;
+        return;
+    }
+
+    // --- DropStmt ---
+    if (auto* drop = dynamic_cast<const DropStmt*>(stmt.get())) {
+        auto it = state.find(drop->name.lexeme);
+        if (it == state.end() || it->second == State::Uninit) {
+            ctx.eh.report(drop->name,
+                "⚠️ Cannot drop `" + drop->name.lexeme + "` — not a tracked allocation.",
+                "E503");
+        } else if (it->second == State::Dropped) {
+            ctx.eh.report(drop->name,
+                "⚠️ Double denaturation — `" + drop->name.lexeme + "` was already dropped.",
+                "E503");
+        } else if (it->second == State::Escaped) {
+            ctx.eh.report(drop->name,
+                "⚠️ Cannot drop `" + drop->name.lexeme + "` — ownership was transferred.",
+                "E503");
+        } else {
+            it->second = State::Dropped;
+        }
+        return;
+    }
+
+    // --- ReturnStmt ---
+    if (auto* ret = dynamic_cast<const ReturnStmt*>(stmt.get())) {
+        if (ret->value) {
+            if (auto* ve = dynamic_cast<const VarExpr*>(ret->value.get())) {
+                auto it = state.find(ve->name.lexeme);
+                if (it != state.end() && it->second == State::Live)
+                    it->second = State::Escaped;
+            }
+        }
+        for (auto& [name, st] : state) {
+            if (st == State::Live) {
+                ctx.eh.report(ret->keyword,
+                    "🧬 Unfolded molecule — `" + name + "` leaks on the return at line " +
+                    std::to_string(ret->keyword.line) + ". Add `drop " + name + ";`.",
+                    "E501");
+            }
+        }
+        terminates = true;
+        return;
+    }
+
+    // --- ThrowStmt ---
+    if (auto* thr = dynamic_cast<const ThrowStmt*>(stmt.get())) {
+        unwindAtThrow(ctx, state, thr->keyword);
+        terminates = true;
+        return;
+    }
+
+    // --- IfStmt ---
+    if (auto* ifs = dynamic_cast<const IfStmt*>(stmt.get())) {
+        StateMap then_state = state, else_state = state;
+        bool then_term = false, else_term = false;
+
+        if (ifs->thenBranch) {
+            if (auto* blk = dynamic_cast<const BlockStmt*>(ifs->thenBranch.get()))
+                then_state = analyzeBlock(ctx, blk->statements, then_state, then_term);
+            else
+                analyzeStmt(ctx, ifs->thenBranch, then_state, then_term);
+        }
+        if (ifs->elseBranch) {
+            if (auto* blk = dynamic_cast<const BlockStmt*>(ifs->elseBranch.get()))
+                else_state = analyzeBlock(ctx, blk->statements, else_state, else_term);
+            else
+                analyzeStmt(ctx, ifs->elseBranch, else_state, else_term);
+        }
+
+        if (then_term && else_term) { terminates = true; return; }
+        if (then_term) { state = else_state; return; }
+        if (else_term) { state = then_state; return; }
+
+        // Both fall through — merge with asymmetry detection.
+        for (auto& [name, st_then] : then_state) {
+            auto it2 = else_state.find(name);
+            if (it2 != else_state.end() && st_then != it2->second) {
+                if ((st_then == State::Live) != (it2->second == State::Live)) {
+                    ctx.eh.warning(ifs->keyword,
+                        "🔄 Incomplete fold — `" + name + "` is handled differently on "
+                        "the two branches. Add `drop " + name + ";` to the path that's missing it.",
+                        "W510");
+                }
+            }
+        }
+        state = join_maps(then_state, else_state);
+        return;
+    }
+
+    // --- WhileStmt / ForStmt / ForInStmt (shared loop pattern) ---
+    auto analyze_loop = [&](const Token& kw, const std::shared_ptr<Stmt>& body) {
+        StateMap pre = state;
+        StateMap body_state = state;
+        bool body_term = false;
+        if (body) {
+            if (auto* blk = dynamic_cast<const BlockStmt*>(body.get()))
+                body_state = analyzeBlock(ctx, blk->statements, body_state, body_term);
+            else
+                analyzeStmt(ctx, body, body_state, body_term);
+        }
+        // Loop-body drop check.
+        for (auto& [name, st_pre] : pre) {
+            if (st_pre == State::Live) {
+                auto it2 = body_state.find(name);
+                if (it2 != body_state.end() && it2->second == State::Dropped) {
+                    ctx.eh.report(kw,
+                        "🔄 `" + name + "` is dropped inside the loop but allocated "
+                        "before it — double-free on iteration 2+.",
+                        "E506");
+                }
+            }
+        }
+        state = join_maps(pre, body_state);
+    };
+
+    if (auto* wh = dynamic_cast<const WhileStmt*>(stmt.get())) {
+        analyze_loop(wh->keyword, wh->body);
+        return;
+    }
+    if (auto* fors = dynamic_cast<const ForStmt*>(stmt.get())) {
+        if (fors->initializer) { bool t; analyzeStmt(ctx, fors->initializer, state, t); }
+        analyze_loop(fors->keyword, fors->body);
+        return;
+    }
+    if (auto* forin = dynamic_cast<const ForInStmt*>(stmt.get())) {
+        analyze_loop(forin->name, forin->body);
+        return;
+    }
+
+    // --- Break / Continue ---
+    if (dynamic_cast<const BreakStmt*>(stmt.get()) ||
+        dynamic_cast<const ContinueStmt*>(stmt.get())) {
+        terminates = true;
+        return;
+    }
+
+    // --- BlockStmt ---
+    if (auto* blk = dynamic_cast<const BlockStmt*>(stmt.get())) {
+        bool blk_term = false;
+        state = analyzeBlock(ctx, blk->statements, state, blk_term);
+        if (blk_term) terminates = true;
+        return;
+    }
+
+    // --- TryStmt ---
+    if (auto* tryS = dynamic_cast<const TryStmt*>(stmt.get())) {
+        StateMap try_state = state, catch_state = state;
+        bool try_term = false, catch_term = false;
+        if (tryS->tryBlock) {
+            if (auto* blk = dynamic_cast<const BlockStmt*>(tryS->tryBlock.get()))
+                try_state = analyzeBlock(ctx, blk->statements, try_state, try_term);
+            else
+                analyzeStmt(ctx, tryS->tryBlock, try_state, try_term);
+        }
+        if (tryS->catchBlock) {
+            if (auto* blk = dynamic_cast<const BlockStmt*>(tryS->catchBlock.get()))
+                catch_state = analyzeBlock(ctx, blk->statements, catch_state, catch_term);
+            else
+                analyzeStmt(ctx, tryS->catchBlock, catch_state, catch_term);
+        }
+        if (try_term && catch_term) { terminates = true; return; }
+        if (try_term) { state = catch_state; return; }
+        if (catch_term) { state = try_state; return; }
+        state = join_maps(try_state, catch_state);
+        return;
+    }
+
+    // --- UnsafeBlockStmt / ExpressionStmt / others: skip ---
+}
+
+// ============================================================================
+// Phase 3: Exception unwinding
+// ============================================================================
+
+void Chaperone::unwindAtThrow(Context& ctx, const StateMap& state, const Token& throw_tok) {
+    for (auto& [name, st] : state) {
+        if (st == State::Live) {
+            ctx.eh.warning(throw_tok,
+                "🧬 `" + name + "` is live when `throw` at line " +
+                std::to_string(throw_tok.line) + " — the Chaperone will auto-drop "
+                "it on the unwind path. Consider an explicit `drop " + name + ";`.",
+                "W510");
+        }
+    }
+}
+
+// ============================================================================
+// Phase 4: Cycle detection
+// ============================================================================
+
+void Chaperone::detectCycles(Context& ctx,
+    const std::vector<std::shared_ptr<Stmt>>& program)
+{
+    std::map<std::string, std::set<std::string>> graph;
+
+
+    auto check_field = [&](const std::string& owner, const VarDeclStmt* field) {
+        auto& types = ctx.tc.getVariableTypes();
+        auto it = types.find(field);
+        if (it != types.end() && it->second) {
+            std::string ft = it->second->toString();
+            if (ctx.tracked_types.count(ft))
+                graph[owner].insert(ft);
+        }
+    };
+
+    for (const auto& stmt : program) {
+        if (!stmt) continue;
+        if (auto* data = dynamic_cast<const DataStmt*>(stmt.get())) {
+            if (data->is_owned)
+                for (const auto& f : data->fields)
+                    check_field(data->name.lexeme, f.get());
+        } else if (auto* cls = dynamic_cast<const ClassStmt*>(stmt.get())) {
+            for (const auto& member : cls->members) {
+                if (auto* fm = dynamic_cast<const FieldMember*>(member.get()))
+                    check_field(cls->name.lexeme, fm->declaration.get());
+            }
+        }
+    }
+
+    std::set<std::string> visiting, visited;
+    std::function<bool(const std::string&, std::vector<std::string>&)> dfs =
+        [&](const std::string& node, std::vector<std::string>& path) -> bool {
+        if (visiting.count(node)) {
+            auto it = std::find(path.begin(), path.end(), node);
+            std::string cycle;
+            for (auto i = it; i != path.end(); ++i) cycle += *i + " → ";
+            cycle += node;
+            ctx.eh.report(Token{}, "🔗 Tangled molecule — reference cycle: " + cycle +
+                ". Use `borrow<T>` for non-owning back-references.", "E504");
+            return true;
+        }
+        if (visited.count(node)) return false;
+        visiting.insert(node);
+        path.push_back(node);
+        auto it = graph.find(node);
+        if (it != graph.end())
+            for (const auto& nb : it->second)
+                if (dfs(nb, path)) return true;
+        path.pop_back();
+        visiting.erase(node);
+        visited.insert(node);
+        return false;
+    };
+
+    for (auto& [name, _] : graph) {
+        std::vector<std::string> path;
+        if (dfs(name, path)) break;  // Report first cycle only.
+    }
+}
+
+// ============================================================================
+// Entry point
+// ============================================================================
+
+bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
+                    const TypeChecker& tc, ErrorHandler& eh)
+{
+    Context ctx(tc, eh);
+    collectTrackedTypes(ctx, program);
+    detectCycles(ctx, program);
+
+    for (const auto& stmt : program) {
+        if (!stmt) continue;
+        if (auto* func = dynamic_cast<const FuncStmt*>(stmt.get())) {
+            if (!func->body) continue;  // Foreign/intrinsic.
+            analyzeFunction(ctx, *func);
+        }
+    }
+    return eh.errorCount() == 0;
+}
+
+} // namespace angara
