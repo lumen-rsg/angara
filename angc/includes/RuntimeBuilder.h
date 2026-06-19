@@ -279,6 +279,10 @@ private:
     llvm::GlobalVariable* m_g_thread_state_tls     = nullptr;
     llvm::ConstantInt*    m_gc_initial_meta        = nullptr;
 
+    // Unified Allocator (vtable: alloc/realloc/free)
+    llvm::StructType*     m_allocator_type          = nullptr;
+    llvm::GlobalVariable* m_g_allocator             = nullptr;
+
     llvm::FunctionCallee m_fn_gc_alloc;
     llvm::FunctionCallee m_fn_gc_clear_unique;
     llvm::FunctionCallee m_fn_gc_push_frame;
