@@ -278,15 +278,63 @@ change, only the escape annotations get more precise):**
 
 ### Escape hatches
 
-- **`@escape`** — annotation on a function call or assignment: "I'm
-  transferring ownership intentionally; the Chaperone stops tracking." The
-  variable transitions to `Escaped` without a diagnostic.
+- **`@consumes`** — annotation on a foreign/module function declaration: "this
+  function takes ownership of the argument and frees it." After the call, the
+  argument transitions to `Dropped`. Used for `sqlite3_close`, `fclose`, etc.
+- **`@escape`** — annotation on a foreign/module function declaration: "this
+  function stores the pointer beyond the call." After the call, the argument
+  transitions to `Escaped`. Used for `register_callback`, `add_handler`, etc.
+- **(no annotation)** — the default. The function **borrows** its tracked
+  arguments — uses them during the call and returns. The argument stays `Live`.
+  This is correct for ~90% of FFI: `io.println`, `string()`, `io.write`, etc.
+- **Foreign return** — if a foreign function returns a tracked type, the result
+  is a new `Live` allocation (the function created it).
 - **`@manual`** — annotation on a variable: "I'm managing this manually; don't
   track it." The Chaperone ignores the variable entirely.
-- **`@unsafe`** — full escape hatch (FFI, raw pointers). Already exists.
+- **`@unsafe`** — the Chaperone **does analyze** `@unsafe` blocks — it tracks
+  state, detects leaks/double-drops/UAF — but reports them as **warnings, not
+  errors**. The state still flows through (a variable dropped inside `@unsafe`
+  is `Dropped` for subsequent code outside). This gives the programmer feedback
+  even in unsafe code, while allowing intentional rule-breaking.
 - **`Rc<T>`** — explicit ARC for genuinely shared ownership (graphs, caches).
   Refcount at runtime, but only when the programmer asks for it. `weak<T>`
   for cycle-breaking.
+
+### FFI interaction
+
+**Foreign functions** (`foreign func`) and **native module functions**
+(`attach`) are opaque — the Chaperone can't analyze their bodies. It infers
+ownership behavior from annotations and return types:
+
+| Annotation | Argument transition | Return transition |
+|---|---|---|
+| (none) | **Borrow** — stays Live | If tracked type → new Live |
+| `@consumes` | **Dropped** — freed by callee | If tracked type → new Live |
+| `@escape` | **Escaped** — stored by callee | If tracked type → new Live |
+
+**Module C-API signatures** (`"o->o"`, `"s?->n"`, etc.): the Chaperone reads
+the type string — `o` params are tracked (default: borrow), `s`/`i`/`n`/`b`/`d`
+are untracked. Module functions that consume or escape need the annotation on
+the `.an` side:
+
+```angara
+// In the module's .an declaration file:
+@consumes func close(db as SqliteDB) -> nil;
+@escape func register_handler(cb as Buffer) -> nil;
+func read(db as SqliteDB) -> string;   // borrows (default)
+```
+
+**`@unsafe` blocks**: the Chaperone analyzes the contents, tracks state
+transitions (a `drop` inside `@unsafe` still transitions to `Dropped`), and
+reports diagnostics at **warning** severity. The programmer can do things the
+Chaperone would normally flag as errors, but still gets feedback:
+
+```
+⚠️ (in @unsafe) `buf` leaks — consider adding `drop buf;` before the
+   block exits. The Chaperone will not enforce this in @unsafe context.
+
+  [W521] Unsafe leak: `Buffer` at {file:12}
+```
 
 ## Diagnostics
 
