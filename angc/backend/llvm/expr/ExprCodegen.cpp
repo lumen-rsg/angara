@@ -514,11 +514,19 @@ llvm::Value* LLVMBackend::cgUnary(const Unary& e) {
 llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
     auto* v = cg(e.value);
     if (auto* var = dynamic_cast<const VarExpr*>(e.target.get())) {
-        // Under GC, assignment just overwrites the alloca. The old value's
-        // lifetime is determined by reachability — no manual decref needed.
+        // v5: data types copy-on-assign. If the target variable is a plain
+        // `data` type (not owned/class — those are tracked for drop), deep-clone
+        // the value so the target is independent of the source.
         auto type_it = namedTypes.find(var->name.lexeme);
-        if (type_it != namedTypes.end() && isSizedIntType(type_it->second)) {
-            v = truncateForType(v, type_it->second);
+        if (type_it != namedTypes.end() && type_it->second) {
+            auto& vt = type_it->second;
+            if (vt->kind == TypeKind::DATA &&
+                m_tracked_types.count(vt->toString()) == 0) {
+                v = callRtByName("__ang_deep_clone", {v});
+            }
+            if (isSizedIntType(vt)) {
+                v = truncateForType(v, vt);
+            }
         }
         storeVar(var->name.lexeme, v);
         return v;

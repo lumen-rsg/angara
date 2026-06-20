@@ -60,6 +60,17 @@ void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
 
     if (s.initializer) {
         v = cg(s.initializer);
+        // v5: data types copy-on-assign. If this variable is a plain `data`
+        // type (not owned, not class — those are tracked for drop), deep-clone
+        // the initializer so p2 is independent of p1.
+        auto type_it2 = m_type_checker.getVariableTypes().find(&s);
+        if (type_it2 != m_type_checker.getVariableTypes().end() && type_it2->second) {
+            auto& vt = type_it2->second;
+            if (vt->kind == TypeKind::DATA &&
+                m_tracked_types.count(vt->toString()) == 0) {
+                v = callRtByName("__ang_deep_clone", {v});
+            }
+        }
     } else if (s.typeAnnotation) {
         // Check if this is a foreign data type that needs default construction
         auto type_it = m_type_checker.getVariableTypes().find(&s);
