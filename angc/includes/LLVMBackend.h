@@ -324,6 +324,9 @@ namespace angara {
         // v5: Chaperone exception-unwind plan (ThrowStmt* → vars to auto-drop).
         std::map<const void*, std::vector<std::string>> m_drop_plan;
 
+        // v5: Set of tracked type names (owned + class) for drop cascades.
+        std::set<std::string> m_tracked_types;
+
         void emitGcPushFrame(llvm::Function* fn, int slot_count);
         void emitGcPopFrame();
         llvm::Value* emitGcThreadSetup();

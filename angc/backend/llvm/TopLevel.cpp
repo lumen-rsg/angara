@@ -5,13 +5,23 @@ namespace angara {
 
 void LLVMBackend::codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>& statements) {
     codegenNativeModuleDecls(statements);
+
+    // v5: collect tracked type names for drop cascades.
+    for (const auto& stmt : statements) {
+        if (auto s = std::dynamic_pointer_cast<const ClassStmt>(stmt))
+            m_tracked_types.insert(s->name.lexeme);
+        else if (auto s = std::dynamic_pointer_cast<const DataStmt>(stmt))
+            if (s->is_owned)
+                m_tracked_types.insert(s->name.lexeme);
+    }
+
     for (const auto& stmt : statements) {
         if (auto s = std::dynamic_pointer_cast<const VarDeclStmt>(stmt))
             codegenGlobalVarDecl(*s);
         else if (auto s = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
             if (s->is_intrinsic) continue;
             if (s->is_foreign) { codegenForeignFuncDecl(*s); continue; }
-            if (s->name.lexeme == "main") continue;  // inlined into C main
+            if (s->name.lexeme == "main") continue;
             codegenFunctionDecl(*s, moduleName);
         }
         else if (auto s = std::dynamic_pointer_cast<const ClassStmt>(stmt))

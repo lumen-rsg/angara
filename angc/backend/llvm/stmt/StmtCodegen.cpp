@@ -351,14 +351,53 @@ void LLVMBackend::cgDrop(const DropStmt& s) {
     auto* ptr_i64 = builder->CreateBitCast(payload, llvm::Type::getInt64Ty(*ctx));
     auto* obj_ptr = builder->CreateIntToPtr(ptr_i64, llvm::PointerType::get(*ctx, 0));
 
-    // Call finalize (no-op stub for now — real finalizers come with Stage 3).
+    // v5: Drop cascade — for each tracked field, load it via __ang_record_get
+    // and drop it before freeing the parent. Fields are emitted at compile time
+    // based on the type declaration; ref<T> fields are NOT cascaded (non-owning).
+    auto type_it = namedTypes.find(s.name.lexeme);
+    if (type_it != namedTypes.end() && type_it->second) {
+        auto& type = type_it->second;
+
+        auto drop_field = [&](const std::string& field_name) {
+            auto* name_gstr = builder->CreateGlobalStringPtr(field_name, "fld");
+            auto* field_val = callRtByName("__ang_record_get", {val, name_gstr});
+            auto* f_payload = builder->CreateExtractValue(field_val, {1});
+            auto* f_ptr_i64 = builder->CreateBitCast(f_payload, llvm::Type::getInt64Ty(*ctx));
+            auto* f_obj_ptr = builder->CreateIntToPtr(f_ptr_i64, llvm::PointerType::get(*ctx, 0));
+            callRtByName("__ang_gc_finalize", {f_obj_ptr});
+            callRtByName("__ang_gc_free",
+                {f_obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
+        };
+
+        if (type->kind == TypeKind::DATA) {
+            auto dt = std::dynamic_pointer_cast<DataType>(type);
+            if (dt) {
+                for (auto& [fname, finfo] : dt->fields) {
+                    if (finfo.type && m_tracked_types.count(finfo.type->toString()))
+                        drop_field(fname);
+                }
+            }
+        } else if (type->kind == TypeKind::CLASS || type->kind == TypeKind::INSTANCE) {
+            std::shared_ptr<ClassType> ct;
+            if (type->kind == TypeKind::INSTANCE)
+                ct = std::dynamic_pointer_cast<InstanceType>(type)->class_type;
+            else
+                ct = std::dynamic_pointer_cast<ClassType>(type);
+            if (ct) {
+                for (auto& [fname, finfo] : ct->fields) {
+                    if (finfo.type && m_tracked_types.count(finfo.type->toString()))
+                        drop_field(fname);
+                }
+            }
+        }
+    }
+
+    // Finalize + free the parent.
     callRtByName("__ang_gc_finalize", {obj_ptr});
+    callRtByName("__ang_gc_free",
+        {obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
 
-    // Free via the Allocator.
-    callRtByName("__ang_gc_free", {obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
-
-    // Invalidate the variable (store nil — the Chaperone pass in Stage 3 will
-    // enforce that it's not used after this point).
+    // Invalidate the variable.
     builder->CreateStore(makeNil(), alloca);
 }
 
