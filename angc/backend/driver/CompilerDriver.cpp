@@ -398,11 +398,9 @@ namespace angara {
 
         try {
             // v5: Chaperone pass — compile-time memory verification.
-            Chaperone::DropPlan drop_plan;
-            Chaperone::run(statements, typeChecker, errorHandler, drop_plan);
+            Chaperone::run(statements, typeChecker, errorHandler);
 
             LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding, m_dump_ir, m_debug, m_emit_llvm);
-            llvmBackend.setDropPlan(std::move(drop_plan));
             if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
                 m_had_error = true;
                 return nullptr;

@@ -256,24 +256,10 @@ void LLVMBackend::cgReturn(const ReturnStmt& s) {
 }
 
 void LLVMBackend::cgThrow(const ThrowStmt& s) {
-    // v5: Chaperone exception unwinding — auto-drop live tracked variables
-    // before the longjmp. The Chaperone populated m_drop_plan for this throw.
-    auto it = m_drop_plan.find(static_cast<const void*>(&s));
-    if (it != m_drop_plan.end()) {
-        for (const auto& name : it->second) {
-            auto var_it = namedVals.find(name);
-            if (var_it == namedVals.end()) continue;
-            auto* val = builder->CreateLoad(objType, var_it->second, "unwind_val");
-            auto* payload = builder->CreateExtractValue(val, {1});
-            auto* ptr_i64 = builder->CreateBitCast(payload, llvm::Type::getInt64Ty(*ctx));
-            auto* obj_ptr = builder->CreateIntToPtr(ptr_i64, llvm::PointerType::get(*ctx, 0));
-            callRtByName("__ang_gc_finalize", {obj_ptr});
-            callRtByName("__ang_gc_free", {obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
-            builder->CreateStore(makeNil(), var_it->second);
-        }
-    }
     // The expression (e.g. Exception("msg")) already creates the exception
     // object via __ang_exception_new in cgCall, so just throw it directly.
+    // v5: no auto-unwind — the Chaperone reports leaks on throw paths as
+    // errors; the programmer uses `finally {}` for explicit cleanup.
     callRtByName("__ang_throw", {cg(s.expression)});
 }
 
@@ -281,6 +267,7 @@ void LLVMBackend::cgTry(const TryStmt& s) {
     auto* fn = builder->GetInsertBlock()->getParent();
     auto* tryBB = llvm::BasicBlock::Create(*ctx,"try_body",fn);
     auto* catchBB = llvm::BasicBlock::Create(*ctx,"catch",fn);
+    auto* finallyBB = s.finallyBlock ? llvm::BasicBlock::Create(*ctx,"finally",fn) : nullptr;
     auto* afterAll = llvm::BasicBlock::Create(*ctx,"after_try",fn);
 
     auto* frameType = llvm::StructType::create(*ctx,
@@ -314,7 +301,7 @@ void LLVMBackend::cgTry(const TryStmt& s) {
     cgStmt(s.tryBlock);
     if (!builder->GetInsertBlock()->getTerminator()) {
         callRtByName("__ang_try_end",{});
-        builder->CreateBr(afterAll);
+        builder->CreateBr(s.finallyBlock ? finallyBB : afterAll);
     }
 
     builder->SetInsertPoint(catchBB);
@@ -333,7 +320,16 @@ void LLVMBackend::cgTry(const TryStmt& s) {
         namedKinds = sk;
     }
     if (!builder->GetInsertBlock()->getTerminator()) {
-        builder->CreateBr(afterAll);
+        builder->CreateBr(s.finallyBlock ? finallyBB : afterAll);
+    }
+
+    // v5: finally block — runs on both normal and catch paths.
+    if (s.finallyBlock) {
+        builder->SetInsertPoint(finallyBB);
+        cgStmt(s.finallyBlock);
+        if (!builder->GetInsertBlock()->getTerminator()) {
+            builder->CreateBr(afterAll);
+        }
     }
 
     builder->SetInsertPoint(afterAll);

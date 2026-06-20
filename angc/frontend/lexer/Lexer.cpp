@@ -44,6 +44,7 @@ namespace angara {
             {"union",    TokenType::UNION},
             {"owned",    TokenType::OWNED},
             {"drop",     TokenType::DROP},
+            {"finally",  TokenType::FINALLY},
             {"match",    TokenType::MATCH},
             {"case",     TokenType::CASE},
             {"foreign",   TokenType::FOREIGN},

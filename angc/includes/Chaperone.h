@@ -28,21 +28,10 @@ struct Token;
 /// use-after-free, double-free, and reference cycles.
 class Chaperone {
 public:
-    /// Maps each ThrowStmt (by pointer) to the tracked variable names that are
-    /// Live at the throw point and must be auto-dropped before the longjmp.
-    /// The codegen reads this in cgThrow.
-    using DropPlan = std::map<const void*, std::vector<std::string>>;
-
     /// Runs the pass on the entire program.
-    /// @param program    Root AST statements (all modules combined).
-    /// @param tc         Completed type checker with resolved types.
-    /// @param eh         Error handler for diagnostics.
-    /// @param drop_plan  Output: throw-stmt → vars to auto-drop (for codegen).
-    /// @return True if no errors were found.
     static bool run(const std::vector<std::shared_ptr<Stmt>>& program,
                     const TypeChecker& tc,
-                    ErrorHandler& eh,
-                    DropPlan& drop_plan);
+                    ErrorHandler& eh);
 
 private:
     // --- Allocation state (the abstract domain) ---
@@ -72,12 +61,11 @@ private:
         ErrorHandler& eh;
         std::set<std::string> tracked_types;
         std::string current_function;
-        DropPlan& drop_plan;
         std::map<std::string, FunctionSummary> summaries;
         bool in_unsafe = false;
 
-        Context(const TypeChecker& t, ErrorHandler& e, DropPlan& dp)
-            : tc(t), eh(e), drop_plan(dp) {}
+        Context(const TypeChecker& t, ErrorHandler& e)
+            : tc(t), eh(e) {}
     };
 
     // --- Helper: report as error (normal) or warning (inside @unsafe) ---
@@ -111,13 +99,8 @@ private:
         const std::shared_ptr<struct Expr>& expr,
         StateMap& state);
 
-    // --- Phase 3: Exception unwinding ---
-    /// Collect all Live tracked variables in scope, insert DropStmts before
-    /// the given ThrowStmt in its enclosing BlockStmt.
-    static void unwindAtThrow(Context& ctx,
-        const StateMap& state,
-        const Token& throw_tok,
-        const void* throw_ptr);
+    // --- Phase 3: Throw-path leak detection (reports E501, no auto-drop) ---
+    // (inline in analyzeStmt's ThrowStmt handler)
 
     // --- Phase 4: Cycle detection ---
     static void detectCycles(Context& ctx,
