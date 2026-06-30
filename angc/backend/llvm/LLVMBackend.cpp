@@ -438,11 +438,43 @@ LLVMBackend::LocalKind LLVMBackend::localKindForType(const std::shared_ptr<Type>
     return LocalKind::BOXED;
 }
 
+// FFI marshalling: the C-side kind for a foreign-function param/return.
+// Like localKindForType but also maps `string` and pointer types to RAW_PTR
+// (a C char*/pointer), so `foreign func strlen(s as string) -> i64` gets a
+// real C signature instead of passing a boxed AngaraObject to libc.
+LLVMBackend::LocalKind LLVMBackend::ffiKindForType(const std::shared_ptr<Type>& type) {
+    if (!type) return LocalKind::BOXED;
+    if (type->kind == TypeKind::PRIMITIVE) {
+        const auto& n = type->toString();
+        if (n == "string") return LocalKind::RAW_PTR;   // char*
+        if (n == "bool")   return LocalKind::RAW_I1;
+        if (isFloat(type)) return LocalKind::RAW_F64;
+        if (isInteger(type)) return LocalKind::RAW_I64;
+        return LocalKind::BOXED;
+    }
+    // Pointer types (*T, *void) marshal as a C pointer.
+    if (type->kind == TypeKind::POINTER) return LocalKind::RAW_PTR;
+    return LocalKind::BOXED;
+}
+
+// Whether a type can be marshalled directly to C in a foreign-function
+// signature (primitives + string + pointers). Aggregate/owned types stay boxed.
+bool LLVMBackend::isFFIMarshallable(const std::shared_ptr<Type>& type) {
+    if (!type) return false;
+    if (type->kind == TypeKind::POINTER) return true;
+    if (type->kind == TypeKind::PRIMITIVE) {
+        const auto& n = type->toString();
+        return n == "string" || n == "bool" || isInteger(type) || isFloat(type);
+    }
+    return false;
+}
+
 llvm::Type* LLVMBackend::llvmTypeForLocalKind(LocalKind kind) {
     switch (kind) {
         case LocalKind::RAW_I1:  return llvm::Type::getInt1Ty(*ctx);
         case LocalKind::RAW_I64: return llvm::Type::getInt64Ty(*ctx);
         case LocalKind::RAW_F64: return llvm::Type::getDoubleTy(*ctx);
+        case LocalKind::RAW_PTR: return llvm::PointerType::get(*ctx, 0);
         case LocalKind::BOXED:   return objType;
     }
     return objType;
@@ -453,6 +485,10 @@ llvm::Value* LLVMBackend::boxRaw(llvm::Value* raw, LocalKind kind) {
         case LocalKind::RAW_I1:  return makeBool(raw);
         case LocalKind::RAW_I64: return makeI64(raw);
         case LocalKind::RAW_F64: return makeF64(raw);
+        // RAW_PTR: a C pointer returned to Angara is carried as an opaque i64
+        // payload (boxed). Marshalling back to a usable Angara value is the
+        // caller's responsibility (e.g. via @own string adoption).
+        case LocalKind::RAW_PTR: return makeI64(builder->CreatePtrToInt(raw, llvm::Type::getInt64Ty(*ctx)));
         case LocalKind::BOXED:   return raw;
     }
     return raw;
@@ -463,6 +499,10 @@ llvm::Value* LLVMBackend::unboxToRaw(llvm::Value* objVal, LocalKind kind) {
         case LocalKind::RAW_I1:  return getBool(objVal);
         case LocalKind::RAW_I64: return getI64(objVal);
         case LocalKind::RAW_F64: return getF64(objVal);
+        // RAW_PTR: treat the boxed value's i64 payload as a pointer. (For
+        // string args, the call site uses marshalAngaraToC instead, which
+        // extracts the char* correctly; this is the fallback for stored ptrs.)
+        case LocalKind::RAW_PTR: return builder->CreateIntToPtr(getI64(objVal), llvm::PointerType::get(*ctx, 0));
         case LocalKind::BOXED:   return objVal;
     }
     return objVal;
@@ -530,10 +570,12 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
         const auto& n = type->toString();
         if (n == "bool")   return getBool(obj);
         if (n == "string") {
-            // Extract char* from AngaraString: payload -> AngaraString* -> GEP(field 2) -> load char*
+            // Extract char* from AngaraString. The boxed payload is a pointer to
+            // the AngaraString struct { ObjHeader, i64 len, i64 cap, ptr chars },
+            // so chars is at field index 3.
             auto* str_ptr = builder->CreateIntToPtr(getI64(obj), llvm::PointerType::get(*ctx, 0));
             auto* string_type = rt->getStringType();
-            auto* chars_ptr = builder->CreateStructGEP(string_type, str_ptr, 2);
+            auto* chars_ptr = builder->CreateStructGEP(string_type, str_ptr, 3);
             auto* raw = builder->CreateLoad(llvm::PointerType::get(*ctx, 0), chars_ptr);
             auto prim = std::dynamic_pointer_cast<PrimitiveType>(type);
             if (prim && prim->is_owned) {

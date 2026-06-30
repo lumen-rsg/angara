@@ -1108,7 +1108,15 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
         std::vector<llvm::Value*> llvmArgs;
         for (size_t i = 0; i < args.size() && i < info.param_kinds.size(); i++) {
             auto* boxed = cg(args[i]);
-            llvmArgs.push_back(unboxToRaw(boxed, info.param_kinds[i]));
+            // FFI marshalling: if this is a foreign func carrying the param's
+            // semantic type, marshal string→char* and pointers via marshalAngaraToC
+            // (unboxToRaw only handles numeric primitives).
+            if (!info.param_types.empty() && i < info.param_types.size()
+                && info.param_kinds[i] == LocalKind::RAW_PTR) {
+                llvmArgs.push_back(marshalAngaraToC(boxed, info.param_types[i]));
+            } else {
+                llvmArgs.push_back(unboxToRaw(boxed, info.param_kinds[i]));
+            }
         }
         while (llvmArgs.size() < ft->getNumParams()) {
             auto kind = llvmArgs.size() < info.param_kinds.size()

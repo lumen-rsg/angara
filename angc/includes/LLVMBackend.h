@@ -211,11 +211,17 @@ namespace angara {
 
         // --- Unboxed primitive support ---
         /// Kind of local variable storage: boxed (AngaraObject) or raw LLVM primitive.
-        enum class LocalKind { BOXED, RAW_I1, RAW_I64, RAW_F64 };
+        /// RAW_PTR is a C pointer (string→char*, *T, *void) used for FFI marshalling.
+        enum class LocalKind { BOXED, RAW_I1, RAW_I64, RAW_F64, RAW_PTR };
         /// Returns true if a type can be stored as a raw LLVM primitive (not boxed).
         static bool isUnboxableType(const std::shared_ptr<Type>& type);
         /// Maps a semantic type to the appropriate LocalKind.
         static LocalKind localKindForType(const std::shared_ptr<Type>& type);
+        /// FFI: the C-side LocalKind for a foreign-function param/return
+        /// (maps string/pointers to RAW_PTR, unlike localKindForType).
+        static LocalKind ffiKindForType(const std::shared_ptr<Type>& type);
+        /// FFI: whether a type can be marshalled directly to C.
+        static bool isFFIMarshallable(const std::shared_ptr<Type>& type);
         /// Returns the raw LLVM type for a given LocalKind.
         llvm::Type* llvmTypeForLocalKind(LocalKind kind);
         /// Boxes a raw LLVM value into an AngaraObject.
@@ -278,6 +284,10 @@ namespace angara {
         struct RawFuncInfo {
             std::vector<LocalKind> param_kinds;
             LocalKind return_kind;
+            // Optional semantic param/return types for FFI marshalling (string→char*,
+            // *T pointers). Populated for foreign funcs with marshalled params.
+            std::vector<std::shared_ptr<Type>> param_types;
+            std::shared_ptr<Type> return_type;
         };
         std::map<std::string, RawFuncInfo> m_raw_functions;
 

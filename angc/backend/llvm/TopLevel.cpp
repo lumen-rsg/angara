@@ -68,24 +68,42 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     auto sem_fn_type = (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION)
         ? std::dynamic_pointer_cast<FunctionType>(sem_sym->type) : nullptr;
 
-    // Check if this function can use a raw (unboxed) signature
+    // Check if this function can use a raw (unboxed) signature. Foreign funcs
+    // use the FFI-marshallable set (includes `string`→char* and pointer types),
+    // so `foreign func strlen(s as string) -> i64` gets a real C signature.
+    // Non-foreign funcs keep the stricter unboxable set (locals only).
+    bool is_foreign_fn = stmt.is_foreign;
     bool is_raw = false;
     RawFuncInfo raw_info;
     raw_info.return_kind = LocalKind::BOXED;
 
     if (sem_fn_type && stmt.type_params.empty()) {
         auto ret_type = sem_fn_type->return_type;
-        bool all_unboxable = ret_type && isUnboxableType(ret_type);
-        raw_info.return_kind = all_unboxable ? localKindForType(ret_type) : LocalKind::BOXED;
+        auto can_marshal = is_foreign_fn ? isFFIMarshallable(ret_type)
+                                        : (ret_type && isUnboxableType(ret_type));
+        raw_info.return_kind = can_marshal
+            ? (is_foreign_fn ? ffiKindForType(ret_type) : localKindForType(ret_type))
+            : LocalKind::BOXED;
 
-        for (size_t i = 0; i < sem_fn_type->param_types.size() && all_unboxable; i++) {
-            if (!isUnboxableType(sem_fn_type->param_types[i])) all_unboxable = false;
+        bool all_marshalable = can_marshal;
+        for (size_t i = 0; i < sem_fn_type->param_types.size() && all_marshalable; i++) {
+            auto& pt = sem_fn_type->param_types[i];
+            bool ok = is_foreign_fn ? isFFIMarshallable(pt) : isUnboxableType(pt);
+            if (!ok) all_marshalable = false;
         }
 
-        if (all_unboxable) {
+        if (all_marshalable) {
             is_raw = true;
             for (size_t i = 0; i < sem_fn_type->param_types.size(); i++) {
-                raw_info.param_kinds.push_back(localKindForType(sem_fn_type->param_types[i]));
+                auto& pt = sem_fn_type->param_types[i];
+                raw_info.param_kinds.push_back(is_foreign_fn ? ffiKindForType(pt)
+                                                             : localKindForType(pt));
+            }
+            if (is_foreign_fn) {
+                // Carry the semantic types so the call site can marshal
+                // (string→char*) via marshalAngaraToC instead of plain unbox.
+                raw_info.param_types = sem_fn_type->param_types;
+                raw_info.return_type = ret_type;
             }
             m_raw_functions[func_name] = raw_info;
         }
