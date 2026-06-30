@@ -74,6 +74,10 @@ private:
         // During the interprocedural fixed-point convergence passes, suppress
         // diagnostics (they'd duplicate); emit only on the final pass.
         bool suppress_diag = false;
+        // S8: names a surrounding `finally {}` guarantees to drop. A throw
+        // inside such a try discharges its leak obligation for these names
+        // (the finally runs on the throw path), so they aren't false-flagged.
+        std::set<std::string> finally_protected;
 
         Context(const TypeChecker& t, ErrorHandler& e)
             : tc(t), eh(e) {}
@@ -110,6 +114,17 @@ private:
         const std::shared_ptr<struct Expr>& expr,
         StateMap& state);
 
+    /// E505: flag a tracked Live value escaping into an untracked container.
+    static void checkEscapeIntoContainer(Context& ctx,
+        const std::shared_ptr<struct Expr>& elem, StateMap& state);
+
+    /// Collect every VarExpr name referenced in a statement / expression tree
+    /// (used to find closure captures).
+    static void collectVarRefs(const std::shared_ptr<struct Stmt>& stmt,
+        std::set<std::string>& out);
+    static void collectExprVarRefs(const std::shared_ptr<struct Expr>& expr,
+        std::set<std::string>& out);
+
     // --- Phase 3: Throw-path leak detection (reports E501, no auto-drop) ---
     // (inline in analyzeStmt's ThrowStmt handler)
 
@@ -119,6 +134,8 @@ private:
 
     // --- Type helpers ---
     static bool isTrackedType(Context& ctx, const std::string& type_name);
+    /// Whether a resolved Type object is tracked (unwraps optionals).
+    static bool isTrackedTypeObj(Context& ctx, const struct Type& type);
     static bool isTrackedVar(Context& ctx, const struct VarDeclStmt& var);
 };
 

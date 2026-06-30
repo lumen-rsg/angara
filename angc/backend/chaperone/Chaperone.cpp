@@ -71,25 +71,129 @@ bool Chaperone::isTrackedType(Context& ctx, const std::string& type_name) {
     return ctx.tracked_types.count(type_name) > 0;
 }
 
+bool Chaperone::isTrackedTypeObj(Context& ctx, const Type& type) {
+    // ref<T> is never tracked (non-owning).
+    if (type.kind == TypeKind::REF) return false;
+    // Unwrap optionals: Buf? tracked iff Buf tracked.
+    const Type* t = &type;
+    if (t->kind == TypeKind::OPTIONAL) {
+        auto ot = dynamic_cast<const OptionalType*>(t);
+        if (!ot || !ot->wrapped_type) return false;
+        t = ot->wrapped_type.get();
+    }
+    if (t->kind == TypeKind::CLASS || t->kind == TypeKind::INSTANCE) return true;
+    if (t->kind == TypeKind::DATA) return ctx.tracked_types.count(t->toString()) > 0;
+    return false;
+}
+
 bool Chaperone::isTrackedVar(Context& ctx, const VarDeclStmt& var) {
     auto& types = ctx.tc.getVariableTypes();
     auto it = types.find(&var);
     if (it == types.end() || !it->second) return false;
-    auto& type = it->second;
-    // ref<T> is NOT tracked — it's a non-owning reference (no drop needed).
-    if (type->kind == TypeKind::REF) return false;
-    // class and instance types are tracked.
-    if (type->kind == TypeKind::CLASS || type->kind == TypeKind::INSTANCE) return true;
-    // data types are tracked only if declared `owned` (check by name).
-    if (type->kind == TypeKind::DATA) {
-        return ctx.tracked_types.count(type->toString()) > 0;
-    }
-    return false;
+    return isTrackedTypeObj(ctx, *it->second);
 }
 
-// ============================================================================
-// Expression analysis — E502 use-after-free detection
-// ============================================================================
+// Recursively collect every VarExpr name referenced in a statement tree.
+// Used to find which tracked locals a closure captures.
+void Chaperone::collectVarRefs(const std::shared_ptr<Stmt>& stmt,
+    std::set<std::string>& out)
+{
+    if (!stmt) return;
+    // Walk the common statement shapes that contain expressions. We don't need
+    // full analysis — just every VarExpr leaf. This is structural: any new Stmt
+    // kind not handled here simply contributes no refs (conservative-safe for
+    // capture detection — better to under-report captures than crash).
+    auto walk_expr = [&](const std::shared_ptr<Expr>& e) {
+        collectExprVarRefs(e, out);
+    };
+    if (auto* es = dynamic_cast<const ExpressionStmt*>(stmt.get())) { walk_expr(es->expression); return; }
+    if (auto* v = dynamic_cast<const VarDeclStmt*>(stmt.get())) {
+        if (v->initializer) walk_expr(v->initializer);
+        return;
+    }
+    if (auto* r = dynamic_cast<const ReturnStmt*>(stmt.get())) { if (r->value) walk_expr(r->value); return; }
+    if (auto* t = dynamic_cast<const ThrowStmt*>(stmt.get())) { if (t->expression) walk_expr(t->expression); return; }
+    if (auto* blk = dynamic_cast<const BlockStmt*>(stmt.get())) {
+        for (const auto& s : blk->statements) collectVarRefs(s, out);
+        return;
+    }
+    if (auto* ifs = dynamic_cast<const IfStmt*>(stmt.get())) {
+        walk_expr(ifs->condition);
+        collectVarRefs(ifs->thenBranch, out);
+        collectVarRefs(ifs->elseBranch, out);
+        return;
+    }
+    if (auto* wh = dynamic_cast<const WhileStmt*>(stmt.get())) {
+        if (wh->condition) walk_expr(wh->condition);
+        collectVarRefs(wh->body, out);
+        return;
+    }
+    if (auto* fs = dynamic_cast<const ForStmt*>(stmt.get())) {
+        if (fs->condition) walk_expr(fs->condition);
+        if (fs->increment) walk_expr(fs->increment);
+        collectVarRefs(fs->initializer, out);
+        collectVarRefs(fs->body, out);
+        return;
+    }
+    if (auto* fi = dynamic_cast<const ForInStmt*>(stmt.get())) {
+        if (fi->collection) walk_expr(fi->collection);
+        collectVarRefs(fi->body, out);
+        return;
+    }
+    if (auto* dr = dynamic_cast<const DropStmt*>(stmt.get())) { out.insert(dr->name.lexeme); return; }
+}
+
+// Expression half of collectVarRefs.
+void Chaperone::collectExprVarRefs(const std::shared_ptr<Expr>& expr,
+    std::set<std::string>& out)
+{
+    if (!expr) return;
+    if (auto* ve = dynamic_cast<const VarExpr*>(expr.get())) { out.insert(ve->name.lexeme); return; }
+    if (auto* b = dynamic_cast<const Binary*>(expr.get())) { collectExprVarRefs(b->left, out); collectExprVarRefs(b->right, out); return; }
+    if (auto* u = dynamic_cast<const Unary*>(expr.get())) { collectExprVarRefs(u->right, out); return; }
+    if (auto* g = dynamic_cast<const Grouping*>(expr.get())) { collectExprVarRefs(g->expression, out); return; }
+    if (auto* a = dynamic_cast<const AssignExpr*>(expr.get())) { collectExprVarRefs(a->target, out); collectExprVarRefs(a->value, out); return; }
+    if (auto* upd = dynamic_cast<const UpdateExpr*>(expr.get())) { collectExprVarRefs(upd->target, out); return; }
+    if (auto* c = dynamic_cast<const CallExpr*>(expr.get())) {
+        collectExprVarRefs(c->callee, out);
+        for (const auto& arg : c->arguments) collectExprVarRefs(arg, out);
+        return;
+    }
+    if (auto* gt = dynamic_cast<const GetExpr*>(expr.get())) { collectExprVarRefs(gt->object, out); return; }
+    if (auto* l = dynamic_cast<const ListExpr*>(expr.get())) { for (const auto& e : l->elements) collectExprVarRefs(e, out); return; }
+    if (auto* lo = dynamic_cast<const LogicalExpr*>(expr.get())) { collectExprVarRefs(lo->left, out); collectExprVarRefs(lo->right, out); return; }
+    if (auto* su = dynamic_cast<const SubscriptExpr*>(expr.get())) { collectExprVarRefs(su->object, out); collectExprVarRefs(su->index, out); return; }
+    if (auto* re = dynamic_cast<const RecordExpr*>(expr.get())) { for (const auto& v : re->values) collectExprVarRefs(v, out); return; }
+    if (auto* te = dynamic_cast<const TernaryExpr*>(expr.get())) { collectExprVarRefs(te->condition, out); collectExprVarRefs(te->thenBranch, out); collectExprVarRefs(te->elseBranch, out); return; }
+    if (auto* ie = dynamic_cast<const IsExpr*>(expr.get())) { collectExprVarRefs(ie->object, out); return; }
+    if (auto* ce = dynamic_cast<const CastExpr*>(expr.get())) { collectExprVarRefs(ce->object, out); return; }
+    if (auto* de = dynamic_cast<const DerefExpr*>(expr.get())) { collectExprVarRefs(de->right, out); return; }
+    if (auto* me = dynamic_cast<const MatchExpr*>(expr.get())) {
+        collectExprVarRefs(me->condition, out);
+        for (const auto& cs : me->cases) if (cs.body) collectExprVarRefs(cs.body, out);
+        return;
+    }
+}
+
+// E505 helper: if `elem` is a bare tracked Live variable, it is escaping into
+// an untracked container (list/record literal). Report and transition to
+// Escaped so later drops aren't double-frees and the leak is named.
+void Chaperone::checkEscapeIntoContainer(Context& ctx,
+    const std::shared_ptr<Expr>& elem, StateMap& state)
+{
+    auto* ve = dynamic_cast<const VarExpr*>(elem.get());
+    if (!ve) return;
+    auto it = state.find(ve->name.lexeme);
+    if (it != state.end() && it->second == State::Live) {
+        diag(ctx, ve->name,
+            "🧬 Escaped molecule — `" + ve->name.lexeme + "` (a tracked "
+            "allocation) is stored into an untracked container. The container "
+            "isn't tracked, so the allocation can't be released correctly. Use "
+            "an owning container or `@escape` to transfer ownership intentionally.",
+            "E505");
+        it->second = State::Escaped;
+    }
+}
 
 void Chaperone::analyzeExpr(Context& ctx,
     const std::shared_ptr<Expr>& expr, StateMap& state)
@@ -268,10 +372,14 @@ void Chaperone::analyzeExpr(Context& ctx,
         return;
     }
 
-    // ListExpr: walk all elements.
+    // ListExpr: walk all elements. E505 — a tracked Live value placed into a
+    // list literal escapes into an untracked container: the container isn't
+    // tracked, so the value can't be dropped correctly (leak or double-free).
     if (auto* list = dynamic_cast<const ListExpr*>(expr.get())) {
-        for (const auto& elem : list->elements)
+        for (const auto& elem : list->elements) {
             analyzeExpr(ctx, elem, state);
+            checkEscapeIntoContainer(ctx, elem, state);
+        }
         return;
     }
 
@@ -291,8 +399,10 @@ void Chaperone::analyzeExpr(Context& ctx,
 
     // RecordExpr: walk all values.
     if (auto* rec = dynamic_cast<const RecordExpr*>(expr.get())) {
-        for (const auto& val : rec->values)
+        for (const auto& val : rec->values) {
             analyzeExpr(ctx, val, state);
+            checkEscapeIntoContainer(ctx, val, state);   // E505
+        }
         return;
     }
 
@@ -331,8 +441,30 @@ void Chaperone::analyzeExpr(Context& ctx,
         return;
     }
 
-    // Literal, ThisExpr, SuperExpr, LambdaExpr: no variable references to check
-    // (literals have no vars; this/super are not droppable; lambdas are scoped).
+    // LambdaExpr: a closure captures any tracked Live variable it references.
+    // The closure may outlive the local, so a captured tracked value transitions
+    // to Escaped (the closure holds the reference; dropping the local would
+    // leave the closure dangling). Without this, use-after-free via a closure
+    // that outlives its capture was invisible.
+    if (auto* lam = dynamic_cast<const LambdaExpr*>(expr.get())) {
+        std::set<std::string> referenced;
+        for (const auto& s : lam->body)
+            collectVarRefs(s, referenced);
+        for (const auto& name : referenced) {
+            auto it = state.find(name);
+            if (it != state.end() && it->second == State::Live) {
+                diag(ctx, lam->keyword,
+                    "🧬 Escaped molecule — `" + name + "` is captured by a closure "
+                    "that may outlive it. Ownership is treated as transferred; drop "
+                    "the captured value via the closure's lifecycle, not the local.",
+                    "E505");
+                it->second = State::Escaped;
+            }
+        }
+        return;
+    }
+
+    // Literal, ThisExpr, SuperExpr: no variable references to check.
 }
 
 // ============================================================================
@@ -366,8 +498,7 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
         for (size_t i = 0; i < fn_type->param_types.size() && i < func.params.size(); i++) {
             auto& pt = fn_type->param_types[i];
             if (!pt) continue;
-            if (pt->kind == TypeKind::CLASS || pt->kind == TypeKind::INSTANCE ||
-                (pt->kind == TypeKind::DATA && ctx.tracked_types.count(pt->toString()))) {
+            if (isTrackedTypeObj(ctx, *pt)) {
                 state[func.params[i].name.lexeme] = State::Live;
                 param_names.insert(func.params[i].name.lexeme);
                 param_tracked[i] = true;
@@ -375,6 +506,7 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
         }
     } else {
         // Fallback: read each param's type annotation directly (methods).
+        // base_name unwaps optionals/owned, so optional tracked params register.
         for (size_t i = 0; i < func.params.size(); i++) {
             std::string tn = base_name(func.params[i].type.get());
             if (!tn.empty() && ctx.tracked_types.count(tn)) {
@@ -544,8 +676,10 @@ void Chaperone::analyzeStmt(Context& ctx,
         analyzeExpr(ctx, thr->expression, state);
         // v5: report leaks on throw paths as errors. No auto-unwind —
         // the programmer must use `finally {}` for explicit cleanup.
+        // S8: a name listed in a surrounding `finally {}`'s drops is
+        // discharged (the finally runs on the throw path), so skip it.
         for (auto& [name, st] : state) {
-            if (st == State::Live) {
+            if (st == State::Live && ctx.finally_protected.count(name) == 0) {
                 diag(ctx, thr->keyword,
                     "🧬 Unfolded molecule — `" + name + "` is live when `throw` "
                     "fires at line " + std::to_string(thr->keyword.line) + ". "
@@ -665,6 +799,20 @@ void Chaperone::analyzeStmt(Context& ctx,
 
     // --- TryStmt ---
     if (auto* tryS = dynamic_cast<const TryStmt*>(stmt.get())) {
+        // S8: if there's a finally, collect the names it drops so throws inside
+        // the try body don't false-flag them as leaks (the finally runs on the
+        // throw path and discharges the obligation). Snapshot the set to restore
+        // on exit (finally protection is scoped to this try).
+        std::set<std::string> protected_snapshot = ctx.finally_protected;
+        if (tryS->finallyBlock) {
+            std::set<std::string> dropped;
+            if (auto* fblk = dynamic_cast<const BlockStmt*>(tryS->finallyBlock.get()))
+                for (const auto& s : fblk->statements)
+                    if (auto* d = dynamic_cast<const DropStmt*>(s.get()))
+                        dropped.insert(d->name.lexeme);
+            ctx.finally_protected.insert(dropped.begin(), dropped.end());
+        }
+
         StateMap try_state = state;
         bool try_term = false;
         if (tryS->tryBlock) {
@@ -720,6 +868,8 @@ void Chaperone::analyzeStmt(Context& ctx,
                 state = analyzeBlock(ctx, blk->statements, state, finally_term);
             else
                 analyzeStmt(ctx, tryS->finallyBlock, state, finally_term);
+            // Restore the finally-protected set (scoped to this try).
+            ctx.finally_protected = protected_snapshot;
             if (try_term && catch_term && finally_term) { terminates = true; return; }
         } else {
             state = merged;
@@ -841,6 +991,24 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
     Context ctx(tc, eh);
     collectTrackedTypes(ctx, program);
     detectCycles(ctx, program);
+
+    // G1: module-level (global) tracked allocations. They have no enclosing
+    // scope to drop them in, so a tracked global leaks by construction — the
+    // programmer must manage it manually (future: @manual). Report E501 so it's
+    // not invisible. (Top-level lets inside the program vector only — class
+    // fields are handled by cascade-drops, not here.)
+    for (const auto& stmt : program) {
+        if (!stmt) continue;
+        if (auto* var = dynamic_cast<const VarDeclStmt*>(stmt.get())) {
+            if (isTrackedVar(ctx, *var)) {
+                diag(ctx, var->name,
+                    "🧬 Unfolded molecule — `" + var->name.lexeme + "` is a tracked "
+                    "allocation at module scope, which has no scope to drop it in. "
+                    "It leaks by construction; manage it manually (future: @manual).",
+                    "E501");
+            }
+        }
+    }
 
     // Collect every analyzable function (top-level + class methods) into a
     // flat list. The same FuncStmt can be analyzed multiple times across the
