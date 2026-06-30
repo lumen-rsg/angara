@@ -24,8 +24,10 @@ struct Token;
 /// Runs after the TypeChecker, before Codegen. Analyzes the typed AST and
 /// verifies that every tracked allocation (class instance or `owned` type) is
 /// explicitly dropped or ownership-transferred on every control-flow path.
-/// Auto-inserts drops on exception-unwind paths. Reports diagnostics for leaks,
-/// use-after-free, double-free, and reference cycles.
+/// Reports diagnostics for leaks, use-after-free, double-free, dangling
+/// borrows, and reference cycles. Exception paths are handled inline in the
+/// ThrowStmt/TryStmt handlers (E501 on throw; `finally {}` discharges the
+/// obligation) — there is no auto-unwind; cleanup is the programmer's job.
 class Chaperone {
 public:
     /// Runs the pass on the entire program.
@@ -134,8 +136,10 @@ private:
     static void collectExprVarRefs(const std::shared_ptr<struct Expr>& expr,
         std::set<std::string>& out);
 
-    // --- Phase 3: Throw-path leak detection (reports E501, no auto-drop) ---
-    // (inline in analyzeStmt's ThrowStmt handler)
+    // --- Exception paths: throw-path leak detection (E501) + finally discharge ---
+    // Handled inline in analyzeStmt's ThrowStmt and TryStmt handlers — no
+    // separate phase. The v5 model reports leaks on throw (the programmer
+    // cleans up via finally {}); the old auto-unwind was removed (cde8e23).
 
     // --- Phase 4: Cycle detection ---
     static void detectCycles(Context& ctx,

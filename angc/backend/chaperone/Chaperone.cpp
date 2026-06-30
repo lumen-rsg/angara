@@ -951,9 +951,15 @@ void Chaperone::analyzeStmt(Context& ctx,
 }
 
 // ============================================================================
-// Phase 3: Exception unwinding
+// Exception paths — no separate phase.
+//
+// The v5 model has no auto-unwind (the old `unwindAtThrow` was removed in
+// cde8e23 — it was unsound with refs/cycles: it dropped what the Chaperone
+// tracked but couldn't prevent dangling refs in untracked containers).
+// Throw-path leak detection (E501) is handled inline in the ThrowStmt handler
+// above, and a surrounding `finally {}` discharges the obligation (S8). The
+// programmer cleans up explicitly; the Chaperone verifies.
 // ============================================================================
-
 
 // ============================================================================
 // Phase 4: Cycle detection
