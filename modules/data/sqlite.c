@@ -41,7 +41,7 @@ AngaraObject Angara_sqlite_open(int arg_count, AngaraObject* args) {
     return ang_api->native_instance_new(dbc, finalize_db, "SqliteDb");
 }
 
-AngaraObject Angara_Db_execute(int arg_count, AngaraObject* args) {
+AngaraObject Angara_SqliteDb_execute(int arg_count, AngaraObject* args) {
     if (arg_count < 2 || !IS_STR(args[1])) {
         ang_api->throw_error("execute(sql, params?) expects a string.");
         return ang_nil();
@@ -127,7 +127,7 @@ AngaraObject Angara_Db_execute(int arg_count, AngaraObject* args) {
     return rows;
 }
 
-AngaraObject Angara_Db_query_one(int arg_count, AngaraObject* args) {
+AngaraObject Angara_SqliteDb_query_one(int arg_count, AngaraObject* args) {
     if (arg_count < 2 || !IS_STR(args[1])) {
         ang_api->throw_error("query_one(sql, params?) expects a string.");
         return ang_nil();
@@ -175,7 +175,7 @@ AngaraObject Angara_Db_query_one(int arg_count, AngaraObject* args) {
     return result;
 }
 
-AngaraObject Angara_Db_run(int arg_count, AngaraObject* args) {
+AngaraObject Angara_SqliteDb_run(int arg_count, AngaraObject* args) {
     if (arg_count < 2 || !IS_STR(args[1])) {
         ang_api->throw_error("run(sql, params?) expects a string.");
         return ang_nil();
@@ -211,7 +211,7 @@ AngaraObject Angara_Db_run(int arg_count, AngaraObject* args) {
     return ang_i64((int64_t)sqlite3_last_insert_rowid(dbc->db));
 }
 
-AngaraObject Angara_Db_close(int arg_count, AngaraObject* args) {
+AngaraObject Angara_SqliteDb_close(int arg_count, AngaraObject* args) {
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (dbc && dbc->db) {
         sqlite3_close(dbc->db);
@@ -220,25 +220,25 @@ AngaraObject Angara_Db_close(int arg_count, AngaraObject* args) {
     return ang_nil();
 }
 
-AngaraObject Angara_Db_last_insert_id(int arg_count, AngaraObject* args) {
+AngaraObject Angara_SqliteDb_last_insert_id(int arg_count, AngaraObject* args) {
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (!dbc || !dbc->db) return ang_i64(-1);
     return ang_i64((int64_t)sqlite3_last_insert_rowid(dbc->db));
 }
 
-AngaraObject Angara_Db_changes(int arg_count, AngaraObject* args) {
+AngaraObject Angara_SqliteDb_changes(int arg_count, AngaraObject* args) {
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (!dbc || !dbc->db) return ang_i64(0);
     return ang_i64((int64_t)sqlite3_changes(dbc->db));
 }
 
 static const AngaraMethodDef DB_METHODS[] = {
-    {"execute",        (AngaraMethodFn)Angara_Db_execute,        "sl<a>?->l<{}>"},
-    {"query_one",      (AngaraMethodFn)Angara_Db_query_one,      "sl<a>?->{}?"},
-    {"run",            (AngaraMethodFn)Angara_Db_run,             "sl<a>?->i"},
-    {"close",          (AngaraMethodFn)Angara_Db_close,           "->n"},
-    {"last_insert_id", (AngaraMethodFn)Angara_Db_last_insert_id,  "->i"},
-    {"changes",        (AngaraMethodFn)Angara_Db_changes,         "->i"},
+    {"execute",        (AngaraMethodFn)Angara_SqliteDb_execute,        "sl<a>?->l<{}>"},
+    {"query_one",      (AngaraMethodFn)Angara_SqliteDb_query_one,      "sl<a>?->{}?"},
+    {"run",            (AngaraMethodFn)Angara_SqliteDb_run,             "sl<a>?->i"},
+    {"close",          (AngaraMethodFn)Angara_SqliteDb_close,           "->n"},
+    {"last_insert_id", (AngaraMethodFn)Angara_SqliteDb_last_insert_id,  "->i"},
+    {"changes",        (AngaraMethodFn)Angara_SqliteDb_changes,         "->i"},
     {NULL, NULL, NULL}
 };
 

@@ -11,7 +11,7 @@ export func main() -> i64 {
 
   // Clean up any previous test DB
   if (fs.exists(DB_PATH)) {
-    fs.remove(DB_PATH);
+    fs.remove_file(DB_PATH);
   }
 
   // 1. Open database
@@ -75,7 +75,7 @@ export func main() -> i64 {
 
   // Clean up
   if (fs.exists(DB_PATH)) {
-    fs.remove(DB_PATH);
+    fs.remove_file(DB_PATH);
   }
 
   io.println(1, "\n--- All SQLite tests passed! ---");
