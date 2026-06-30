@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Angara — Explicit Systems Programming</title>
-<meta name="description" content="A modern, statically-typed systems programming language with protein-folding-inspired garbage collection and contract-first design. Powered by LLVM.">
+<title>Angara — Explicit Memory, Verified at Compile Time</title>
+<meta name="description" content="A statically-typed systems programming language with no garbage collector. The Chaperone verifies every allocation at compile time — no runtime collector, no refcount, no pauses. Powered by LLVM.">
 <style>
 /* ========== RESET & BASE ========== */
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -12,29 +12,39 @@
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300..700;1,300..700&family=Source+Code+Pro:ital,wght@0,200..900;1,200..900&display=swap');
 
 :root {
-  --bg:        #0a0e17;
-  --bg-card:   #111827;
-  --bg-code:   #0d1117;
-  --fg:        #e2e8f0;
-  --fg-dim:    #94a3b8;
-  --fg-muted:  #64748b;
-  --accent:    #38bdf8;
-  --accent2:   #a78bfa;
-  --accent3:   #34d399;
-  --accent4:   #f472b6;
-  --accent5:   #fb923c;
-  --border:    #1e293b;
+  /* Soft neumorphic pastel palette — lavender / mint / peach */
+  --bg:        #ece9f2;   /* warm lavender-white base */
+  --bg-2:      #e4e0ee;   /* slightly deeper, for section alternation */
+  --raised:    #f6f4fb;   /* neumorphic raised surface */
+  --card:      #ffffff;   /* cards on top */
+  --inset:     #e0dcea;   /* pressed/inset surface (code blocks) */
+  --ink:       #3a3550;   /* soft aubergine text */
+  --ink-soft:  #5a5470;
+  --muted:     #8a85a0;
+  --accent:    #a78bfa;   /* lavender */
+  --accent2:   #6ee7c7;   /* mint */
+  --accent3:   #fbbf95;   /* peach */
+  --accent-ink:#7c5fd6;   /* deeper lavender for links/text on light */
+  --line:      rgba(120,110,160,0.16);
+
+  /* Neumorphic dual shadows */
+  --sh-raise:    8px 8px 20px rgba(160,150,195,0.38), -8px -8px 20px rgba(255,255,255,0.92);
+  --sh-raise-sm: 5px 5px 12px rgba(160,150,195,0.32), -5px -5px 12px rgba(255,255,255,0.90);
+  --sh-inset:    inset 5px 5px 12px rgba(160,150,195,0.30), inset -5px -5px 12px rgba(255,255,255,0.85);
+  --sh-hover:    12px 12px 28px rgba(160,150,195,0.42), -12px -12px 28px rgba(255,255,255,0.95);
+
   --font:      'Cormorant Garamond', 'Georgia', serif;
   --font-mono: 'Source Code Pro', 'Fira Code', 'Courier New', monospace;
-  --font-size: 16px;
-  --max-w:     1200px;
+  --font-size: 17px;
+  --max-w:     1180px;
+  --radius:    20px;
 }
 
 html {
   scroll-behavior: smooth;
   font-size: var(--font-size);
   background: var(--bg);
-  color: var(--fg);
+  color: var(--ink);
 }
 
 body {
@@ -45,25 +55,31 @@ body {
   -webkit-font-feature-settings: "liga" on;
 }
 
-a { color: var(--accent); text-decoration: none; transition: color 0.2s; }
-a:hover { color: #7dd3fc; }
+a { color: var(--accent-ink); text-decoration: none; transition: color 0.2s; }
+a:hover { color: var(--accent); }
 
 code {
   font-family: var(--font-mono);
-  font-size: 0.88em;
+  font-size: 0.86em;
+  background: var(--inset);
+  padding: 0.12em 0.4em;
+  border-radius: 6px;
+  color: var(--accent-ink);
 }
 
-::selection { background: rgba(56,189,248,0.3); color: #fff; }
+::selection { background: rgba(167,139,250,0.28); color: var(--ink); }
 
 /* ========== NAVIGATION ========== */
 nav {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-  background: rgba(10,14,23,0.85);
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid var(--border);
+  background: rgba(236,233,242,0.78);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  border-bottom: 1px solid var(--line);
   padding: 0 2rem;
-  transition: background 0.3s;
+  transition: box-shadow 0.3s;
 }
+nav.scrolled { box-shadow: 0 6px 18px rgba(160,150,195,0.18); }
 
 nav .nav-inner {
   max-width: var(--max-w);
@@ -71,1194 +87,851 @@ nav .nav-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 60px;
+  height: 64px;
 }
 
 nav .logo {
   font-family: var(--font-mono);
-  font-size: 1.2rem;
+  font-size: 1.18rem;
   font-weight: 700;
-  color: var(--fg);
-  letter-spacing: -0.5px;
-}
-
-nav .logo span { color: var(--accent); }
-
-nav .nav-links {
+  color: var(--ink);
+  letter-spacing: -0.02em;
   display: flex;
-  gap: 2rem;
-  list-style: none;
-  font-size: 0.87rem;
-  font-family: var(--font-mono);
+  align-items: center;
+  gap: 0.5rem;
+}
+nav .logo .dot {
+  width: 11px; height: 11px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  box-shadow: 0 0 10px rgba(167,139,250,0.6);
 }
 
+nav .nav-links { display: flex; gap: 1.9rem; align-items: center; }
 nav .nav-links a {
-  color: var(--fg-dim);
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
   font-weight: 500;
+  letter-spacing: 0.01em;
+  text-transform: lowercase;
   transition: color 0.2s;
 }
+nav .nav-links a:hover { color: var(--accent-ink); }
 
-nav .nav-links a:hover { color: var(--accent); }
-
-.nav-cta {
-  background: var(--accent);
-  color: var(--bg) !important;
-  padding: 0.4rem 1.1rem;
-  border-radius: 6px;
-  font-weight: 700 !important;
-  font-size: 0.82rem !important;
-  letter-spacing: 0.3px;
+nav .nav-cta {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: var(--raised);
+  padding: 0.5rem 1.1rem;
+  border-radius: 999px;
+  box-shadow: var(--sh-raise-sm);
+  transition: box-shadow 0.2s, transform 0.2s;
 }
+nav .nav-cta:hover { box-shadow: var(--sh-hover); transform: translateY(-1px); color: var(--accent-ink); }
 
-.nav-cta:hover { background: #7dd3fc !important; }
-
-/* ========== SECTIONS (generic) ========== */
+/* ========== LAYOUT PRIMITIVES ========== */
 section {
-  max-width: var(--max-w);
-  margin: 0 auto;
   padding: 6rem 2rem;
+  position: relative;
 }
+.section-inner { max-width: var(--max-w); margin: 0 auto; }
 
 .section-label {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 3px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--accent);
-  margin-bottom: 0.8rem;
+  margin-bottom: 0.9rem;
 }
-
 .section-title {
   font-family: var(--font);
-  font-size: 2.8rem;
-  font-weight: 700;
-  line-height: 1.15;
-  margin-bottom: 1rem;
-  color: #fff;
+  font-size: clamp(2.1rem, 4.5vw, 3.2rem);
+  font-weight: 600;
+  line-height: 1.08;
+  color: var(--ink);
+  margin-bottom: 1.1rem;
+  letter-spacing: -0.01em;
 }
-
 .section-subtitle {
-  font-size: 1.1rem;
-  color: var(--fg-dim);
-  max-width: 700px;
-  line-height: 1.8;
+  font-size: 1.18rem;
+  color: var(--ink-soft);
+  max-width: 640px;
+  line-height: 1.65;
 }
+.section-subtitle strong { color: var(--ink); font-weight: 600; }
+
+/* Alternate section backgrounds for rhythm */
+.alt-bg { background: var(--bg-2); }
 
 /* ========== HERO ========== */
 .hero {
   min-height: 100vh;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 8rem 2rem 4rem;
+  padding: 8rem 2rem 5rem;
   position: relative;
   overflow: hidden;
 }
-
-.hero-bg {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-}
-
-.hero-bg canvas {
-  width: 100%;
-  height: 100%;
-}
-
+.hero-bg { position: absolute; inset: 0; z-index: 0; }
+.hero-bg canvas { width: 100%; height: 100%; display: block; }
 .hero-gradient {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse 80% 60% at 50% 40%, rgba(56,189,248,0.06) 0%, transparent 70%),
-              radial-gradient(ellipse 60% 40% at 30% 60%, rgba(167,139,250,0.04) 0%, transparent 70%);
-  z-index: 1;
+  position: absolute; inset: 0; z-index: 1;
+  background: radial-gradient(ellipse at 50% 40%, rgba(236,233,242,0.25) 0%, rgba(236,233,242,0.7) 55%, var(--bg) 100%);
 }
-
-.hero-content {
-  position: relative;
-  z-index: 2;
-}
+.hero-content { position: relative; z-index: 2; max-width: 880px; }
 
 .hero-badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  background: rgba(56,189,248,0.08);
-  border: 1px solid rgba(56,189,248,0.2);
-  border-radius: 100px;
-  padding: 0.4rem 1.2rem;
-  font-size: 0.78rem;
+  gap: 0.55rem;
   font-family: var(--font-mono);
-  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--ink-soft);
+  background: var(--raised);
+  padding: 0.5rem 1.15rem;
+  border-radius: 999px;
+  box-shadow: var(--sh-raise-sm);
   margin-bottom: 2rem;
-  font-weight: 600;
+  letter-spacing: 0.02em;
 }
-
 .hero-badge .dot {
-  width: 6px;
-  height: 6px;
-  background: var(--accent3);
-  border-radius: 50%;
-  animation: pulse-dot 2s ease-in-out infinite;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent2);
+  box-shadow: 0 0 8px rgba(110,231,199,0.8);
+  animation: pulse 2.4s ease-in-out infinite;
 }
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(1.4); }
-}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
 
 .hero h1 {
   font-family: var(--font);
-  font-size: 5rem;
-  font-weight: 700;
-  line-height: 1.05;
-  letter-spacing: -2px;
-  margin-bottom: 1.5rem;
-  color: #fff;
+  font-size: clamp(2.9rem, 7vw, 5.2rem);
+  font-weight: 600;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  margin-bottom: 1.6rem;
+  color: var(--ink);
 }
-
-.hero h1 .accent { color: var(--accent); }
-
-.hero h1 .dim { color: var(--fg-dim); font-weight: 400; }
+.hero h1 .accent {
+  background: linear-gradient(120deg, var(--accent), var(--accent2) 60%, var(--accent3));
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-style: italic;
+}
+.hero h1 .dim { color: var(--muted); font-style: italic; }
 
 .hero-tagline {
-  font-family: var(--font);
-  font-size: 1.2rem;
-  color: var(--fg-dim);
+  font-size: 1.28rem;
+  color: var(--ink-soft);
   max-width: 640px;
-  margin: 0 auto 2.5rem;
-  line-height: 1.8;
+  margin: 0 auto 2.4rem;
+  line-height: 1.6;
 }
+.hero-tagline strong { color: var(--ink); font-weight: 600; }
 
-.hero-tagline strong { color: var(--fg); font-weight: 700; }
-
-.hero-actions {
-  display: flex;
-  gap: 1rem;
-  justify-content: center;
-  flex-wrap: wrap;
-}
+.hero-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 3.2rem; }
 
 .btn {
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  font-weight: 600;
+  padding: 0.9rem 1.8rem;
+  border-radius: 999px;
+  transition: box-shadow 0.22s, transform 0.22s;
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.8rem 1.8rem;
-  border-radius: 8px;
-  font-family: var(--font-mono);
-  font-size: 0.9rem;
-  font-weight: 700;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s;
-  text-decoration: none;
 }
-
 .btn-primary {
-  background: var(--accent);
-  color: var(--bg);
+  background: linear-gradient(135deg, var(--accent), var(--accent-ink));
+  color: #fff;
+  box-shadow: 6px 6px 16px rgba(124,95,214,0.34);
 }
-
-.btn-primary:hover { background: #7dd3fc; transform: translateY(-1px); }
-
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 8px 10px 24px rgba(124,95,214,0.42); color:#fff; }
 .btn-secondary {
-  background: transparent;
-  color: var(--fg);
-  border: 1px solid var(--border);
+  background: var(--raised);
+  color: var(--ink);
+  box-shadow: var(--sh-raise-sm);
 }
-
-.btn-secondary:hover { border-color: var(--fg-muted); background: rgba(255,255,255,0.03); }
+.btn-secondary:hover { transform: translateY(-2px); box-shadow: var(--sh-hover); color: var(--ink); }
 
 .hero-stats {
-  display: flex;
-  gap: 3rem;
-  margin-top: 4rem;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-
-.hero-stat {
-  text-align: center;
-}
-
-.hero-stat .num {
-  font-family: var(--font-mono);
-  font-size: 1.6rem;
-  font-weight: 800;
-  color: #fff;
-}
-
-.hero-stat .label {
-  font-family: var(--font-mono);
-  font-size: 0.72rem;
-  color: var(--fg-muted);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-top: 0.2rem;
-}
-
-/* ========== PHILOSOPHY ========== */
-.philosophy {
-  border-top: 1px solid var(--border);
-}
-
-.philosophy-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 2rem;
-  margin-top: 3rem;
-}
-
-.phil-item {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 2rem;
-  transition: border-color 0.3s, transform 0.2s;
-}
-
-.phil-item:hover {
-  border-color: rgba(56,189,248,0.3);
-  transform: translateY(-2px);
-}
-
-.phil-item .icon {
-  font-size: 1.8rem;
-  margin-bottom: 1rem;
-  display: block;
-}
-
-.phil-item h3 {
-  font-family: var(--font);
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #fff;
-  margin-bottom: 0.6rem;
-}
-
-.phil-item p {
-  font-size: 0.87rem;
-  color: var(--fg-dim);
-  line-height: 1.7;
-}
-
-/* ========== CODE BLOCKS ========== */
-.code-block {
-  background: var(--bg-code);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-  margin: 1.5rem 0;
-}
-
-.code-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 1.2rem;
-  background: rgba(255,255,255,0.02);
-  border-bottom: 1px solid var(--border);
-  font-size: 0.75rem;
-  font-family: var(--font-mono);
-  color: var(--fg-muted);
-}
-
-.code-dots {
-  display: flex;
-  gap: 6px;
-  margin-right: 0.8rem;
-}
-
-.code-dots span {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-
-.code-dots .d1 { background: #ef4444; }
-.code-dots .d2 { background: #f59e0b; }
-.code-dots .d3 { background: #22c55e; }
-
-.code-block pre {
-  padding: 1.2rem 1.5rem;
-  overflow-x: auto;
-  font-size: 0.85rem;
-  line-height: 1.8;
-  font-family: var(--font-mono);
-}
-
-.code-block pre code {
-  font-family: var(--font-mono);
-}
-
-/* Syntax colors */
-.kw { color: #c678dd; }
-.ty { color: #e5c07b; }
-.fn { color: #61afef; }
-.str { color: #98c379; }
-.num { color: #d19a66; }
-.cm { color: #5c6370; font-style: italic; }
-.op { color: #56b6c2; }
-.pp { color: #c678dd; }
-.param { color: #e06c75; }
-.annotation { color: #e5c07b; font-weight: 600; }
-
-/* ========== PROTEIN FOLDING SECTION ========== */
-.protein-section {
-  border-top: 1px solid var(--border);
-  position: relative;
-}
-
-.protein-hero {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 3rem;
-  align-items: center;
-  margin-bottom: 4rem;
-}
-
-.protein-canvas-wrap {
-  position: relative;
-  background: rgba(0,0,0,0.3);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  overflow: hidden;
-  aspect-ratio: 1;
-}
-
-.protein-canvas-wrap canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.protein-legend {
-  position: absolute;
-  bottom: 1rem;
-  left: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  font-size: 0.7rem;
-  color: var(--fg-dim);
-  background: rgba(10,14,23,0.8);
-  padding: 0.8rem 1rem;
-  border-radius: 8px;
-  backdrop-filter: blur(8px);
-}
-
-.legend-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.legend-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.protein-info {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.protein-info .section-title {
-  font-size: 2.6rem;
-}
-
-.bio-analogy {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.5rem;
-}
-
-.bio-analogy h4 {
-  font-family: var(--font);
-  font-size: 0.95rem;
-  color: var(--accent2);
-  margin-bottom: 0.6rem;
-  font-weight: 700;
-}
-
-.bio-analogy p {
-  font-size: 0.85rem;
-  color: var(--fg-dim);
-  line-height: 1.7;
-}
-
-/* Mechanism cards */
-.mechanism-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1.5rem;
-  margin: 3rem 0;
-}
-
-.mech-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 2rem;
-  position: relative;
-  overflow: hidden;
-}
-
-.mech-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-}
-
-.mech-card:nth-child(1)::before { background: linear-gradient(90deg, var(--accent), transparent); }
-.mech-card:nth-child(2)::before { background: linear-gradient(90deg, var(--accent2), transparent); }
-.mech-card:nth-child(3)::before { background: linear-gradient(90deg, var(--accent3), transparent); }
-
-.mech-num {
-  font-family: var(--font);
-  font-size: 3rem;
-  font-weight: 200;
-  color: rgba(255,255,255,0.06);
-  position: absolute;
-  top: 0.5rem;
-  right: 1rem;
-}
-
-.mech-card h3 {
-  font-family: var(--font);
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: #fff;
-  margin-bottom: 0.5rem;
-}
-
-.mech-card .bio-label {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  margin-bottom: 0.8rem;
-  font-weight: 600;
-}
-
-.mech-card p {
-  font-size: 0.82rem;
-  color: var(--fg-dim);
-  line-height: 1.7;
-}
-
-/* Energy landscape */
-.energy-section {
-  margin: 3rem 0;
-}
-
-.energy-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2rem;
-  margin-top: 1.5rem;
-}
-
-.energy-canvas-wrap {
-  background: rgba(0,0,0,0.3);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-  aspect-ratio: 16/10;
-}
-
-.energy-canvas-wrap canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-.energy-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-.energy-formula {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1.5rem;
-  text-align: center;
-}
-
-.energy-formula .formula {
-  font-family: var(--font-mono);
-  font-size: 1.3rem;
-  font-weight: 700;
-  color: var(--accent2);
-  letter-spacing: 1px;
-}
-
-.energy-formula .formula-desc {
-  font-size: 0.78rem;
-  color: var(--fg-muted);
-  margin-top: 0.5rem;
-}
-
-/* Analogy table */
-.analogy-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.88rem;
-  margin-top: 1.5rem;
-}
-
-.analogy-table th {
-  font-family: var(--font-mono);
-  text-align: left;
-  padding: 0.8rem 1rem;
-  background: rgba(255,255,255,0.03);
-  color: var(--fg-dim);
-  font-weight: 600;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-.analogy-table td {
-  padding: 0.7rem 1rem;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
-  color: var(--fg);
-}
-
-.analogy-table td:first-child { color: var(--accent2); font-weight: 600; }
-
-/* ========== PERFORMANCE ========== */
-.perf-section { border-top: 1px solid var(--border); }
-
-.perf-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 1rem;
-  margin-top: 2.5rem;
+  max-width: 720px;
+  margin: 0 auto;
 }
-
-.perf-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1.5rem;
-  text-align: center;
+.hero-stat {
+  background: var(--raised);
+  border-radius: var(--radius);
+  padding: 1.2rem 0.8rem;
+  box-shadow: var(--sh-raise-sm);
 }
-
-.perf-card .ratio {
+.hero-stat .num {
   font-family: var(--font-mono);
-  font-size: 2rem;
-  font-weight: 800;
-  color: var(--accent3);
+  font-size: 1.5rem;
+  font-weight: 700;
+  background: linear-gradient(120deg, var(--accent-ink), var(--accent));
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.hero-stat .label {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
 }
 
-.perf-card .ratio.beats { color: var(--accent3); }
-.perf-card .ratio.par { color: var(--accent); }
-.perf-card .ratio.slow { color: var(--accent5); }
-
-.perf-card .bench-name {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  color: var(--fg-muted);
-  margin-top: 0.3rem;
+/* ========== PHILOSOPHY ========== */
+.philosophy-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.6rem;
+  margin-top: 3.2rem;
 }
-
-.perf-card .bench-desc {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  color: var(--fg-muted);
-  margin-top: 0.15rem;
-  opacity: 0.6;
+.phil-item {
+  background: var(--raised);
+  border-radius: var(--radius);
+  padding: 1.9rem 1.7rem;
+  box-shadow: var(--sh-raise);
+  transition: transform 0.25s, box-shadow 0.25s;
 }
+.phil-item:hover { transform: translateY(-4px); box-shadow: var(--sh-hover); }
+.phil-item .icon {
+  display: inline-flex;
+  align-items: center; justify-content: center;
+  width: 48px; height: 48px;
+  border-radius: 14px;
+  font-size: 1.5rem;
+  background: var(--card);
+  box-shadow: var(--sh-inset);
+  margin-bottom: 1.1rem;
+  color: var(--accent);
+}
+.phil-item h3 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 0.5rem;
+}
+.phil-item p { color: var(--ink-soft); font-size: 1.04rem; line-height: 1.6; }
 
-.perf-note {
-  text-align: center;
+/* ========== CODE BLOCKS ========== */
+.code-block {
+  background: var(--inset);
+  border-radius: var(--radius);
+  box-shadow: var(--sh-inset);
+  overflow: hidden;
+  margin: 1.4rem 0;
+}
+.code-header {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.85rem 1.2rem;
   font-family: var(--font-mono);
   font-size: 0.78rem;
-  color: var(--fg-muted);
-  margin-top: 1.5rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
 }
+.code-dots { display: flex; gap: 0.4rem; }
+.code-dots span { width: 11px; height: 11px; border-radius: 50%; box-shadow: var(--sh-inset); }
+.code-dots .d1 { background: #f0b4a8; }
+.code-dots .d2 { background: #ffe7a3; }
+.code-dots .d3 { background: #a8e0c8; }
+.code-block pre {
+  padding: 1.3rem 1.4rem;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: var(--ink);
+}
+.code-block pre code { background: none; padding: 0; font-size: inherit; color: inherit; }
+/* pastel syntax tokens */
+.code-block .kw  { color: #8b6fd6; font-weight: 600; }
+.code-block .ty  { color: #2fa37a; }
+.code-block .fn  { color: #c97a4a; }
+.code-block .str { color: #d98c6a; }
+.code-block .num { color: #8b6fd6; }
+.code-block .cm  { color: var(--muted); font-style: italic; }
+.code-block .param { color: #5a9fb8; }
+.code-block .annotation { color: #b85ea3; }
 
-/* ========== CONTRACTS ========== */
-.contracts-section { border-top: 1px solid var(--border); }
-
-.contracts-grid {
+/* ========== CHAPERONE CENTERPIECE ========== */
+.chap-hero {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 2rem;
+  gap: 3rem;
+  align-items: center;
   margin-top: 2.5rem;
 }
-
-.contract-feature {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 2rem;
+.chap-canvas-wrap {
+  background: var(--raised);
+  border-radius: var(--radius);
+  box-shadow: var(--sh-raise);
+  padding: 1.4rem;
+  aspect-ratio: 1 / 1;
+  position: relative;
 }
-
-.contract-feature h3 {
-  font-family: var(--font);
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #fff;
-  margin-bottom: 0.5rem;
+.chap-canvas-wrap canvas { width: 100%; height: 100%; display: block; border-radius: 14px; }
+.chap-legend {
+  position: absolute; bottom: 1.1rem; left: 1.1rem; right: 1.1rem;
+  display: flex; flex-wrap: wrap; gap: 0.8rem;
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--ink-soft);
 }
+.legend-item { display: flex; align-items: center; gap: 0.4rem;
+  background: rgba(255,255,255,0.7); padding: 0.25rem 0.6rem; border-radius: 999px;
+  box-shadow: var(--sh-inset); }
+.legend-dot { width: 9px; height: 9px; border-radius: 50%; }
 
-.contract-feature p {
-  font-size: 0.85rem;
-  color: var(--fg-dim);
-  line-height: 1.7;
-  margin-bottom: 1rem;
-}
-
-.contract-comparison {
+.chap-pillars {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.2rem;
   margin-top: 3rem;
 }
-
-.comparison-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
-  margin-top: 1rem;
+.chap-pillar {
+  background: var(--raised);
+  border-radius: var(--radius);
+  padding: 1.5rem 1.4rem;
+  box-shadow: var(--sh-raise);
 }
-
-.comparison-table th {
+.chap-pillar h4 {
   font-family: var(--font-mono);
-  text-align: left;
-  padding: 0.8rem 1rem;
-  background: rgba(255,255,255,0.03);
-  border-bottom: 1px solid var(--border);
-  font-weight: 600;
-  color: var(--fg-dim);
-}
-
-.comparison-table td {
-  padding: 0.7rem 1rem;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
-}
-
-.comparison-table td code {
-  font-family: var(--font-mono);
-  background: rgba(167,139,250,0.15);
-  color: var(--accent2);
-  padding: 0.15rem 0.5rem;
-  border-radius: 4px;
   font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+  margin-bottom: 0.4rem;
+  text-transform: uppercase;
 }
+.chap-pillar p { color: var(--ink-soft); font-size: 1rem; line-height: 1.55; }
 
-.check { color: var(--accent3); }
-.cross { color: var(--fg-muted); }
-
-/* ========== LANGUAGE FEATURES ========== */
-.features-section { border-top: 1px solid var(--border); }
-
-.features-grid {
+/* The four ownership keywords */
+.kw-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 2rem;
+  gap: 1.4rem;
   margin-top: 2.5rem;
 }
-
-.feature-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
-  transition: border-color 0.3s;
-}
-
-.feature-card:hover { border-color: rgba(56,189,248,0.25); }
-
-.feature-card .feature-desc {
+.kw-card {
+  background: var(--raised);
+  border-radius: var(--radius);
   padding: 1.5rem;
+  box-shadow: var(--sh-raise);
+  transition: transform 0.25s, box-shadow 0.25s;
 }
+.kw-card:hover { transform: translateY(-3px); box-shadow: var(--sh-hover); }
+.kw-card .kw-head { display: flex; align-items: baseline; gap: 0.7rem; margin-bottom: 0.6rem; }
+.kw-card .kw-name {
+  font-family: var(--font-mono); font-size: 1.15rem; font-weight: 700;
+  color: var(--accent-ink);
+}
+.kw-card .kw-tag {
+  font-family: var(--font-mono); font-size: 0.72rem; font-weight: 600;
+  padding: 0.18rem 0.6rem; border-radius: 999px;
+}
+.kw-card[data-tag="value"] .kw-tag { background: rgba(110,231,199,0.22); color: #2a9a78; }
+.kw-card[data-tag="tracked"] .kw-tag { background: rgba(167,139,250,0.20); color: #7c5fd6; }
+.kw-card[data-tag="borrow"] .kw-tag { background: rgba(251,191,149,0.28); color: #b8703a; }
+.kw-card .kw-desc { color: var(--ink-soft); font-size: 1rem; line-height: 1.55; margin-bottom: 0.9rem; }
+.kw-card .code-block { margin: 0; }
 
-.feature-card h3 {
-  font-family: var(--font);
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #fff;
-  margin-bottom: 0.5rem;
+/* Diagnostics table */
+.diag-table-wrap {
+  background: var(--raised);
+  border-radius: var(--radius);
+  box-shadow: var(--sh-raise);
+  padding: 1.6rem;
+  margin-top: 2.5rem;
+  overflow-x: auto;
 }
+.diag-table { width: 100%; border-collapse: collapse; font-size: 0.98rem; }
+.diag-table th {
+  font-family: var(--font-mono); font-size: 0.74rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
+  text-align: left; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--line);
+}
+.diag-table td { padding: 0.7rem 0.8rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+.diag-table tr:last-child td { border-bottom: none; }
+.diag-table .code-cell {
+  font-family: var(--font-mono); font-weight: 700; font-size: 0.86rem;
+  white-space: nowrap;
+}
+.diag-table .e-code { color: var(--accent-ink); }
+.diag-table .w-code { color: #b8783a; }
+.diag-table .metaphor { color: var(--ink); font-weight: 500; white-space: nowrap; }
+.diag-table .meaning { color: var(--ink-soft); }
 
-.feature-card p {
-  font-size: 0.82rem;
-  color: var(--fg-dim);
-  line-height: 1.7;
+/* ========== FEATURES / CONTRACTS ========== */
+.features-grid, .contracts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.6rem;
+  margin-top: 2.8rem;
 }
+.feature-card, .contracts-grid > div {
+  background: var(--raised);
+  border-radius: var(--radius);
+  padding: 1.6rem;
+  box-shadow: var(--sh-raise);
+}
+.feature-desc { margin-top: 1.1rem; }
+.feature-desc h3 { font-size: 1.5rem; font-weight: 600; color: var(--ink); margin-bottom: 0.4rem; }
+.feature-desc p { color: var(--ink-soft); }
+
+/* Contracts comparison table */
+.contract-comparison {
+  background: var(--raised);
+  border-radius: var(--radius);
+  box-shadow: var(--sh-raise);
+  padding: 2rem;
+  margin-top: 2.8rem;
+}
+.comparison-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+.comparison-table th, .comparison-table td {
+  padding: 0.75rem 0.9rem; text-align: left; border-bottom: 1px solid var(--line); font-size: 1.02rem;
+}
+.comparison-table th { font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.comparison-table .check { color: #2a9a78; font-weight: 700; }
+.comparison-table .cross { color: #c47a6a; font-weight: 700; }
+
+/* ========== PERFORMANCE ========== */
+.perf-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.1rem;
+  margin-top: 2.8rem;
+}
+.perf-card {
+  background: var(--raised);
+  border-radius: var(--radius);
+  padding: 1.4rem 1.1rem;
+  box-shadow: var(--sh-raise);
+  text-align: center;
+}
+.perf-card .perf-num {
+  font-family: var(--font-mono); font-size: 1.7rem; font-weight: 700;
+  background: linear-gradient(120deg, var(--accent-ink), var(--accent));
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+.perf-card .perf-name { font-size: 0.95rem; color: var(--ink); margin-top: 0.3rem; font-weight: 500; }
+.perf-card .perf-note { font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }
+.perf-footer { text-align: center; color: var(--muted); font-size: 0.92rem; margin-top: 1.8rem; font-family: var(--font-mono); }
 
 /* ========== ECOSYSTEM ========== */
-.ecosystem-section { border-top: 1px solid var(--border); }
-
 .module-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 1rem;
-  margin-top: 2.5rem;
+  margin-top: 2.8rem;
 }
-
 .module-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1.3rem;
-  transition: border-color 0.3s, transform 0.2s;
+  background: var(--raised);
+  border-radius: 16px;
+  padding: 1.1rem 1.2rem;
+  box-shadow: var(--sh-raise-sm);
+  transition: transform 0.2s, box-shadow 0.2s;
 }
-
-.module-card:hover { border-color: rgba(56,189,248,0.3); transform: translateY(-1px); }
-
+.module-card:hover { transform: translateY(-3px); box-shadow: var(--sh-hover); }
 .module-card .mod-name {
-  font-family: var(--font-mono);
-  font-size: 0.9rem;
-  font-weight: 700;
-  color: var(--accent);
-  margin-bottom: 0.3rem;
+  font-family: var(--font-mono); font-size: 1rem; font-weight: 700; color: var(--accent-ink);
+  margin-bottom: 0.25rem;
 }
-
-.module-card .mod-desc {
-  font-family: var(--font);
-  font-size: 0.8rem;
-  color: var(--fg-muted);
-  line-height: 1.5;
-}
+.module-card .mod-desc { font-size: 0.86rem; color: var(--ink-soft); line-height: 1.45; }
 
 /* ========== CTA ========== */
 .cta-section {
-  border-top: 1px solid var(--border);
   text-align: center;
-  padding: 8rem 2rem;
+  padding: 7rem 2rem;
 }
-
-.cta-section .section-title {
-  font-size: 3rem;
+.cta-card {
+  max-width: 760px; margin: 0 auto;
+  background: var(--raised);
+  border-radius: 32px;
+  padding: 3.5rem 2.5rem;
+  box-shadow: var(--sh-raise);
 }
-
-.cta-section .section-subtitle {
-  margin: 0 auto 2.5rem;
+.cta-card h2 {
+  font-family: var(--font); font-size: clamp(2rem, 4vw, 2.8rem); font-weight: 600;
+  color: var(--ink); margin-bottom: 1rem; line-height: 1.1;
 }
+.cta-card p { color: var(--ink-soft); font-size: 1.15rem; margin-bottom: 2rem; }
 
 /* ========== FOOTER ========== */
 footer {
-  border-top: 1px solid var(--border);
-  padding: 3rem 2rem;
+  padding: 2.5rem 2rem;
   text-align: center;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
   font-family: var(--font-mono);
-  font-size: 0.78rem;
-  color: var(--fg-muted);
+  font-size: 0.84rem;
 }
+footer a { color: var(--ink-soft); }
 
-footer .footer-inner {
-  max-width: var(--max-w);
-  margin: 0 auto;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-footer a { color: var(--fg-dim); }
-
-/* ========== SCROLL ANIMATIONS ========== */
+/* ========== SCROLL REVEAL ========== */
 .reveal {
   opacity: 0;
-  transform: translateY(30px);
-  transition: opacity 0.6s ease, transform 0.6s ease;
+  transform: translateY(28px);
+  transition: opacity 0.7s cubic-bezier(0.2,0.7,0.3,1), transform 0.7s cubic-bezier(0.2,0.7,0.3,1);
 }
-
-.reveal.visible {
-  opacity: 1;
-  transform: translateY(0);
-}
+.reveal.visible { opacity: 1; transform: translateY(0); }
 
 /* ========== RESPONSIVE ========== */
 @media (max-width: 900px) {
-  .hero h1 { font-size: 3rem; letter-spacing: -1.5px; }
-  .protein-hero,
-  .energy-grid,
-  .contracts-grid,
-  .features-grid { grid-template-columns: 1fr; }
-  .mechanism-grid { grid-template-columns: 1fr; }
-  .perf-grid { grid-template-columns: repeat(2, 1fr); }
-  .module-grid { grid-template-columns: repeat(2, 1fr); }
-  .philosophy-grid { grid-template-columns: 1fr; }
   nav .nav-links { display: none; }
-  .hero-stats { gap: 2rem; }
-  footer .footer-inner { flex-direction: column; gap: 1rem; }
+  .philosophy-grid, .features-grid, .contracts-grid, .kw-grid { grid-template-columns: 1fr; }
+  .chap-hero { grid-template-columns: 1fr; }
+  .perf-grid, .module-grid { grid-template-columns: repeat(2, 1fr); }
+  .hero-stats { grid-template-columns: repeat(2, 1fr); }
+  section { padding: 4.5rem 1.3rem; }
+}
+@media (max-width: 560px) {
+  .perf-grid, .module-grid, .hero-stats { grid-template-columns: 1fr; }
 }
 
-@media (max-width: 600px) {
-  .hero h1 { font-size: 2.2rem; }
-  .section-title { font-size: 1.8rem; }
-  .module-grid { grid-template-columns: 1fr; }
-  .perf-grid { grid-template-columns: 1fr; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .hero-badge .dot { animation: none; }
+  * { scroll-behavior: auto !important; }
 }
 </style>
 </head>
 <body>
 
-<!-- ==================== NAVIGATION ==================== -->
-<nav>
+<!-- ==================== NAV ==================== -->
+<nav id="nav">
   <div class="nav-inner">
-    <div class="logo">angara<span>.</span></div>
-    <ul class="nav-links">
-      <li><a href="#philosophy">Philosophy</a></li>
-      <li><a href="#gc">ChaperoneGC</a></li>
-      <li><a href="#contracts">Contracts</a></li>
-      <li><a href="#features">Language</a></li>
-      <li><a href="#performance">Performance</a></li>
-      <li><a href="#ecosystem">Ecosystem</a></li>
-      <li><a href="https://github.com/lumen-rsg/angara" class="nav-cta">GitHub</a></li>
-    </ul>
+    <a href="#" class="logo"><span class="dot"></span>angara</a>
+    <div class="nav-links">
+      <a href="#philosophy">philosophy</a>
+      <a href="#chaperone">chaperone</a>
+      <a href="#features">language</a>
+      <a href="#contracts">contracts</a>
+      <a href="#ecosystem">modules</a>
+    </div>
+    <a href="https://github.com/lumen-rsg/angara" class="nav-cta">GitHub &rarr;</a>
   </div>
 </nav>
 
 <!-- ==================== HERO ==================== -->
 <section class="hero">
-  <div class="hero-bg">
-    <canvas id="hero-canvas"></canvas>
-  </div>
+  <div class="hero-bg"><canvas id="hero-canvas"></canvas></div>
   <div class="hero-gradient"></div>
   <div class="hero-content">
     <div class="hero-badge">
       <span class="dot"></span>
-      v4.1 &mdash; LLVM-Powered &mdash; Open Source
+      v5 &mdash; The GC is gone. Memory is resolved at compile time.
     </div>
     <h1>
-      Write code that<br>
-      <span class="accent">means</span> what it<br>
-      <span class="dim">says.</span>
+      Explicit memory,<br>
+      <span class="accent">verified</span> at<br>
+      <span class="dim">compile time.</span>
     </h1>
     <p class="hero-tagline">
       Angara is a <strong>statically-typed systems programming language</strong> with
-      protein-folding-inspired garbage collection, contract-first design, and native
-      LLVM compilation. <strong>No implicit conversions. No hidden allocations. No surprises.</strong>
+      <strong>no garbage collector</strong>. A compile-time pass &mdash; the <strong>Chaperone</strong>
+      &mdash; proves every allocation is released and catches use-after-free, double-free, and leaks.
+      <strong>No runtime collector. No refcount. No pauses.</strong> Powered by LLVM.
     </p>
     <div class="hero-actions">
-      <a href="#philosophy" class="btn btn-primary">Explore the Language</a>
+      <a href="#chaperone" class="btn btn-primary">How the Chaperone works</a>
       <a href="https://github.com/lumen-rsg/angara" class="btn btn-secondary">View on GitHub</a>
     </div>
     <div class="hero-stats">
-      <div class="hero-stat">
-        <div class="num">20+</div>
-        <div class="label">Native Modules</div>
-      </div>
-      <div class="hero-stat">
-        <div class="num">0.69x</div>
-        <div class="label">vs C (GC Stress)</div>
-      </div>
-      <div class="hero-stat">
-        <div class="num">LLVM</div>
-        <div class="label">Native Backend</div>
-      </div>
-      <div class="hero-stat">
-        <div class="num">ARM64</div>
-        <div class="label">Bare-Metal Ready</div>
-      </div>
+      <div class="hero-stat"><div class="num">0</div><div class="label">GC pauses</div></div>
+      <div class="hero-stat"><div class="num">~30</div><div class="label">Memory diagnostics</div></div>
+      <div class="hero-stat"><div class="num">LLVM</div><div class="label">Native backend</div></div>
+      <div class="hero-stat"><div class="num">ARM64</div><div class="label">Bare-metal ready</div></div>
     </div>
   </div>
 </section>
 
 <!-- ==================== PHILOSOPHY ==================== -->
-<section id="philosophy" class="philosophy">
-  <div class="reveal">
-    <div class="section-label">Philosophy</div>
-    <div class="section-title">Explicit is better<br>than implicit.</div>
-    <p class="section-subtitle">
-      Every design decision in Angara follows one principle: the programmer should never be
-      surprised by what the compiler does. Types are annotated, not inferred behind your back.
-      Memory is tracked, not silently collected. Contracts are declared, not assumed.
-    </p>
-  </div>
+<section id="philosophy" class="alt-bg">
+  <div class="section-inner">
+    <div class="reveal">
+      <div class="section-label">Philosophy</div>
+      <div class="section-title">Explicit is better<br>than implicit.</div>
+      <p class="section-subtitle">
+        Every design decision in Angara follows one principle: the programmer should never be
+        surprised by what the compiler does. Types are annotated, not inferred behind your back.
+        Memory is <strong>verified</strong>, not silently collected. Contracts are declared, not assumed.
+      </p>
+    </div>
 
-  <div class="philosophy-grid">
-    <div class="phil-item reveal">
-      <span class="icon">&#9881;</span>
-      <h3>No Hidden Allocations</h3>
-      <p>Every heap allocation is visible. String concatenation creates a new object &mdash; and you know it. No autoboxing, no implicit heap promotion, no compiler-generated copies you didn't ask for.</p>
+    <div class="philosophy-grid">
+      <div class="phil-item reveal">
+        <span class="icon">&#9881;</span>
+        <h3>No Hidden Allocations</h3>
+        <p>Every heap allocation is visible. You <code>new</code> it explicitly, you <code>drop</code> it explicitly &mdash; and the Chaperone proves you did it right. No autoboxing, no implicit heap promotion, no compiler-generated copies you didn't ask for.</p>
+      </div>
+      <div class="phil-item reveal">
+        <span class="icon">&#9733;</span>
+        <h3>No Implicit Conversions</h3>
+        <p><code>i64</code> does not become <code>f64</code> silently. <code>string</code> does not become <code>any</code> without your consent. Every type conversion is deliberate, every cast is explicit, every boundary is enforced.</p>
+      </div>
+      <div class="phil-item reveal">
+        <span class="icon">&#9889;</span>
+        <h3>No Runtime Collector</h3>
+        <p>There is no garbage collector. No tracing, no refcounting, no safepoints, no pauses. Memory safety is a <strong>compile-time proof</strong>, which means the language is sound on freestanding targets &mdash; kernels, drivers, embedded.</p>
+      </div>
+      <div class="phil-item reveal">
+        <span class="icon">&#9878;</span>
+        <h3>Contracts First</h3>
+        <p>Define what a type must provide before you define how it provides it. The <code>contract</code> keyword enforces field presence and method signatures at compile time. Interface by design, not by convention.</p>
+      </div>
+      <div class="phil-item reveal">
+        <span class="icon">&#128279;</span>
+        <h3>Zero-Cost C FFI</h3>
+        <p>Call any C library with a <code>foreign</code> declaration. Map C structs directly. No wrapper generation, no binding layers, no runtime overhead. The C ABI is a first-class citizen.</p>
+      </div>
+      <div class="phil-item reveal">
+        <span class="icon">&#9873;</span>
+        <h3>Bare-Metal Ready</h3>
+        <p>Compile to freestanding ARM64 with <code>--freestanding --target aarch64-unknown-none-elf</code>. Write kernels, firmware, and embedded code with the same language, the same type system, the same guarantees.</p>
+      </div>
     </div>
-    <div class="phil-item reveal">
-      <span class="icon">&#9733;</span>
-      <h3>No Implicit Conversions</h3>
-      <p><code>i64</code> does not become <code>f64</code> silently. <code>string</code> does not become <code>any</code> without your consent. Every type conversion is deliberate, every cast is explicit, every boundary is enforced.</p>
-    </div>
-    <div class="phil-item reveal">
-      <span class="icon">&#9878;</span>
-      <h3>Contracts First</h3>
-      <p>Define what a type must provide before you define how it provides it. The <code>contract</code> keyword enforces field presence and method signatures at compile time. Interface by design, not by convention.</p>
-    </div>
-    <div class="phil-item reveal">
-      <span class="icon">&#9775;</span>
-      <h3>Biological GC</h3>
-      <p>The garbage collector is inspired by protein folding &mdash; molecular chaperones that guide heap compaction incrementally, using simulated annealing to optimize object locality without stopping the world.</p>
-    </div>
-    <div class="phil-item reveal">
-      <span class="icon">&#9889;</span>
-      <h3>Zero-Cost C FFI</h3>
-      <p>Call any C library with a <code>foreign</code> declaration. Map C structs directly. No wrapper generation, no binding layers, no runtime overhead. The C ABI is a first-class citizen.</p>
-    </div>
-    <div class="phil-item reveal">
-      <span class="icon">&#9873;</span>
-      <h3>Bare-Metal Ready</h3>
-      <p>Compile to freestanding ARM64 with <code>--freestanding --target aarch64-unknown-none-elf</code>. Write kernels, firmware, and embedded code with the same language, the same type system, the same guarantees.</p>
-    </div>
-  </div>
 
-  <div class="code-block reveal" style="margin-top: 3rem;">
-    <div class="code-header">
-      <div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-      hello.an &mdash; Every type is explicit, every module is attached
-    </div>
-    <pre><code><span class="kw">attach</span> io;
+    <div class="code-block reveal" style="margin-top: 3rem;">
+      <div class="code-header">
+        <div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
+        hello.an &mdash; Every type is explicit, every module is attached
+      </div>
+      <pre><code><span class="kw">attach</span> io;
 
 <span class="kw">export func</span> <span class="fn">main</span>() -> <span class="ty">i64</span> {
   io.<span class="fn">println</span>(<span class="num">1</span>, <span class="str">"Hello, world!"</span>);
   <span class="kw">return</span> <span class="num">0</span>;
 }</code></pre>
+    </div>
   </div>
 </section>
 
-<!-- ==================== CHAPERONE GC ==================== -->
-<section id="gc" class="protein-section">
-  <div class="protein-hero">
-    <div class="protein-canvas-wrap reveal">
-      <canvas id="protein-canvas"></canvas>
-      <div class="protein-legend">
-        <div class="legend-item"><span class="legend-dot" style="background:#ef4444"></span> Hydrophobic (hot objects)</div>
-        <div class="legend-item"><span class="legend-dot" style="background:#3b82f6"></span> Hydrophilic (cold/dead)</div>
-        <div class="legend-item"><span class="legend-dot" style="background:#fbbf24"></span> Chaperone molecule</div>
-        <div class="legend-item"><span class="legend-dot" style="background:#a78bfa"></span> Covalent bonds (references)</div>
-      </div>
-    </div>
-    <div class="protein-info reveal">
-      <div class="section-label">Memory Management</div>
-      <div class="section-title">ChaperoneGC:<br>Protein Folding<br>Meets the Heap</div>
+<!-- ==================== CHAPERONE CENTERPIECE ==================== -->
+<section id="chaperone">
+  <div class="section-inner">
+    <div class="reveal">
+      <div class="section-label">Memory Model</div>
+      <div class="section-title">The Chaperone:<br>not a collector &mdash; a verifier.</div>
       <p class="section-subtitle">
-        In molecular biology, <strong>chaperone molecules</strong> guide proteins to fold into
-        their lowest-energy configurations &mdash; dense, compact, functional 3D structures.
-        ChaperoneGC applies the same principle to heap memory.
+        Angara v5 removed its garbage collector entirely. In its place, the <strong>Chaperone</strong>
+        is a compile-time data-flow analysis pass that <em>verifies</em> memory safety rather than
+        managing memory at runtime. You allocate explicitly, you drop explicitly &mdash; the Chaperone
+        proves every allocation is released and catches use-after-free, double-free, and leaks before
+        the binary ever runs.
       </p>
-      <div class="bio-analogy">
-        <h4>The Hydrophobic Effect</h4>
-        <p>
-          Proteins fold because hydrophobic residues collapse inward, forming a dense core,
-          while hydrophilic residues remain exposed. ChaperoneGC treats <strong>frequently-referenced
-          objects as hydrophobic</strong> &mdash; they cluster together for cache locality &mdash;
-          while cold or dying objects drift to arena edges, ready for collection.
-        </p>
-      </div>
-      <div class="bio-analogy">
-        <h4>Simulated Annealing</h4>
-        <p>
-          The background chaperone thread proposes small object relocations, accepting energy-improving
-          moves always and energy-increasing moves probabilistically (exp(-&Delta;E/T)). Temperature
-          cools over time, then periodically reheats to avoid premature convergence &mdash; exactly
-          like thermal fluctuations during protein folding.
-        </p>
-      </div>
     </div>
-  </div>
 
-  <!-- Three mechanisms -->
-  <div class="reveal">
-    <div class="section-label">Architecture</div>
-    <div class="section-title">Three Mechanisms,<br>One Metaphor</div>
-  </div>
-
-  <div class="mechanism-grid">
-    <div class="mech-card reveal">
-      <div class="mech-num">01</div>
-      <div class="bio-label">Bump-Arena Allocation</div>
-      <h3>Biological Parallel:<br>Co-Translational Folding</h3>
-      <p>
-        Just as proteins begin folding while still being synthesized by the ribosome, Angara
-        objects are bump-allocated into thread-local arenas. Allocation is a single pointer
-        increment &mdash; contiguous objects are already partially "folded" from birth.
-        Each arena is 1MB, up to 256 arenas (256MB total).
-      </p>
-    </div>
-    <div class="mech-card reveal">
-      <div class="mech-num">02</div>
-      <div class="bio-label">Energy Landscape</div>
-      <h3>Biological Parallel:<br>Free Energy Minimization</h3>
-      <p>
-        Each arena has a computed "free energy" score based on fragmentation, pointer distance,
-        and cache behavior. Hot objects with many incoming references cluster like hydrophobic
-        residues in a protein core. The chaperone thread continuously evaluates this energy
-        landscape, seeking the global minimum.
-      </p>
-    </div>
-    <div class="mech-card reveal">
-      <div class="mech-num">03</div>
-      <div class="bio-label">Simulated Annealing</div>
-      <h3>Biological Parallel:<br>Chaperone-Mediated Refolding</h3>
-      <p>
-        Molecular chaperones (Hsp60/GroEL, Hsp70) resolve misfolded proteins incrementally,
-        without stopping the cell. ChaperoneGC's background thread relocates objects one at a
-        time using forwarding pointers &mdash; mutators never pause. Temperature cools at
-        T &times; 0.9999, reheats every 10,000 steps.
-      </p>
-    </div>
-  </div>
-
-  <!-- Energy landscape visualization -->
-  <div class="energy-section reveal">
-    <div class="section-label">Live Simulation</div>
-    <div class="section-title">Energy Landscape</div>
-    <p class="section-subtitle">
-      Watch the chaperone thread fold the heap in real-time. Each arena's energy decreases
-      as objects are relocated to denser configurations.
-    </p>
-    <div class="energy-grid">
-      <div class="energy-canvas-wrap">
-        <canvas id="energy-canvas"></canvas>
-      </div>
-      <div class="energy-text">
-        <div class="energy-formula">
-          <div class="formula">E = 0.4 &middot; F + 0.35 &middot; D + 0.25 &middot; C</div>
-          <div class="formula-desc">F = fragmentation &middot; D = pointer distance &middot; C = cache miss estimate</div>
+    <div class="chap-hero">
+      <div class="chap-canvas-wrap reveal">
+        <canvas id="chap-canvas"></canvas>
+        <div class="chap-legend">
+          <div class="legend-item"><span class="legend-dot" style="background:#6ee7c7"></span> Live</div>
+          <div class="legend-item"><span class="legend-dot" style="background:#a78bfa"></span> Moved / Escaped</div>
+          <div class="legend-item"><span class="legend-dot" style="background:#c47a6a"></span> Dropped</div>
+          <div class="legend-item"><span class="legend-dot" style="background:#fbbf95"></span> ref borrow</div>
         </div>
-        <div class="energy-formula" style="text-align: left;">
-          <div style="font-size: 0.85rem; color: var(--fg-dim); line-height: 1.8;">
-            <strong style="color: var(--accent2);">Simulated Annealing Parameters</strong><br>
-            <span style="color: var(--fg-muted); font-size: 0.82rem;">
-              T<sub>initial</sub> = 1.0 &middot; cooling = 0.9999<br>
-              T<sub>min</sub> = 0.01 &middot; reheat cycle = 10,000 steps<br>
-              Relocation: incremental, one object per step<br>
-              Pause: zero &mdash; read barrier forwards transparently
-            </span>
+      </div>
+      <div class="reveal">
+        <div class="chap-pillars" style="margin-top:0;">
+          <div class="chap-pillar">
+            <h4>No Collector</h4>
+            <p>No tracing, no refcount, no safepoints. Memory safety is proven at compile time, so there is nothing to pause or synchronize at runtime.</p>
+          </div>
+          <div class="chap-pillar">
+            <h4>Freestanding-Sound</h4>
+            <p>Because safety is a compile-time property, the same guarantees hold on bare metal &mdash; kernels, drivers, and embedded targets with no runtime at all.</p>
+          </div>
+          <div class="chap-pillar">
+            <h4>Not Rust</h4>
+            <p>No lifetimes in the type system. No borrow checker that rejects code. The Chaperone is a <strong>verifier</strong> &mdash; it reports exactly where it can't prove safety.</p>
+          </div>
+          <div class="chap-pillar">
+            <h4>Move Semantics</h4>
+            <p>A tracked allocation has exactly one owner. Assigning it <em>moves</em> ownership; the old name is invalidated &mdash; the core of the double-free guarantee.</p>
           </div>
         </div>
       </div>
     </div>
-  </div>
 
-  <!-- Analogy table -->
-  <div class="reveal" style="margin-top: 3rem;">
-    <div class="section-title" style="font-size: 1.5rem;">The Mapping</div>
-    <table class="analogy-table">
-      <thead>
-        <tr><th>Biology</th><th>Garbage Collection</th></tr>
-      </thead>
-      <tbody>
-        <tr><td>Protein residue</td><td>Heap object</td></tr>
-        <tr><td>Hydrophobic residue (buried in core)</td><td>Hot object (frequently referenced, high reference heat)</td></tr>
-        <tr><td>Hydrophilic residue (exposed surface)</td><td>Cold object (rarely accessed, dead or dying)</td></tr>
-        <tr><td>Free energy</td><td>Fragmentation + pointer distance + cache miss estimate</td></tr>
-        <tr><td>Native fold (energy minimum)</td><td>Dense, cache-friendly object layout</td></tr>
-        <tr><td>Misfolded aggregate</td><td>Fragmented heap with scattered live objects</td></tr>
-        <tr><td>Chaperone molecule (Hsp70, GroEL)</td><td>Background GC thread that incrementally relocates objects</td></tr>
-        <tr><td>Thermal fluctuation</td><td>Simulated annealing temperature for stochastic optimization</td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <!-- GC code -->
-  <div class="code-block reveal" style="margin-top: 3rem;">
-    <div class="code-header">
-      <div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-      Select ChaperoneGC at compile time
+    <div class="reveal" style="margin-top: 4rem;">
+      <div class="section-label" style="color:var(--accent2);">Ownership Keywords</div>
+      <div class="section-title" style="font-size: clamp(1.7rem,3.5vw,2.4rem);">Four ways to hold memory.</div>
     </div>
-    <pre><code><span class="cm"># Compile with protein-folding-inspired GC</span>
-$ angc app.an <span class="annotation">--gc chaperone</span>
 
-<span class="cm"># Or use the default mark-sweep collector</span>
-$ angc app.an <span class="annotation">--gc mark-sweep</span></code></pre>
+    <div class="kw-grid">
+      <div class="kw-card reveal" data-tag="value">
+        <div class="kw-head">
+          <span class="kw-name">data</span>
+          <span class="kw-tag">pure value</span>
+        </div>
+        <div class="kw-desc">Copy-on-assign (memcpy). Stack/inline. The Chaperone ignores it &mdash; no tracking, no drop. The zero-cost case.</div>
+        <div class="code-block">
+          <div class="code-header"><div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div> value semantics</div>
+          <pre><code><span class="kw">data</span> <span class="ty">Point</span> { <span class="kw">let</span> x <span class="kw">as</span> <span class="ty">i64</span>; <span class="kw">let</span> y <span class="kw">as</span> <span class="ty">i64</span>; }
+<span class="kw">let</span> p1 = <span class="ty">Point</span>(<span class="num">10</span>, <span class="num">20</span>);
+<span class="kw">let</span> p2 = p1;            <span class="cm">// deep copy — independent</span>
+p2.x = <span class="num">99</span>;
+<span class="cm">// p1.x is still 10</span></code></pre>
+        </div>
+      </div>
+
+      <div class="kw-card reveal" data-tag="tracked">
+        <div class="kw-head">
+          <span class="kw-name">owned</span>
+          <span class="kw-tag">tracked</span>
+        </div>
+        <div class="kw-desc">Heap-allocated via the Allocator. The Chaperone tracks its whole lifetime &mdash; it must be explicitly <code>drop</code>ped or ownership-transferred.</div>
+        <div class="code-block">
+          <div class="code-header"><div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div> tracked allocation</div>
+          <pre><code><span class="kw">owned</span> <span class="ty">Buffer</span> {
+  <span class="kw">let</span> value <span class="kw">as</span> <span class="ty">i64</span>;
+  <span class="kw">func</span> <span class="fn">fin</span>(<span class="param">this</span>) { <span class="cm">/* finalizer */</span> }
+}
+<span class="kw">let</span> buf = <span class="ty">Buffer</span>();
+<span class="cm">// ... use buf ...</span>
+<span class="kw">drop</span> buf;              <span class="cm">// required — else E501 leak</span></code></pre>
+        </div>
+      </div>
+
+      <div class="kw-card reveal" data-tag="tracked">
+        <div class="kw-head">
+          <span class="kw-name">class</span>
+          <span class="kw-tag">tracked</span>
+        </div>
+        <div class="kw-desc">Owned by default &mdash; every instance is tracked and heap-allocated, same as <code>owned</code>, plus methods and inheritance.</div>
+        <div class="code-block">
+          <div class="code-header"><div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div> move semantics</div>
+          <pre><code><span class="kw">class</span> <span class="ty">Conn</span> {
+  <span class="kw">let</span> port <span class="kw">as</span> <span class="ty">i64</span>;
+  <span class="kw">func</span> <span class="fn">init</span>(<span class="param">this</span>, p <span class="kw">as</span> <span class="ty">i64</span>) { <span class="param">this</span>.port = p; }
+}
+<span class="kw">let</span> a = <span class="ty">Conn</span>(<span class="num">80</span>);
+<span class="kw">let</span> b = a;   <span class="cm">// MOVE: b owns it; a is invalid</span>
+<span class="kw">drop</span> b;      <span class="cm">// only the owner drops</span></code></pre>
+        </div>
+      </div>
+
+      <div class="kw-card reveal" data-tag="borrow">
+        <div class="kw-head">
+          <span class="kw-name">ref&lt;T&gt;</span>
+          <span class="kw-tag">borrow</span>
+        </div>
+        <div class="kw-desc">A non-owning reference. Borrows a tracked object without owning it &mdash; the Chaperone checks the borrow doesn't outlive its referent.</div>
+        <div class="code-block">
+          <div class="code-header"><div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div> borrow-checked</div>
+          <pre><code><span class="kw">let</span> b = <span class="ty">Buffer</span>();
+<span class="kw">let</span> r <span class="kw">as</span> <span class="ty">ref</span>&lt;<span class="ty">Buffer</span>&gt; = b;  <span class="cm">// borrow</span>
+<span class="kw">drop</span> b;
+<span class="cm">// r.get() here → E509 dangling borrow</span></code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="reveal" style="margin-top: 4rem;">
+      <div class="section-label" style="color:var(--accent3);">Diagnostics</div>
+      <div class="section-title" style="font-size: clamp(1.7rem,3.5vw,2.4rem);">Every bug class, named and caught.</div>
+      <p class="section-subtitle">
+        The Chaperone runs after the type checker and halts compilation on any error below.
+        Each diagnostic is a molecular metaphor &mdash; an unfolded molecule is a leak, a dead reference is a use-after-free.
+      </p>
+    </div>
+
+    <div class="diag-table-wrap reveal">
+      <table class="diag-table">
+        <thead>
+          <tr><th>Code</th><th>Metaphor</th><th>What it catches</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="code-cell e-code">E501</td><td class="metaphor">&#129516; Unfolded molecule</td><td class="meaning">Memory leak &mdash; allocation has no <code>drop</code> on a control-flow path</td></tr>
+          <tr><td class="code-cell e-code">E502</td><td class="metaphor">&#128128; Dead reference</td><td class="meaning">Use-after-free &mdash; variable used after <code>drop</code></td></tr>
+          <tr><td class="code-cell e-code">E503</td><td class="metaphor">&#9888;&#65039; Double denaturation</td><td class="meaning">Double-free &mdash; dropped twice, or after ownership moved</td></tr>
+          <tr><td class="code-cell e-code">E504</td><td class="metaphor">&#128279; Tangled molecule</td><td class="meaning">Reference cycle &mdash; use <code>ref&lt;T&gt;</code> for the back-edge</td></tr>
+          <tr><td class="code-cell e-code">E505</td><td class="metaphor">&#129516; Escaped molecule</td><td class="meaning">Tracked value escapes into an untracked container or closure</td></tr>
+          <tr><td class="code-cell e-code">E506</td><td class="metaphor">&#128260; Incomplete fold</td><td class="meaning">Loop-body drop &mdash; double-free on iteration 2+</td></tr>
+          <tr><td class="code-cell e-code">E507</td><td class="metaphor">&#128228; Moved molecule</td><td class="meaning">Use-after-move &mdash; a moved-from variable is read</td></tr>
+          <tr><td class="code-cell e-code">E509</td><td class="metaphor">&#128279; Dangling borrow</td><td class="meaning">A <code>ref&lt;T&gt;</code> is read after its referent was released</td></tr>
+          <tr><td class="code-cell w-code">W510</td><td class="metaphor">(warning)</td><td class="meaning">Variable handled differently on if/else branches</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </section>
 
-<!-- ==================== PERFORMANCE ==================== -->
-<section id="performance" class="perf-section">
-  <div class="reveal">
-    <div class="section-label">Benchmarks</div>
-    <div class="section-title">Performance That<br>Competes With C</div>
-    <p class="section-subtitle">
-      ChaperoneGC with unboxed primitives brings Angara within striking distance of hand-written C.
-      On GC-heavy workloads, the bump-arena allocator and incremental compaction actually
-      <strong>outperform C's malloc</strong>.
-    </p>
-  </div>
+<!-- ==================== FEATURES ==================== -->
+<section id="features" class="alt-bg">
+  <div class="section-inner">
+    <div class="reveal">
+      <div class="section-label">Language</div>
+      <div class="section-title">Modern Type System,<br>Systems-Level Control</div>
+    </div>
 
-  <div class="perf-grid">
-    <div class="perf-card reveal">
-      <div class="ratio beats">0.69x</div>
-      <div class="bench-name">GC Stress</div>
-      <div class="bench-desc">Faster than C</div>
-    </div>
-    <div class="perf-card reveal">
-      <div class="ratio beats">0.52x</div>
-      <div class="bench-name">String Building</div>
-      <div class="bench-desc">Faster than C</div>
-    </div>
-    <div class="perf-card reveal">
-      <div class="ratio beats">0.79x</div>
-      <div class="bench-name">Bubble Sort</div>
-      <div class="bench-desc">Faster than C</div>
-    </div>
-    <div class="perf-card reveal">
-      <div class="ratio par">1.00x</div>
-      <div class="bench-name">Prime Sieve</div>
-      <div class="bench-desc">Parity with C</div>
-    </div>
-    <div class="perf-card reveal">
-      <div class="ratio par">1.00x</div>
-      <div class="bench-name">Matrix Multiply</div>
-      <div class="bench-desc">Parity with C</div>
-    </div>
-    <div class="perf-card reveal">
-      <div class="ratio par">1.01x</div>
-      <div class="bench-name">Recursive Fibonacci</div>
-      <div class="bench-desc">Parity with C</div>
-    </div>
-    <div class="perf-card reveal">
-      <div class="ratio par">1.11x</div>
-      <div class="bench-name">Integer Loop</div>
-      <div class="bench-desc">Near parity</div>
-    </div>
-    <div class="perf-card reveal">
-      <div class="ratio slow">5.37x</div>
-      <div class="bench-name">Data Class Churn</div>
-      <div class="bench-desc">Boxed objects (improving)</div>
+    <div class="features-grid">
+      <div class="feature-card reveal">
+        <div class="code-block" style="border:none; border-radius:0; margin:0; box-shadow:none; background:transparent;">
+          <div class="code-header"><div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div> data classes</div>
+          <pre><code><span class="kw">data</span> <span class="ty">Vec2</span> {
+  <span class="kw">let</span> x <span class="kw">as</span> <span class="ty">f64</span>;
+  <span class="kw">let</span> y <span class="kw">as</span> <span class="ty">f64</span>;
+}
+<span class="kw">let</span> v1 = <span class="ty">Vec2</span>(<span class="num">10.0</span>, <span class="num">20.0</span>);
+<span class="kw">let</span> v2 = v1;             <span class="cm">// deep copy</span>
+v2.x = <span class="num">30.0</span>;
+io.<span class="fn">println</span>(<span class="num">1</span>, v1.x);  <span class="cm">// still 10.0</span></code></pre>
+        </div>
+        <div class="feature-desc">
+          <h3>Data Classes</h3>
+          <p>Pure value types with copy-on-assign semantics. The compiler generates equality, constructors, and accessors &mdash; no boilerplate.</p>
+        </div>
+      </div>
+
+      <div class="feature-card reveal">
+        <div class="code-block" style="border:none; border-radius:0; margin:0; box-shadow:none; background:transparent;">
+          <div class="code-header"><div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div> enums &amp; matching</div>
+          <pre><code><span class="kw">enum</span> <span class="ty">WebEvent</span> {
+  KeyPress(<span class="ty">string</span>),
+  Click({x: <span class="ty">i64</span>, y: <span class="ty">i64</span>})
+}
+<span class="kw">let</span> desc = <span class="kw">match</span> (event) {
+  <span class="kw">case</span> <span class="ty">WebEvent</span>.KeyPress(k): { <span class="str">"key: "</span> + k },
+  <span class="kw">case</span> <span class="ty">WebEvent</span>.Click(c):   { <span class="str">"at "</span> + string(c.x) }
+};</code></pre>
+        </div>
+        <div class="feature-desc">
+          <h3>Enums &amp; Matching</h3>
+          <p>Algebraic data types with payload destructuring. Pattern matching is exhaustive &mdash; the compiler rejects unhandled variants.</p>
+        </div>
+      </div>
     </div>
   </div>
-  <p class="perf-note reveal">
-    Ratios show Angara execution time relative to equivalent C. Lower is better.
-    &lt;1.0x means Angara is faster. Benchmarked with ChaperoneGC + unboxed primitives.
-  </p>
 </section>
 
 <!-- ==================== CONTRACTS ==================== -->
-<section id="contracts" class="contracts-section">
-  <div class="reveal">
-    <div class="section-label">Type System</div>
-    <div class="section-title">Contract-First<br>Awareness</div>
-    <p class="section-subtitle">
-      The <code>contract</code> keyword defines what a type must provide &mdash; both
-      fields and methods &mdash; before you write any implementation. Classes declare
-      their contracts with <code>signs</code>, and the compiler verifies every obligation.
-    </p>
-  </div>
-
-  <div class="contracts-grid">
+<section id="contracts">
+  <div class="section-inner">
     <div class="reveal">
-      <div class="code-block">
-        <div class="code-header">
-          <div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-          Define contracts
-        </div>
-        <pre><code><span class="kw">export contract</span> <span class="ty">Identifiable</span> {
+      <div class="section-label">Type System</div>
+      <div class="section-title">Contract-First<br>Awareness</div>
+      <p class="section-subtitle">
+        The <code>contract</code> keyword defines what a type must provide &mdash; both
+        fields and methods &mdash; before you write any implementation. Classes declare
+        their contracts with <code>signs</code>, and the compiler verifies every obligation.
+      </p>
+    </div>
+
+    <div class="contracts-grid">
+      <div class="reveal">
+        <div class="code-block">
+          <div class="code-header"><div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div> Define contracts</div>
+          <pre><code><span class="kw">export contract</span> <span class="ty">Identifiable</span> {
   <span class="kw">public</span>:
     <span class="kw">let</span> id <span class="kw">as</span> <span class="ty">i64</span>;
 }
@@ -1273,15 +946,12 @@ $ angc app.an <span class="annotation">--gc mark-sweep</span></code></pre>
     <span class="kw">func</span> <span class="fn">to_json</span>(<span class="param">this</span>) -> <span class="ty">string</span>;
     <span class="kw">func</span> <span class="fn">from_json</span>(<span class="param">this</span>, data <span class="kw">as</span> <span class="ty">string</span>) -> <span class="ty">nil</span>;
 }</code></pre>
-      </div>
-    </div>
-    <div class="reveal">
-      <div class="code-block">
-        <div class="code-header">
-          <div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-          Sign contracts with a class
         </div>
-        <pre><code><span class="kw">class</span> <span class="ty">User</span> <span class="annotation">signs</span> <span class="ty">Identifiable</span>, <span class="ty">Loggable</span> {
+      </div>
+      <div class="reveal">
+        <div class="code-block">
+          <div class="code-header"><div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div> Sign contracts with a class</div>
+          <pre><code><span class="kw">class</span> <span class="ty">User</span> <span class="annotation">signs</span> <span class="ty">Identifiable</span>, <span class="ty">Loggable</span> {
   <span class="kw">public</span>:
     <span class="kw">let</span> id <span class="kw">as</span> <span class="ty">i64</span> = <span class="num">0</span>;
     <span class="kw">let</span> name <span class="kw">as</span> <span class="ty">string</span>;
@@ -1298,363 +968,93 @@ $ angc app.an <span class="annotation">--gc mark-sweep</span></code></pre>
              + <span class="str">"] "</span> + <span class="param">this</span>.name;
     }
 }</code></pre>
+        </div>
       </div>
     </div>
-  </div>
 
-  <div class="contract-comparison reveal">
-    <div class="section-title" style="font-size: 1.4rem;">Contracts vs. Traits</div>
-    <p class="section-subtitle" style="margin-bottom: 1rem;">
-      Angara provides two complementary abstraction mechanisms. Contracts can require fields;
-      traits cannot. Both require method implementations.
-    </p>
-    <table class="comparison-table">
-      <thead>
-        <tr><th>Feature</th><th>Contract</th><th>Trait</th></tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>Require fields</td>
-          <td><span class="check">&#10003;</span></td>
-          <td><span class="cross">&#10007;</span></td>
-        </tr>
-        <tr>
-          <td>Require methods</td>
-          <td><span class="check">&#10003;</span></td>
-          <td><span class="check">&#10003;</span></td>
-        </tr>
-        <tr>
-          <td>Implementation keyword</td>
-          <td><code>signs</code></td>
-          <td><code>uses</code></td>
-        </tr>
-        <tr>
-          <td>Defined with</td>
-          <td><code>contract</code></td>
-          <td><code>trait</code></td>
-        </tr>
-        <tr>
-          <td>Multiple supported</td>
-          <td><span class="check">&#10003;</span> <code>signs A, B, C</code></td>
-          <td><span class="check">&#10003;</span> <code>uses X, Y</code></td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="contract-comparison reveal">
+      <div class="section-title" style="font-size: 1.4rem;">Contracts vs. Traits</div>
+      <p class="section-subtitle" style="margin-bottom: 1rem;">
+        Angara provides two complementary abstraction mechanisms. Contracts can require fields;
+        traits cannot. Both require method implementations.
+      </p>
+      <table class="comparison-table">
+        <thead><tr><th>Feature</th><th>Contract</th><th>Trait</th></tr></thead>
+        <tbody>
+          <tr><td>Require fields</td><td><span class="check">&#10003;</span></td><td><span class="cross">&#10007;</span></td></tr>
+          <tr><td>Require methods</td><td><span class="check">&#10003;</span></td><td><span class="check">&#10003;</span></td></tr>
+          <tr><td>Implementation keyword</td><td><code>signs</code></td><td><code>uses</code></td></tr>
+          <tr><td>Defined with</td><td><code>contract</code></td><td><code>trait</code></td></tr>
+          <tr><td>Multiple supported</td><td><span class="check">&#10003;</span> <code>signs A, B, C</code></td><td><span class="check">&#10003;</span> <code>uses X, Y</code></td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </section>
 
-<!-- ==================== LANGUAGE FEATURES ==================== -->
-<section id="features" class="features-section">
-  <div class="reveal">
-    <div class="section-label">Language</div>
-    <div class="section-title">Modern Type System,<br>Systems-Level Control</div>
-  </div>
-
-  <div class="features-grid">
-    <!-- Data Classes -->
-    <div class="feature-card reveal">
-      <div class="code-block" style="border: none; border-radius: 0; margin: 0;">
-        <div class="code-header">
-          <div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-          Data Classes &mdash; Value semantics
-        </div>
-        <pre><code><span class="kw">data</span> <span class="ty">Vec2</span> {
-  <span class="kw">let</span> x <span class="kw">as</span> <span class="ty">f64</span>;
-  <span class="kw">let</span> y <span class="kw">as</span> <span class="ty">f64</span>;
-}
-
-<span class="kw">data</span> <span class="ty">Box</span>&lt;<span class="ty">T</span>&gt; {
-  <span class="kw">let</span> value <span class="kw">as</span> <span class="ty">T</span>;
-}
-
-<span class="kw">let</span> v1 = <span class="ty">Vec2</span>(<span class="num">10.0</span>, <span class="num">20.0</span>);
-<span class="kw">let</span> v2 = v1;             <span class="cm">// deep copy</span>
-v2.x = <span class="num">30.0</span>;
-io.<span class="fn">println</span>(<span class="num">1</span>, v1.x);  <span class="cm">// still 10.0</span></code></pre>
-      </div>
-      <div class="feature-desc">
-        <h3>Data Classes</h3>
-        <p>Value-semantic data blocks with auto-generated constructors, deep copy semantics, and equality operators. Support generic type parameters.</p>
-      </div>
+<!-- ==================== PERFORMANCE ==================== -->
+<section id="performance" class="alt-bg">
+  <div class="section-inner">
+    <div class="reveal">
+      <div class="section-label">Benchmarks</div>
+      <div class="section-title">No GC overhead.<br>Just the allocator.</div>
+      <p class="section-subtitle">
+        With no collector in the loop, Angara goes straight to the allocator &mdash; native LLVM code
+        with unboxed primitives and value-type <code>data</code>. The result is within striking
+        distance of hand-written C, with no pauses to tune around.
+      </p>
     </div>
 
-    <!-- Enums -->
-    <div class="feature-card reveal">
-      <div class="code-block" style="border: none; border-radius: 0; margin: 0;">
-        <div class="code-header">
-          <div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-          Enums &mdash; Algebraic Data Types
-        </div>
-        <pre><code><span class="kw">enum</span> <span class="ty">WebEvent</span> {
-  PageLoad,
-  KeyPress(<span class="ty">string</span>),
-  Click({x: <span class="ty">i64</span>, y: <span class="ty">i64</span>})
-}
-
-<span class="kw">let</span> desc = <span class="kw">match</span> (event) {
-  <span class="kw">case</span> <span class="ty">WebEvent</span>.PageLoad:
-    { <span class="str">"Page loaded."</span> },
-  <span class="kw">case</span> <span class="ty">WebEvent</span>.KeyPress(key):
-    { <span class="str">"Key: "</span> + key },
-  <span class="kw">case</span> <span class="ty">WebEvent</span>.Click(pos):
-    { <span class="str">"Click at ("</span>
-      + string(pos[<span class="str">"x"</span>])
-      + <span class="str">", "</span>
-      + string(pos[<span class="str">"y"</span>]) + <span class="str">")"</span> },
-};</code></pre>
-      </div>
-      <div class="feature-desc">
-        <h3>Enums & Pattern Matching</h3>
-        <p>Algebraic data types with associated data and exhaustive pattern matching with destructuring. No null pointer exceptions, ever.</p>
-      </div>
+    <div class="perf-grid">
+      <div class="perf-card reveal"><div class="perf-num">0.52&times;</div><div class="perf-name">String Building</div><div class="perf-note">faster than C</div></div>
+      <div class="perf-card reveal"><div class="perf-num">0.79&times;</div><div class="perf-name">Bubble Sort</div><div class="perf-note">faster than C</div></div>
+      <div class="perf-card reveal"><div class="perf-num">1.00&times;</div><div class="perf-name">Prime Sieve</div><div class="perf-note">parity with C</div></div>
+      <div class="perf-card reveal"><div class="perf-num">1.00&times;</div><div class="perf-name">Matrix Multiply</div><div class="perf-note">parity with C</div></div>
+      <div class="perf-card reveal"><div class="perf-num">1.01&times;</div><div class="perf-name">Recursive Fibonacci</div><div class="perf-note">parity with C</div></div>
+      <div class="perf-card reveal"><div class="perf-num">1.11&times;</div><div class="perf-name">Integer Loop</div><div class="perf-note">near parity</div></div>
+      <div class="perf-card reveal"><div class="perf-num">0.69&times;</div><div class="perf-name">Allocation Stress</div><div class="perf-note">faster than C</div></div>
+      <div class="perf-card reveal"><div class="perf-num">0</div><div class="perf-name">GC Pauses</div><div class="perf-note">by design</div></div>
     </div>
-
-    <!-- Classes -->
-    <div class="feature-card reveal">
-      <div class="code-block" style="border: none; border-radius: 0; margin: 0;">
-        <div class="code-header">
-          <div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-          Classes &mdash; Reference semantics, inheritance, access control
-        </div>
-        <pre><code><span class="kw">class</span> <span class="ty">Entity</span> {
-  <span class="kw">public</span>:
-    <span class="kw">let</span> name <span class="kw">as</span> <span class="ty">string</span>;
-    <span class="kw">let</span> x <span class="kw">as</span> <span class="ty">i64</span>;
-    <span class="kw">let</span> y <span class="kw">as</span> <span class="ty">i64</span>;
-
-  <span class="kw">public</span>:
-    <span class="kw">func</span> <span class="fn">init</span>(<span class="param">this</span>, name <span class="kw">as</span> <span class="ty">string</span>,
-                   x <span class="kw">as</span> <span class="ty">i64</span>, y <span class="kw">as</span> <span class="ty">i64</span>) -> <span class="ty">nil</span> {
-      <span class="param">this</span>.name = name;
-      <span class="param">this</span>.x = x;
-      <span class="param">this</span>.y = y;
-    }
-
-    <span class="kw">func</span> <span class="fn">describe</span>(<span class="param">this</span>) -> <span class="ty">string</span> {
-      <span class="kw">return</span> <span class="param">this</span>.name + <span class="str">" at ("</span>
-        + string(<span class="param">this</span>.x) + <span class="str">", "</span>
-        + string(<span class="param">this</span>.y) + <span class="str">")"</span>;
-    }
-}</code></pre>
-      </div>
-      <div class="feature-desc">
-        <h3>Classes & Inheritance</h3>
-        <p>Object-oriented programming with access control (<code>public:</code>/<code>private:</code>), constructor chaining via <code>super</code>, and method overriding.</p>
-      </div>
-    </div>
-
-    <!-- FFI -->
-    <div class="feature-card reveal">
-      <div class="code-block" style="border: none; border-radius: 0; margin: 0;">
-        <div class="code-header">
-          <div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-          C FFI &mdash; Zero-cost interop
-        </div>
-        <pre><code><span class="kw">foreign</span> <span class="str">"stdlib.h"</span>;
-<span class="kw">foreign</span> <span class="str">"sys/utsname.h"</span>;
-
-<span class="kw">foreign data</span> <span class="ty">utsname</span> {
-  <span class="kw">const</span> sysname  <span class="kw">as</span> <span class="ty">string</span>;
-  <span class="kw">const</span> nodename <span class="kw">as</span> <span class="ty">string</span>;
-  <span class="kw">const</span> release  <span class="kw">as</span> <span class="ty">string</span>;
-  <span class="kw">const</span> machine  <span class="kw">as</span> <span class="ty">string</span>;
-}
-
-<span class="kw">foreign func</span> <span class="fn">malloc</span>(size <span class="kw">as</span> <span class="ty">u64</span>) -> <span class="ty">c_ptr</span>;
-<span class="kw">foreign func</span> <span class="fn">uname</span>(buf <span class="kw">as</span> <span class="ty">c_ptr</span>) -> <span class="ty">i32</span>;
-<span class="kw">foreign func</span> <span class="fn">free</span>(ptr <span class="kw">as</span> <span class="ty">c_ptr</span>) -> <span class="ty">nil</span>;</code></pre>
-      </div>
-      <div class="feature-desc">
-        <h3>Seamless C FFI</h3>
-        <p>Call any C library with a <code>foreign</code> declaration. Map C structs directly to Angara types. No wrapper generation, no binding layers.</p>
-      </div>
-    </div>
-
-    <!-- Optionals -->
-    <div class="feature-card reveal">
-      <div class="code-block" style="border: none; border-radius: 0; margin: 0;">
-        <div class="code-header">
-          <div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-          Optionals &mdash; Null safety at compile time
-        </div>
-        <pre><code><span class="kw">func</span> <span class="fn">find_user</span>(id <span class="kw">as</span> <span class="ty">i64</span>) -> <span class="ty">string</span>? {
-  <span class="kw">if</span> (id == <span class="num">1</span>) {
-    <span class="kw">return</span> <span class="str">"Alice"</span>;
-  }
-  <span class="kw">return</span> <span class="kw">nil</span>;
-}
-
-<span class="kw">let</span> result <span class="kw">as</span> <span class="ty">string</span>? = find_user(<span class="num">42</span>);
-<span class="kw">if</span> (result != <span class="kw">nil</span>) {
-  io.<span class="fn">println</span>(<span class="num">1</span>, <span class="str">"Found: "</span> + result);
-} <span class="kw">orif</span> {
-  io.<span class="fn">println</span>(<span class="num">1</span>, <span class="str">"Not found"</span>);
-}</code></pre>
-      </div>
-      <div class="feature-desc">
-        <h3>Optionals & Null Safety</h3>
-        <p>Optional types (<code>T?</code>) enforce null safety at compile time. The <code>??</code> operator provides default values. No null pointer exceptions, guaranteed.</p>
-      </div>
-    </div>
-
-    <!-- Bare Metal -->
-    <div class="feature-card reveal">
-      <div class="code-block" style="border: none; border-radius: 0; margin: 0;">
-        <div class="code-header">
-          <div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-          Bare-Metal &mdash; ARM64 kernel development
-        </div>
-        <pre><code><span class="kw">intrinsic func</span> <span class="fn">peek32</span>(addr <span class="kw">as</span> <span class="ty">i64</span>) -> <span class="ty">i64</span>;
-<span class="kw">intrinsic func</span> <span class="fn">poke32</span>(addr <span class="kw">as</span> <span class="ty">i64</span>,
-                       val <span class="kw">as</span> <span class="ty">i64</span>) -> <span class="ty">nil</span>;
-<span class="kw">intrinsic func</span> <span class="fn">halt</span>() -> <span class="ty">nil</span>;
-
-<span class="kw">export func</span> <span class="fn">main</span>() -> <span class="ty">nil</span> {
-  <span class="cm">// Write to UART on ARM64 QEMU</span>
-  <span class="kw">while</span> ((peek32(<span class="num">0x09000018</span>)
-           & <span class="num">0x20</span>) != <span class="num">0</span>) {}
-  poke32(<span class="num">0x09000000</span>, <span class="num">72</span>); <span class="cm">// 'H'</span>
-  halt();
-}
-
-<span class="cm">$ angc kernel.an --freestanding \</span>
-<span class="cm">  --target aarch64-unknown-none-elf</span></code></pre>
-      </div>
-      <div class="feature-desc">
-        <h3>Bare-Metal Ready</h3>
-        <p>Compile to freestanding ARM64 with intrinsic functions for direct hardware access. Write kernels, firmware, and embedded code with full type safety.</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- Unique keywords -->
-  <div class="reveal" style="margin-top: 3rem;">
-    <div class="section-title" style="font-size: 1.4rem;">Distinctive Keywords</div>
-    <p class="section-subtitle" style="margin-bottom: 1.5rem;">
-      Every keyword in Angara serves a purpose. No compound constructs, no ambiguity.
-    </p>
-  </div>
-  <div class="philosophy-grid reveal" style="grid-template-columns: repeat(3, 1fr);">
-    <div class="phil-item">
-      <h3><code style="color:var(--accent2)">orif</code></h3>
-      <p>A first-class "else if" keyword. No compound <code>else if</code> &mdash; the language provides <code>orif</code> as a dedicated construct.</p>
-    </div>
-    <div class="phil-item">
-      <h3><code style="color:var(--accent2)">signs</code></h3>
-      <p>Declares that a class fulfills a contract. Read: "User <em>signs</em> Identifiable" &mdash; the class promises to implement every field and method the contract requires.</p>
-    </div>
-    <div class="phil-item">
-      <h3><code style="color:var(--accent2)">uses</code></h3>
-      <p>Adopts a trait. Unlike contracts, traits only require methods (no fields). Complements <code>signs</code> for interface composition.</p>
-    </div>
-    <div class="phil-item">
-      <h3><code style="color:var(--accent2)">attach</code></h3>
-      <p>Imports a module or specific symbols. <code>attach io;</code> brings in the I/O module. <code>attach Server from websocket;</code> imports selectively.</p>
-    </div>
-    <div class="phil-item">
-      <h3><code style="color:var(--accent2)">is</code></h3>
-      <p>Runtime type inspection. <code>if (value is string) { ... }</code> checks the dynamic type without casting.</p>
-    </div>
-    <div class="phil-item">
-      <h3><code style="color:var(--accent2)">??</code></h3>
-      <p>Null coalescing operator. <code>result ?? "default"</code> provides a fallback for optional values.</p>
-    </div>
+    <div class="perf-footer">Ratios are Angara time &divide; C time (lower is better). Benchmarked with the unified Allocator &amp; unboxed primitives &mdash; no collector in the path.</div>
   </div>
 </section>
 
 <!-- ==================== ECOSYSTEM ==================== -->
-<section id="ecosystem" class="ecosystem-section">
-  <div class="reveal">
-    <div class="section-label">Ecosystem</div>
-    <div class="section-title">20+ Native Modules,<br>Zero Dependencies</div>
-    <p class="section-subtitle">
-      Angara ships with a rich set of native modules written in C, loaded dynamically at runtime.
-      Build web servers, message queues, databases, and more without leaving the language.
-    </p>
-  </div>
+<section id="ecosystem">
+  <div class="section-inner">
+    <div class="reveal">
+      <div class="section-label">Ecosystem</div>
+      <div class="section-title">20+ Native Modules,<br>Zero Dependencies</div>
+      <p class="section-subtitle">
+        Angara ships with a rich set of native modules written in C, loaded dynamically at runtime.
+        Build web servers, message queues, databases, and more without leaving the language.
+      </p>
+    </div>
 
-  <div class="module-grid">
-    <div class="module-card reveal">
-      <div class="mod-name">io</div>
-      <div class="mod-desc">Console I/O &mdash; stdin, stdout, stderr</div>
+    <div class="module-grid">
+      <div class="module-card reveal"><div class="mod-name">io</div><div class="mod-desc">Console I/O &mdash; stdin, stdout, stderr</div></div>
+      <div class="module-card reveal"><div class="mod-name">fs</div><div class="mod-desc">File system operations &mdash; read, write, list, exists</div></div>
+      <div class="module-card reveal"><div class="mod-name">json</div><div class="mod-desc">JSON parsing and serialization</div></div>
+      <div class="module-card reveal"><div class="mod-name">http</div><div class="mod-desc">HTTP client and server via libcurl</div></div>
+      <div class="module-card reveal"><div class="mod-name">websocket</div><div class="mod-desc">WebSocket server via libwebsockets</div></div>
+      <div class="module-card reveal"><div class="mod-name">amqp</div><div class="mod-desc">AMQP/RabbitMQ client</div></div>
+      <div class="module-card reveal"><div class="mod-name">math</div><div class="mod-desc">Trig, sqrt, pow, abs, and more</div></div>
+      <div class="module-card reveal"><div class="mod-name">hash</div><div class="mod-desc">SHA, MD5, and other hashing algorithms</div></div>
+      <div class="module-card reveal"><div class="mod-name">random</div><div class="mod-desc">Random number generation</div></div>
+      <div class="module-card reveal"><div class="mod-name">uuid</div><div class="mod-desc">UUID generation</div></div>
+      <div class="module-card reveal"><div class="mod-name">time</div><div class="mod-desc">Time formatting, parsing, and sleep</div></div>
+      <div class="module-card reveal"><div class="mod-name">encoding</div><div class="mod-desc">Base64 and other encoding utilities</div></div>
+      <div class="module-card reveal"><div class="mod-name">path</div><div class="mod-desc">Path manipulation and resolution</div></div>
+      <div class="module-card reveal"><div class="mod-name">adv_string</div><div class="mod-desc">Split, join, pad, trim, and more</div></div>
+      <div class="module-card reveal"><div class="mod-name">os</div><div class="mod-desc">Operating system utilities</div></div>
+      <div class="module-card reveal"><div class="mod-name">env</div><div class="mod-desc">Environment variable access</div></div>
+      <div class="module-card reveal"><div class="mod-name">assert</div><div class="mod-desc">Assertion utilities for testing</div></div>
+      <div class="module-card reveal"><div class="mod-name">unistd</div><div class="mod-desc">POSIX standard utilities</div></div>
     </div>
-    <div class="module-card reveal">
-      <div class="mod-name">fs</div>
-      <div class="mod-desc">File system operations &mdash; read, write, list, exists</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">json</div>
-      <div class="mod-desc">JSON parsing and serialization</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">http</div>
-      <div class="mod-desc">HTTP client and server via libcurl</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">websocket</div>
-      <div class="mod-desc">WebSocket server via libwebsockets</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">amqp</div>
-      <div class="mod-desc">AMQP/RabbitMQ client</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">math</div>
-      <div class="mod-desc">Trig, sqrt, pow, abs, and more</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">hash</div>
-      <div class="mod-desc">SHA, MD5, and other hashing algorithms</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">random</div>
-      <div class="mod-desc">Random number generation</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">uuid</div>
-      <div class="mod-desc">UUID generation</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">time</div>
-      <div class="mod-desc">Time formatting, parsing, and sleep</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">encoding</div>
-      <div class="mod-desc">Base64 and other encoding utilities</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">path</div>
-      <div class="mod-desc">Path manipulation and resolution</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">adv_string</div>
-      <div class="mod-desc">Split, join, pad, trim, and more</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">os</div>
-      <div class="mod-desc">Operating system utilities</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">env</div>
-      <div class="mod-desc">Environment variable access</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">assert</div>
-      <div class="mod-desc">Assertion utilities for testing</div>
-    </div>
-    <div class="module-card reveal">
-      <div class="mod-name">unistd</div>
-      <div class="mod-desc">POSIX standard utilities</div>
-    </div>
-  </div>
 
-  <!-- WebSocket example -->
-  <div class="code-block reveal" style="margin-top: 3rem;">
-    <div class="code-header">
-      <div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-      echo_server.an &mdash; WebSocket echo server in ~20 lines
-    </div>
-    <pre><code><span class="kw">attach</span> <span class="ty">Server</span>, <span class="ty">WebSocket</span>, <span class="fn">createServer</span> <span class="kw">from</span> <span class="ty">websocket</span>;
+    <div class="code-block reveal" style="margin-top: 3rem;">
+      <div class="code-header"><div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div> echo_server.an &mdash; WebSocket echo server in ~20 lines</div>
+      <pre><code><span class="kw">attach</span> <span class="ty">Server</span>, <span class="ty">WebSocket</span>, <span class="fn">createServer</span> <span class="kw">from</span> <span class="ty">websocket</span>;
 <span class="kw">attach</span> io;
 
 <span class="kw">let</span> clients <span class="kw">as</span> <span class="ty">list</span>&lt;<span class="ty">WebSocket</span>&gt; = [];
@@ -1681,774 +1081,176 @@ io.<span class="fn">println</span>(<span class="num">1</span>, v1.x);  <span cla
   });
   <span class="kw">while</span> (<span class="kw">true</span>) { server.<span class="fn">service</span>(); }
 }</code></pre>
+    </div>
   </div>
 </section>
 
 <!-- ==================== CTA ==================== -->
-<section class="cta-section">
-  <div class="reveal">
+<section class="cta-section alt-bg">
+  <div class="cta-card reveal">
     <div class="section-label">Get Started</div>
-    <div class="section-title">Start Building<br>With Angara</div>
-    <p class="section-subtitle">
-      Clone the repository, build the compiler, and write your first program in under five minutes.
-      No dependencies beyond LLVM and a C++23 compiler.
-    </p>
-    <div class="code-block" style="max-width: 540px; margin: 2rem auto; text-align: left;">
-      <div class="code-header">
-        <div class="code-dots"><span class="d1"></span><span class="d2"></span><span class="d3"></span></div>
-        Terminal
-      </div>
-      <pre><code><span class="cm"># Clone and build</span>
-$ git clone https://github.com/lumen-rsg/angara.git
-$ cd angara && make
-
-<span class="cm"># Install globally</span>
-$ make install
-
-<span class="cm"># Create a project</span>
-$ angc init my-project && cd my-project
-
-<span class="cm"># Build and run</span>
-$ angc && ./my-project</code></pre>
-    </div>
-    <div class="hero-actions" style="margin-top: 2.5rem;">
+    <h2>Write code that means<br>what it says.</h2>
+    <p>Explicit memory, verified at compile time. No collector, no refcount, no surprises &mdash; just LLVM native code and a Chaperone that won't let you misfold.</p>
+    <div class="hero-actions" style="justify-content:center; margin-bottom:0;">
       <a href="https://github.com/lumen-rsg/angara" class="btn btn-primary">View on GitHub</a>
-      <a href="https://github.com/lumen-rsg/angara/wiki" class="btn btn-secondary">Language Guide</a>
+      <a href="#chaperone" class="btn btn-secondary">Read the memory model</a>
     </div>
   </div>
 </section>
 
-<!-- ==================== FOOTER ==================== -->
 <footer>
-  <div class="footer-inner">
-    <div>&copy; 2024&ndash;2026 Lumina Labs. Angara is MIT-licensed open source.</div>
-    <div>
-      <a href="https://github.com/lumen-rsg/angara">GitHub</a> &middot;
-      <a href="https://github.com/lumen-rsg/angara/wiki">Docs</a> &middot;
-      <a href="https://github.com/lumen-rsg/angara/issues">Issues</a>
-    </div>
-  </div>
+  Angara &mdash; a statically-typed systems language with no GC. &nbsp;|&nbsp;
+  <a href="https://github.com/lumen-rsg/angara">GitHub</a> &nbsp;|&nbsp;
+  Powered by LLVM. Open source.
 </footer>
 
-<!-- ==================== JAVASCRIPT ==================== -->
 <script>
-// ============================
-// SCROLL REVEAL
-// ============================
-document.addEventListener('DOMContentLoaded', function() {
-  const revealEls = document.querySelectorAll('.reveal');
-  const revealObserver = new IntersectionObserver((entries) => {
-    entries.forEach(e => {
-      if (e.isIntersecting) {
-        e.target.classList.add('visible');
-      }
+(function () {
+  'use strict';
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- Scroll reveal ---------- */
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((e) => {
+      if (e.isIntersecting) { e.target.classList.add('visible'); io.unobserve(e.target); }
     });
-  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
-  revealEls.forEach(el => revealObserver.observe(el));
-});
+  }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+  document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
 
-// Wait for full layout before initializing canvases
-window.addEventListener('load', function() {
+  /* ---------- Nav shadow on scroll ---------- */
+  const nav = document.getElementById('nav');
+  window.addEventListener('scroll', () => {
+    nav.classList.toggle('scrolled', window.scrollY > 12);
+  }, { passive: true });
 
-// ============================
-// HERO BACKGROUND PARTICLES
-// ============================
-(function() {
-  const canvas = document.getElementById('hero-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  let W, H;
-  const particles = [];
-  const PARTICLE_COUNT = 80;
-
-  function resize() {
-    W = canvas.width = canvas.offsetWidth || window.innerWidth;
-    H = canvas.height = canvas.offsetHeight || window.innerHeight;
-  }
-
-  window.addEventListener('resize', resize);
-  resize();
-
-  for (let i = 0; i < PARTICLE_COUNT; i++) {
-    particles.push({
-      x: Math.random() * W,
-      y: Math.random() * H,
-      vx: (Math.random() - 0.5) * 0.3,
-      vy: (Math.random() - 0.5) * 0.3,
-      r: Math.random() * 2 + 0.5,
-      a: Math.random() * 0.4 + 0.1,
-    });
-  }
-
-  function draw() {
-    ctx.clearRect(0, 0, W, H);
-    for (let i = 0; i < particles.length; i++) {
-      const p = particles[i];
-      p.x += p.vx;
-      p.y += p.vy;
-      if (p.x < 0 || p.x > W) p.vx *= -1;
-      if (p.y < 0 || p.y > H) p.vy *= -1;
-
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(56,189,248,${p.a})`;
-      ctx.fill();
-
-      // Connect nearby particles
-      for (let j = i + 1; j < particles.length; j++) {
-        const q = particles[j];
-        const dx = p.x - q.x, dy = p.y - q.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 150) {
-          ctx.beginPath();
-          ctx.moveTo(p.x, p.y);
-          ctx.lineTo(q.x, q.y);
-          ctx.strokeStyle = `rgba(56,189,248,${0.06 * (1 - dist / 150)})`;
-          ctx.lineWidth = 0.5;
-          ctx.stroke();
-        }
-      }
-    }
-    requestAnimationFrame(draw);
-  }
-  draw();
-})();
-
-// ============================
-// PROTEIN FOLDING ANIMATION
-// ============================
-(function() {
-  const canvas = document.getElementById('protein-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  let W = 800, H = 800;
-  const NODE_COUNT = 50;
-  const nodes = [];
-  const bonds = [];
-  let chaperone = null;
-  let frame = 0;
-  let foldProgress = 0;
-  let initialized = false;
-
-  function resize() {
-    const wrap = canvas.parentElement;
-    if (!wrap) return;
-    const rect = wrap.getBoundingClientRect();
-    const w = rect.width || 400;
-    const h = rect.height || 400;
-    if (w < 10 || h < 10) return; // not laid out yet
+  /* ---------- Soft pastel canvas helpers ---------- */
+  function setupCanvas(canvas) {
     const dpr = window.devicePixelRatio || 1;
-    W = canvas.width = w * dpr;
-    H = canvas.height = h * dpr;
-    canvas.style.width = w + 'px';
-    canvas.style.height = h + 'px';
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // Use CSS pixel dimensions for all calculations
-    W = w;
-    H = h;
-    initialized = true;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return { ctx, w: rect.width, h: rect.height };
   }
 
-  function initProtein() {
-    if (!initialized) return;
-    nodes.length = 0;
-    bonds.length = 0;
+  const PASTEL = {
+    lavender: 'rgba(167,139,250,0.85)',
+    mint:     'rgba(110,231,199,0.85)',
+    peach:    'rgba(251,191,149,0.85)',
+    rose:     'rgba(196,122,106,0.7)',
+    dim:      'rgba(140,130,170,0.5)',
+  };
 
-    const cx = W / 2;
-    const cy = H / 2;
-    const chainLength = NODE_COUNT;
-    const scale = Math.min(W, H) / 800; // scale to fit
-
-    for (let i = 0; i < chainLength; i++) {
-      const angle = (i / chainLength) * Math.PI * 6 + Math.random() * 0.5;
-      const radius = (60 + i * 5) * scale;
-      const isHydrophobic = Math.random() < 0.45;
-
-      const targetAngle = (i / chainLength) * Math.PI * 2;
-      const targetRadius = (isHydrophobic
-        ? 30 + Math.random() * 80
-        : 120 + Math.random() * 60) * scale;
-
+  /* ---------- Hero canvas: floating ownership-graph nodes ---------- */
+  function initHero() {
+    const canvas = document.getElementById('hero-canvas');
+    if (!canvas || reduced) return;
+    let env = setupCanvas(canvas);
+    let nodes = [];
+    const COUNT = 26;
+    for (let i = 0; i < COUNT; i++) {
       nodes.push({
-        x: cx + Math.cos(angle) * radius + (Math.random() - 0.5) * 40 * scale,
-        y: cy + Math.sin(angle) * radius + (Math.random() - 0.5) * 40 * scale,
-        vx: 0, vy: 0,
-        r: (isHydrophobic ? 8 : 6) * scale,
-        hydrophobic: isHydrophobic,
-        targetX: cx + Math.cos(targetAngle) * targetRadius,
-        targetY: cy + Math.sin(targetAngle) * targetRadius,
-        color: isHydrophobic ? '#ef4444' : '#3b82f6',
-        glowColor: isHydrophobic ? 'rgba(239,68,68,0.3)' : 'rgba(59,130,246,0.2)',
+        x: Math.random() * env.w,
+        y: Math.random() * env.h,
+        vx: (Math.random() - 0.5) * 0.28,
+        vy: (Math.random() - 0.5) * 0.28,
+        r: 2 + Math.random() * 3.5,
+        c: [PASTEL.lavender, PASTEL.mint, PASTEL.peach][i % 3],
       });
     }
-
-    for (let i = 0; i < chainLength - 1; i++) {
-      bonds.push([i, i + 1]);
-    }
-    for (let i = 0; i < chainLength; i++) {
-      if (nodes[i].hydrophobic && Math.random() < 0.3) {
-        const j = Math.floor(Math.random() * chainLength);
-        if (j !== i && nodes[j].hydrophobic && Math.abs(i - j) > 3) {
-          bonds.push([i, j]);
-        }
-      }
-    }
-
-    chaperone = {
-      x: cx + 200 * scale,
-      y: cy - 100 * scale,
-      targetNode: -1,
-      phase: 0,
-      orbitAngle: 0,
-    };
-  }
-
-  function updateProtein() {
-    if (!initialized) return;
-    frame++;
-    const cycle = frame % 900;
-    if (cycle < 300) {
-      foldProgress = Math.min(1, foldProgress + 0.004);
-    } else if (cycle < 600) {
-      // Hold
-    } else {
-      foldProgress = Math.max(0, foldProgress - 0.005);
-    }
-
-    const cx = W / 2;
-    const cy = H / 2;
-    const scale = Math.min(W, H) / 800;
-
-    for (let i = 0; i < nodes.length; i++) {
-      const n = nodes[i];
-      const t = foldProgress;
-
-      const dx = n.targetX - n.x;
-      const dy = n.targetY - n.y;
-
-      const spring = n.hydrophobic ? 0.0008 * t : 0.0003 * t;
-
-      n.vx += dx * spring;
-      n.vy += dy * spring;
-
-      if (n.hydrophobic && t > 0.2) {
-        for (let j = 0; j < nodes.length; j++) {
-          if (i === j || !nodes[j].hydrophobic) continue;
-          const hx = nodes[j].x - n.x;
-          const hy = nodes[j].y - n.y;
-          const hd = Math.sqrt(hx * hx + hy * hy);
-          if (hd < 200 * scale && hd > 15 * scale) {
-            n.vx += (hx / hd) * 0.15 * t;
-            n.vy += (hy / hd) * 0.15 * t;
+    function frame() {
+      const { ctx, w, h } = env;
+      ctx.clearRect(0, 0, w, h);
+      // connecting lines (ownership edges)
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y;
+          const d = Math.hypot(dx, dy);
+          if (d < 130) {
+            ctx.strokeStyle = 'rgba(167,139,250,' + (0.14 * (1 - d / 130)) + ')';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(nodes[i].x, nodes[i].y); ctx.lineTo(nodes[j].x, nodes[j].y); ctx.stroke();
           }
         }
       }
-
-      const noise = (1 - t * 0.7) * 0.4;
-      n.vx += (Math.random() - 0.5) * noise;
-      n.vy += (Math.random() - 0.5) * noise;
-
-      n.vx *= 0.92;
-      n.vy *= 0.92;
-
-      n.x += n.vx;
-      n.y += n.vy;
-
-      const pad = 30 * scale;
-      if (n.x < pad) { n.x = pad; n.vx *= -0.5; }
-      if (n.x > W - pad) { n.x = W - pad; n.vx *= -0.5; }
-      if (n.y < pad) { n.y = pad; n.vy *= -0.5; }
-      if (n.y > H - pad) { n.y = H - pad; n.vy *= -0.5; }
+      // nodes
+      nodes.forEach((n) => {
+        n.x += n.vx; n.y += n.vy;
+        if (n.x < 0 || n.x > w) n.vx *= -1;
+        if (n.y < 0 || n.y > h) n.vy *= -1;
+        ctx.fillStyle = n.c;
+        ctx.shadowColor = n.c; ctx.shadowBlur = 12;
+        ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0;
+      });
+      requestAnimationFrame(frame);
     }
-
-    if (chaperone) {
-      chaperone.orbitAngle += 0.008;
-      chaperone.phase += 0.02;
-
-      const orbitR = (160 + Math.sin(chaperone.phase * 0.5) * 30) * scale;
-      chaperone.x = cx + Math.cos(chaperone.orbitAngle) * orbitR;
-      chaperone.y = cy + Math.sin(chaperone.orbitAngle) * orbitR;
-
-      if (frame % 180 === 0) {
-        chaperone.targetNode = Math.floor(Math.random() * nodes.length);
-      }
-      if (chaperone.targetNode >= 0 && chaperone.targetNode < nodes.length) {
-        const tn = nodes[chaperone.targetNode];
-        chaperone.x += (tn.x - chaperone.x) * 0.03;
-        chaperone.y += (tn.y - chaperone.y) * 0.03;
-      }
-    }
+    frame();
+    window.addEventListener('resize', () => { env = setupCanvas(canvas); });
   }
 
-  function drawProtein() {
-    if (!initialized) return;
-    ctx.clearRect(0, 0, W, H);
-
-    const scale = Math.min(W, H) / 800;
-
-    // Draw bonds
-    for (const [i, j] of bonds) {
-      const a = nodes[i], b = nodes[j];
-      if (!a || !b) continue;
-      const isBackbone = Math.abs(i - j) === 1;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = isBackbone
-        ? `rgba(167,139,250,${0.15 + foldProgress * 0.25})`
-        : `rgba(167,139,250,${0.05 + foldProgress * 0.15})`;
-      ctx.lineWidth = isBackbone ? 2 : 1;
-      ctx.stroke();
-    }
-
-    // Draw nodes
-    for (const n of nodes) {
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, n.r * 3, 0, Math.PI * 2);
-      ctx.fillStyle = n.glowColor;
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-      ctx.fillStyle = n.color;
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.arc(n.x - n.r * 0.3, n.y - n.r * 0.3, n.r * 0.4, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.3)';
-      ctx.fill();
-    }
-
-    // Chaperone
-    if (chaperone) {
-      const ccx = chaperone.x, ccy = chaperone.y;
-      const size = (16 + Math.sin(chaperone.phase) * 3) * scale;
-
-      ctx.beginPath();
-      ctx.arc(ccx, ccy, size * 3, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(251,191,36,0.1)';
-      ctx.fill();
-
-      ctx.beginPath();
-      for (let i = 0; i < 6; i++) {
-        const angle = (i / 6) * Math.PI * 2 - Math.PI / 6;
-        const px = ccx + Math.cos(angle) * size;
-        const py = ccy + Math.sin(angle) * size;
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
-      }
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(251,191,36,0.6)';
-      ctx.fill();
-      ctx.strokeStyle = '#fbbf24';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-
-      ctx.font = `${600} ${Math.round(14 * scale)}px Source Code Pro, monospace`;
-      ctx.fillStyle = '#fbbf24';
-      ctx.textAlign = 'center';
-      ctx.fillText('Hsp70', ccx, ccy + size + 22 * scale);
-
-      if (chaperone.targetNode >= 0 && chaperone.targetNode < nodes.length) {
-        const tn = nodes[chaperone.targetNode];
-        ctx.beginPath();
-        ctx.moveTo(ccx, ccy);
-        ctx.lineTo(tn.x, tn.y);
-        ctx.strokeStyle = 'rgba(251,191,36,0.15)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 4]);
-        ctx.stroke();
+  /* ---------- Chaperone canvas: animated ownership state graph ---------- */
+  function initChap() {
+    const canvas = document.getElementById('chap-canvas');
+    if (!canvas || reduced) return;
+    let env = setupCanvas(canvas);
+    // A small graph: an owner, two fields, a ref borrow — states cycle to show the analysis.
+    const graph = [
+      { id: 'owner',  x: 0.50, y: 0.30, r: 16, label: 'owner',   base: 'mint' },
+      { id: 'field',  x: 0.28, y: 0.62, r: 13, label: 'field',   base: 'mint' },
+      { id: 'moved',  x: 0.72, y: 0.62, r: 13, label: 'moved',   base: 'lavender' },
+      { id: 'ref',    x: 0.50, y: 0.84, r: 11, label: 'ref',     base: 'peach' },
+    ];
+    const edges = [['owner','field'], ['owner','moved'], ['field','ref'], ['moved','ref']];
+    const colorOf = { mint: PASTEL.mint, lavender: PASTEL.lavender, peach: PASTEL.peach, rose: PASTEL.rose };
+    let t = 0;
+    function frame() {
+      const { ctx, w, h } = env;
+      ctx.clearRect(0, 0, w, h);
+      t += 0.012;
+      // edges
+      edges.forEach(([a, b]) => {
+        const na = graph.find(n => n.id === a), nb = graph.find(n => n.id === b);
+        ctx.strokeStyle = 'rgba(140,130,170,0.32)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 5]);
+        ctx.beginPath(); ctx.moveTo(na.x * w, na.y * h); ctx.lineTo(nb.x * w, nb.y * h); ctx.stroke();
         ctx.setLineDash([]);
-      }
+      });
+      // nodes with breathing pulse + state drift
+      graph.forEach((n, i) => {
+        const pulse = 1 + 0.08 * Math.sin(t * 1.5 + i);
+        const x = n.x * w, y = n.y * h, r = n.r * pulse;
+        // soft glow ring
+        const grad = ctx.createRadialGradient(x, y, r * 0.4, x, y, r * 2.4);
+        grad.addColorStop(0, colorOf[n.base]);
+        grad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(x, y, r * 2.4, 0, Math.PI * 2); ctx.fill();
+        // core
+        ctx.fillStyle = '#ffffff';
+        ctx.shadowColor = colorOf[n.base]; ctx.shadowBlur = 16;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = colorOf[n.base];
+        ctx.beginPath(); ctx.arc(x, y, r * 0.55, 0, Math.PI * 2); ctx.fill();
+        // label
+        ctx.fillStyle = '#5a5470';
+        ctx.font = '600 11px "Source Code Pro", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(n.label, x, y + r + 16);
+      });
+      requestAnimationFrame(frame);
     }
-
-    // Labels
-    const fontSize = Math.round(13 * scale);
-    ctx.font = `500 ${fontSize}px Source Code Pro, monospace`;
-    ctx.fillStyle = 'rgba(148,163,184,0.6)';
-    ctx.textAlign = 'left';
-    const stateText = foldProgress > 0.8 ? 'NEAR-NATIVE FOLD' :
-                      foldProgress > 0.3 ? 'FOLDING...' : 'RANDOM COIL';
-    ctx.fillText('state: ' + stateText, 16 * scale, 28 * scale);
-    ctx.fillText('energy: ' + (1 - foldProgress).toFixed(3), 16 * scale, 46 * scale);
-    ctx.fillText('T: ' + (1 - foldProgress * 0.99).toFixed(4), 16 * scale, 64 * scale);
+    frame();
+    window.addEventListener('resize', () => { env = setupCanvas(canvas); });
   }
 
-  function proteinLoop() {
-    updateProtein();
-    drawProtein();
-    requestAnimationFrame(proteinLoop);
-  }
-
-  window.addEventListener('resize', function() {
-    resize();
-    initProtein();
-  });
-  resize();
-  initProtein();
-  proteinLoop();
+  /* ---------- init after layout ---------- */
+  if (document.readyState === 'complete') { initHero(); initChap(); }
+  else { window.addEventListener('load', () => { initHero(); initChap(); }); }
 })();
-
-// ============================
-// ENERGY LANDSCAPE VISUALIZATION
-// ============================
-(function() {
-  const canvas = document.getElementById('energy-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  let W = 800, H = 500;
-  const ARENA_COUNT = 8;
-  const arenas = [];
-  const relocating = []; // objects flying between arenas
-  let frame = 0;
-  let chaperoneStep = 0;
-  let initialized = false;
-
-  function resize() {
-    const wrap = canvas.parentElement;
-    if (!wrap) return;
-    const rect = wrap.getBoundingClientRect();
-    const w = rect.width || 600;
-    const h = rect.height || 400;
-    if (w < 10 || h < 10) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    canvas.style.width = w + 'px';
-    canvas.style.height = h + 'px';
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    W = w;
-    H = h;
-    initialized = true;
-  }
-
-  // Place objects in a grid-like bump-arena layout within their cell
-  function layoutObjects(arena) {
-    const cols = Math.floor((arena.cellW - 12) / 7);
-    arena.objects.forEach(function(obj, idx) {
-      const col = idx % cols;
-      const row = Math.floor(idx / cols);
-      obj.tx = -arena.cellW / 2 + 6 + col * 7 + 3; // target x
-      obj.ty = -arena.cellH / 2 + 8 + row * 7 + 3;  // target y
-      if (obj.x === undefined) { obj.x = obj.tx; obj.y = obj.ty; }
-    });
-  }
-
-  function recomputeEnergy(arena) {
-    let liveCount = 0, totalCount = arena.objects.length;
-    for (let i = 0; i < totalCount; i++) if (arena.objects[i].live) liveCount++;
-    if (totalCount > 0) {
-      arena.energy = Math.max(0.02, 0.4 * (1 - liveCount / totalCount));
-    }
-  }
-
-  function initArenas() {
-    if (!initialized) return;
-    arenas.length = 0;
-    const pad = 24;
-    const gap = 8;
-    const cols = 4, rows = 2;
-    const cellW = (W - pad * 2 - gap * (cols - 1)) / cols;
-    const cellH = (H - pad * 2 - gap * (rows - 1) - 16) / rows; // 16 for top HUD
-
-    for (let i = 0; i < ARENA_COUNT; i++) {
-      const col = i % cols;
-      const row = Math.floor(i / cols);
-      const cx = pad + col * (cellW + gap) + cellW / 2;
-      const cy = pad + 16 + row * (cellH + gap) + cellH / 2;
-
-      const objCount = 12 + Math.floor(Math.random() * 10);
-      const liveRatio = 0.4 + Math.random() * 0.4;
-      const objects = [];
-
-      for (let j = 0; j < objCount; j++) {
-        const isLive = Math.random() < liveRatio;
-        objects.push({
-          live: isLive,
-          hot: isLive && Math.random() < 0.3,
-          x: undefined, y: undefined, tx: 0, ty: 0,
-          opacity: isLive ? 0.7 + Math.random() * 0.3 : 0.25,
-          fadeOut: 0, // 0 = normal, >0 = fading out
-          fadeIn: isLive ? 0 : 1, // 0 = settled, >0 = appearing
-        });
-      }
-
-      const arena = {
-        x: cx, y: cy, cellW: cellW, cellH: cellH,
-        objects: objects,
-        energy: 0,
-        displayEnergy: 0, // smoothly animated
-        id: i,
-      };
-      layoutObjects(arena);
-      recomputeEnergy(arena);
-      arena.displayEnergy = arena.energy;
-      arenas.push(arena);
-    }
-  }
-
-  function chaperoneRelocate() {
-    // Find highest energy arena (source)
-    let maxE = -1, srcIdx = 0;
-    for (let i = 0; i < arenas.length; i++) {
-      if (arenas[i].energy > maxE && arenas[i].objects.length > 2) {
-        maxE = arenas[i].energy; srcIdx = i;
-      }
-    }
-    // Find lowest energy arena (destination)
-    let minE = 999, dstIdx = 0;
-    for (let i = 0; i < arenas.length; i++) {
-      if (i !== srcIdx && arenas[i].energy < minE) {
-        minE = arenas[i].energy; dstIdx = i;
-      }
-    }
-
-    const srcArena = arenas[srcIdx];
-    const dstArena = arenas[dstIdx];
-
-    // Pick a random live object from source
-    const liveObjs = [];
-    for (let i = 0; i < srcArena.objects.length; i++) {
-      if (srcArena.objects[i].live) liveObjs.push(i);
-    }
-    if (liveObjs.length === 0) return;
-    const pickIdx = liveObjs[Math.floor(Math.random() * liveObjs.length)];
-    const obj = srcArena.objects[pickIdx];
-
-    // Compute screen positions for animation
-    const sx = srcArena.x + obj.x;
-    const sy = srcArena.y + obj.y;
-    const dx = dstArena.x;
-    const dy = dstArena.y;
-
-    // Start relocation animation
-    relocating.push({
-      x: sx, y: sy,
-      dx: dx, dy: dy,
-      srcArenaIdx: srcIdx, dstArenaIdx: dstIdx,
-      srcObjIdx: pickIdx,
-      obj: obj,
-      progress: 0,
-      hot: obj.hot,
-    });
-
-    // Remove from source
-    srcArena.objects.splice(pickIdx, 1);
-    layoutObjects(srcArena);
-    recomputeEnergy(srcArena);
-  }
-
-  function gcCollect() {
-    // Pick a random arena and remove a dead object (with fade)
-    const idx = Math.floor(Math.random() * arenas.length);
-    const arena = arenas[idx];
-    for (let i = 0; i < arena.objects.length; i++) {
-      if (!arena.objects[i].live && arena.objects[i].fadeOut === 0) {
-        arena.objects[i].fadeOut = 1;
-        break;
-      }
-    }
-  }
-
-  function allocate() {
-    // Add a dead object to a random arena
-    const idx = Math.floor(Math.random() * arenas.length);
-    const arena = arenas[idx];
-    arena.objects.push({
-      live: false, hot: false,
-      x: undefined, y: undefined, tx: 0, ty: 0,
-      opacity: 0, fadeOut: 0, fadeIn: 1,
-    });
-    layoutObjects(arena);
-    recomputeEnergy(arena);
-  }
-
-  function updateEnergy() {
-    if (!initialized) return;
-    frame++;
-    chaperoneStep++;
-
-    // Chaperone relocation every ~20 frames (fast!)
-    if (frame % 20 === 0) chaperoneRelocate();
-
-    // GC sweep every ~35 frames
-    if (frame % 35 === 0) gcCollect();
-
-    // New allocations every ~25 frames
-    if (frame % 25 === 0) allocate();
-
-    // Animate relocating objects
-    for (let i = relocating.length - 1; i >= 0; i--) {
-      const r = relocating[i];
-      r.progress += 0.04; // smooth interpolation
-      // Arc path for visual flair
-      const t = Math.min(1, r.progress);
-      const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-      r.x = r.x + (r.dx - r.x) * 0.08;
-      r.y = r.y + (r.dy - r.y) * 0.08;
-
-      if (r.progress >= 1) {
-        // Insert into destination arena
-        const dstArena = arenas[r.dstArenaIdx];
-        r.obj.x = undefined;
-        dstArena.objects.push(r.obj);
-        layoutObjects(dstArena);
-        recomputeEnergy(dstArena);
-        relocating.splice(i, 1);
-      }
-    }
-
-    // Animate objects within arenas (drift toward target, fade effects)
-    for (let a = 0; a < arenas.length; a++) {
-      const arena = arenas[a];
-      for (let i = arena.objects.length - 1; i >= 0; i--) {
-        const obj = arena.objects[i];
-        // Drift toward target position
-        if (obj.x !== undefined && obj.tx !== undefined) {
-          obj.x += (obj.tx - obj.x) * 0.15;
-          obj.y += (obj.ty - obj.y) * 0.15;
-        }
-        // Fade out dead objects
-        if (obj.fadeOut > 0) {
-          obj.fadeOut -= 0.06;
-          obj.opacity = Math.max(0, obj.fadeOut);
-          if (obj.fadeOut <= 0) {
-            arena.objects.splice(i, 1);
-            layoutObjects(arena);
-            recomputeEnergy(arena);
-          }
-        }
-        // Fade in new objects
-        if (obj.fadeIn > 0) {
-          obj.fadeIn -= 0.05;
-          obj.opacity = (1 - obj.fadeIn) * (obj.live ? 0.8 : 0.25);
-          if (obj.fadeIn <= 0) { obj.fadeIn = 0; obj.opacity = obj.live ? 0.8 : 0.25; }
-        }
-      }
-      // Smooth energy display
-      arena.displayEnergy += (arena.energy - arena.displayEnergy) * 0.1;
-    }
-  }
-
-  function drawEnergy() {
-    if (!initialized) return;
-    ctx.clearRect(0, 0, W, H);
-
-    // HUD
-    ctx.font = '500 10px Source Code Pro, monospace';
-    ctx.fillStyle = 'rgba(148,163,184,0.5)';
-    ctx.textAlign = 'left';
-    ctx.fillText('step ' + chaperoneStep, 8, 12);
-    const temp = Math.max(0.01, 1.0 * Math.pow(0.9999, chaperoneStep % 10000));
-    ctx.fillText('T=' + temp.toFixed(4), 90, 12);
-
-    // Draw arenas
-    for (let a = 0; a < arenas.length; a++) {
-      const arena = arenas[a];
-      const x = arena.x - arena.cellW / 2;
-      const y = arena.y - arena.cellH / 2;
-      const w = arena.cellW;
-      const h = arena.cellH;
-      const e = arena.displayEnergy;
-
-      // Arena background with energy-based tint
-      ctx.fillStyle = e > 0.25 ? 'rgba(239,68,68,0.06)' :
-                      e > 0.12 ? 'rgba(251,191,36,0.04)' :
-                      'rgba(52,211,153,0.04)';
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeStyle = e > 0.25 ? 'rgba(239,68,68,0.25)' :
-                        e > 0.12 ? 'rgba(251,191,36,0.15)' :
-                        'rgba(52,211,153,0.15)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(x, y, w, h);
-
-      // Objects (tiny memory blocks)
-      for (let i = 0; i < arena.objects.length; i++) {
-        const obj = arena.objects[i];
-        if (obj.x === undefined) continue;
-        const ox = arena.x + obj.x;
-        const oy = arena.y + obj.y;
-        if (ox < x || ox > x + w || oy < y || oy > y + h) continue;
-
-        const size = 2.5;
-        if (obj.hot) {
-          ctx.fillStyle = 'rgba(239,68,68,' + obj.opacity + ')';
-        } else if (obj.live) {
-          ctx.fillStyle = 'rgba(56,189,248,' + obj.opacity + ')';
-        } else {
-          ctx.fillStyle = 'rgba(100,116,139,' + obj.opacity + ')';
-        }
-        ctx.fillRect(ox - size / 2, oy - size / 2, size, size);
-      }
-
-      // Arena label
-      ctx.font = '600 8px Source Code Pro, monospace';
-      ctx.fillStyle = 'rgba(148,163,184,0.45)';
-      ctx.textAlign = 'left';
-      ctx.fillText('arena ' + arena.id, x + 3, y - 3);
-
-      // Energy bar (bottom of cell, thin)
-      const barX = x + 4;
-      const barY = y + h - 5;
-      const barW = w - 8;
-      const barH = 2;
-      ctx.fillStyle = 'rgba(255,255,255,0.04)';
-      ctx.fillRect(barX, barY, barW, barH);
-      const eColor = e > 0.25 ? '#ef4444' : e > 0.12 ? '#fbbf24' : '#34d399';
-      ctx.fillStyle = eColor;
-      ctx.fillRect(barX, barY, barW * Math.min(1, e / 0.4), barH);
-
-      // Energy value
-      ctx.font = '400 7px Source Code Pro, monospace';
-      ctx.fillStyle = eColor;
-      ctx.textAlign = 'right';
-      ctx.fillText('E=' + e.toFixed(2), x + w - 3, y - 3);
-    }
-
-    // Draw relocating objects (flying between arenas)
-    for (let i = 0; i < relocating.length; i++) {
-      const r = relocating[i];
-      const alpha = 1 - r.progress * 0.3;
-      // Trail
-      ctx.beginPath();
-      ctx.moveTo(r.x, r.y);
-      const srcArena = arenas[r.srcArenaIdx];
-      const dstArena = arenas[r.dstArenaIdx];
-      ctx.lineTo(dstArena.x, dstArena.y);
-      ctx.strokeStyle = 'rgba(251,191,36,0.12)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      // Object
-      ctx.beginPath();
-      ctx.arc(r.x, r.y, 3, 0, Math.PI * 2);
-      ctx.fillStyle = r.hot ? 'rgba(239,68,68,' + alpha + ')' : 'rgba(56,189,248,' + alpha + ')';
-      ctx.fill();
-
-      // Glow
-      ctx.beginPath();
-      ctx.arc(r.x, r.y, 6, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(251,191,36,0.15)';
-      ctx.fill();
-    }
-  }
-
-  function energyLoop() {
-    updateEnergy();
-    drawEnergy();
-    requestAnimationFrame(energyLoop);
-  }
-
-  window.addEventListener('resize', function() {
-    resize();
-    initArenas();
-  });
-  resize();
-  initArenas();
-  energyLoop();
-})();
-
-}); // end window.addEventListener('load', ...)
 </script>
 </body>
 </html>
