@@ -1,0 +1,22 @@
+// Chaperone negative test — E502 (use-after-free in a for-in iterable, S2)
+// The for-in loop iterates over a tracked collection that was dropped. The
+// Chaperone must now analyze for-in iterables, not just the body.
+//
+// expect: E502
+
+class Bag {
+    let items as list<i64>;
+    func init(this) { this.items = [1, 2, 3]; }
+    public:
+    func get_items(this) -> list<i64> { return this.items; }
+}
+
+export func main() -> i64 {
+    let bag = Bag();
+    drop bag;
+    let sum as i64 = 0;
+    for (x in bag.get_items()) {   // use-after-free — calling a method on a freed object
+        sum = sum + x;
+    }
+    return 0;
+}

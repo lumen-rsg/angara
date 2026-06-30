@@ -20,8 +20,8 @@
 
 | Category | Critical | High | Medium | Low | Total | Fixed |
 |---|---|---|---|---|---|---|
-| Soundness holes (bugs slip through) | 2 | 6 | 1 | — | 9 | 3 (S0, S1, S7) |
-| Coverage gaps (not analyzed) | — | — | 6 | — | 6 | 0 |
+| Soundness holes (bugs slip through) | 2 | 6 | 1 | — | 9 | 4 (S0, S1, S2, S7) |
+| Coverage gaps (not analyzed) | — | — | 6 | — | 6 | 1 (G3 — N/A) |
 | Doc ↔ implementation mismatches | — | 2 | 3 | 1 | 6 | 1 (D6) |
 | Test coverage | — | 1 | — | — | 1 | 1 (T1) |
 | Tooling (LSP) | — | 1 | — | — | 1 | 0 |
@@ -44,7 +44,7 @@ stage being meaningful.
 |---|---|---|---|---|
 | - [x] **S0** | ⚫ Verified → ✅ Fixed | **Critical** | **Chaperone errors do not halt compilation.** `CompilerDriver` called `Chaperone::run(...)` but ignored the return value and never checked `errorHandler.hadError()` afterward, unlike every other pass (type-check bails with `m_had_error=true; return nullptr`). Result: E501–E506 were *reported* but compilation proceeded — the binary linked and segfaulted at runtime. Verified: a use-after-free program emitted `Error [E502]` then built `/tmp/c3`, which exited 139. This made every other finding moot in practice. *(Fixed: codegen now gated on `errorHandler.hadError()` after the Chaperone call, mirroring the type-checker bail. Warnings (W510/W521) do NOT halt — only errors.)* | `CompilerDriver.cpp:401`; verified E502 → binary → exit 139 |
 | - [x] **S1** | 🟢 Source → ✅ Fixed | **Critical** | **Aliasing of `class`/`owned` is untracked.** Copy-on-assign was applied *only to plain `data`*; `class`/`owned` assignment was a raw pointer copy and the state machine recorded both names as `Live`, so `let c2 = c1; drop c1; drop c2;` double-freed and passed the Chaperone. *(Fixed: move-on-assign, `unique_ptr` semantics. New `Moved` state: on `let c2 = c1` / `c2 = c1` of a tracked type, the source transitions to `Moved` (invalid) and the destination becomes `Live`. Use-after-move is E507; dropping a moved-from var is E503. `data` types are untouched (still copy-on-assign). No lifetimes, no borrow checker, no pattern rejection — only genuinely unsound aliasing is now rejected.)* | `Chaperone.cpp` (VarDecl/Assign/VarExpr/DropStmt handlers); verified by tests 04, 09, 11 |
-| - [ ] **S2** | 🟢 Source | High | **Loop conditions and `for-in` iterables are never analyzed.** `analyze_loop` walks only `body`; the `while`/`for` condition and `for-in` iterable are skipped → `drop b; while (b.size() > 0) {}` compiles (use-after-free undetected). | `Chaperone.cpp:505-517` |
+| - [x] **S2** | 🟢 Source → ✅ Fixed | High | **Loop conditions and `for-in` iterables are never analyzed.** `analyze_loop` walked only `body`; the `while`/`for` condition, the `for` increment, and the `for-in` iterable were skipped → `drop b; while (b.get() > 0) {}` compiled (use-after-free undetected). *(Fixed: the loop handlers now `analyzeExpr` the condition (before and after the body, since it's re-evaluated each iteration), the `for` increment, and the `for-in` iterable. No false positives — 18/18 chaperone tests pass and zero E5xx across the whole suite.)* | `Chaperone.cpp` loop handlers; verified by tests 12, 13, 14 |
 | - [ ] **S3** | 🟢 Source | High | **`borrow<T>` / `ref<T>` lifetime tracking does not exist.** `isTrackedVar` explicitly returns false for `REF` types; nothing models borrow lifetimes. A `ref<T>` that outlives its referent compiles silently — directly contradicting decision #7 in `CHAPERONE.md`. | `Chaperone.cpp:77`; `CHAPERONE.md:33-34,86-91` |
 | - [ ] **S4** | 🟢 Source | High | **Interprocedural analysis is single-pass, no fixed point.** `run()` walks functions once in source order; the documented whole-program fixed point, recursion handling, and convergence-fallback are unimplemented. Calls to later-defined functions and recursive/mutual recursion hit the lenient "unknown → borrow" path. | `Chaperone.cpp:700-706`; `CHAPERONE.md:256-277` |
 | - [ ] **S5** | 🟢 Source | High | **Multi-parameter functions escape *all* their args.** `if (summary.size() == 1) { apply } else { state = Escaped; }` — any function with >1 tracked parameter loses tracking on every argument, even when the summary says "borrowed." Causes false E503 on later drops and suppresses leak detection. Positional matching against the signature is needed. | `Chaperone.cpp:177-187` |
@@ -60,7 +60,7 @@ stage being meaningful.
 |---|---|---|---|---|
 | - [ ] **G1** | 🟢 Source | Medium | **Globals / module-level owned allocations.** `run()` only analyzes `FuncStmt`; top-level `let g = Buffer()` is never checked. Globals are de-facto `@manual` by accident. | `Chaperone.cpp:700-705` |
 | - [ ] **G2** | 🟢 Source | Medium | **Lambdas / closures.** `analyzeExpr` treats `LambdaExpr` as a no-op. A closure capturing a `Buffer` and outliving it is untracked. | `Chaperone.cpp:269` |
-| - [ ] **G3** | 🟢 Source | Medium | **`match` pattern-bound variables** aren't registered as tracked bindings; block-bodied match arms aren't analyzed as scopes. | `Chaperone.cpp:261-267` |
+| - [x] **G3** | ⚫ Verified → ✅ N/A | ~~Medium~~ | **`match` pattern-bound variables / arm bodies.** Originally flagged as unanalyzed — but verification shows the `MatchExpr` handler *does* walk the condition and all arm bodies (`analyzeExpr` at the MatchExpr case). Use-after-free inside an arm is caught (verified: E502 fires in `tests/chaperone/negative/15`). Pattern-binding of tracked types (`case Some(b)` where `b` is a `class`) is impossible in the current language — enums can't carry class instances (E237) — so there's nothing to register. **No fix needed; closed as not-a-bug.** | `Chaperone.cpp:307-314` |
 | - [ ] **G4** | 🟢 Source | Medium | **E505 ("escaped molecule into untracked container") is documented but not implemented.** Storing a `Buffer` into `list`/`record` then dropping the list leaks it silently. | diagnostics table in `CHAPERONE.md`; no `E505` anywhere in `angc/` |
 | - [ ] **G5** | 🟢 Source | Medium | **`Rc<T>` / `weak<T>`** documented escape hatches have no implementation. | `CHAPERONE.md:299-301` |
 | - [ ] **G6** | 🟢 Source | Low | **Optionals.** `Connection?` is treated as Live regardless of nil-ness; dropping a possibly-nil optional is imprecise (codegen happens to be safe via nil-store). | `Chaperone.cpp:71-85` |
@@ -134,7 +134,7 @@ See the staged implementation plan. Items map to IDs above:
 |---|---|---|---|
 | **0** — Enforcement + test harness | gate codegen on Chaperone errors; negative/positive suite for existing diagnostics; also fixed E504 cycle detection | S0, T1, D6 | ✅ done |
 | **1** — Move-on-assign (soundness) | new `Moved` state; `=` / `let c2=c1` move the source; E507 use-after-move | S1, S7 | ✅ done |
-| **2** — Analyze what's skipped | loop conditions, `for-in` iterables, `match` arms/bindings | S2, G3 | ☐ next |
+| **2** — Analyze what's skipped | loop conditions, `for-in` iterables, for-loop increment (match arms already analyzed — G3 closed as N/A) | S2 | ✅ done |
 | **3** — Field ownership rules | explicit Chaperone rule: forbid field-targeted ownership transfer; E508 | S6 | ☐ |
 | **4** — Interprocedural fixed point | worklist to convergence, recursion handling, positional summaries | S4, S5 | ☐ |
 | **5** — Coverage breadth | globals, closures, E505, optionals, throw/`finally` cleanup discharge | G1, G2, G4, G6, S8 | ☐ |

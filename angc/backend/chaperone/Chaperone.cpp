@@ -554,7 +554,12 @@ void Chaperone::analyzeStmt(Context& ctx,
     }
 
     // --- WhileStmt / ForStmt / ForInStmt (shared loop pattern) ---
-    auto analyze_loop = [&](const Token& kw, const std::shared_ptr<Stmt>& body) {
+    // The body is analyzed once (the E506 check catches drop-without-reassign
+    // before the back-edge). The loop's recurring expressions — condition,
+    // increment, and the for-in iterable — are also analyzed, since a
+    // use-after-free in them is a real bug (S2). Previously only the body
+    // was walked, so `drop b; while (b.get() > 0) {}` compiled silently.
+    auto analyze_loop_body = [&](const Token& kw, const std::shared_ptr<Stmt>& body) {
         StateMap pre = state;
         StateMap body_state = state;
         bool body_term = false;
@@ -580,16 +585,22 @@ void Chaperone::analyzeStmt(Context& ctx,
     };
 
     if (auto* wh = dynamic_cast<const WhileStmt*>(stmt.get())) {
-        analyze_loop(wh->keyword, wh->body);
+        if (wh->condition) analyzeExpr(ctx, wh->condition, state);   // S2: condition
+        analyze_loop_body(wh->keyword, wh->body);
+        if (wh->condition) analyzeExpr(ctx, wh->condition, state);   // re-evaluated each iter
         return;
     }
     if (auto* fors = dynamic_cast<const ForStmt*>(stmt.get())) {
         if (fors->initializer) { bool t; analyzeStmt(ctx, fors->initializer, state, t); }
-        analyze_loop(fors->keyword, fors->body);
+        if (fors->condition) analyzeExpr(ctx, fors->condition, state);  // S2: condition
+        analyze_loop_body(fors->keyword, fors->body);
+        if (fors->increment) analyzeExpr(ctx, fors->increment, state);  // S2: increment
+        if (fors->condition) analyzeExpr(ctx, fors->condition, state);  // re-checked each iter
         return;
     }
     if (auto* forin = dynamic_cast<const ForInStmt*>(stmt.get())) {
-        analyze_loop(forin->name, forin->body);
+        if (forin->collection) analyzeExpr(ctx, forin->collection, state);  // S2: iterable
+        analyze_loop_body(forin->name, forin->body);
         return;
     }
 
