@@ -9,7 +9,7 @@
 /* ========== RESET & BASE ========== */
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300..700;1,300..700&family=Source+Code+Pro:ital,wght@0,200..900;1,200..900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=JetBrains+Mono:wght@400..700&display=swap');
 
 :root {
   /* Soft neumorphic pastel palette — lavender / mint / peach */
@@ -33,9 +33,9 @@
   --sh-inset:    inset 5px 5px 12px rgba(160,150,195,0.30), inset -5px -5px 12px rgba(255,255,255,0.85);
   --sh-hover:    12px 12px 28px rgba(160,150,195,0.42), -12px -12px 28px rgba(255,255,255,0.95);
 
-  --font:      'Cormorant Garamond', 'Georgia', serif;
-  --font-mono: 'Source Code Pro', 'Fira Code', 'Courier New', monospace;
-  --font-size: 17px;
+  --font:      'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Source Code Pro', 'Fira Code', monospace;
+  --font-size: 16px;
   --max-w:     1180px;
   --radius:    20px;
 }
@@ -150,11 +150,11 @@ section {
 .section-title {
   font-family: var(--font);
   font-size: clamp(2.1rem, 4.5vw, 3.2rem);
-  font-weight: 600;
-  line-height: 1.08;
+  font-weight: 700;
+  line-height: 1.1;
   color: var(--ink);
   margin-bottom: 1.1rem;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.025em;
 }
 .section-subtitle {
   font-size: 1.18rem;
@@ -212,9 +212,9 @@ section {
 .hero h1 {
   font-family: var(--font);
   font-size: clamp(2.9rem, 7vw, 5.2rem);
-  font-weight: 600;
-  line-height: 1.02;
-  letter-spacing: -0.02em;
+  font-weight: 800;
+  line-height: 1.04;
+  letter-spacing: -0.035em;
   margin-bottom: 1.6rem;
   color: var(--ink);
 }
@@ -222,9 +222,9 @@ section {
   background: linear-gradient(120deg, var(--accent), var(--accent2) 60%, var(--accent3));
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent;
-  font-style: italic;
+  font-weight: 800;
 }
-.hero h1 .dim { color: var(--muted); font-style: italic; }
+.hero h1 .dim { color: var(--muted); font-weight: 300; }
 
 .hero-tagline {
   font-size: 1.28rem;
@@ -308,12 +308,15 @@ section {
   align-items: center; justify-content: center;
   width: 48px; height: 48px;
   border-radius: 14px;
-  font-size: 1.5rem;
   background: var(--card);
   box-shadow: var(--sh-inset);
   margin-bottom: 1.1rem;
   color: var(--accent);
 }
+.phil-item .icon svg { width: 22px; height: 22px; }
+/* Shared line-icon style: stroke = currentColor, no fill. */
+.svgicon { stroke: currentColor; fill: none; stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round; }
 .phil-item h3 {
   font-size: 1.5rem;
   font-weight: 600;
@@ -468,6 +471,10 @@ section {
 .diag-table .e-code { color: var(--accent-ink); }
 .diag-table .w-code { color: #b8783a; }
 .diag-table .metaphor { color: var(--ink); font-weight: 500; white-space: nowrap; }
+.diag-table .metaphor .svgicon { width: 17px; height: 17px; vertical-align: -3px; margin-right: 0.45rem; }
+/* Tint the metaphor icon to match the code's severity. */
+.metaphor .e-ic { color: var(--accent-ink); }
+.metaphor .w-ic { color: #b8783a; }
 .diag-table .meaning { color: var(--ink-soft); }
 
 /* ========== FEATURES / CONTRACTS ========== */
@@ -606,6 +613,31 @@ footer a { color: var(--ink-soft); }
 </head>
 <body>
 
+<!-- ==================== SVG ICON SPRITE ==================== -->
+<!-- Hidden symbol defs; referenced via <svg class="svgicon"><use href="#i-..."/></svg>.
+     Line icons, 24x24 viewBox, 1.6px rounded stroke = currentColor. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Philosophy -->
+    <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z"/><path d="M19.4 13.5l1.8 1.4-1.6 2.8-2.2-.6a7.6 7.6 0 0 1-1.3.75l-.5 2.25h-3.2l-.5-2.25a7.6 7.6 0 0 1-1.3-.75l-2.2.6-1.6-2.8 1.8-1.4a7.7 7.7 0 0 1 0-1.5L2.8 10.6l1.6-2.8 2.2.6c.4-.3.83-.55 1.3-.75L8.4 5.4h3.2l.5 2.25c.47.2.9.45 1.3.75l2.2-.6 1.6 2.8-1.8 1.4c.05.5.05 1 0 1.5z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3L5 13h5l-1 8 8-10h-5l1-8z"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5"/><path d="M3 16.5l9 5 9-5"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5"/><path d="M15 3v5"/><path d="M7 8h10v3a5 5 0 0 1-10 0V8z"/><path d="M12 16v5"/></symbol>
+    <symbol id="i-chip" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 3v3M14 3v3M10 18v3M14 18v3M3 10h3M3 14h3M18 10h3M18 14h3"/></symbol>
+    <!-- Diagnostics -->
+    <symbol id="i-droplet" viewBox="0 0 24 24"><path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/><circle cx="10" cy="14" r="1.2"/></symbol>
+    <symbol id="i-skull" viewBox="0 0 24 24"><path d="M12 3a8 8 0 0 0-5 14v3a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-3a8 8 0 0 0-5-14z"/><circle cx="9" cy="12" r="1.3"/><circle cx="15" cy="12" r="1.3"/><path d="M10 18v3M14 18v3"/></symbol>
+    <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M4 9a5 5 0 0 1 5-5h8"/><path d="M14 2l3 2-3 2"/><path d="M20 15a5 5 0 0 1-5 5H7"/><path d="M10 22l-3-2 3-2"/></symbol>
+    <symbol id="i-cycle" viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 1 12-4.9L19 9"/><path d="M19 4v5h-5"/><path d="M19 12a7 7 0 0 1-12 4.9L5 15"/><path d="M5 20v-5h5"/></symbol>
+    <symbol id="i-escape" viewBox="0 0 24 24"><path d="M9 19l-5-5 5-5"/><path d="M4 14h9a6 6 0 0 0 6-6V4"/><path d="M15 6l4-2 2 4"/></symbol>
+    <symbol id="i-loop" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 8"/><path d="M20 4v4h-4"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 16"/><path d="M4 20v-4h4"/></symbol>
+    <symbol id="i-move" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/><circle cx="5" cy="12" r="1.3"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M9 15l6-6"/><path d="M10.5 6.5l1-1a4 4 0 0 1 5.7 5.7l-2 2"/><path d="M13.5 17.5l-1 1a4 4 0 0 1-5.7-5.7l2-2"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3l9 16H3l9-16z"/><path d="M12 10v4"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></symbol>
+  </defs>
+</svg>
+
 <!-- ==================== NAV ==================== -->
 <nav id="nav">
   <div class="nav-inner">
@@ -669,32 +701,32 @@ footer a { color: var(--ink-soft); }
 
     <div class="philosophy-grid">
       <div class="phil-item reveal">
-        <span class="icon">&#9881;</span>
+        <span class="icon"><svg class="svgicon"><use href="#i-gear"/></svg></span>
         <h3>No Hidden Allocations</h3>
         <p>Every heap allocation is visible. You <code>new</code> it explicitly, you <code>drop</code> it explicitly &mdash; and the Chaperone proves you did it right. No autoboxing, no implicit heap promotion, no compiler-generated copies you didn't ask for.</p>
       </div>
       <div class="phil-item reveal">
-        <span class="icon">&#9733;</span>
+        <span class="icon"><svg class="svgicon"><use href="#i-shield"/></svg></span>
         <h3>No Implicit Conversions</h3>
         <p><code>i64</code> does not become <code>f64</code> silently. <code>string</code> does not become <code>any</code> without your consent. Every type conversion is deliberate, every cast is explicit, every boundary is enforced.</p>
       </div>
       <div class="phil-item reveal">
-        <span class="icon">&#9889;</span>
+        <span class="icon"><svg class="svgicon"><use href="#i-bolt"/></svg></span>
         <h3>No Runtime Collector</h3>
         <p>There is no garbage collector. No tracing, no refcounting, no safepoints, no pauses. Memory safety is a <strong>compile-time proof</strong>, which means the language is sound on freestanding targets &mdash; kernels, drivers, embedded.</p>
       </div>
       <div class="phil-item reveal">
-        <span class="icon">&#9878;</span>
+        <span class="icon"><svg class="svgicon"><use href="#i-layers"/></svg></span>
         <h3>Contracts First</h3>
         <p>Define what a type must provide before you define how it provides it. The <code>contract</code> keyword enforces field presence and method signatures at compile time. Interface by design, not by convention.</p>
       </div>
       <div class="phil-item reveal">
-        <span class="icon">&#128279;</span>
+        <span class="icon"><svg class="svgicon"><use href="#i-plug"/></svg></span>
         <h3>Zero-Cost C FFI</h3>
         <p>Call any C library with a <code>foreign</code> declaration. Map C structs directly. No wrapper generation, no binding layers, no runtime overhead. The C ABI is a first-class citizen.</p>
       </div>
       <div class="phil-item reveal">
-        <span class="icon">&#9873;</span>
+        <span class="icon"><svg class="svgicon"><use href="#i-chip"/></svg></span>
         <h3>Bare-Metal Ready</h3>
         <p>Compile to freestanding ARM64 with <code>--freestanding --target aarch64-unknown-none-elf</code>. Write kernels, firmware, and embedded code with the same language, the same type system, the same guarantees.</p>
       </div>
@@ -851,15 +883,15 @@ p2.x = <span class="num">99</span>;
           <tr><th>Code</th><th>Metaphor</th><th>What it catches</th></tr>
         </thead>
         <tbody>
-          <tr><td class="code-cell e-code">E501</td><td class="metaphor">&#129516; Unfolded molecule</td><td class="meaning">Memory leak &mdash; allocation has no <code>drop</code> on a control-flow path</td></tr>
-          <tr><td class="code-cell e-code">E502</td><td class="metaphor">&#128128; Dead reference</td><td class="meaning">Use-after-free &mdash; variable used after <code>drop</code></td></tr>
-          <tr><td class="code-cell e-code">E503</td><td class="metaphor">&#9888;&#65039; Double denaturation</td><td class="meaning">Double-free &mdash; dropped twice, or after ownership moved</td></tr>
-          <tr><td class="code-cell e-code">E504</td><td class="metaphor">&#128279; Tangled molecule</td><td class="meaning">Reference cycle &mdash; use <code>ref&lt;T&gt;</code> for the back-edge</td></tr>
-          <tr><td class="code-cell e-code">E505</td><td class="metaphor">&#129516; Escaped molecule</td><td class="meaning">Tracked value escapes into an untracked container or closure</td></tr>
-          <tr><td class="code-cell e-code">E506</td><td class="metaphor">&#128260; Incomplete fold</td><td class="meaning">Loop-body drop &mdash; double-free on iteration 2+</td></tr>
-          <tr><td class="code-cell e-code">E507</td><td class="metaphor">&#128228; Moved molecule</td><td class="meaning">Use-after-move &mdash; a moved-from variable is read</td></tr>
-          <tr><td class="code-cell e-code">E509</td><td class="metaphor">&#128279; Dangling borrow</td><td class="meaning">A <code>ref&lt;T&gt;</code> is read after its referent was released</td></tr>
-          <tr><td class="code-cell w-code">W510</td><td class="metaphor">(warning)</td><td class="meaning">Variable handled differently on if/else branches</td></tr>
+          <tr><td class="code-cell e-code">E501</td><td class="metaphor"><svg class="svgicon e-ic"><use href="#i-droplet"/></svg>Unfolded molecule</td><td class="meaning">Memory leak &mdash; allocation has no <code>drop</code> on a control-flow path</td></tr>
+          <tr><td class="code-cell e-code">E502</td><td class="metaphor"><svg class="svgicon e-ic"><use href="#i-skull"/></svg>Dead reference</td><td class="meaning">Use-after-free &mdash; variable used after <code>drop</code></td></tr>
+          <tr><td class="code-cell e-code">E503</td><td class="metaphor"><svg class="svgicon e-ic"><use href="#i-repeat"/></svg>Double denaturation</td><td class="meaning">Double-free &mdash; dropped twice, or after ownership moved</td></tr>
+          <tr><td class="code-cell e-code">E504</td><td class="metaphor"><svg class="svgicon e-ic"><use href="#i-cycle"/></svg>Tangled molecule</td><td class="meaning">Reference cycle &mdash; use <code>ref&lt;T&gt;</code> for the back-edge</td></tr>
+          <tr><td class="code-cell e-code">E505</td><td class="metaphor"><svg class="svgicon e-ic"><use href="#i-escape"/></svg>Escaped molecule</td><td class="meaning">Tracked value escapes into an untracked container or closure</td></tr>
+          <tr><td class="code-cell e-code">E506</td><td class="metaphor"><svg class="svgicon e-ic"><use href="#i-loop"/></svg>Incomplete fold</td><td class="meaning">Loop-body drop &mdash; double-free on iteration 2+</td></tr>
+          <tr><td class="code-cell e-code">E507</td><td class="metaphor"><svg class="svgicon e-ic"><use href="#i-move"/></svg>Moved molecule</td><td class="meaning">Use-after-move &mdash; a moved-from variable is read</td></tr>
+          <tr><td class="code-cell e-code">E509</td><td class="metaphor"><svg class="svgicon e-ic"><use href="#i-link"/></svg>Dangling borrow</td><td class="meaning">A <code>ref&lt;T&gt;</code> is read after its referent was released</td></tr>
+          <tr><td class="code-cell w-code">W510</td><td class="metaphor"><svg class="svgicon w-ic"><use href="#i-alert"/></svg>Asymmetry</td><td class="meaning">Variable handled differently on if/else branches</td></tr>
         </tbody>
       </table>
     </div>
