@@ -696,7 +696,7 @@ static const AngaraClassDef SERVER_CLASS_DEF = { "RpcServer", NULL, SERVER_METHO
 
 static const AngaraFuncDef RPC_EXPORTS[] = {
     {"create_server", Angara_rpc_create_server, "i->RpcServer", &SERVER_CLASS_DEF},
-    {"call",          Angara_rpc_call,           "sisl?a->a",    NULL},
+    {"call",          Angara_rpc_call,           "sisl<a>?->a",  NULL},
     {"notify",        Angara_rpc_notify,         "sis->n",       NULL},
     ANGARA_FUNC_END
 };

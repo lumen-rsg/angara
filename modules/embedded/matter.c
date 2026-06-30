@@ -495,7 +495,7 @@ AngaraObject Angara_Controller_node_description(int arg_count, AngaraObject* arg
 
 static const AngaraMethodDef CONTROLLER_METHODS[] = {
     {"commission",      (AngaraMethodFn)Angara_Controller_commission,       "si?->n"},
-    {"devices",         (AngaraMethodFn)Angara_Controller_devices,          "->l{}"},
+    {"devices",         (AngaraMethodFn)Angara_Controller_devices,          "->l<{}>"},
     {"read",            (AngaraMethodFn)Angara_Controller_read,             "iiii?->s"},
     {"write",           (AngaraMethodFn)Angara_Controller_write,            "iiiia->n"},
     {"command",         (AngaraMethodFn)Angara_Controller_command,          "iisl->s"},

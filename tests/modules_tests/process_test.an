@@ -10,12 +10,14 @@ export func main() -> i64 {
 
   // Test exec (simple command)
   let output = process.exec("echo 'hello world'");
-  io.println(1, "exec echo: '" + string(output).trim() + "'");
+  io.println(1, "exec echo: '" + string(output) + "'");
 
   // Test run with captured output
   let result = process.run("ls", ["/tmp"]);
-  io.println(1, "run ls exit_code: " + string(result["exit_code"]));
-  println("run ls stdout length: " + string(result["stdout"].length()));
+  @unsafe {
+    io.println(1, "run ls exit_code: " + string(result["exit_code"]));
+    io.println(1, "run ls stdout length: " + string(len(result["stdout"])));
+  }
 
   // Test getpid
   let pid = process.getpid();
@@ -31,10 +33,11 @@ export func main() -> i64 {
     cat.write("hello from spawn\n");
     cat.close_stdin();
     let cat_out = cat.read_stdout(1024);
-    io.println(1, "spawn cat output: '" + string(cat_out).trim() + "'");
+    io.println(1, "spawn cat output: '" + string(cat_out) + "'");
     let exit_code = cat.wait();
     io.println(1, "spawn cat exit_code: " + string(exit_code));
   }
+  drop cat;
 
   if (process.getpid() > 0) {
     io.println(1, "\n--- All process tests passed! ---");

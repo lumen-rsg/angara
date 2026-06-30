@@ -13,11 +13,12 @@ func run_worker() -> nil {
 
   // Declare a durable queue to ensure tasks are not lost if the server restarts.
   ch.queue_declare(QUEUE_NAME, true, false, false);
+  ch.subscribe(QUEUE_NAME);
   io.println(1, "[*] Waiting for messages in queue '" + QUEUE_NAME + "'. To exit press CTRL+C");
 
   while (true) {
     // Wait for a message indefinitely.
-    let msg_data as record? = ch.consume(QUEUE_NAME, 10);  // returns optional
+    let msg_data as record? = ch.next_message(10);  // returns optional
 
     if (let received_record = msg_data) {
       let msg as {body: string, delivery_tag: i64} = received_record;
@@ -41,6 +42,8 @@ func run_worker() -> nil {
   // This part is unreachable in the while(true) loop, but shows the pattern.
   ch.close();
   conn.close();
+  drop ch;
+  drop conn;
 }
 
 
@@ -58,6 +61,8 @@ func run_publisher(message as string) -> nil {
 
   ch.close();
   conn.close();
+  drop ch;
+  drop conn;
 }
 
 
