@@ -1,4 +1,7 @@
 /// Angara time module — time.now(), epoch, formatted strings, stopwatch, sleep. Links -lrt on Linux.
+// _GNU_SOURCE enables strptime() and timegm() on Linux (glibc). On macOS
+// these are in <time.h> by default, so the define is harmless there.
+#define _GNU_SOURCE
 #include <time.h>
 #include <stdlib.h>
 #include <stdio.h>
