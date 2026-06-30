@@ -508,6 +508,7 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
     ctx.current_function = func.name.lexeme;
     StateMap state;
     ctx.borrows.clear();   // S3: borrow map is per-function (reset each pass)
+    ctx.current_params.clear();  // rebuilt below as tracked params register
 
     // Register tracked parameters. Prefer the resolved FunctionType from the
     // symbol table (top-level functions), but fall back to reading the param's
@@ -535,6 +536,7 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
             if (isTrackedTypeObj(ctx, *pt)) {
                 state[func.params[i].name.lexeme] = State::Live;
                 param_names.insert(func.params[i].name.lexeme);
+                ctx.current_params.insert(func.params[i].name.lexeme);
                 param_tracked[i] = true;
             }
         }
@@ -546,6 +548,7 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
             if (!tn.empty() && ctx.tracked_types.count(tn)) {
                 state[func.params[i].name.lexeme] = State::Live;
                 param_names.insert(func.params[i].name.lexeme);
+                ctx.current_params.insert(func.params[i].name.lexeme);
                 param_tracked[i] = true;
             }
         }
@@ -706,7 +709,9 @@ void Chaperone::analyzeStmt(Context& ctx,
             }
         }
         for (auto& [name, st] : state) {
-            if (st == State::Live) {
+            // Exclude tracked parameters — they're borrowed (caller-owned), not
+            // this function's responsibility to drop.
+            if (st == State::Live && ctx.current_params.count(name) == 0) {
                 diag(ctx, ret->keyword,
                     "🧬 Unfolded molecule — `" + name + "` leaks on the return at line " +
                     std::to_string(ret->keyword.line) + ". Add `drop " + name + ";`.",
@@ -725,7 +730,8 @@ void Chaperone::analyzeStmt(Context& ctx,
         // S8: a name listed in a surrounding `finally {}`'s drops is
         // discharged (the finally runs on the throw path), so skip it.
         for (auto& [name, st] : state) {
-            if (st == State::Live && ctx.finally_protected.count(name) == 0) {
+            if (st == State::Live && ctx.finally_protected.count(name) == 0
+                && ctx.current_params.count(name) == 0) {  // borrowed params excluded
                 diag(ctx, thr->keyword,
                     "🧬 Unfolded molecule — `" + name + "` is live when `throw` "
                     "fires at line " + std::to_string(thr->keyword.line) + ". "

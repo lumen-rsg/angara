@@ -28,6 +28,7 @@ func subscriber_task() -> i64 {
   let conn as Connection = make_conn("thread_sub");
   if (!wait_connected(conn, 3.0)) {
     io.println(2, "[SUB] Connect failed");
+    drop conn;
     return 1;
   }
   conn.subscribe("angara/test/threaded", 1);
@@ -56,6 +57,7 @@ func subscriber_task() -> i64 {
 
   io.println(1, "[SUB] Received " + string(sub_received) + " messages");
   conn.disconnect();
+  drop conn;
   return 0;
 }
 
@@ -74,6 +76,7 @@ export func main() -> i64 {
     done_flag = true;
     mtx.unlock();
     sub_thread.join();
+    drop pub;
     return 1;
   }
 
@@ -85,6 +88,7 @@ export func main() -> i64 {
     i = i + 1;
   }
   pub.disconnect();
+  drop pub;
 
   // Wait for subscriber to collect all messages
   time.sleep(1.5);

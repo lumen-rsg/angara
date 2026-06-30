@@ -37,5 +37,6 @@ export func main() -> i64 {
   let duration3 = sw.elapsed();
   io.println(1, "Time immediately after reset: " + string(duration3) + " seconds.");
 
+  drop sw;
   return 0;
 }

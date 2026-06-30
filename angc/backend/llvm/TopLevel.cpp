@@ -171,6 +171,15 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     auto saved_raw_ret = m_current_raw_return_kind;
     m_current_raw_return_kind = is_raw ? raw_info.return_kind : std::optional<LocalKind>{};
 
+    // Reset per-function codegen state. m_exc_chain_save holds an LLVM Value
+    // (an alloca) from emitGcPushFrame; if a prior function set it and this one
+    // doesn't push a frame, a stale value would make emitGcPopFrame reference
+    // an instruction in another function → LLVM module-verify failure. Same for
+    // the inlined-main members. Reset before the conditional push below.
+    m_exc_chain_save = nullptr;
+    m_inlined_main_ret_alloca = nullptr;
+    m_inlined_main_cleanup_bb = nullptr;
+
     // Only push GC frame if the function has heap-referencing values.
     // Raw primitive-only functions (like fib) don't need GC at all.
     bool needs_gc = !is_raw || functionNeedsGC(stmt);

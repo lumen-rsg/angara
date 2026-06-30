@@ -33,6 +33,7 @@ func run_publisher() -> nil {
   if (!conn.is_connected()) {
     io.println(2, "[PUBLISHER] Failed to connect!");
     conn.disconnect();
+    drop conn;
     return;
   }
 
@@ -50,6 +51,7 @@ func run_publisher() -> nil {
 
   io.println(1, "[PUBLISHER] Done publishing.");
   conn.disconnect();
+  drop conn;
 }
 
 
@@ -71,6 +73,7 @@ func run_subscriber() -> nil {
   if (!conn.is_connected()) {
     io.println(2, "[SUBSCRIBER] Failed to connect!");
     conn.disconnect();
+    drop conn;
     return;
   }
 
@@ -94,6 +97,7 @@ func run_subscriber() -> nil {
   io.println(1, "[SUBSCRIBER] Received " + string(received) + " messages.");
   conn.unsubscribe(TEST_TOPIC);
   conn.disconnect();
+  drop conn;
 }
 
 
@@ -111,6 +115,7 @@ func run_combined_test() -> bool {
 
   if (!conn.is_connected()) {
     io.println(2, "[TEST] Connection failed.");
+    drop conn;
     return false;
   }
 
@@ -128,11 +133,13 @@ func run_combined_test() -> bool {
     @unsafe{
     io.println(1, "[TEST] Echo received: '" + msg["payload"] + "'");
     conn.disconnect();
+    drop conn;
     return true;
   } }
 
   io.println(2, "[TEST] No echo received.");
   conn.disconnect();
+  drop conn;
   return false;
 }
 
@@ -154,9 +161,11 @@ export func main() -> i64 {
       io.println(1, "[PASS] Connected to MQTT broker.");
       io.println(1, "       Client ID: " + conn.client_id());
       conn.disconnect();
+      drop conn;
     } else {
       io.println(2, "[FAIL] Could not connect to MQTT broker.");
       io.println(2, "       Is mosquitto running? Try: brew services start mosquitto");
+      drop conn;
       return 1;
     }
   } catch (e) {

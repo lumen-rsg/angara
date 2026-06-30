@@ -5,7 +5,7 @@ attach time;
 
 const BROKER_URL as string = "mqtt://localhost:11883";
 
-func wait_connected(conn as Connection, max_wait as f64) -> bool {
+func wait_connected(conn as ref<Connection>, max_wait as f64) -> bool {
   let attempts as i64 = 0;
   let max_attempts as i64 = i64(max_wait * 20.0);
   while (!conn.is_connected() && attempts < max_attempts) {
@@ -27,6 +27,8 @@ export func main() -> i64 {
 
   if (!wait_connected(sub, 3.0) || !wait_connected(pub, 3.0)) {
     io.println(2, "[FAIL] Connection failed");
+    drop sub;
+    drop pub;
     return 1;
   }
 
@@ -88,6 +90,8 @@ export func main() -> i64 {
 
   sub.disconnect();
   pub.disconnect();
+  drop sub;
+  drop pub;
 
   io.println(1, "");
   if (failures == 0) {

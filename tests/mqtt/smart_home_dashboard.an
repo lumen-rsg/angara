@@ -262,6 +262,7 @@ func mqtt_subscriber() -> i64 {
   let conn as Connection = make_conn("dashboard_sub");
   if (!wait_connected(conn, 5.0)) {
     io.println(2, "[DASHBOARD] Failed to connect to broker");
+    drop conn;
     return 1;
   }
   conn.subscribe("home/#", 1);
@@ -345,6 +346,7 @@ func mqtt_subscriber() -> i64 {
   }
 
   conn.disconnect();
+  drop conn;
   return 0;
 }
 
@@ -371,6 +373,7 @@ export func main() -> i64 {
   let conn as Connection = make_conn("dashboard_main");
   if (!wait_connected(conn, 5.0)) {
     io.println(2, "[FAIL] Could not connect to broker");
+    drop conn;
     return 1;
   }
   conn.subscribe("home/#", 1);
@@ -454,5 +457,6 @@ export func main() -> i64 {
   time.sleep(0.3);
 
   conn.disconnect();
+  drop conn;
   return 0;
 }

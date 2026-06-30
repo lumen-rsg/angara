@@ -30,6 +30,7 @@ let registry_mtx = Mutex();
 func registry_task() -> i64 {
   let conn as Connection = make_conn("device_registry");
   if (!wait_connected(conn, 3.0)) {
+    drop conn;
     return 1;
   }
   conn.subscribe("registry/+/status", 1);
@@ -55,6 +56,7 @@ func registry_task() -> i64 {
   }
 
   conn.disconnect();
+  drop conn;
   return 0;
 }
 
@@ -88,6 +90,7 @@ export func main() -> i64 {
       io.println(2, "[DEVICE] " + device_ids[i] + " connect failed");
     }
     conn.disconnect();
+    drop conn;
     time.sleep(0.2);
     i = i + 1;
   }

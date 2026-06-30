@@ -29,6 +29,8 @@ export func main() -> i64 {
 
   if (!wait_connected(sub, 3.0) || !wait_connected(pub, 3.0)) {
     io.println(2, "[FAIL] Connection failed");
+    drop pub;
+    drop sub;
     return 1;
   }
 
@@ -61,7 +63,9 @@ export func main() -> i64 {
   }
 
   sub.disconnect();
+  drop sub;
   pub.disconnect();
+  drop pub;
 
   io.println(1, "Received: " + string(received) + " / " + string(MESSAGE_COUNT));
 

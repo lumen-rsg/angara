@@ -69,6 +69,11 @@ private:
         ErrorHandler& eh;
         std::set<std::string> tracked_types;
         std::string current_function;
+        // The tracked-parameter names of the function currently being analyzed.
+        // Leak checks on return/throw must EXCLUDE these — a parameter is
+        // borrowed (the caller owns it); flagging it as a leak is a false
+        // positive. Reset per function in analyzeFunction.
+        std::set<std::string> current_params;
         std::map<std::string, FunctionSummary> summaries;
         bool in_unsafe = false;
         // During the interprocedural fixed-point convergence passes, suppress

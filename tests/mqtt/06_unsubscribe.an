@@ -28,6 +28,8 @@ export func main() -> i64 {
 
   if (!wait_connected(sub, 3.0) || !wait_connected(pub, 3.0)) {
     io.println(2, "[FAIL] Connection failed");
+    drop pub;
+    drop sub;
     return 1;
   }
 
@@ -42,12 +44,16 @@ export func main() -> i64 {
     @unsafe {
       if (msg1["payload"] != "before_unsub") {
         io.println(2, "[FAIL] Payload mismatch before unsubscribe");
+        drop pub;
+        drop sub;
         return 1;
       }
       io.println(1, "[PASS] Phase 1: Received message while subscribed");
     }
   } else {
     io.println(2, "[FAIL] Did not receive message before unsubscribe");
+    drop pub;
+    drop sub;
     return 1;
   }
 
@@ -64,14 +70,18 @@ export func main() -> i64 {
       io.println(2, "[FAIL] Received message after unsubscribe: " + msg2["payload"]);
     }
     sub.disconnect();
+    drop sub;
     pub.disconnect();
+    drop pub;
     return 1;
   }
 
   io.println(1, "[PASS] Phase 2: No message received after unsubscribe");
 
   sub.disconnect();
+  drop sub;
   pub.disconnect();
+  drop pub;
 
   io.println(1, "");
   io.println(1, "=== All unsubscribe tests PASSED ===");

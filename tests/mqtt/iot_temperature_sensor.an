@@ -31,6 +31,7 @@ func monitor_task() -> i64 {
   let conn as Connection = make_conn("sensor_monitor");
   if (!wait_connected(conn, 3.0)) {
     io.println(2, "[MONITOR] Connect failed");
+    drop conn;
     return 1;
   }
 
@@ -53,6 +54,7 @@ func monitor_task() -> i64 {
   }
 
   conn.disconnect();
+  drop conn;
   return 0;
 }
 
@@ -68,6 +70,7 @@ export func main() -> i64 {
   if (!wait_connected(sensor, 3.0)) {
     io.println(2, "[SENSOR] Connect failed");
     mon_thread.join();
+    drop sensor;
     return 1;
   }
 
@@ -86,6 +89,7 @@ export func main() -> i64 {
   }
 
   sensor.disconnect();
+  drop sensor;
   io.println(1, "[SENSOR] Done publishing");
 
   // Wait for monitor to finish collecting

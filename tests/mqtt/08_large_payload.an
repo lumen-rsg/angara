@@ -29,6 +29,8 @@ func test_size(size as i64) -> bool {
 
   if (!wait_connected(sub, 3.0) || !wait_connected(pub, 3.0)) {
     io.println(2, "  [FAIL] Connection failed for size " + string(size));
+    drop pub;
+    drop sub;
     return false;
   }
 
@@ -39,7 +41,9 @@ func test_size(size as i64) -> bool {
 
   let msg = sub.next_message(5000);
   sub.disconnect();
+  drop sub;
   pub.disconnect();
+  drop pub;
 
   if (msg != nil) {
     @unsafe {
