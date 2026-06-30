@@ -1,0 +1,21 @@
+// Chaperone negative test — E507 (use-after-move)
+// After `let b2 = b1`, ownership moves to b2 and b1 is invalid. Using b1
+// afterward is a use-after-move — it would read a pointer the new owner may
+// free. Must report E507.
+//
+// expect: E507
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let b1 = Buf(42);
+    let b2 = b1;       // MOVE: b1 is now invalid
+    let x = b1.get();  // use-after-move
+    drop b2;
+    return x;
+}

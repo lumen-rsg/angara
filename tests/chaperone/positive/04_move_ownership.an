@@ -1,0 +1,22 @@
+// Chaperone positive test — move-on-assign (S1 soundness).
+// Assigning a tracked allocation to a new variable MOVES ownership: the
+// destination becomes Live, the source becomes Moved (invalid). Using the
+// source afterward would be E507; here we only use the destination and drop
+// it. No diagnostics, compiles and runs.
+//
+// exit: 42
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let b1 = Buf(42);
+    let b2 = b1;        // MOVE: b2 now owns it, b1 is Moved (invalid)
+    let x = b2.get();
+    drop b2;            // only the new owner is dropped
+    return x;           // expect 42
+}

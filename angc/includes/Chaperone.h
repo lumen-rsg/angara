@@ -40,6 +40,8 @@ private:
         Live,     // holds a tracked allocation — must drop or transfer
         Dropped,  // explicitly dropped — use-after-free if accessed
         Escaped,  // ownership transferred (return, function call, global)
+        Moved,    // ownership moved to another variable (let x = y / x = y);
+                  // using or dropping it is an error (use-after-move / double-free)
     };
 
     /// State map: variable name → current state. Snapshotted at branch points.

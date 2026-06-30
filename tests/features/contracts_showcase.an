@@ -30,5 +30,6 @@ export func main() -> i64 {
   io.println(1, "User ID: " + string(u.id));
   io.println(1, "Log string: " + u.to_log_string());
 
+  drop u;
   return 0;
 }

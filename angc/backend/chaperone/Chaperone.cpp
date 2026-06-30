@@ -93,14 +93,22 @@ void Chaperone::analyzeExpr(Context& ctx,
 {
     if (!expr) return;
 
-    // VarExpr: the key check — is this variable Dropped?
+    // VarExpr: the key checks — use-after-free (Dropped) and use-after-move (Moved).
     if (auto* ve = dynamic_cast<const VarExpr*>(expr.get())) {
         auto it = state.find(ve->name.lexeme);
-        if (it != state.end() && it->second == State::Dropped) {
-            diag(ctx, ve->name,
-                "💀 Dead reference — `" + ve->name.lexeme + "` was dropped but "
-                "is used here. The molecule has already been released.",
-                "E502");
+        if (it != state.end()) {
+            if (it->second == State::Dropped) {
+                diag(ctx, ve->name,
+                    "💀 Dead reference — `" + ve->name.lexeme + "` was dropped but "
+                    "is used here. The molecule has already been released.",
+                    "E502");
+            } else if (it->second == State::Moved) {
+                diag(ctx, ve->name,
+                    "📤 Moved molecule — `" + ve->name.lexeme + "` had its ownership "
+                    "transferred to another variable and is used here. Read the new "
+                    "owner instead.",
+                    "E507");
+            }
         }
         return;
     }
@@ -124,12 +132,51 @@ void Chaperone::analyzeExpr(Context& ctx,
         return;
     }
 
-    // AssignExpr: walk value being assigned.
+    // AssignExpr: handle leaks (S7) and ownership moves (S1).
     if (auto* asgn = dynamic_cast<const AssignExpr*>(expr.get())) {
+        // Capture the move source BEFORE walking the value: if the RHS is a
+        // bare tracked variable, its current state tells us if this is a move.
+        bool rhs_is_move_source = false;
+        std::string move_src;
+        if (asgn->op.type == TokenType::EQUAL) {
+            if (auto* vve = dynamic_cast<const VarExpr*>(asgn->value.get())) {
+                auto sit = state.find(vve->name.lexeme);
+                if (sit != state.end() && sit->second == State::Live) {
+                    rhs_is_move_source = true;
+                    move_src = vve->name.lexeme;
+                }
+            }
+        }
+
+        // Walk the RHS (catches use-after-free / use-after-move inside it).
         analyzeExpr(ctx, asgn->value, state);
-        // The target variable is being overwritten — if it was Live, that's a
-        // leak (the old allocation is lost). The VarDecl handler catches this
-        // for `let` re-declarations; this catches `x = expr` assignments.
+
+        // Only a plain `=` to a bare variable can reassign ownership. `+=` etc.
+        // keep the target's allocation (compound assign), and field/subscript
+        // targets are not whole-variable ownership transfers.
+        if (asgn->op.type != TokenType::EQUAL) return;
+        auto* tgt = dynamic_cast<const VarExpr*>(asgn->target.get());
+        if (!tgt) return;
+
+        auto tit = state.find(tgt->name.lexeme);
+        if (tit == state.end()) return;
+
+        // S7: overwriting a Live tracked variable leaks the old allocation.
+        // (Moved/Dropped/Escaped targets are already invalid — no leak.)
+        if (tit->second == State::Live) {
+            diag(ctx, tgt->name,
+                "🧬 Unfolded molecule — `" + tgt->name.lexeme + "` held a live "
+                "allocation that is overwritten by this assignment without being "
+                "dropped. Add `drop " + tgt->name.lexeme + ";` first.",
+                "E501");
+        }
+
+        // S1 move: if the RHS was a tracked Live var, ownership transfers —
+        // the source becomes Moved (invalid), the target becomes Live.
+        if (rhs_is_move_source) {
+            state[move_src] = State::Moved;
+            tit->second = State::Live;
+        }
         return;
     }
 
@@ -361,9 +408,26 @@ void Chaperone::analyzeStmt(Context& ctx,
 
     // --- VarDeclStmt ---
     if (auto* var = dynamic_cast<const VarDeclStmt*>(stmt.get())) {
-        // Check the initializer expression for use-after-free.
+        // Capture a move source BEFORE walking the initializer: if the
+        // initializer is a bare tracked variable currently Live, `let x = y`
+        // MOVES ownership from y to x (S1). Walking first would let the
+        // initializer's own sub-expressions mutate state, so snapshot here.
+        bool init_is_move_source = false;
+        std::string move_src;
+        if (var->initializer) {
+            if (auto* vve = dynamic_cast<const VarExpr*>(var->initializer.get())) {
+                auto sit = state.find(vve->name.lexeme);
+                if (sit != state.end() && sit->second == State::Live) {
+                    init_is_move_source = true;
+                    move_src = vve->name.lexeme;
+                }
+            }
+        }
+
+        // Check the initializer expression for use-after-free / use-after-move.
         if (var->initializer)
             analyzeExpr(ctx, var->initializer, state);
+
         auto it = state.find(var->name.lexeme);
         if (it != state.end() && it->second == State::Live) {
             diag(ctx, var->name,
@@ -371,7 +435,15 @@ void Chaperone::analyzeStmt(Context& ctx,
                 "allocation that is now overwritten without being dropped.",
                 "E501");
         }
-        state[var->name.lexeme] = isTrackedVar(ctx, *var) ? State::Live : State::Uninit;
+        bool tracked = isTrackedVar(ctx, *var);
+        state[var->name.lexeme] = tracked ? State::Live : State::Uninit;
+
+        // S1 move: the source of a `let x = y` move is invalidated. Only when
+        // the new binding is itself tracked (otherwise y is borrowed/copied,
+        // e.g. `data` copy-on-assign — the source keeps its allocation).
+        if (init_is_move_source && tracked) {
+            state[move_src] = State::Moved;
+        }
         return;
     }
 
@@ -389,6 +461,11 @@ void Chaperone::analyzeStmt(Context& ctx,
         } else if (it->second == State::Escaped) {
             diag(ctx, drop->name,
                 "⚠️ Cannot drop `" + drop->name.lexeme + "` — ownership was transferred.",
+                "E503");
+        } else if (it->second == State::Moved) {
+            diag(ctx, drop->name,
+                "⚠️ Double denaturation — `" + drop->name.lexeme + "` had its ownership "
+                "moved to another variable; dropping it would double-free. Drop the new owner instead.",
                 "E503");
         } else {
             it->second = State::Dropped;

@@ -1,0 +1,17 @@
+// Chaperone negative test — E501 (leak on reassignment of a tracked var, S7)
+// Reassigning a tracked variable that already holds a Live allocation leaks
+// the old allocation (it's overwritten with no drop). Must report E501.
+//
+// expect: E501
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let b = Buf(1);
+    b = Buf(2);   // old Buf(1) leaks — overwritten without a drop
+    drop b;
+    return 0;
+}
