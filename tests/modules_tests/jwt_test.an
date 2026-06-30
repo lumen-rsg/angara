@@ -5,48 +5,45 @@
 attach jwt;
 attach io;
 
-func println(s as string) -> void {
-  io.write(1, s + "\n");
-}
 
 export func main() -> i64 {
-  println("--- Angara JWT Module Test ---");
+  io.println(1, "--- Angara JWT Module Test ---");
 
   // Test HS256 encode/decode
   let secret = "my_super_secret_key";
   let payload = {"sub": "1234567890", "name": "John Doe", "admin": true, "iat": 1516239022};
 
-  println("Encoding JWT with HS256...");
+  io.println(1, "Encoding JWT with HS256...");
   let token = jwt.encode(payload, secret, "HS256");
-  println("Token: " + string(token));
+  io.println(1, "Token: " + string(token));
 
   // Decode without verification
   let decoded = jwt.decode(string(token));
-  println("Decoded header alg: " + string(decoded["header"]["alg"]));
-  println("Decoded payload sub: " + string(decoded["payload"]["sub"]));
-  println("Decoded payload name: " + string(decoded["payload"]["name"]));
+  io.println(1, "Decoded header alg: " + string(decoded["header"]["alg"]));
+  io.println(1, "Decoded payload sub: " + string(decoded["payload"]["sub"]));
+  io.println(1, "Decoded payload name: " + string(decoded["payload"]["name"]));
 
   // Verify with correct secret
   let verified = jwt.verify(string(token), secret);
-  println("Verify with correct secret: " + string(verified["valid"]));
-  if verified["valid"] == true {
-    println("Verified payload sub: " + string(verified["payload"]["sub"]));
+  io.println(1, "Verify with correct secret: " + string(verified["valid"]));
+  if (verified["valid"] == true) {
+    io.println(1, "Verified payload sub: " + string(verified["payload"]["sub"]));
   }
 
   // Verify with wrong secret
   let bad_verify = jwt.verify(string(token), "wrong_secret");
-  println("Verify with wrong secret: " + string(bad_verify["valid"]));
+  io.println(1, "Verify with wrong secret: " + string(bad_verify["valid"]));
 
   // Test with expiration
   let exp_payload = {"sub": "user123", "exp": 9999999999};
   let exp_token = jwt.encode(exp_payload, secret, "HS256");
   let exp_verified = jwt.verify(string(exp_token), secret);
-  println("Expired token valid: " + string(exp_verified["valid"]));
+  io.println(1, "Expired token valid: " + string(exp_verified["valid"]));
 
-  if verified["valid"] == true && bad_verify["valid"] == false {
-    println("\n--- All JWT tests passed! ---");
+  if (verified["valid"] == true && bad_verify["valid"] == false) {
+    io.println(1, "\n--- All JWT tests passed! ---");
     return 0;
   }
-  println("\n--- JWT tests FAILED ---");
+  io.println(1, "\n--- JWT tests FAILED ---");
   return 1;
 }

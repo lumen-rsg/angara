@@ -18,24 +18,24 @@ func println(s as string) -> void {
 
 // Handler: dispatch JSON-RPC methods
 func handle_method(method as string, params as any) -> any {
-  if method == "add" {
+  if (method == "add") {
     // params should be a list [a, b]
     let p as list<i64> = params;
-    if p.length() >= 2 {
+    if (p.length() >= 2) {
       return p[0] + p[1];
     }
     return 0;
   }
-  if method == "greet" {
+  if (method == "greet") {
     let p as list<string> = params;
-    if p.length() >= 1 {
+    if (p.length() >= 1) {
       return "Hello, " + p[0] + "!";
     }
     return "Hello, stranger!";
   }
-  if method == "echo" {
+  if (method == "echo") {
     let p as list<any> = params;
-    if p.length() >= 1 {
+    if (p.length() >= 1) {
       return p[0];
     }
     return nil;
@@ -50,7 +50,7 @@ export func main() -> i64 {
 
   // 1. Create the RPC server
   let server = rpc.create_server(PORT);
-  if server == nil {
+  if (server == nil) {
     println("FAIL: Could not create RPC server on port " + string(PORT));
     return 1;
   }
@@ -64,7 +64,7 @@ export func main() -> i64 {
     try {
       let result = rpc.call("localhost", PORT, "add", [10, 20]);
       println("[CLIENT] Result: " + string(result));
-      if result as i64 == 30 {
+      if (result as i64 == 30) {
         println("[CLIENT] PASS: add(10, 20) = 30");
       } else {
         println("[CLIENT] FAIL: expected 30, got " + string(result));
@@ -105,7 +105,7 @@ export func main() -> i64 {
     while i < clients.length() {
       let client_fd = clients[i];
       let req = server.read_request(client_fd);
-      if req != nil {
+      if (req != nil) {
         let req_method as string = req["method"];
         let req_id = req["id"];
         let req_params = req["params"];
@@ -114,7 +114,7 @@ export func main() -> i64 {
         println("[SERVER] Request: method=" + req_method + " id=" + string(req_id));
 
         // Only respond if there's an id (not a notification)
-        if req_id != nil {
+        if (req_id != nil) {
           let result = handle_method(req_method, req_params);
           server.respond(req_id, result, req_fd);
           println("[SERVER] Responded with: " + string(result));
@@ -137,7 +137,7 @@ export func main() -> i64 {
   server.close();
   println("[MAIN] Server closed.");
 
-  if client_result == 0 {
+  if (client_result == 0) {
     println("\n--- All RPC tests passed! ---");
   } else {
     println("\n--- Some RPC tests FAILED ---");

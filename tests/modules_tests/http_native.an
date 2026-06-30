@@ -1,12 +1,9 @@
 attach http;
 attach io;
 
-func println(s as string) -> void {
-  io.write(1, s + "\n");
-}
 
 export func main() -> i64 {
-  println("--- Angara HTTP Module Test ---");
+  io.println(1, "--- Angara HTTP Module Test ---");
 
   let request_options = {
     "method": "GET",
@@ -14,7 +11,7 @@ export func main() -> i64 {
   };
 
   try {
-    println("Making request to: " + request_options["url"]);
+    io.println(1, "Making request to: " + request_options["url"]);
 
     // 1. The return value is now 'any'.
     let any_response = http.request(request_options);
@@ -25,18 +22,18 @@ export func main() -> i64 {
     let response as {status_code: i64, body: string, headers: {}} = any_response;
 
     // 3. From this point on, all access is statically type-checked and safe.
-    println("\n--- Response ---");
-    println("Status Code: " + string(response["status_code"]));
-    println("Body:");
-    println(response["body"]);
+    io.println(1, "\n--- Response ---");
+    io.println(1, "Status Code: " + string(response["status_code"]));
+    io.println(1, "Body:");
+    io.println(1, response["body"]);
 
     if (response["status_code"] != 200) {
-      println("\nRequest failed!");
+      io.println(1, "\nRequest failed!");
       return 1;
     }
 
   } catch (e) {
-    println("\nAn error occurred: " + string(e));
+    io.println(1, "\nAn error occurred: " + string(e));
     return 1;
   }
 

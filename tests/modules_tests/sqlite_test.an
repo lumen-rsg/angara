@@ -16,13 +16,13 @@ export func main() -> i64 {
   const DB_PATH = "/tmp/angara_sqlite_test.db";
 
   // Clean up any previous test DB
-  if fs.exists(DB_PATH) {
+  if (fs.exists(DB_PATH)) {
     fs.remove(DB_PATH);
   }
 
   // 1. Open database
   let db = sqlite.open(DB_PATH);
-  if db == nil {
+  if (db == nil) {
     println("FAIL: Could not open database");
     return 1;
   }
@@ -80,11 +80,11 @@ export func main() -> i64 {
   println("Database closed.");
 
   // Clean up
-  if fs.exists(DB_PATH) {
+  if (fs.exists(DB_PATH)) {
     fs.remove(DB_PATH);
   }
 
-  if total == 4 {
+  if (total == 4) {
     println("\n--- All SQLite tests passed! ---");
     return 0;
   }

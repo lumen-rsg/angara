@@ -18,7 +18,7 @@ export func main() -> i64 {
   // Start TCP echo server in background thread
   let server_thread = spawn(func() -> i64 {
     let server = net.listen("127.0.0.1", PORT);
-    if server < 0 {
+    if (server < 0) {
       println("[SERVER] FAIL: Could not listen");
       return 1;
     }
@@ -26,7 +26,7 @@ export func main() -> i64 {
 
     // Accept one connection
     let client_fd = net.accept(server);
-    if client_fd < 0 {
+    if (client_fd < 0) {
       println("[SERVER] FAIL: Could not accept");
       net.close(server);
       return 1;
@@ -49,7 +49,7 @@ export func main() -> i64 {
 
   // Client: connect, send, receive
   let sock = net.connect("127.0.0.1", PORT);
-  if sock < 0 {
+  if (sock < 0) {
     println("[CLIENT] FAIL: Could not connect");
     return 1;
   }
@@ -70,7 +70,7 @@ export func main() -> i64 {
   // Test get_port helper (from address string)
   // Just verify non-empty
 
-  if string(response) == "Hello, Angara Net!" {
+  if (string(response) == "Hello, Angara Net!") {
     println("\n--- All net tests passed! ---");
     return server_result;
   }
