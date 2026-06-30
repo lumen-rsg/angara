@@ -233,9 +233,9 @@ AngaraObject Angara_Db_changes(int arg_count, AngaraObject* args) {
 }
 
 static const AngaraMethodDef DB_METHODS[] = {
-    {"execute",        (AngaraMethodFn)Angara_Db_execute,        "sl?->l<{}>"},
-    {"query_one",      (AngaraMethodFn)Angara_Db_query_one,      "sl?->{}?"},
-    {"run",            (AngaraMethodFn)Angara_Db_run,             "sl?->i"},
+    {"execute",        (AngaraMethodFn)Angara_Db_execute,        "sl<a>?->l<{}>"},
+    {"query_one",      (AngaraMethodFn)Angara_Db_query_one,      "sl<a>?->{}?"},
+    {"run",            (AngaraMethodFn)Angara_Db_run,             "sl<a>?->i"},
     {"close",          (AngaraMethodFn)Angara_Db_close,           "->n"},
     {"last_insert_id", (AngaraMethodFn)Angara_Db_last_insert_id,  "->i"},
     {"changes",        (AngaraMethodFn)Angara_Db_changes,         "->i"},
