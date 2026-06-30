@@ -20,21 +20,24 @@
 
 | Category | Critical | High | Medium | Low | Total | Fixed |
 |---|---|---|---|---|---|---|
-| Soundness holes (bugs slip through) | 2 | 7 | 1 | — | 10 | 9 (S0, S1, S2, S4, S5, S6, S7, S8, S9) |
+| Soundness holes (bugs slip through) | 2 | 7 | 1 | — | 10 | 10 (all closed — S0–S9, incl. S3) |
 | Coverage gaps (not analyzed) | — | 1 | 6 | 1 | 8 | 6 (G1, G2, G3 N/A, G4, G6, G7) |
 | Doc ↔ implementation mismatches | — | 2 | 3 | 1 | 6 | 1 (D6) |
 | Test coverage | — | 1 | — | — | 1 | 1 (T1) |
 | Tooling (LSP) | — | 1 | — | — | 1 | 0 |
 
-**The single most important issue:** the Chaperone tracks *variables*, not
-*allocations*. `class`/`owned` assignment aliases two names to one heap object
-(`S1`). Until that is fixed, the core promise — "catches use-after-free and
-double-free" — does not hold whenever ownership is shared by more than one name.
+**Status (post Stage 6):** all soundness holes are closed. The two that
+mattered most are resolved — `S1` (the Chaperone tracked variables not
+allocations, so `class`/`owned` aliasing defeated it; fixed with move-on-assign)
+and `S0` (the driver ignored the pass's result and shipped crashing binaries
+anyway; fixed by gating codegen on errors). Every analyzable bug class — leaks,
+use-after-free, double-free, use-after-move, cycles, dangling borrows,
+loop/condition/closure/container/global escapes — is now detected and halts
+compilation.
 
-**Equally critical and far cheaper to fix (S0):** the Chaperone *does* detect
-bugs today, but the driver **ignores its result and ships the binary anyway**
-— so the detection is theatrical. Fixing S0 is a prerequisite for every later
-stage being meaningful.
+**What remains** is doc reconciliation (`CHAPERONE.md` now oversells/describes
+removed features — Stage 7) and LSP integration (Stage 8, run the pass in the
+editor). These are honesty and tooling, not soundness.
 
 ---
 
@@ -45,7 +48,7 @@ stage being meaningful.
 | - [x] **S0** | ⚫ Verified → ✅ Fixed | **Critical** | **Chaperone errors do not halt compilation.** `CompilerDriver` called `Chaperone::run(...)` but ignored the return value and never checked `errorHandler.hadError()` afterward, unlike every other pass (type-check bails with `m_had_error=true; return nullptr`). Result: E501–E506 were *reported* but compilation proceeded — the binary linked and segfaulted at runtime. Verified: a use-after-free program emitted `Error [E502]` then built `/tmp/c3`, which exited 139. This made every other finding moot in practice. *(Fixed: codegen now gated on `errorHandler.hadError()` after the Chaperone call, mirroring the type-checker bail. Warnings (W510/W521) do NOT halt — only errors.)* | `CompilerDriver.cpp:401`; verified E502 → binary → exit 139 |
 | - [x] **S1** | 🟢 Source → ✅ Fixed | **Critical** | **Aliasing of `class`/`owned` is untracked.** Copy-on-assign was applied *only to plain `data`*; `class`/`owned` assignment was a raw pointer copy and the state machine recorded both names as `Live`, so `let c2 = c1; drop c1; drop c2;` double-freed and passed the Chaperone. *(Fixed: move-on-assign, `unique_ptr` semantics. New `Moved` state: on `let c2 = c1` / `c2 = c1` of a tracked type, the source transitions to `Moved` (invalid) and the destination becomes `Live`. Use-after-move is E507; dropping a moved-from var is E503. `data` types are untouched (still copy-on-assign). No lifetimes, no borrow checker, no pattern rejection — only genuinely unsound aliasing is now rejected.)* | `Chaperone.cpp` (VarDecl/Assign/VarExpr/DropStmt handlers); verified by tests 04, 09, 11 |
 | - [x] **S2** | 🟢 Source → ✅ Fixed | High | **Loop conditions and `for-in` iterables are never analyzed.** `analyze_loop` walked only `body`; the `while`/`for` condition, the `for` increment, and the `for-in` iterable were skipped → `drop b; while (b.get() > 0) {}` compiled (use-after-free undetected). *(Fixed: the loop handlers now `analyzeExpr` the condition (before and after the body, since it's re-evaluated each iteration), the `for` increment, and the `for-in` iterable. No false positives — 18/18 chaperone tests pass and zero E5xx across the whole suite.)* | `Chaperone.cpp` loop handlers; verified by tests 12, 13, 14 |
-| - [ ] **S3** | 🟢 Source | High | **`borrow<T>` / `ref<T>` lifetime tracking does not exist.** `isTrackedVar` explicitly returns false for `REF` types; nothing models borrow lifetimes. A `ref<T>` that outlives its referent compiles silently — directly contradicting decision #7 in `CHAPERONE.md`. | `Chaperone.cpp:77`; `CHAPERONE.md:33-34,86-91` |
+| - [x] **S3** | 🟢 Source → ✅ Fixed | High | **`ref<T>` lifetime tracking did not exist.** `isTrackedVar` returned false for `REF` types; nothing modeled borrow lifetimes, so a `ref<T>` whose referent was dropped compiled silently (a latent use-after-free). *(Fixed with a minimal borrow check — no lifetimes in the type system. Assigning a tracked Live var to a `ref<T>` is a BORROW (not a move): the source keeps ownership, and the ref→referent pair is recorded in `ctx.borrows`. Reading a ref whose referent is Dropped/Moved is E509 (a dangling borrow). The check fires at ref-use time, so a valid borrow — ref used while the referent is live, then dropped after — is not a false positive. Also fixed a Phase-1 interaction: `ref_x = tracked` no longer spuriously moves the source (move only happens when the target is itself tracked).)* | `Chaperone.cpp` borrow recording + VarExpr E509 check |
 | - [x] **S4** | 🟢 Source → ✅ Fixed | High | **Interprocedural analysis was single-pass, no fixed point.** `run()` walked functions once in source order; forward references and recursive/mutual recursion hit the lenient "unknown → borrow" path — so a double-drop via a forward-referenced consumer shipped a binary. *(Fixed: a worklist fixed-point. All functions (top-level + methods) are analyzed repeatedly until no summary changes, with an 8-pass cap as the convergence-fallback the design doc specifies. Diagnostics are suppressed during convergence and emitted only on the final pass to avoid duplicates. Verified: forward-reference double-drop now caught (test 17); recursion converges to Borrowed without false E503.)* | `Chaperone.cpp` run(); `CHAPERONE.md:256-277` |
 | - [x] **S5** | 🟢 Source → ✅ Fixed | High | **Multi-parameter functions escaped *all* their args.** `if (summary.size() == 1) { apply } else { state = Escaped; }` — any function with >1 tracked parameter lost tracking on every argument, causing false E503 on later legitimate drops. *(Fixed: the summary is now a POSITIONAL vector aligned to call-arg positions (`summary[i]` = behavior of the param the i-th call-arg binds to; `this` is parsed but not stored in params, so indices line up). Call-site matching is a direct index — no single-param shortcut, no blanket-Escape fallback. Verified: a 2-tracked-param function (drops a, borrows b) no longer false-alarms on `drop b` (test 06).)* | `Chaperone.cpp` summary build + CallExpr apply |
 | - [x] **S6** | ⚫ Verified → ✅ Fixed | Medium | **Field-level ownership is untracked.** Codegen cascades drops over owned fields, which double-frees when ownership of a tracked value is aliased into a field (`this.f = b`, then both the field's owning object cascade-drop and the source `b` free the same memory). The parser restricts `drop` to a bare `IDENTIFIER`, so `drop conn.field` is already a parse error — but the *aliasing* path was open. *(Fixed: `this.f = tracked_live_var` is now a move — the source transitions to `Moved` (E507 on later use, E503 on later drop), consistent with Phase 1's `unique_ptr` semantics. External field writes are already blocked by the type checker (private, E336), so this only fires inside methods/constructors. The field's *previous* value leaking is still untracked — needs per-field state, deferred.)* | `Chaperone.cpp` AssignExpr GetExpr branch; verified by tests 05, 16 |
@@ -140,7 +143,7 @@ See the staged implementation plan. Items map to IDs above:
 | **3** — Field ownership rules | move-on-field-assign (`this.f = tracked` → source Moved); also fixed class methods unanalyzed (G7) and the analyzeFunction state-discard bug (S9) | S6, G7, S9 | ✅ done |
 | **4** — Interprocedural fixed point | worklist to convergence, recursion handling, positional summaries | S4, S5 | ✅ done |
 | **5** — Coverage breadth | globals, closures, E505, optionals, throw/`finally` cleanup discharge | G1, G2, G4, G6, S8 | ✅ done |
-| **6** — `ref<T>` minimal borrow check | scope-bound liveness of the referent at borrow scope-exit | S3 | ☐ |
+| **6** — `ref<T>` minimal borrow check | ref→referent borrow map; E509 dangling borrow at ref-use time; move vs borrow distinction | S3 | ✅ done |
 | **7** — Doc reconciliation | `@consumes`/`@escape`/`@manual` or strike them; fix Phase-3, staging, E504 multi-cycle, W521 | D1, D2, D3, D4, D5, D6 | ☐ |
 | **8** — LSP integration | run Chaperone in `analyzeDocument`; publish E501–E508 + W510/W521 | L1 | ☐ |
 

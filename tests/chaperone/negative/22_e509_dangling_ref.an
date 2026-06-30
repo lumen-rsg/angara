@@ -1,0 +1,21 @@
+// Chaperone negative test — E509 (dangling borrow, S3)
+// A ref<T> borrows a tracked allocation; the referent is dropped while the ref
+// still aliases it — the ref would read freed memory. The Chaperone previously
+// ignored ref<T> entirely, so this use-after-free was invisible. Must report E509.
+//
+// expect: E509
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let r as ref<Buf> = b;   // r borrows b
+    drop b;                   // b freed — r dangles
+    let x = r.get();          // use-after-free via the dangling ref
+    return x;
+}

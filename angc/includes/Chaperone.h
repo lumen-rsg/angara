@@ -78,6 +78,10 @@ private:
         // inside such a try discharges its leak obligation for these names
         // (the finally runs on the throw path), so they aren't false-flagged.
         std::set<std::string> finally_protected;
+        // S3: borrow relationships — ref_name → referent_name. When the
+        // referent is dropped/moved while a ref still aliases it, the ref
+        // dangles (E509). Tracked within the current function's analysis.
+        std::map<std::string, std::string> borrows;
 
         Context(const TypeChecker& t, ErrorHandler& e)
             : tc(t), eh(e) {}
@@ -137,6 +141,8 @@ private:
     /// Whether a resolved Type object is tracked (unwraps optionals).
     static bool isTrackedTypeObj(Context& ctx, const struct Type& type);
     static bool isTrackedVar(Context& ctx, const struct VarDeclStmt& var);
+    /// Whether a VarExpr is a ref<T> (a non-owning borrow), via the type checker.
+    static bool isRefVarExpr(Context& ctx, const struct VarExpr& ve);
 };
 
 } // namespace angara

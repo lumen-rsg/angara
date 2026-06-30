@@ -93,6 +93,16 @@ bool Chaperone::isTrackedVar(Context& ctx, const VarDeclStmt& var) {
     return isTrackedTypeObj(ctx, *it->second);
 }
 
+// Resolve a VarExpr's type via the type checker's resolution map and report
+// whether it is a ref<T> (a non-owning borrow). Used to distinguish a move
+// (`x = tracked`) from a borrow (`ref_x = tracked`).
+bool Chaperone::isRefVarExpr(Context& ctx, const VarExpr& ve) {
+    auto& resolutions = ctx.tc.getVariableResolutions();
+    auto it = resolutions.find(&ve);
+    if (it == resolutions.end() || !it->second || !it->second->type) return false;
+    return it->second->type->kind == TypeKind::REF;
+}
+
 // Recursively collect every VarExpr name referenced in a statement tree.
 // Used to find which tracked locals a closure captures.
 void Chaperone::collectVarRefs(const std::shared_ptr<Stmt>& stmt,
@@ -217,6 +227,20 @@ void Chaperone::analyzeExpr(Context& ctx,
                     "E507");
             }
         }
+        // S3: if this is a ref<T> being read, check its referent is still live.
+        // Reading a ref whose referent was dropped/moved is a dangling borrow.
+        auto bit = ctx.borrows.find(ve->name.lexeme);
+        if (bit != ctx.borrows.end()) {
+            auto rit = state.find(bit->second);
+            if (rit != state.end() &&
+                (rit->second == State::Dropped || rit->second == State::Moved)) {
+                diag(ctx, ve->name,
+                    "🔗 Dangling borrow — `" + ve->name.lexeme + "` is a ref to `" +
+                    bit->second + "`, whose ownership has been released. The ref "
+                    "reads freed memory. Keep the referent live while the ref is used.",
+                    "E509");
+            }
+        }
         return;
     }
 
@@ -266,6 +290,15 @@ void Chaperone::analyzeExpr(Context& ctx,
         if (auto* tgt = dynamic_cast<const VarExpr*>(asgn->target.get())) {
             auto tit = state.find(tgt->name.lexeme);
             if (tit == state.end()) return;
+
+            // S3 borrow vs S1 move: if the TARGET is a ref<T>, assigning a
+            // tracked Live var to it is a BORROW — the source stays Live (it
+            // still owns the object), and we record ref→referent so a later
+            // drop/move of the referent flags the dangling ref (E509).
+            if (rhs_is_move_source && isRefVarExpr(ctx, *tgt)) {
+                ctx.borrows[tgt->name.lexeme] = move_src;  // ref points at referent
+                return;  // borrow — source stays Live, no leak on the target
+            }
 
             // S7: overwriting a Live tracked variable leaks the old allocation.
             // (Moved/Dropped/Escaped targets are already invalid — no leak.)
@@ -474,6 +507,7 @@ void Chaperone::analyzeExpr(Context& ctx,
 void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
     ctx.current_function = func.name.lexeme;
     StateMap state;
+    ctx.borrows.clear();   // S3: borrow map is per-function (reset each pass)
 
     // Register tracked parameters. Prefer the resolved FunctionType from the
     // symbol table (top-level functions), but fall back to reading the param's
@@ -619,6 +653,18 @@ void Chaperone::analyzeStmt(Context& ctx,
         // e.g. `data` copy-on-assign — the source keeps its allocation).
         if (init_is_move_source && tracked) {
             state[move_src] = State::Moved;
+        }
+
+        // S3 borrow: if the new binding is a ref<T> initialized from a tracked
+        // Live var, record ref→referent (no move — the source keeps ownership).
+        // A later drop/move of the referent flags the dangling ref (E509).
+        if (init_is_move_source && !tracked) {
+            auto& types = ctx.tc.getVariableTypes();
+            auto tit = types.find(var);
+            if (tit != types.end() && tit->second &&
+                tit->second->kind == TypeKind::REF) {
+                ctx.borrows[var->name.lexeme] = move_src;
+            }
         }
         return;
     }

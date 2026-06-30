@@ -1,0 +1,20 @@
+// Chaperone positive test — a valid borrow (ref<T>) outliving nothing (S3).
+// A ref<T> borrows a tracked allocation; the referent stays live while the ref
+// is used, then is dropped after the ref's last use. No dangling borrow.
+//
+// exit: 42
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let r as ref<Buf> = b;   // r borrows b — b still owns it
+    let x = r.get();          // use the ref while b is live
+    drop b;                   // drop the referent AFTER the ref's last use — safe
+    return x;                 // expect 42
+}
