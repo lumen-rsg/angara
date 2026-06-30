@@ -54,8 +54,14 @@ private:
     static StateMap join_maps(const StateMap& a, const StateMap& b);
 
     // --- Function summaries (interprocedural) ---
+    // A summary is POSITIONAL: summary[i] is the ownership behavior of the
+    // parameter that the i-th call argument binds to. `this` is implicit
+    // (never a call argument), so the vector aligns to the call-arg-visible
+    // params. This makes call-site matching trivial (arg i → summary[i]) and
+    // correct for multi-param functions (S5); the old name-keyed map forced a
+    // "single tracked param" shortcut and escaped all args otherwise.
     enum class ParamBehavior { Borrowed, Dropped, Escaped };
-    using FunctionSummary = std::map<std::string, ParamBehavior>;
+    using FunctionSummary = std::vector<ParamBehavior>;
 
     // --- Analysis context (must be before diag which takes Context&) ---
     struct Context {
@@ -65,6 +71,9 @@ private:
         std::string current_function;
         std::map<std::string, FunctionSummary> summaries;
         bool in_unsafe = false;
+        // During the interprocedural fixed-point convergence passes, suppress
+        // diagnostics (they'd duplicate); emit only on the final pass.
+        bool suppress_diag = false;
 
         Context(const TypeChecker& t, ErrorHandler& e)
             : tc(t), eh(e) {}

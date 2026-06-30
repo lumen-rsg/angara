@@ -10,8 +10,11 @@
 namespace angara {
 
 // Helper: report as error (normal) or warning (inside @unsafe).
+// Suppressed entirely during the fixed-point convergence passes (the final
+// pass emits); this avoids duplicate diagnostics across iterations.
 void Chaperone::diag(Context& ctx, const Token& tok,
                      const std::string& msg, const std::string& code) {
+    if (ctx.suppress_diag) return;
     if (ctx.in_unsafe)
         ctx.eh.warning(tok, msg + " [in @unsafe — reported as warning]", code);
     else
@@ -231,33 +234,22 @@ void Chaperone::analyzeExpr(Context& ctx,
         if (sum_it == ctx.summaries.end() && !method_name.empty())
             sum_it = ctx.summaries.find(method_name);
         if (sum_it != ctx.summaries.end()) {
+            // Positional match: call-arg i binds to summary[i] (S5). The summary
+            // is aligned to call-arg positions (`this` is not a call arg), so a
+            // direct index is correct for any arity — no more "single tracked
+            // param" shortcut or blanket-Escape fallback.
             const auto& summary = sum_it->second;
-            for (size_t i = 0; i < call->arguments.size(); i++) {
-                // Resolve the parameter name for this position.
-                // The summary maps param_name → behavior. We need the i-th param.
-                // For simplicity: if there's only one tracked param, match it.
-                // Otherwise, match by position (the summary was built from the
-                // function signature, so param order is known).
+            for (size_t i = 0; i < call->arguments.size() && i < summary.size(); i++) {
+                auto behavior = summary[i];
+                if (behavior == ParamBehavior::Borrowed) continue;  // stays Live
                 auto* arg = call->arguments[i].get();
                 if (auto* ve3 = dynamic_cast<const VarExpr*>(arg)) {
                     auto st_it = state.find(ve3->name.lexeme);
                     if (st_it != state.end() && st_it->second == State::Live) {
-                        // Check if the i-th parameter is in the summary.
-                        // The summary keys are param names; we match by scanning
-                        // for any param that has behavior != Borrowed.
-                        // For now: if the summary has exactly one entry and this
-                        // arg is tracked, apply it.
-                        if (summary.size() == 1) {
-                            auto& [pname, behavior] = *summary.begin();
-                            if (behavior == ParamBehavior::Dropped)
-                                st_it->second = State::Dropped;
-                            else if (behavior == ParamBehavior::Escaped)
-                                st_it->second = State::Escaped;
-                            // Borrowed: stays Live (no transition).
-                        } else {
-                            // Multi-param: conservative — assume Escaped.
+                        if (behavior == ParamBehavior::Dropped)
+                            st_it->second = State::Dropped;
+                        else if (behavior == ParamBehavior::Escaped)
                             st_it->second = State::Escaped;
-                        }
                     }
                 }
             }
@@ -354,9 +346,12 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
     // Register tracked parameters. Prefer the resolved FunctionType from the
     // symbol table (top-level functions), but fall back to reading the param's
     // own type annotation — methods aren't resolvable by bare name at the top
-    // level, so without the fallback their tracked params would never register
-    // and field-move detection inside methods would silently miss.
-    std::set<std::string> param_names;  // Track which names are params (not locals).
+    // level, so without the fallback their tracked params would never register.
+    // Track per-param tracked-ness positionally (aligned to func.params, which
+    // excludes `this` — `this` is parsed but not stored in params) so the
+    // summary can be positional too (S5: correct multi-param matching).
+    std::set<std::string> param_names;  // which names are params (not locals)
+    std::vector<bool> param_tracked(func.params.size(), false);
     std::function<std::string(const ASTType*)> base_name = [&](const ASTType* t) -> std::string {
         if (!t) return "";
         if (auto* s = dynamic_cast<const SimpleType*>(t)) return s->name.lexeme;
@@ -375,15 +370,17 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
                 (pt->kind == TypeKind::DATA && ctx.tracked_types.count(pt->toString()))) {
                 state[func.params[i].name.lexeme] = State::Live;
                 param_names.insert(func.params[i].name.lexeme);
+                param_tracked[i] = true;
             }
         }
     } else {
         // Fallback: read each param's type annotation directly (methods).
-        for (const auto& p : func.params) {
-            std::string tn = base_name(p.type.get());
+        for (size_t i = 0; i < func.params.size(); i++) {
+            std::string tn = base_name(func.params[i].type.get());
             if (!tn.empty() && ctx.tracked_types.count(tn)) {
-                state[p.name.lexeme] = State::Live;
-                param_names.insert(p.name.lexeme);
+                state[func.params[i].name.lexeme] = State::Live;
+                param_names.insert(func.params[i].name.lexeme);
+                param_tracked[i] = true;
             }
         }
     }
@@ -411,20 +408,22 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
         }
     }
 
-    // Phase 4: build the function summary for interprocedural analysis.
-    // Uses param_names (populated above, works for both top-level fns and
-    // methods). A Moved param means ownership transferred (e.g. into a field),
-    // so it maps to Escaped — the caller no longer owns it.
-    FunctionSummary summary;
-    for (const auto& pname : param_names) {
-        auto st_it = state.find(pname);
+    // Phase 4: build the positional function summary for interprocedural
+    // analysis. summary[i] aligns to func.params[i] (call-arg positions —
+    // `this` is not in params). Untracked params default to Borrowed so the
+    // indices line up at the call site (arg i → summary[i]). A Moved param
+    // means ownership transferred (e.g. into a field) → Escaped.
+    FunctionSummary summary(func.params.size(), ParamBehavior::Borrowed);
+    for (size_t i = 0; i < func.params.size(); i++) {
+        if (!param_tracked[i]) continue;
+        auto st_it = state.find(func.params[i].name.lexeme);
         if (st_it != state.end()) {
             if (st_it->second == State::Dropped)
-                summary[pname] = ParamBehavior::Dropped;
+                summary[i] = ParamBehavior::Dropped;
             else if (st_it->second == State::Escaped || st_it->second == State::Moved)
-                summary[pname] = ParamBehavior::Escaped;
+                summary[i] = ParamBehavior::Escaped;
             else
-                summary[pname] = ParamBehavior::Borrowed;
+                summary[i] = ParamBehavior::Borrowed;
         }
     }
     ctx.summaries[func.name.lexeme] = std::move(summary);
@@ -843,23 +842,43 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
     collectTrackedTypes(ctx, program);
     detectCycles(ctx, program);
 
+    // Collect every analyzable function (top-level + class methods) into a
+    // flat list. The same FuncStmt can be analyzed multiple times across the
+    // fixed-point; we hold raw pointers (the program vector owns the storage).
+    std::vector<const FuncStmt*> functions;
     for (const auto& stmt : program) {
         if (!stmt) continue;
         if (auto* func = dynamic_cast<const FuncStmt*>(stmt.get())) {
-            if (!func->body) continue;  // Foreign/intrinsic.
-            analyzeFunction(ctx, *func);
+            if (func->body) functions.push_back(func);
         } else if (auto* cls = dynamic_cast<const ClassStmt*>(stmt.get())) {
-            // Analyze class methods too — without this, every memory bug inside
-            // a method body (field moves, use-after-free, leaks) is invisible.
-            // `this` is already the first param in the FuncStmt.
             for (const auto& member : cls->members) {
                 if (auto* mm = dynamic_cast<const MethodMember*>(member.get())) {
                     if (mm->declaration && mm->declaration->body)
-                        analyzeFunction(ctx, *mm->declaration);
+                        functions.push_back(mm->declaration.get());
                 }
             }
         }
     }
+
+    // Interprocedural fixed point (S4). Iterate analyzeFunction until no
+    // summary changes, so forward references and (mutual) recursion converge.
+    // Diagnostics are suppressed during convergence and emitted only on the
+    // final pass, to avoid duplicates. A pass cap guards against divergence
+    // (the design doc's convergence-fallback); on non-convergence the last
+    // pass's summaries stand and we still report.
+    const int MAX_PASSES = 8;
+    ctx.suppress_diag = true;
+    for (int pass = 0; pass < MAX_PASSES; pass++) {
+        auto before = ctx.summaries;  // snapshot
+        for (const auto* fn : functions)
+            analyzeFunction(ctx, *fn);
+        if (ctx.summaries == before) break;  // converged
+    }
+    ctx.suppress_diag = false;
+    // Final diagnostic pass with the converged summaries.
+    for (const auto* fn : functions)
+        analyzeFunction(ctx, *fn);
+
     return eh.errorCount() == 0;
 }
 

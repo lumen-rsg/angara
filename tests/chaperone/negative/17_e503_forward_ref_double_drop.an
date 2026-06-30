@@ -1,0 +1,23 @@
+// Chaperone negative test — E503 (double-drop via forward reference, S4)
+// main() calls helper(b), which drops b — but helper is defined AFTER main.
+// In the single-pass analysis, helper's summary isn't ready when main is
+// analyzed, so the second `drop b` is not caught as a double-free. The
+// fixed-point pass must resolve forward references so this is detected.
+//
+// expect: E503
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    helper(b);     // helper (below) takes ownership and drops b
+    drop b;        // double-drop — b was already consumed by helper
+    return 0;
+}
+
+func helper(b as Buf) -> nil {
+    drop b;
+}

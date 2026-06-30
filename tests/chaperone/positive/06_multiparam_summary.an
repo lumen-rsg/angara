@@ -1,0 +1,24 @@
+// Chaperone positive test — multi-parameter summary matching (S5).
+// process() has TWO tracked params: it drops `a` (consumes) and borrows `b`
+// (uses without dropping). The Chaperone must apply the summary positionally:
+// x (→a) is consumed (no drop needed), y (→b) is borrowed (must still be
+// dropped). The old code escaped BOTH args, causing a false E503 on `drop y`.
+//
+// exit: 0
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+func process(a as Buf, b as Buf) -> nil {
+    drop a;        // consumes a; b is borrowed
+}
+
+export func main() -> i64 {
+    let x = Buf(1);
+    let y = Buf(2);
+    process(x, y);
+    drop y;        // legitimate — y was only borrowed by process
+    return 0;      // x was consumed by process — no drop needed, no leak
+}
