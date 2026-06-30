@@ -18,18 +18,23 @@
 
 ## Summary
 
-| Category | Critical | High | Medium | Low | Total |
-|---|---|---|---|---|---|
-| Soundness holes (bugs slip through) | 1 | 6 | — | — | 7 |
-| Coverage gaps (not analyzed) | — | — | 6 | — | 6 |
-| Doc ↔ implementation mismatches | — | 2 | 3 | 1 | 6 |
-| Test coverage | — | 1 | — | — | 1 |
-| Tooling (LSP) | — | 1 | — | — | 1 |
+| Category | Critical | High | Medium | Low | Total | Fixed |
+|---|---|---|---|---|---|---|
+| Soundness holes (bugs slip through) | 2 | 6 | — | — | 8 | 1 (S0) |
+| Coverage gaps (not analyzed) | — | — | 6 | — | 6 | 0 |
+| Doc ↔ implementation mismatches | — | 2 | 3 | 1 | 6 | 1 (D6) |
+| Test coverage | — | 1 | — | — | 1 | 1 (T1) |
+| Tooling (LSP) | — | 1 | — | — | 1 | 0 |
 
 **The single most important issue:** the Chaperone tracks *variables*, not
 *allocations*. `class`/`owned` assignment aliases two names to one heap object
 (`S1`). Until that is fixed, the core promise — "catches use-after-free and
 double-free" — does not hold whenever ownership is shared by more than one name.
+
+**Equally critical and far cheaper to fix (S0):** the Chaperone *does* detect
+bugs today, but the driver **ignores its result and ships the binary anyway**
+— so the detection is theatrical. Fixing S0 is a prerequisite for every later
+stage being meaningful.
 
 ---
 
@@ -37,6 +42,7 @@ double-free" — does not hold whenever ownership is shared by more than one nam
 
 | ID | Status | Sev | Issue | Location |
 |---|---|---|---|---|
+| - [x] **S0** | ⚫ Verified → ✅ Fixed | **Critical** | **Chaperone errors do not halt compilation.** `CompilerDriver` called `Chaperone::run(...)` but ignored the return value and never checked `errorHandler.hadError()` afterward, unlike every other pass (type-check bails with `m_had_error=true; return nullptr`). Result: E501–E506 were *reported* but compilation proceeded — the binary linked and segfaulted at runtime. Verified: a use-after-free program emitted `Error [E502]` then built `/tmp/c3`, which exited 139. This made every other finding moot in practice. *(Fixed: codegen now gated on `errorHandler.hadError()` after the Chaperone call, mirroring the type-checker bail. Warnings (W510/W521) do NOT halt — only errors.)* | `CompilerDriver.cpp:401`; verified E502 → binary → exit 139 |
 | - [ ] **S1** | 🟢 Source | **Critical** | **Aliasing of `class`/`owned` is untracked.** Copy-on-assign is applied *only to plain `data`*; `class`/`owned` assignment is a raw pointer copy and the state machine records both names as `Live`. After `let c2 = c1; drop c1; drop c2;` both the source and the duplicate "own" the freed object → **double-free passes the Chaperone**. The design tracks variables; allocations must have exactly one owner. Fix = move-on-assign (`unique_ptr` semantics): on `let c2 = c1` / `c2 = c1` of a tracked type, the source transitions to a new `Moved` state; use-after-move is flagged. No lifetimes, no borrow checker, no pattern rejection. | `ExprCodegen.cpp:517-525`; `StmtCodegen.cpp:63-71`; `Chaperone.cpp:38-43` |
 | - [ ] **S2** | 🟢 Source | High | **Loop conditions and `for-in` iterables are never analyzed.** `analyze_loop` walks only `body`; the `while`/`for` condition and `for-in` iterable are skipped → `drop b; while (b.size() > 0) {}` compiles (use-after-free undetected). | `Chaperone.cpp:505-517` |
 | - [ ] **S3** | 🟢 Source | High | **`borrow<T>` / `ref<T>` lifetime tracking does not exist.** `isTrackedVar` explicitly returns false for `REF` types; nothing models borrow lifetimes. A `ref<T>` that outlives its referent compiles silently — directly contradicting decision #7 in `CHAPERONE.md`. | `Chaperone.cpp:77`; `CHAPERONE.md:33-34,86-91` |
@@ -69,7 +75,7 @@ double-free" — does not hold whenever ownership is shared by more than one nam
 | - [ ] **D3** | 🟢 Source | Medium | **Interprocedural fixed point / recursion convergence documented but unimplemented** (see S4). | `CHAPERONE.md:256-277` |
 | - [ ] **D4** | 🟢 Source | Medium | **`borrow<T>` lifetime verification promised but absent** (see S3). | `CHAPERONE.md:33-34,86-91` |
 | - [ ] **D5** | 🟢 Source | Medium | **Staging table stale.** `CHAPERONE.md` lists Stages 3-8 as "☐ future" but the git log shows Stages 3-7 are committed. | `CHAPERONE.md:375-386` |
-| - [ ] **D6** | 🟢 Source | Low | **E504 reports only the first cycle** and `ref<T>`/`borrow<T>`/container back-edges aren't recognized as the doc-prescribed cycle breaker (keys on `toString()`). `W521` is never emitted. | `Chaperone.cpp:685, 634-642, 667` |
+| - [x] **D6** | ⚫ Verified → ✅ Fixed | High | **E504 never fired at all** — worse than "first cycle only." `detectCycles` looked up field types in `getVariableTypes()` (a `VarDeclStmt*`→Type map that only holds local/let vars), so type-declaration fields were never found and the ownership graph stayed empty. Verified: `owned Node { let next as Node; }` and a 2-node `A→B→A` both compiled silently. *(Fixed: `check_field` now reads the base type name directly from the field's `ASTType` annotation — `SimpleType`/`GenericType`/`Optional`/`Owned` — and matches against `tracked_types`. Self-cycles and mutual cycles now report E504; acyclic types have no false positive.)* Residual: still reports only the first cycle; `W521` still never emitted (deferred to Stage 7). | `Chaperone.cpp:634-660`; verified `Node→Node`, `A→B→A` → E504 |
 
 ---
 
@@ -77,7 +83,7 @@ double-free" — does not hold whenever ownership is shared by more than one nam
 
 | ID | Status | Sev | Issue | Location |
 |---|---|---|---|---|
-| - [ ] **T1** | 🟢 Source | High | **No tests for the Chaperone.** No `owned`/`drop`/`borrow` `.an` files in `tests/`; no C++ tests reference `Chaperone`; `run_tests.sh` never exercises memory diagnostics. Every code below would have caught its bug. A negative test suite (one must-fail + one must-pass per diagnostic code) is the highest-leverage process fix. | `tests/` |
+| - [x] **T1** | 🟢 Source → ✅ Fixed | High | **No tests for the Chaperone.** No `owned`/`drop`/`borrow` `.an` files in `tests/`; no C++ tests referenced `Chaperone`; `run_tests.sh` never exercised memory diagnostics. *(Fixed: `tests/chaperone/{positive,negative}/` with 3 positive + 8 negative `.an` files, each negative declaring `// expect: Exxx`; `run_chaperone_tests.sh` asserts the code fires AND that E-codes halt compilation (S0 enforcement) while W-codes don't; `make test-chaperone` / `make test` targets added. 11/11 pass.)* | `tests/chaperone/`; `Makefile` |
 
 Minimal must-cover matrix:
 
@@ -123,17 +129,17 @@ These are sound and correctly implemented — the foundation to extend:
 
 See the staged implementation plan. Items map to IDs above:
 
-| Stage | Fixes | IDs |
-|---|---|---|
-| **0** — Test harness + baseline | negative/positive suite for existing diagnostics | T1 |
-| **1** — Move-on-assign (soundness) | new `Moved` state; `=` / `let c2=c1` move the source; E507 use-after-move | S1, S7 |
-| **2** — Analyze what's skipped | loop conditions, `for-in` iterables, `match` arms/bindings, assignment leak | S2, G3, S7 |
-| **3** — Field ownership rules | explicit Chaperone rule: forbid field-targeted ownership transfer; E508 | S6 |
-| **4** — Interprocedural fixed point | worklist to convergence, recursion handling, positional summaries | S4, S5 |
-| **5** — Coverage breadth | globals, closures, E505, optionals | G1, G2, G4, G6 |
-| **6** — `ref<T>` minimal borrow check | scope-bound liveness of the referent at borrow scope-exit | S3 |
-| **7** — Doc reconciliation | `@consumes`/`@escape`/`@manual` or strike them; fix Phase-3, staging, E504 | D1, D2, D3, D4, D5, D6 |
-| **8** — LSP integration | run Chaperone in `analyzeDocument`; publish E501–E508 + W510/W521 | L1 |
+| Stage | Fixes | IDs | Status |
+|---|---|---|---|
+| **0** — Enforcement + test harness | gate codegen on Chaperone errors; negative/positive suite for existing diagnostics; also fixed E504 cycle detection | S0, T1, D6 | ✅ done |
+| **1** — Move-on-assign (soundness) | new `Moved` state; `=` / `let c2=c1` move the source; E507 use-after-move | S1, S7 | ☐ next |
+| **2** — Analyze what's skipped | loop conditions, `for-in` iterables, `match` arms/bindings, assignment leak | S2, G3, S7 | ☐ |
+| **3** — Field ownership rules | explicit Chaperone rule: forbid field-targeted ownership transfer; E508 | S6 | ☐ |
+| **4** — Interprocedural fixed point | worklist to convergence, recursion handling, positional summaries | S4, S5 | ☐ |
+| **5** — Coverage breadth | globals, closures, E505, optionals | G1, G2, G4, G6 | ☐ |
+| **6** — `ref<T>` minimal borrow check | scope-bound liveness of the referent at borrow scope-exit | S3 | ☐ |
+| **7** — Doc reconciliation | `@consumes`/`@escape`/`@manual` or strike them; fix Phase-3, staging, E504 multi-cycle, W521 | D1, D2, D3, D4, D5, D6 | ☐ |
+| **8** — LSP integration | run Chaperone in `analyzeDocument`; publish E501–E508 + W510/W521 | L1 | ☐ |
 
 ---
 

@@ -631,14 +631,27 @@ void Chaperone::detectCycles(Context& ctx,
     std::map<std::string, std::set<std::string>> graph;
 
 
+    // Extract the base type name from a field's type annotation. Cycle
+    // detection only needs the name (to compare against tracked_types); we read
+    // it directly from the AST rather than resolveType(), which is non-const and
+    // would require casting away const on the TypeChecker. Field types live on
+    // DataType/ClassType (filled by the type checker), NOT in getVariableTypes()
+    // — that map only holds local/let VarDeclStmts. Looking it up there was why
+    // E504 never fired (the graph stayed empty).
+    std::function<std::string(const ASTType*)> base_name = [&](const ASTType* t) -> std::string {
+        if (!t) return "";
+        if (auto* s = dynamic_cast<const SimpleType*>(t)) return s->name.lexeme;
+        if (auto* g = dynamic_cast<const GenericType*>(t)) return g->name.lexeme;
+        if (auto* o = dynamic_cast<const OptionalTypeNode*>(t)) return base_name(o->base_type.get());
+        if (auto* ow = dynamic_cast<const OwnedTypeNode*>(t)) return base_name(ow->inner_type.get());
+        return "";
+    };
+
     auto check_field = [&](const std::string& owner, const VarDeclStmt* field) {
-        auto& types = ctx.tc.getVariableTypes();
-        auto it = types.find(field);
-        if (it != types.end() && it->second) {
-            std::string ft = it->second->toString();
-            if (ctx.tracked_types.count(ft))
-                graph[owner].insert(ft);
-        }
+        if (!field || !field->typeAnnotation) return;
+        std::string ft = base_name(field->typeAnnotation.get());
+        if (!ft.empty() && ctx.tracked_types.count(ft))
+            graph[owner].insert(ft);
     };
 
     for (const auto& stmt : program) {

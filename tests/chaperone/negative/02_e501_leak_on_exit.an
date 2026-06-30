@@ -1,0 +1,18 @@
+// Chaperone negative test — E501 (memory leak on plain function exit)
+// A tracked local reaches function exit while still Live. Must report E501.
+//
+// expect: E501
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+func leak() -> i64 {
+    let b = Buf(7);
+    return 0;   // `b` is live at exit → leak
+}
+
+export func main() -> i64 {
+    return leak();
+}

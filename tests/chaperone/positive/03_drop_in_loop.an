@@ -1,0 +1,24 @@
+// Chaperone positive test — allocation inside a loop, dropped each iteration.
+// The allocation is created fresh inside the loop body before being dropped,
+// so there is no double-free on iteration 2+. No E506.
+//
+// exit: 3
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let i as i64 = 0;
+    let sum as i64 = 0;
+    while (i < 3) {
+        let b = Buf(i);      // fresh each iteration
+        sum = sum + b.get(); // 0 + 1 + 2 = 3
+        drop b;
+        i = i + 1;
+    }
+    return sum;   // expect 3
+}

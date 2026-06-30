@@ -398,7 +398,14 @@ namespace angara {
 
         try {
             // v5: Chaperone pass — compile-time memory verification.
+            // Errors (E501–E506) are fatal: do not ship a binary the pass
+            // has flagged. Mirrors the type-checker bail at the analogous site.
             Chaperone::run(statements, typeChecker, errorHandler);
+            if (errorHandler.hadError()) {
+                errorHandler.printSummary();
+                m_had_error = true;
+                return nullptr;
+            }
 
             LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding, m_dump_ir, m_debug, m_emit_llvm);
             if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {

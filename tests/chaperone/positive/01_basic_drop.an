@@ -1,0 +1,19 @@
+// Chaperone positive test — basic allocation + drop, no leak.
+// A tracked `class` instance is dropped before function exit. Must compile,
+// run, and return its exit code. No Chaperone diagnostics.
+//
+// exit: 42
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let x = b.get();
+    drop b;
+    return x;   // expect 42
+}

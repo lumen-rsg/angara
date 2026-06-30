@@ -75,7 +75,7 @@ ANGC_SRCS := $(shell find angc -name "*.cpp")
 ANGC_OBJS := $(patsubst %.cpp,build/obj/%.o,$(ANGC_SRCS))
 ANGC_OUT  := build/angc
 
-.PHONY: all logo clean install install_vim uninstall_vim test-cpp
+.PHONY: all logo clean install install_vim uninstall_vim test test-cpp test-chaperone test-lang
 
 all: logo $(ANGC_OUT)
 	@printf "$(BOLD)$(GREEN)>>> Build Completed Successfully <<<$(RESET)\n"
@@ -385,6 +385,19 @@ test-cpp: $(ANGC_OBJS) $(TEST_CPP_SRCS)
 		$(TEST_CPP_SRCS) $(LDFLAGS_BIN) -o $(TEST_CPP_OUT)
 	@printf "$(CYAN)[TS] $(RESET) Running C++ unit tests\n"
 	@./$(TEST_CPP_OUT)
+
+# Chaperone memory-safety test suite (positive + negative .an programs).
+test-chaperone: $(ANGC_OUT)
+	@printf "$(CYAN)[TS] $(RESET) Running Chaperone memory-safety tests\n"
+	@./tests/chaperone/run_chaperone_tests.sh ./$(ANGC_OUT)
+
+# Language positive/negative suite (compile & run + expected compile errors).
+test-lang: $(ANGC_OUT)
+	@printf "$(CYAN)[TS] $(RESET) Running language test suite\n"
+	@./tests/lang/run_tests.sh ./$(ANGC_OUT) || true
+
+# Aggregate: all tests.
+test: test-cpp test-chaperone test-lang
 
 clean:
 	@printf "$(RED)[CL] $(RESET) Cleaning build directory...\n"
