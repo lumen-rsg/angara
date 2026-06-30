@@ -22,7 +22,7 @@
 |---|---|---|---|---|---|---|
 | Soundness holes (bugs slip through) | 2 | 7 | 1 | — | 10 | 10 (all closed — S0–S9, incl. S3) |
 | Coverage gaps (not analyzed) | — | 1 | 6 | 1 | 8 | 6 (G1, G2, G3 N/A, G4, G6, G7) |
-| Doc ↔ implementation mismatches | — | 2 | 3 | 1 | 6 | 1 (D6) |
+| Doc ↔ implementation mismatches | — | 2 | 3 | 1 | 6 | 6 (all — D1–D6) |
 | Test coverage | — | 1 | — | — | 1 | 1 (T1) |
 | Tooling (LSP) | — | 1 | — | — | 1 | 0 |
 
@@ -76,11 +76,11 @@ editor). These are honesty and tooling, not soundness.
 
 | ID | Status | Sev | Issue | Location |
 |---|---|---|---|---|
-| - [ ] **D1** | 🟢 Source | High | **`@consumes` / `@escape` / `@manual` annotations are not implemented.** Only mentioned in a comment. All foreign/module calls default to borrow with *no way* to mark consumes/escape, yet the doc has a full FFI table. | `Chaperone.cpp:195`; `CHAPERONE.md:279-337` |
-| - [ ] **D2** | 🟢 Source | High | **Auto-drop insertion on throw (Phase 3) was removed but the doc still describes it.** Commit `cde8e23` replaced it with E501-on-throw + manual `finally`. Code is self-consistent; the doc section, decision #6, and the architecture diagram are stale. | `Chaperone.cpp:421-438`; `CHAPERONE.md:46-62,166-182` |
-| - [ ] **D3** | 🟢 Source | Medium | **Interprocedural fixed point / recursion convergence documented but unimplemented** (see S4). | `CHAPERONE.md:256-277` |
-| - [ ] **D4** | 🟢 Source | Medium | **`borrow<T>` lifetime verification promised but absent** (see S3). | `CHAPERONE.md:33-34,86-91` |
-| - [ ] **D5** | 🟢 Source | Medium | **Staging table stale.** `CHAPERONE.md` lists Stages 3-8 as "☐ future" but the git log shows Stages 3-7 are committed. | `CHAPERONE.md:375-386` |
+| - [x] **D1** | 🟢 Source → ✅ Doc-fixed | High | **`@consumes` / `@escape` / `@manual` annotations are not implemented.** *(Doc reconciled: the FFI table now states the uniform borrow default, and the escape-hatches section lists these explicitly as "not yet implemented" future work. The features themselves remain unimplemented — all foreign/module calls borrow — but the doc no longer claims otherwise.)* | `CHAPERONE.md` FFI + escape-hatches sections |
+| - [x] **D2** | 🟢 Source → ✅ Doc-fixed | High | **Auto-drop insertion on throw (Phase 3) was removed but the doc still described it.** *(Doc reconciled: the "Exception unwinding" section now documents the v5 model — no auto-unwind, E501 on throw, `finally` discharges the obligation.)* | `CHAPERONE.md` Exceptions section |
+| - [x] **D3** | 🟢 Source → ✅ Doc-fixed | Medium | **Interprocedural fixed point / recursion convergence** — now both implemented (Stage 4, S4) AND documented accurately (the doc's claim was correct in intent; items 3/5/6 rewritten to match the actual borrow-default, positional summaries, and pass-cap behavior). | `CHAPERONE.md` Interprocedural section |
+| - [x] **D4** | 🟢 Source → ✅ Doc-fixed | Medium | **`ref<T>` lifetime verification** — now both implemented (Stage 6, S3) AND documented (the doc's `borrow<T>` references corrected to `ref<T>` throughout; a dedicated "ref<T> borrow check" section added). | `CHAPERONE.md` |
+| - [x] **D5** | 🟢 Source → ✅ Doc-fixed | Medium | **Staging table stale.** *(Doc reconciled: all stages marked done, plus a new "Chaperone soundness pass" sub-table documenting Phases 0–6 and the progress log updated through 2026-06-30.)* | `CHAPERONE.md` Staging + progress log |
 | - [x] **D6** | ⚫ Verified → ✅ Fixed | High | **E504 never fired at all** — worse than "first cycle only." `detectCycles` looked up field types in `getVariableTypes()` (a `VarDeclStmt*`→Type map that only holds local/let vars), so type-declaration fields were never found and the ownership graph stayed empty. Verified: `owned Node { let next as Node; }` and a 2-node `A→B→A` both compiled silently. *(Fixed: `check_field` now reads the base type name directly from the field's `ASTType` annotation — `SimpleType`/`GenericType`/`Optional`/`Owned` — and matches against `tracked_types`. Self-cycles and mutual cycles now report E504; acyclic types have no false positive.)* Residual: still reports only the first cycle; `W521` still never emitted (deferred to Stage 7). | `Chaperone.cpp:634-660`; verified `Node→Node`, `A→B→A` → E504 |
 
 ---
@@ -144,7 +144,7 @@ See the staged implementation plan. Items map to IDs above:
 | **4** — Interprocedural fixed point | worklist to convergence, recursion handling, positional summaries | S4, S5 | ✅ done |
 | **5** — Coverage breadth | globals, closures, E505, optionals, throw/`finally` cleanup discharge | G1, G2, G4, G6, S8 | ✅ done |
 | **6** — `ref<T>` minimal borrow check | ref→referent borrow map; E509 dangling borrow at ref-use time; move vs borrow distinction | S3 | ✅ done |
-| **7** — Doc reconciliation | `@consumes`/`@escape`/`@manual` or strike them; fix Phase-3, staging, E504 multi-cycle, W521 | D1, D2, D3, D4, D5, D6 | ☐ |
+| **7** — Doc reconciliation | `@consumes`/`@escape`/`@manual` honestly marked unimplemented; fix Phase-3 auto-unwind, staging, E504 multi-cycle, W521; add E507/E509 + move/borrow sections | D1, D2, D3, D4, D5, D6 | ✅ done |
 | **8** — LSP integration | run Chaperone in `analyzeDocument`; publish E501–E508 + W510/W521 | L1 | ☐ |
 
 ---
