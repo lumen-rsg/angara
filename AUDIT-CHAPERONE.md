@@ -20,8 +20,8 @@
 
 | Category | Critical | High | Medium | Low | Total | Fixed |
 |---|---|---|---|---|---|---|
-| Soundness holes (bugs slip through) | 2 | 6 | 1 | — | 9 | 4 (S0, S1, S2, S7) |
-| Coverage gaps (not analyzed) | — | — | 6 | — | 6 | 1 (G3 — N/A) |
+| Soundness holes (bugs slip through) | 2 | 7 | 1 | — | 10 | 6 (S0, S1, S2, S6, S7, S9) |
+| Coverage gaps (not analyzed) | — | 1 | 6 | 1 | 8 | 2 (G3 N/A, G7) |
 | Doc ↔ implementation mismatches | — | 2 | 3 | 1 | 6 | 1 (D6) |
 | Test coverage | — | 1 | — | — | 1 | 1 (T1) |
 | Tooling (LSP) | — | 1 | — | — | 1 | 0 |
@@ -48,9 +48,10 @@ stage being meaningful.
 | - [ ] **S3** | 🟢 Source | High | **`borrow<T>` / `ref<T>` lifetime tracking does not exist.** `isTrackedVar` explicitly returns false for `REF` types; nothing models borrow lifetimes. A `ref<T>` that outlives its referent compiles silently — directly contradicting decision #7 in `CHAPERONE.md`. | `Chaperone.cpp:77`; `CHAPERONE.md:33-34,86-91` |
 | - [ ] **S4** | 🟢 Source | High | **Interprocedural analysis is single-pass, no fixed point.** `run()` walks functions once in source order; the documented whole-program fixed point, recursion handling, and convergence-fallback are unimplemented. Calls to later-defined functions and recursive/mutual recursion hit the lenient "unknown → borrow" path. | `Chaperone.cpp:700-706`; `CHAPERONE.md:256-277` |
 | - [ ] **S5** | 🟢 Source | High | **Multi-parameter functions escape *all* their args.** `if (summary.size() == 1) { apply } else { state = Escaped; }` — any function with >1 tracked parameter loses tracking on every argument, even when the summary says "borrowed." Causes false E503 on later drops and suppresses leak detection. Positional matching against the signature is needed. | `Chaperone.cpp:177-187` |
-| - [ ] **S6** | ⚫ Verified | Medium | **Field-level ownership is untracked (currently masked).** The Chaperone never models `obj.field`. Codegen cascades drops over owned fields, which *would* double-free `buf` if `drop conn.buf` were allowed — but the parser restricts `drop` to a bare `IDENTIFIER` (`dropStatement.cpp:4`), so `drop conn.field` is already a **parse error** (verified, E502). Residual risk: once field moves via `conn.f = c2` (Stage 1) or droppable fields are introduced, the absence of field-state tracking becomes live. Add an explicit Chaperone rule rejecting field-targeted ownership transfers so the mask becomes intentional, not accidental. | `StmtCodegen.cpp:382-396`; `dropStatement.cpp:4` |
+| - [x] **S6** | ⚫ Verified → ✅ Fixed | Medium | **Field-level ownership is untracked.** Codegen cascades drops over owned fields, which double-frees when ownership of a tracked value is aliased into a field (`this.f = b`, then both the field's owning object cascade-drop and the source `b` free the same memory). The parser restricts `drop` to a bare `IDENTIFIER`, so `drop conn.field` is already a parse error — but the *aliasing* path was open. *(Fixed: `this.f = tracked_live_var` is now a move — the source transitions to `Moved` (E507 on later use, E503 on later drop), consistent with Phase 1's `unique_ptr` semantics. External field writes are already blocked by the type checker (private, E336), so this only fires inside methods/constructors. The field's *previous* value leaking is still untracked — needs per-field state, deferred.)* | `Chaperone.cpp` AssignExpr GetExpr branch; verified by tests 05, 16 |
 | - [x] **S7** | 🟢 Source → ✅ Fixed | High | **Reassignment leak via `x = …` on tracked vars is not detected.** The `AssignExpr` handler had a comment describing the leak but only walked the value; it never transitioned or reported. *(Fixed: the `AssignExpr` handler now reports E501 when a `Live` tracked target is overwritten by `=`, and applies the move transition to the RHS. Compound assigns (`+=` etc.) and field/subscript targets are excluded — they don't transfer whole-variable ownership.)* | `Chaperone.cpp` AssignExpr handler; verified by test 10 |
 | - [ ] **S8** | ⚫ Verified | Medium | **Throw handler ignores `finally` cleanup.** The ThrowStmt handler flags *every* `Live` tracked var at the throw point as an E501 leak, even when a `finally {}` block on the enclosing `try` will release it. The message even says "wrap in try/catch/finally," but the analysis doesn't model that the finally runs. Found while fixing `edge_case_stress.an` (a `Counter` live across a `throw`, cleaned in a `finally`, was still flagged). Worked around in-test by capturing the value and dropping before the throw. Fix: when a throw is inside a `try` with a `finally`, the finally's drops should discharge the throw-path leak obligation. | `Chaperone.cpp:421-438` (ThrowStmt); verified in `edge_case_stress.an:1204` |
+| - [x] **S9** | ⚫ Verified → ✅ Fixed | High | **`analyzeFunction` discarded the body's threaded state.** `analyzeBlock` takes `state` by value and returns the threaded map, but `analyzeFunction` called it and *threw away the return value*. Every function's params/locals were therefore stuck at their entry state for the leak check and summary — corrupting the entire interprocedural summary (every function looked like it borrowed all its params). Found while debugging field-move summaries. *(Fixed: `state = analyzeBlock(...)` — the body's moves/drops now flow to the leak check and summary.)* | `Chaperone.cpp` analyzeFunction |
 
 ---
 
@@ -64,6 +65,7 @@ stage being meaningful.
 | - [ ] **G4** | 🟢 Source | Medium | **E505 ("escaped molecule into untracked container") is documented but not implemented.** Storing a `Buffer` into `list`/`record` then dropping the list leaks it silently. | diagnostics table in `CHAPERONE.md`; no `E505` anywhere in `angc/` |
 | - [ ] **G5** | 🟢 Source | Medium | **`Rc<T>` / `weak<T>`** documented escape hatches have no implementation. | `CHAPERONE.md:299-301` |
 | - [ ] **G6** | 🟢 Source | Low | **Optionals.** `Connection?` is treated as Live regardless of nil-ness; dropping a possibly-nil optional is imprecise (codegen happens to be safe via nil-store). | `Chaperone.cpp:71-85` |
+| - [x] **G7** | ⚫ Verified → ✅ Fixed | High | **Class methods were never analyzed.** `run()` only walked top-level `FuncStmt`; `MethodMember` bodies inside `ClassStmt` were skipped entirely, so every memory bug inside a method (field moves, use-after-free, leaks) was invisible. *(Fixed: `run()` now descends into `ClassStmt` members and analyzes each method's `FuncStmt`. Param registration gained a fallback that reads the param's `ASTType` annotation directly, since methods aren't resolvable by bare name in the symbol table.)* | `Chaperone.cpp` run() + analyzeFunction |
 
 ---
 
@@ -135,7 +137,7 @@ See the staged implementation plan. Items map to IDs above:
 | **0** — Enforcement + test harness | gate codegen on Chaperone errors; negative/positive suite for existing diagnostics; also fixed E504 cycle detection | S0, T1, D6 | ✅ done |
 | **1** — Move-on-assign (soundness) | new `Moved` state; `=` / `let c2=c1` move the source; E507 use-after-move | S1, S7 | ✅ done |
 | **2** — Analyze what's skipped | loop conditions, `for-in` iterables, for-loop increment (match arms already analyzed — G3 closed as N/A) | S2 | ✅ done |
-| **3** — Field ownership rules | explicit Chaperone rule: forbid field-targeted ownership transfer; E508 | S6 | ☐ |
+| **3** — Field ownership rules | move-on-field-assign (`this.f = tracked` → source Moved); also fixed class methods unanalyzed (G7) and the analyzeFunction state-discard bug (S9) | S6, G7, S9 | ✅ done |
 | **4** — Interprocedural fixed point | worklist to convergence, recursion handling, positional summaries | S4, S5 | ☐ |
 | **5** — Coverage breadth | globals, closures, E505, optionals, throw/`finally` cleanup discharge | G1, G2, G4, G6, S8 | ☐ |
 | **6** — `ref<T>` minimal borrow check | scope-bound liveness of the referent at borrow scope-exit | S3 | ☐ |

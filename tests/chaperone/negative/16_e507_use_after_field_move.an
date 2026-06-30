@@ -1,0 +1,27 @@
+// Chaperone negative test — E507 (use-after-move into a field, S6)
+// After `this.f = i`, ownership of `i` moves into the field. Reading `i`
+// afterward is a use-after-move — the field's owning object may free it.
+// Must report E507.
+//
+// expect: E507
+
+class Inner {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+class Outer {
+    let inner as Inner;
+    func init(this) { this.inner = Inner(0); }
+    public:
+    func set_and_leak(this, i as Inner) -> i64 {
+        this.inner = i;   // MOVE: i's ownership transfers into this.inner
+        return i.get();   // use-after-move — i is invalid
+    }
+}
+
+export func main() -> i64 {
+    return 0;
+}

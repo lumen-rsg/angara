@@ -151,33 +151,51 @@ void Chaperone::analyzeExpr(Context& ctx,
         // Walk the RHS (catches use-after-free / use-after-move inside it).
         analyzeExpr(ctx, asgn->value, state);
 
-        // Only a plain `=` to a bare variable can reassign ownership. `+=` etc.
-        // keep the target's allocation (compound assign), and field/subscript
-        // targets are not whole-variable ownership transfers.
+        // Only a plain `=` can transfer whole-variable ownership. `+=` etc.
+        // keep the target's allocation (compound assign).
         if (asgn->op.type != TokenType::EQUAL) return;
-        auto* tgt = dynamic_cast<const VarExpr*>(asgn->target.get());
-        if (!tgt) return;
 
-        auto tit = state.find(tgt->name.lexeme);
-        if (tit == state.end()) return;
+        // --- Target is a bare variable (let/assign): whole-variable ownership ---
+        if (auto* tgt = dynamic_cast<const VarExpr*>(asgn->target.get())) {
+            auto tit = state.find(tgt->name.lexeme);
+            if (tit == state.end()) return;
 
-        // S7: overwriting a Live tracked variable leaks the old allocation.
-        // (Moved/Dropped/Escaped targets are already invalid — no leak.)
-        if (tit->second == State::Live) {
-            diag(ctx, tgt->name,
-                "🧬 Unfolded molecule — `" + tgt->name.lexeme + "` held a live "
-                "allocation that is overwritten by this assignment without being "
-                "dropped. Add `drop " + tgt->name.lexeme + ";` first.",
-                "E501");
+            // S7: overwriting a Live tracked variable leaks the old allocation.
+            // (Moved/Dropped/Escaped targets are already invalid — no leak.)
+            if (tit->second == State::Live) {
+                diag(ctx, tgt->name,
+                    "🧬 Unfolded molecule — `" + tgt->name.lexeme + "` held a live "
+                    "allocation that is overwritten by this assignment without being "
+                    "dropped. Add `drop " + tgt->name.lexeme + ";` first.",
+                    "E501");
+            }
+
+            // S1 move: if the RHS was a tracked Live var, ownership transfers —
+            // the source becomes Moved (invalid), the target becomes Live.
+            if (rhs_is_move_source) {
+                state[move_src] = State::Moved;
+                tit->second = State::Live;
+            }
+            return;
         }
 
-        // S1 move: if the RHS was a tracked Live var, ownership transfers —
-        // the source becomes Moved (invalid), the target becomes Live.
-        if (rhs_is_move_source) {
-            state[move_src] = State::Moved;
-            tit->second = State::Live;
+        // --- Target is a field (this.f = ...): S6 field ownership move ---
+        // External field writes are already blocked by the type checker (private
+        // fields, E336), so this only fires inside methods/constructors. The
+        // sound rule is unique_ptr field semantics: assigning a tracked Live
+        // variable to a field MOVES its ownership into the field — the source
+        // becomes invalid (E507 on later use). This prevents the double-free
+        // where both the field's owning object (cascade-drop) and the source
+        // would free the same allocation. (We don't track per-field state, so
+        // the field's previous value leaking is out of scope — addressed with
+        // field-state tracking later.)
+        if (auto* get = dynamic_cast<const GetExpr*>(asgn->target.get())) {
+            analyzeExpr(ctx, get->object, state);   // catch UAF on the object
+            if (rhs_is_move_source) {
+                state[move_src] = State::Moved;
+            }
+            return;
         }
-        return;
     }
 
     // UpdateExpr (x++, ++x): walk the target.
@@ -194,16 +212,24 @@ void Chaperone::analyzeExpr(Context& ctx,
             analyzeExpr(ctx, arg, state);
 
         // Interprocedural: determine the callee name.
+        // For method calls (o.m()), summaries are keyed by the bare method
+        // name (m), so try that; a top-level fn call uses the variable name.
         std::string callee_name;
+        std::string method_name;  // fallback for method calls
         if (auto* ve = dynamic_cast<const VarExpr*>(call->callee.get())) {
             callee_name = ve->name.lexeme;
         } else if (auto* get = dynamic_cast<const GetExpr*>(call->callee.get())) {
+            method_name = get->name.lexeme;  // e.g. "set"
             if (auto* ve2 = dynamic_cast<const VarExpr*>(get->object.get()))
-                callee_name = ve2->name.lexeme + "." + get->name.lexeme;
+                callee_name = ve2->name.lexeme + "." + get->name.lexeme;  // "o.set"
+            else
+                callee_name = method_name;
         }
 
-        // Look up the summary. Unknown functions → conservative (Escaped).
+        // Look up the summary. For method calls, prefer the bare method name.
         auto sum_it = ctx.summaries.find(callee_name);
+        if (sum_it == ctx.summaries.end() && !method_name.empty())
+            sum_it = ctx.summaries.find(method_name);
         if (sum_it != ctx.summaries.end()) {
             const auto& summary = sum_it->second;
             for (size_t i = 0; i < call->arguments.size(); i++) {
@@ -325,8 +351,20 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
     ctx.current_function = func.name.lexeme;
     StateMap state;
 
-    // Register tracked parameters.
+    // Register tracked parameters. Prefer the resolved FunctionType from the
+    // symbol table (top-level functions), but fall back to reading the param's
+    // own type annotation — methods aren't resolvable by bare name at the top
+    // level, so without the fallback their tracked params would never register
+    // and field-move detection inside methods would silently miss.
     std::set<std::string> param_names;  // Track which names are params (not locals).
+    std::function<std::string(const ASTType*)> base_name = [&](const ASTType* t) -> std::string {
+        if (!t) return "";
+        if (auto* s = dynamic_cast<const SimpleType*>(t)) return s->name.lexeme;
+        if (auto* g = dynamic_cast<const GenericType*>(t)) return g->name.lexeme;
+        if (auto* o = dynamic_cast<const OptionalTypeNode*>(t)) return base_name(o->base_type.get());
+        if (auto* ow = dynamic_cast<const OwnedTypeNode*>(t)) return base_name(ow->inner_type.get());
+        return "";
+    };
     auto sem_sym = const_cast<SymbolTable&>(ctx.tc.getSymbolTable()).resolve(func.name.lexeme);
     if (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION) {
         auto fn_type = std::dynamic_pointer_cast<FunctionType>(sem_sym->type);
@@ -339,11 +377,24 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
                 param_names.insert(func.params[i].name.lexeme);
             }
         }
+    } else {
+        // Fallback: read each param's type annotation directly (methods).
+        for (const auto& p : func.params) {
+            std::string tn = base_name(p.type.get());
+            if (!tn.empty() && ctx.tracked_types.count(tn)) {
+                state[p.name.lexeme] = State::Live;
+                param_names.insert(p.name.lexeme);
+            }
+        }
     }
 
     bool terminates = false;
     if (func.body) {
-        analyzeBlock(ctx, *func.body, state, terminates);
+        // analyzeBlock takes state by value and returns the threaded map;
+        // capture the result so the body's effects (moves, drops) are visible
+        // to the leak check and summary below. Discarding it left every param
+        // stuck at its entry state, which corrupted the interprocedural summary.
+        state = analyzeBlock(ctx, *func.body, state, terminates);
     }
 
     if (!terminates) {
@@ -361,25 +412,19 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
     }
 
     // Phase 4: build the function summary for interprocedural analysis.
+    // Uses param_names (populated above, works for both top-level fns and
+    // methods). A Moved param means ownership transferred (e.g. into a field),
+    // so it maps to Escaped — the caller no longer owns it.
     FunctionSummary summary;
-    if (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION) {
-        auto fn_type = std::dynamic_pointer_cast<FunctionType>(sem_sym->type);
-        for (size_t i = 0; i < fn_type->param_types.size() && i < func.params.size(); i++) {
-            auto& pt = fn_type->param_types[i];
-            if (!pt) continue;
-            if (pt->kind == TypeKind::CLASS || pt->kind == TypeKind::INSTANCE ||
-                (pt->kind == TypeKind::DATA && ctx.tracked_types.count(pt->toString()))) {
-                std::string pname = func.params[i].name.lexeme;
-                auto st_it = state.find(pname);
-                if (st_it != state.end()) {
-                    if (st_it->second == State::Dropped)
-                        summary[pname] = ParamBehavior::Dropped;
-                    else if (st_it->second == State::Escaped)
-                        summary[pname] = ParamBehavior::Escaped;
-                    else
-                        summary[pname] = ParamBehavior::Borrowed;
-                }
-            }
+    for (const auto& pname : param_names) {
+        auto st_it = state.find(pname);
+        if (st_it != state.end()) {
+            if (st_it->second == State::Dropped)
+                summary[pname] = ParamBehavior::Dropped;
+            else if (st_it->second == State::Escaped || st_it->second == State::Moved)
+                summary[pname] = ParamBehavior::Escaped;
+            else
+                summary[pname] = ParamBehavior::Borrowed;
         }
     }
     ctx.summaries[func.name.lexeme] = std::move(summary);
@@ -803,6 +848,16 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
         if (auto* func = dynamic_cast<const FuncStmt*>(stmt.get())) {
             if (!func->body) continue;  // Foreign/intrinsic.
             analyzeFunction(ctx, *func);
+        } else if (auto* cls = dynamic_cast<const ClassStmt*>(stmt.get())) {
+            // Analyze class methods too — without this, every memory bug inside
+            // a method body (field moves, use-after-free, leaks) is invisible.
+            // `this` is already the first param in the FuncStmt.
+            for (const auto& member : cls->members) {
+                if (auto* mm = dynamic_cast<const MethodMember*>(member.get())) {
+                    if (mm->declaration && mm->declaration->body)
+                        analyzeFunction(ctx, *mm->declaration);
+                }
+            }
         }
     }
     return eh.errorCount() == 0;
