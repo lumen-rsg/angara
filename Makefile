@@ -390,6 +390,8 @@ test-cpp: $(ANGC_OBJS) $(TEST_CPP_SRCS)
 test-chaperone: $(ANGC_OUT)
 	@printf "$(CYAN)[TS] $(RESET) Running Chaperone memory-safety tests\n"
 	@./tests/chaperone/run_chaperone_tests.sh ./$(ANGC_OUT)
+	@printf "$(CYAN)[TS] $(RESET) Running Chaperone LSP integration test\n"
+	@./tests/chaperone/test_lsp_chaperone.sh ./$(ANGC_OUT)
 
 # Language positive/negative suite (compile & run + expected compile errors).
 test-lang: $(ANGC_OUT)
