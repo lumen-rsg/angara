@@ -467,13 +467,54 @@ namespace angara {
             const AngaraFuncDef& func_def = defs[i];
             if (func_def.constructs) {
                 const AngaraClassDef* class_def = func_def.constructs;
-                if (native_classes.count(class_def->name)) { continue; }
+                // If already registered from a prior constructs entry, skip.
+                // But if it was only forward-declared (pre-registered as a
+                // placeholder), replace it with a proper ClassType and add
+                // to exports.
+                auto existing = native_classes.find(class_def->name);
+                if (existing != native_classes.end()) {
+                    // Check if it was already properly exported
+                    if (module_type->exports.count(class_def->name)) continue;
+                    // Forward-declared placeholder — replace it
+                }
 
                 auto class_type = std::make_shared<ClassType>(class_def->name);
                 class_type->is_native = true;
                 native_classes[class_def->name] = class_type;
 
                 module_type->exports[class_def->name] = class_type;
+
+                // Pre-register ALL classes referenced by this constructor's
+                // methods (return types / param types). A method like
+                // Connection.channel() returning Channel means Channel must
+                // be known to the ABI parser before method parsing begins.
+                // Use a forward-declaration set (NOT native_classes) so the
+                // real registration via func_def.constructs still runs and
+                // properly adds the class to both native_classes and exports.
+                if (class_def->methods) {
+                    for (int m = 0; class_def->methods[m].name != nullptr; ++m) {
+                        const AngaraMethodDef& md = class_def->methods[m];
+                        if (!md.type_string) continue;
+                        // Scan for uppercase identifiers (class names) in the sig.
+                        const char* s = md.type_string;
+                        while (*s) {
+                            if (isupper(*s)) {
+                                std::string cn;
+                                while (isalnum(*s) || *s == '_') { cn += *s++; }
+                                if (!cn.empty() && !native_classes.count(cn)) {
+                                    // Forward-declare: a placeholder so the ABI
+                                    // parser can resolve the type. The real
+                                    // ClassType (with methods) replaces this
+                                    // when the _channel/constructs entry is
+                                    // processed in the first loop.
+                                    auto ct = std::make_shared<ClassType>(cn);
+                                    ct->is_native = true;
+                                    native_classes[cn] = ct;
+                                }
+                            } else { s++; }
+                        }
+                    }
+                }
             }
         }
 
@@ -553,7 +594,13 @@ namespace angara {
 
 
                 auto func_type = std::make_shared<FunctionType>(params, return_type, is_variadic);
-                module_type->exports[func_def.name] = func_type;
+                // Skip adding function exports for placeholder entries (NULL
+                // function pointer). These exist solely to register dependent
+                // classes via their `constructs` field — their methods are
+                // parsed above, but the entry itself is not callable.
+                if (func_def.function) {
+                    module_type->exports[func_def.name] = func_type;
+                }
 
             } catch (const std::runtime_error& e) {
                 std::cerr << "\n" << CLR_YELLOW << "[WARN] " << CLR_RESET << "Could not parse ABI definition for '"

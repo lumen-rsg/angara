@@ -696,18 +696,25 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                 std::string resolved_method;
                 auto type_it = m_type_checker.getExpressionTypes().find(obj);
                 if (type_it != m_type_checker.getExpressionTypes().end() &&
-                    type_it->second->kind == TypeKind::INSTANCE) {
-                    auto inst = std::dynamic_pointer_cast<InstanceType>(type_it->second);
-                    if (inst && inst->class_type) {
-                        auto cls = inst->class_type;
-                        while (cls) {
-                            auto qit = methodLookup.find(cls->name + "." + fnName);
-                            if (qit != methodLookup.end()) {
-                                resolved_method = qit->second;
-                                break;
-                            }
-                            cls = cls->superclass;
+                    (type_it->second->kind == TypeKind::INSTANCE ||
+                     type_it->second->kind == TypeKind::CLASS)) {
+                    // For INSTANCE types, walk class_type; for native CLASS
+                    // types (returned by module constructors like amqp.connect),
+                    // use the class name directly.
+                    std::shared_ptr<ClassType> cls;
+                    if (type_it->second->kind == TypeKind::INSTANCE) {
+                        auto inst = std::dynamic_pointer_cast<InstanceType>(type_it->second);
+                        if (inst) cls = inst->class_type;
+                    } else {
+                        cls = std::dynamic_pointer_cast<ClassType>(type_it->second);
+                    }
+                    while (cls) {
+                        auto qit = methodLookup.find(cls->name + "." + fnName);
+                        if (qit != methodLookup.end()) {
+                            resolved_method = qit->second;
+                            break;
                         }
+                        cls = cls->superclass;
                     }
                 }
                 // Fall back to unqualified lookup if no qualified match
@@ -715,6 +722,32 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                     auto mit = methodLookup.find(fnName);
                     if (mit != methodLookup.end())
                         resolved_method = mit->second;
+                }
+                // Fallback: resolve via codegen's namedTypes if expression-type
+                // pointer lookup missed (handles native instances from module
+                // constructors whose VarExpr pointer may not be in the type
+                // checker's expression-type map).
+                if (resolved_method.empty()) {
+                    auto nt_it = namedTypes.find(modName);
+                    if (nt_it != namedTypes.end() && nt_it->second) {
+                        auto& t = nt_it->second;
+                        std::shared_ptr<ClassType> cls;
+                        if (t->kind == TypeKind::INSTANCE) {
+                            auto inst = std::dynamic_pointer_cast<InstanceType>(t);
+                            if (inst) cls = inst->class_type;
+                        } else if (t->kind == TypeKind::CLASS) {
+                            cls = std::dynamic_pointer_cast<ClassType>(t);
+                        }
+                        while (cls) {
+                            auto qit = methodLookup.find(cls->name + "." + fnName);
+                            if (qit != methodLookup.end()) { resolved_method = qit->second; break; }
+                            cls = cls->superclass;
+                        }
+                        if (resolved_method.empty()) {
+                            auto mit2 = methodLookup.find(fnName);
+                            if (mit2 != methodLookup.end()) resolved_method = mit2->second;
+                        }
+                    }
                 }
                 if (!resolved_method.empty()) {
                     llvm::Function* mf = this->mod->getFunction(resolved_method);
