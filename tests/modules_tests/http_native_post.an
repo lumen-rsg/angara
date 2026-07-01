@@ -1,5 +1,5 @@
 attach http;
-attach "json.an";
+attach json;
 attach io;
 
 
