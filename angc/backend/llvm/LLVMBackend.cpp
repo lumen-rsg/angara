@@ -211,10 +211,13 @@ void LLVMBackend::createStrlitInitFn() {
     if (m_strlit_init_fn) return;
     auto* fn_type = llvm::FunctionType::get(
         llvm::Type::getVoidTy(*ctx), false);
+    // External linkage + module-unique name so the main module can call
+    // each imported module's init function. Without this, string literals
+    // in .an source modules stay zero-initialized (nil) at runtime.
+    std::string init_name = "__ang_strlit_init_" + moduleName;
     m_strlit_init_fn = llvm::Function::Create(fn_type,
-        llvm::Function::InternalLinkage,
-        "__ang_strlit_init", mod.get());
-    m_strlit_init_fn->setDSOLocal(true);
+        llvm::Function::ExternalLinkage,
+        init_name, mod.get());
     auto* entry_bb = llvm::BasicBlock::Create(*ctx, "entry", m_strlit_init_fn);
     llvm::IRBuilder<>(entry_bb).CreateRetVoid();
 }

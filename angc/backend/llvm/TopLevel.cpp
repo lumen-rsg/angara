@@ -72,12 +72,15 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     // use the FFI-marshallable set (includes `string`→char* and pointer types),
     // so `foreign func strlen(s as string) -> i64` gets a real C signature.
     // Non-foreign funcs keep the stricter unboxable set (locals only).
+    // Exported functions are always boxed — cross-module calls use the
+    // uniform (objType...) -> objType ABI, avoiding signature mismatches
+    // between the defining and calling modules.
     bool is_foreign_fn = stmt.is_foreign;
     bool is_raw = false;
     RawFuncInfo raw_info;
     raw_info.return_kind = LocalKind::BOXED;
 
-    if (sem_fn_type && stmt.type_params.empty()) {
+    if (sem_fn_type && stmt.type_params.empty() && !stmt.is_exported) {
         auto ret_type = sem_fn_type->return_type;
         auto can_marshal = is_foreign_fn ? isFFIMarshallable(ret_type)
                                         : (ret_type && isUnboxableType(ret_type));
@@ -784,7 +787,7 @@ void LLVMBackend::codegenEnumDecl(const EnumStmt& stmt) {
 
 void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& statements,
                                         const std::string& module_name,
-                                        const std::vector<std::string>&) {
+                                        const std::vector<std::string>& all_module_names) {
     std::string entry_name = m_freestanding ? "_start" : "main";
     auto* main_type = llvm::FunctionType::get(
         m_freestanding ? llvm::Type::getVoidTy(*ctx) : llvm::Type::getInt32Ty(*ctx), false);
@@ -855,6 +858,24 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
     // codegen), this call always executes every init, even for literals first
     // referenced in functions compiled after this call site.
     builder->CreateCall(m_strlit_init_fn);
+
+    // Call each imported .an module's string-literal init function.
+    // Each module has its own __ang_strlit_init_<moduleName> with
+    // ExternalLinkage; we emit calls to them here so their string
+    // literals are initialized before any user code runs.
+    for (const auto& mod_name : all_module_names) {
+        std::string init_name = "__ang_strlit_init_" + mod_name;
+        if (auto* init_fn = mod->getFunction(init_name)) {
+            builder->CreateCall(init_fn);
+        } else {
+            // Declare it as an external — the linker resolves it from
+            // the imported module's object file.
+            auto* ft = llvm::FunctionType::get(llvm::Type::getVoidTy(*ctx), false);
+            auto* ext_fn = llvm::Function::Create(ft,
+                llvm::Function::ExternalLinkage, init_name, mod.get());
+            builder->CreateCall(ext_fn);
+        }
+    }
 
     for (const auto& stmt : statements) {
         if (std::dynamic_pointer_cast<const FuncStmt>(stmt)) continue;
