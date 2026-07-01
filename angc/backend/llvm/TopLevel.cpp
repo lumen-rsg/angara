@@ -1023,11 +1023,13 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
                         }
                         if (ms) builder->SetInsertPoint(ms);
                         methodLookup[method_name] = mwn;
+                        methodLookup[class_type->name + "." + method_name] = mwn;
                     }
                 }
                 continue;
             }
             int param_count = (int)func_type->param_types.size();
+            bool is_variadic = func_type->is_variadic;
 
             std::string native_name = "Angara_" + mod_name + "_" + export_name;
             auto* native_fn_type = llvm::FunctionType::get(objType,
@@ -1036,6 +1038,16 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
                                     native_name, mod.get());
 
             std::string wrapper_name = mangle(mod_name, export_name);
+
+            // For variadic native functions, skip the fixed-arity wrapper.
+            // The call site (callModuleFn) handles packing args into the
+            // (argc, args[]) native calling convention directly.
+            if (is_variadic) {
+                // Register the native name as a known function so callModuleFn
+                // can find it and use the native (argc, ptr) calling convention.
+                continue;
+            }
+
             std::vector<llvm::Type*> wpt(param_count, objType);
             auto* wft = llvm::FunctionType::get(objType, wpt, false);
             auto* wf = llvm::Function::Create(wft, llvm::Function::ExternalLinkage, wrapper_name, mod.get());
@@ -1054,6 +1066,7 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
                 }
                 auto* nf = mod->getFunction(native_name);
                 if (!nf) {
+                    if (sb) builder->SetInsertPoint(sb);
                     continue;
                 }
                 auto* cr = builder->CreateCall(nf, {
@@ -1063,6 +1076,7 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
             } else {
                 auto* nf = mod->getFunction(native_name);
                 if (!nf) {
+                    if (sb) builder->SetInsertPoint(sb);
                     continue;
                 }
                 auto* cr = builder->CreateCall(nf, {

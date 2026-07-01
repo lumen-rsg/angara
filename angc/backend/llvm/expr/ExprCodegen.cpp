@@ -1093,6 +1093,32 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
     llvm::Function* f = this->mod->getFunction(mangled);
     if (!f) f = this->mod->getFunction("__ang_"+sanitize(fn));
 
+    // If no fixed-arity wrapper exists, check for the native (argc, ptr)
+    // convention — this is how variadic module functions are called.
+    if (!f) {
+        std::string native_name = "Angara_" + mod + "_" + fn;
+        llvm::Function* native_f = this->mod->getFunction(native_name);
+        if (native_f) {
+            // Call with native convention: (argc, AngaraObject* args[])
+            std::vector<llvm::Value*> native_args;
+            auto cnt = args.size();
+            native_args.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), (int)cnt));
+            if (cnt > 0) {
+                auto* aa = builder->CreateAlloca(llvm::ArrayType::get(objType, cnt));
+                for (size_t i = 0; i < cnt; i++) {
+                    auto* ep = builder->CreateGEP(llvm::ArrayType::get(objType, cnt), aa,
+                        {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
+                         llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
+                    builder->CreateStore(cg(args[i]), ep);
+                }
+                native_args.push_back(builder->CreateBitCast(aa, llvm::PointerType::get(*ctx, 0)));
+            } else {
+                native_args.push_back(llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)));
+            }
+            return builder->CreateCall(native_f, native_args);
+        }
+    }
+
     if (!f) {
         // Check if we know this is a raw-signature function
         auto raw_it = m_raw_functions.find(mangled);
