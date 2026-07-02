@@ -480,6 +480,7 @@ namespace angara {
 
                 auto class_type = std::make_shared<ClassType>(class_def->name);
                 class_type->is_native = true;
+                class_type->home_module = module_type->name;  // TS-4
                 native_classes[class_def->name] = class_type;
 
                 module_type->exports[class_def->name] = class_type;
@@ -509,6 +510,7 @@ namespace angara {
                                     // processed in the first loop.
                                     auto ct = std::make_shared<ClassType>(cn);
                                     ct->is_native = true;
+                                    ct->home_module = module_type->name;  // TS-4
                                     native_classes[cn] = ct;
                                 }
                             } else { s++; }

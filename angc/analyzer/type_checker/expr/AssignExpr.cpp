@@ -21,7 +21,7 @@ namespace angara {
                 if (!isInteger(index_type)) {
                     error(subscript_target->bracket, "List index must be an integer, but got '" + index_type->toString() + "'.", "E314");
                 }
-                if (list_type->element_type->toString() != rhs_type->toString()) {
+                if (!sameType(list_type->element_type, rhs_type)) {
                     error(expr.op, "Cannot assign a value of type '" + rhs_type->toString() + "' to a list element of type '" + list_type->element_type->toString() + "'.", "E315");
                 }
             }
@@ -65,8 +65,8 @@ namespace angara {
 
             if (!types_match) {
                 error(expr.op, "Type mismatch. Cannot assign a value of type '" +
-                               rhs_type->toString() + "' to a target of type '" +
-                               lhs_type->toString() + "'.", "E319");
+                               displayType(*rhs_type, *lhs_type) + "' to a target of type '" +
+                               displayType(*lhs_type, *rhs_type) + "'.", "E319");
             }
         }
 

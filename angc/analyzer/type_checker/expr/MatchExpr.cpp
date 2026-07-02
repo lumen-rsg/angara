@@ -34,7 +34,7 @@ namespace angara {
                     if (body_type->kind != TypeKind::ERROR) {
                         if (!common_result_type) {
                             common_result_type = body_type;
-                        } else if (common_result_type->toString() != body_type->toString()) {
+                        } else if (!sameType(common_result_type, body_type)) {
                             error(expr.keyword, "All match arms must return the same type. Expected '" +
                                                 common_result_type->toString() + "' but this arm has type '" +
                                                 body_type->toString() + "'.", "E366");
@@ -56,7 +56,7 @@ namespace angara {
                     variant_name = get_expr->name.lexeme;
                 }
 
-                if (func_type->return_type->toString() != enum_type->name) {
+                if (!sameType(func_type->return_type, enum_type)) {
                     error(expr.keyword, "Variant '" + variant_name + "' does not belong to enum '" + enum_type->name + "'.", "E367");
                 } else {
                     covered_variants.insert(variant_name);
@@ -82,7 +82,7 @@ namespace angara {
             if (body_type->kind != TypeKind::ERROR) {
                 if (!common_result_type) {
                     common_result_type = body_type;
-                } else if (common_result_type->toString() != body_type->toString()) {
+                } else if (!sameType(common_result_type, body_type)) {
                     error(expr.keyword, "All match arms must return the same type. Expected '" +
                                         common_result_type->toString() + "' but this arm has type '" +
                                         body_type->toString() + "'.", "E370");

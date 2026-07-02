@@ -63,7 +63,10 @@ bool TypeChecker::check_type_compatibility(
             const std::shared_ptr<Type>& actual,
             const Literal* narrowing_literal
 ) {
-    if (expected->toString() == actual->toString()) return true;
+    // TS-4: structural identity. Nominal types compare by canonical pointer
+    // identity (so two same-named types from different modules are distinct);
+    // compound types recurse. Supersedes the old toString()== fast-path.
+    if (sameType(expected, actual)) return true;
 
     if (expected->kind == TypeKind::ANY || actual->kind == TypeKind::ANY) return true;
 
@@ -144,7 +147,7 @@ bool TypeChecker::check_type_compatibility(
     if (expected->kind == TypeKind::GENERIC_INSTANCE && actual->kind == TypeKind::GENERIC_INSTANCE) {
         auto expected_gen = std::dynamic_pointer_cast<GenericInstanceType>(expected);
         auto actual_gen = std::dynamic_pointer_cast<GenericInstanceType>(actual);
-        if (expected_gen->base_type->toString() != actual_gen->base_type->toString()) return false;
+        if (!sameType(expected_gen->base_type, actual_gen->base_type)) return false;
         for (const auto& [name, expected_arg] : expected_gen->type_args) {
             auto it = actual_gen->type_args.find(name);
             if (it == actual_gen->type_args.end()) return false;
@@ -157,7 +160,7 @@ bool TypeChecker::check_type_compatibility(
     if (expected->kind == TypeKind::DATA && actual->kind == TypeKind::GENERIC_INSTANCE) {
         auto expected_data = std::dynamic_pointer_cast<DataType>(expected);
         auto actual_gen = std::dynamic_pointer_cast<GenericInstanceType>(actual);
-        return expected_data->toString() == actual_gen->base_type->toString();
+        return sameType(expected_data, actual_gen->base_type);
     }
 
     // v5: ref<T> — implicit conversion from a tracked type to ref<T>.
@@ -187,8 +190,9 @@ bool TypeChecker::check_type_compatibility(
             const Literal* ret_lit = std::dynamic_pointer_cast<const Literal>(stmt->value).get();
             if (!check_type_compatibility(expected_return_type, actual_return_type, ret_lit)) {
                 error(stmt->keyword, "Type mismatch. This function is declared to return '" +
-                                     expected_return_type->toString() + "', but is returning a value of type '" +
-                                     actual_return_type->toString() + "'.", "E265");
+                                     displayType(*expected_return_type, *actual_return_type) +
+                                     "', but is returning a value of type '" +
+                                     displayType(*actual_return_type, *expected_return_type) + "'.", "E265");
             }
 
         } else {

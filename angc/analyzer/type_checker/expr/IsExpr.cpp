@@ -9,15 +9,15 @@ namespace angara {
                                     const std::shared_ptr<Type>& target_type) {
         if (!object_type || !target_type) return true;
         if (object_type->kind == TypeKind::ANY || target_type->kind == TypeKind::ANY) return true;
-        if (object_type->toString() == target_type->toString()) return true;
+        if (sameType(object_type, target_type)) return true;
 
         // optional<T> is T  /  optional<T> is optional<T>
         if (object_type->kind == TypeKind::OPTIONAL) {
             auto inner = std::dynamic_pointer_cast<OptionalType>(object_type)->wrapped_type;
-            if (target_type->toString() == inner->toString()) return true;
+            if (sameType(target_type, inner)) return true;
             if (target_type->kind == TypeKind::OPTIONAL) {
                 auto tinner = std::dynamic_pointer_cast<OptionalType>(target_type)->wrapped_type;
-                if (tinner->toString() == inner->toString()) return true;
+                if (sameType(tinner, inner)) return true;
             }
             return false;
         }
@@ -43,8 +43,10 @@ namespace angara {
             } else if (target_type->kind == TypeKind::CLASS) {
                 target_cls = std::dynamic_pointer_cast<ClassType>(target_type);
             }
+            // TS-4: ancestor match by canonical pointer identity, not bare name
+            // (a same-named class in another module is NOT an ancestor).
             for (auto cur = cls; cur; cur = cur->superclass) {
-                if (target_cls && cur->name == target_cls->name) return true;
+                if (target_cls && cur.get() == target_cls.get()) return true;
             }
             return false;
         }
@@ -53,7 +55,7 @@ namespace angara {
         if (object_type->kind == TypeKind::GENERIC_INSTANCE && target_type->kind == TypeKind::GENERIC_INSTANCE) {
             auto o = std::dynamic_pointer_cast<GenericInstanceType>(object_type);
             auto t = std::dynamic_pointer_cast<GenericInstanceType>(target_type);
-            return o->base_type->toString() == t->base_type->toString();
+            return sameType(o->base_type, t->base_type);
         }
 
         return false;

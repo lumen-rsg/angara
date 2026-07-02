@@ -23,7 +23,7 @@ namespace angara {
             expr.elements[i]->accept(*this);
             auto current_element_type = popType();
 
-            if (common_element_type->toString() != current_element_type->toString()) {
+            if (!sameType(common_element_type, current_element_type)) {
                 common_element_type = m_type_any;
             }
 

@@ -23,7 +23,7 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
                 auto current = superclass_type;
                 bool has_cycle = false;
                 while (current) {
-                    if (current->name == class_type->name) {
+                    if (current.get() == class_type.get()) {
                         error(stmt.name, "Inheritance cycle detected: class '" + class_type->name + "' cannot inherit from itself.", "E287");
                         has_cycle = true;
                         break;
@@ -105,7 +105,7 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
                 error(stmt.name, "Contract '" + contract_type->name + "' requires field '" + name + "' to be '" + (required_field.is_const ? "const" : "let") + "', but it is not in class '" + stmt.name.lexeme + "'.", "E296");
                 note(required_field.declaration_token, "Requirement '" + name + "' is defined here.");
             }
-            if (class_prop->type->toString() != required_field.type->toString()) {
+            if (!sameType(class_prop->type, required_field.type)) {
                 error(stmt.name, "Type mismatch for field '" + name + "' required by contract '" + contract_type->name + "'. Expected '" + required_field.type->toString() + "', but got '" + class_prop->type->toString() + "'.", "E297");
                 note(required_field.declaration_token, "Requirement '" + name + "' is defined here.");
             }
@@ -194,7 +194,7 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
                     if (expected_type->kind != TypeKind::ERROR &&
                         initializer_type->kind != TypeKind::ERROR) {
 
-                        bool types_match = (expected_type->toString() == initializer_type->toString());
+                        bool types_match = sameType(expected_type, initializer_type);
                         if (!types_match && initializer_type->toString() == "list<any>" && expected_type->kind == TypeKind::LIST) {
                             types_match = true;
                         }

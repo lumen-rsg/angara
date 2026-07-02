@@ -45,6 +45,15 @@ namespace angara {
     struct EnumVariantType;
     struct ClassType; // Needed for DataType and others
 
+    // TS-4: structural type identity. Nominal types (CLASS/DATA/ENUM/TRAIT/
+    // CONTRACT) compare by canonical pointer identity (each declaration is
+    // constructed once and aliased across modules); compound types recurse on
+    // their constituent shared_ptrs. Forward-declared so FunctionType::equals
+    // can use it; defined at the end of this file.
+    bool sameType(const std::shared_ptr<Type>& a, const std::shared_ptr<Type>& b);
+    // TS-4: qualified display name ("Foo" or "mod::Foo") for collision diagnostics.
+    std::string qualifiedName(const Type& t);
+
     // --- BASE TYPE CLASS ---
     struct Type {
         const TypeKind kind;
@@ -140,16 +149,15 @@ namespace angara {
                 return false;
             }
 
-            // 3. Check each parameter's type
+            // 3. Check each parameter's type (TS-4: structural identity, not string)
             for (size_t i = 0; i < this->param_types.size(); ++i) {
-                // We are comparing the string representations.
-                if (this->param_types[i]->toString() != other.param_types[i]->toString()) {
+                if (!sameType(this->param_types[i], other.param_types[i])) {
                     return false;
                 }
             }
 
             // 4. Check the return type
-            if (this->return_type->toString() != other.return_type->toString()) {
+            if (!sameType(this->return_type, other.return_type)) {
                 return false;
             }
 
@@ -177,6 +185,12 @@ namespace angara {
 
         // --- GENERIC SUPPORT ---
         std::vector<std::string> type_params;
+
+        // TS-4: the declaring module's name. Empty for built-ins. Set at every
+        // construction site; preserved across module imports (the shared object
+        // is aliased, so this always reflects the original home module). Used for
+        // qualified diagnostics ("app::Foo" vs "lib::Foo").
+        std::string home_module;
 
         explicit ClassType(std::string name)
                 : Type(TypeKind::CLASS), name(std::move(name)) {}
@@ -222,6 +236,7 @@ namespace angara {
         const std::string name;
         // A map from method name to that method's FunctionType.
         std::map<std::string, std::shared_ptr<FunctionType>> methods;
+        std::string home_module;  // TS-4: declaring module (for qualified diagnostics)
 
         explicit TraitType(std::string name)
                 : Type(TypeKind::TRAIT), name(std::move(name)) {}
@@ -319,6 +334,7 @@ namespace angara {
 
         std::map<std::string, MemberInfo> fields;
         std::map<std::string, MemberInfo> methods;
+        std::string home_module;  // TS-4: declaring module (for qualified diagnostics)
 
         explicit ContractType(std::string name)
             : Type(TypeKind::CONTRACT), name(std::move(name)) {}
@@ -377,6 +393,7 @@ namespace angara {
         // --- GENERIC SUPPORT ---
         // Type parameter names for this generic data type (e.g., {"T"} for Box<T>)
         std::vector<std::string> type_params;
+        std::string home_module;  // TS-4: declaring module (for qualified diagnostics)
 
         explicit DataType(std::string name)
             : Type(TypeKind::DATA), name(std::move(name)) {}
@@ -395,6 +412,7 @@ namespace angara {
         const std::string name;
         // The map now stores the CONSTRUCTOR SIGNATURE for each variant.
         std::map<std::string, std::shared_ptr<FunctionType>> variants;
+        std::string home_module;  // TS-4: declaring module (for qualified diagnostics)
 
         explicit EnumType(std::string name)
             : Type(TypeKind::ENUM), name(std::move(name)) {}
@@ -491,5 +509,141 @@ namespace angara {
             return type;
         }
     };
+
+    // TS-4: structural type identity. See the forward declaration above.
+    inline bool sameType(const std::shared_ptr<Type>& a, const std::shared_ptr<Type>& b) {
+        if (a.get() == b.get()) return true;          // pointer identity (covers null==null, singletons, canonical nominal types)
+        if (!a || !b) return false;
+        if (a->kind != b->kind) return false;
+
+        switch (a->kind) {
+            // Name-only / singleton kinds: toString() equality is sound (no
+            // cross-module concern — these are language built-ins).
+            case TypeKind::PRIMITIVE:
+            case TypeKind::NIL:
+            case TypeKind::VOID:
+            case TypeKind::ANY:
+            case TypeKind::TYPE_PARAM:
+            case TypeKind::ERROR:
+            case TypeKind::THREAD:
+            case TypeKind::MUTEX:
+            case TypeKind::MODULE:
+            case TypeKind::EXCEPTION:
+                return a->toString() == b->toString();
+
+            // Nominal kinds: identity is the canonical declaration object.
+            // Each declaration is constructed once and aliased across modules,
+            // so pointer identity is the correct nominal-identity test. (Pointer
+            // equality was already handled by the fast-path above, so reaching
+            // here means the pointers differ → distinct declarations → unequal.)
+            case TypeKind::CLASS:
+            case TypeKind::DATA:
+            case TypeKind::ENUM:
+            case TypeKind::TRAIT:
+            case TypeKind::CONTRACT:
+                return false;
+
+            case TypeKind::INSTANCE: {
+                auto la = std::dynamic_pointer_cast<InstanceType>(a);
+                auto lb = std::dynamic_pointer_cast<InstanceType>(b);
+                // InstanceType is minted per-use; compare the canonical class.
+                return la && lb && sameType(la->class_type, lb->class_type);
+            }
+
+            case TypeKind::GENERIC_INSTANCE: {
+                auto la = std::dynamic_pointer_cast<GenericInstanceType>(a);
+                auto lb = std::dynamic_pointer_cast<GenericInstanceType>(b);
+                if (!la || !lb) return false;
+                if (!sameType(la->base_type, lb->base_type)) return false;
+                if (la->type_args.size() != lb->type_args.size()) return false;
+                for (const auto& [k, va] : la->type_args) {
+                    auto it = lb->type_args.find(k);
+                    if (it == lb->type_args.end()) return false;
+                    if (!sameType(va, it->second)) return false;
+                }
+                return true;
+            }
+
+            case TypeKind::LIST: {
+                auto la = std::dynamic_pointer_cast<ListType>(a);
+                auto lb = std::dynamic_pointer_cast<ListType>(b);
+                return la && lb && sameType(la->element_type, lb->element_type);
+            }
+
+            case TypeKind::OPTIONAL: {
+                auto la = std::dynamic_pointer_cast<OptionalType>(a);
+                auto lb = std::dynamic_pointer_cast<OptionalType>(b);
+                return la && lb && sameType(la->wrapped_type, lb->wrapped_type);
+            }
+
+            case TypeKind::REF: {
+                auto la = std::dynamic_pointer_cast<RefType>(a);
+                auto lb = std::dynamic_pointer_cast<RefType>(b);
+                return la && lb && sameType(la->inner_type, lb->inner_type);
+            }
+
+            case TypeKind::FUNCTION: {
+                auto la = std::dynamic_pointer_cast<FunctionType>(a);
+                auto lb = std::dynamic_pointer_cast<FunctionType>(b);
+                if (!la || !lb) return false;
+                return la->equals(*lb);
+            }
+
+            case TypeKind::RECORD: {
+                auto la = std::dynamic_pointer_cast<RecordType>(a);
+                auto lb = std::dynamic_pointer_cast<RecordType>(b);
+                if (!la || !lb) return false;
+                if (la->fields.size() != lb->fields.size()) return false;
+                for (const auto& [k, va] : la->fields) {
+                    auto it = lb->fields.find(k);
+                    if (it == lb->fields.end()) return false;
+                    if (!sameType(va, it->second)) return false;
+                }
+                return true;
+            }
+
+            case TypeKind::POINTER: {
+                auto la = std::dynamic_pointer_cast<PointerType>(a);
+                auto lb = std::dynamic_pointer_cast<PointerType>(b);
+                return la && lb && la->depth == lb->depth && la->byval == lb->byval &&
+                       sameType(la->pointee_type, lb->pointee_type);
+            }
+
+            case TypeKind::FIXED_ARRAY: {
+                auto la = std::dynamic_pointer_cast<FixedArrayType>(a);
+                auto lb = std::dynamic_pointer_cast<FixedArrayType>(b);
+                return la && lb && la->size == lb->size && sameType(la->element_type, lb->element_type);
+            }
+        }
+        return false;
+    }
+
+    // TS-4: qualified display name. Returns the bare name for built-in-like
+    // types (home_module empty), or "module::Name" when a nominal type carries
+    // a home module. Used in diagnostics where two same-named types collide.
+    inline std::string qualifiedName(const Type& t) {
+        std::string home;
+        std::string base = t.toString();
+        switch (t.kind) {
+            case TypeKind::CLASS:  home = static_cast<const ClassType&>(t).home_module; break;
+            case TypeKind::DATA:   home = static_cast<const DataType&>(t).home_module; break;
+            case TypeKind::ENUM:   home = static_cast<const EnumType&>(t).home_module; break;
+            case TypeKind::TRAIT:  home = static_cast<const TraitType&>(t).home_module; break;
+            case TypeKind::CONTRACT: home = static_cast<const ContractType&>(t).home_module; break;
+            default: return base;
+        }
+        return home.empty() ? base : (home + "::" + base);
+    }
+
+    // TS-4: name to show for `t` in a mismatch diagnostic against `other`.
+    // Shows the qualified name (e.g. "lib::Foo") only when the two types share
+    // the same bare name — i.e. an actual cross-module collision worth
+    // disambiguating. Otherwise the bare name (cleaner for the common case).
+    inline std::string displayType(const Type& t, const Type& other) {
+        if (t.toString() == other.toString()) {
+            return qualifiedName(t);
+        }
+        return t.toString();
+    }
 
 } // namespace angara

@@ -25,7 +25,7 @@ namespace angara {
             return {};
         }
 
-        if (then_type->toString() != else_type->toString()) {
+        if (!sameType(then_type, else_type)) {
             error(Token(), "Type mismatch in ternary expression. The 'then' branch has type '" +
                            then_type->toString() + "', but the 'else' branch has type '" +
                            else_type->toString() + "'. Both branches must return the same type.", "E381");

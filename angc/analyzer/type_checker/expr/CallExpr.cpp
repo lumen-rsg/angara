@@ -207,8 +207,8 @@ namespace angara {
             if (!check_type_compatibility(expected_type, actual_type,
                     std::dynamic_pointer_cast<const Literal>(arg_expr).get())) {
                 error(call.paren, "Type mismatch for argument " + std::to_string(i + 1) + ". " +
-                                  "Expected '" + expected_type->toString() +
-                                  "', but got '" + actual_type->toString() + "'.", "E332");
+                                  "Expected '" + displayType(*expected_type, *actual_type) +
+                                  "', but got '" + displayType(*actual_type, *expected_type) + "'.", "E332");
                 return;
             }
         }

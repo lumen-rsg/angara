@@ -113,7 +113,7 @@ namespace angara {
             case TokenType::EQUAL_EQUAL:
             case TokenType::BANG_EQUAL: {
                 if (left_type->kind == TypeKind::DATA && right_type->kind == TypeKind::DATA) {
-                    if (left_type->toString() == right_type->toString()) {
+                    if (sameType(left_type, right_type)) {
                         result_type = m_type_bool;
                     } else {
                         error(expr.op, "Cannot compare instances of two different data types: '" +
@@ -137,7 +137,7 @@ namespace angara {
                                        "' — the result depends on the runtime type. Use an @unsafe block to opt in.", "E383");
                     }
                 }
-                else if (left_type->toString() == right_type->toString() ||
+                else if (sameType(left_type, right_type) ||
                     left_type->kind == TypeKind::NIL || right_type->kind == TypeKind::NIL ||
                     (isNumeric(left_type) && isNumeric(right_type)))
                 {

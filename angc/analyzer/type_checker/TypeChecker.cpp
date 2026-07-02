@@ -154,18 +154,21 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         for (const auto& stmt : statements) {
             if (auto class_stmt = std::dynamic_pointer_cast<const ClassStmt>(stmt)) {
                 auto class_type = std::make_shared<ClassType>(class_stmt->name.lexeme);
+                class_type->home_module = m_module_type->name;  // TS-4
                 if (auto conflicting_symbol = m_symbols.declare(class_stmt->name, class_type, true)) {
                     error(class_stmt->name, "Symbol '" + class_stmt->name.lexeme + "' is already declared.", "E243");
                     note(conflicting_symbol->declaration_token, "previous declaration was here.");
                 }
             } else if (auto trait_stmt = std::dynamic_pointer_cast<const TraitStmt>(stmt)) {
                 auto trait_type = std::make_shared<TraitType>(trait_stmt->name.lexeme);
+                trait_type->home_module = m_module_type->name;  // TS-4
                 if (auto conflicting_symbol = m_symbols.declare(trait_stmt->name, trait_type, true)) {
                     error(trait_stmt->name, "Symbol '" + trait_stmt->name.lexeme + "' is already declared.", "E244");
                     note(conflicting_symbol->declaration_token, "previous declaration was here.");
                 }
             } else if (auto contract_stmt = std::dynamic_pointer_cast<const ContractStmt>(stmt)) {
                 auto contract_type = std::make_shared<ContractType>(contract_stmt->name.lexeme);
+                contract_type->home_module = m_module_type->name;  // TS-4
                 if (auto conflicting_symbol = m_symbols.declare(contract_stmt->name, contract_type, true)) {
                     error(contract_stmt->name, "Symbol '" + contract_stmt->name.lexeme + "' is already declared.", "E245");
                     note(conflicting_symbol->declaration_token, "previous declaration was here.");
@@ -173,12 +176,14 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
             }
             else if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
                 auto data_type = std::make_shared<DataType>(data_stmt->name.lexeme);
+                data_type->home_module = m_module_type->name;  // TS-4
                 if (auto conflicting = m_symbols.declare(data_stmt->name, data_type, true)) {
                     error(data_stmt->name, "Symbol '" + data_stmt->name.lexeme + "' is already declared.", "E246");
                     note(conflicting->declaration_token, "previous declaration was here.");
                 }
             } else if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
                 auto enum_type = std::make_shared<EnumType>(enum_stmt->name.lexeme);
+                enum_type->home_module = m_module_type->name;  // TS-4
                 if (auto conflicting = m_symbols.declare(enum_stmt->name, enum_type, true)) {
                     error(enum_stmt->name, "Symbol '" + enum_stmt->name.lexeme + "' is already declared.", "E247");
                     note(conflicting->declaration_token, "previous declaration was here.");

@@ -1,0 +1,30 @@
+// TS-4 positive: legitimate same-type comparisons round-trip cleanly through
+// every site that now uses sameType(): assign, return, ==, ternary, match arms,
+// list-element unify. Same-module nominal types are still identical to themselves.
+attach io;
+
+data Point { let x as i64; let y as i64; }
+
+func make_point(xv as i64, yv as i64) -> Point {
+    return Point(xv, yv);          // E265 path: return Point into Point
+}
+
+func main() -> i64 {
+    let p = make_point(1, 2);       // E275 path: var-decl Point into Point
+    let q = Point(1, 2);
+
+    // E356 path: == on two data of the same type
+    if (p == q) {
+        io.println(0, "equal");
+    }
+
+    // E381 path: ternary both branches same type
+    let r = (p.x > 0) ? p : q;
+
+    // E315 path: list element assign same type
+    let pts as list<Point> = [p, q];
+    pts[0] = q;
+
+    io.println(0, "r=(" + string(r.x) + "," + string(r.y) + ")");
+    return 0;
+}

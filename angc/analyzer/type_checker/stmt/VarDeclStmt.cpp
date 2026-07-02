@@ -35,8 +35,8 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
 
             if (!types_match) {
                 error(stmt->name, "Type mismatch. Variable is annotated as '" +
-                    final_type->toString() + "' but is initialized with a value of type '" +
-                    initializer_type->toString() + "'.", "E275");
+                    displayType(*final_type, *initializer_type) + "' but is initialized with a value of type '" +
+                    displayType(*initializer_type, *final_type) + "'.", "E275");
                 final_type = m_type_error;
             }
         }
