@@ -1622,6 +1622,20 @@ llvm::Value* LLVMBackend::cgIs(const IsExpr& e) {
         return checkObjSubtype(OBJ_RECORD);
     }
 
+    // TS-1: trait/contract target. A value `is Drawable` iff it is a trait
+    // object (OBJ_TRAIT_OBJECT) — i.e. it has been boxed into a trait object
+    // (the boxing happens at coercion sites per Phase C). Raw class instances
+    // are OBJ_RECORDs with no runtime class-id, so a precise check on an
+    // unboxed instance isn't possible without a class-id runtime change (which
+    // accompanies the fat-pointer perf work). For trait objects this is exact.
+    // Resolve whether the named type is a trait/contract.
+    auto target_sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(type_name);
+    if (target_sym && target_sym->type &&
+        (target_sym->type->kind == TypeKind::TRAIT ||
+         target_sym->type->kind == TypeKind::CONTRACT)) {
+        return checkObjSubtype(OBJ_TRAIT_OBJECT);
+    }
+
     // For unknown/class types, just check TAG_OBJ
     return makeBool(is_obj);
 }
