@@ -1,0 +1,22 @@
+// Chaperone negative test — E502 (use-after-free in a while condition, S2)
+// The loop condition reads a tracked variable that was dropped. The Chaperone
+// previously skipped loop conditions entirely; it must now analyze them.
+//
+// expect: E502
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    drop b;
+    while (b.get() > 0) {   // use-after-free in the condition
+        let x as i64 = 0;
+        x = x + 1;
+    }
+    return 0;
+}

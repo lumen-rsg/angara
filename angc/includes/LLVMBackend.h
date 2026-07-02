@@ -42,8 +42,7 @@ namespace angara {
                     bool freestanding = false,
                     bool dump_ir = false,
                     bool debug = false,
-                    bool emit_llvm = false,
-                    const std::string& gc_strategy = "chaperone");
+                    bool emit_llvm = false);
 
         /// Releases LLVM objects (cleanup at process exit).
         ~LLVMBackend();
@@ -123,6 +122,7 @@ namespace angara {
         void cgReturn(const ReturnStmt& s);
         void cgThrow(const ThrowStmt& s);
         void cgTry(const TryStmt& s);
+        void cgDrop(const DropStmt& s);
 
         /// Emits top-level declarations (globals, functions, classes, data, enums).
         void codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>& statements);
@@ -211,11 +211,17 @@ namespace angara {
 
         // --- Unboxed primitive support ---
         /// Kind of local variable storage: boxed (AngaraObject) or raw LLVM primitive.
-        enum class LocalKind { BOXED, RAW_I1, RAW_I64, RAW_F64 };
+        /// RAW_PTR is a C pointer (string→char*, *T, *void) used for FFI marshalling.
+        enum class LocalKind { BOXED, RAW_I1, RAW_I64, RAW_F64, RAW_PTR };
         /// Returns true if a type can be stored as a raw LLVM primitive (not boxed).
         static bool isUnboxableType(const std::shared_ptr<Type>& type);
         /// Maps a semantic type to the appropriate LocalKind.
         static LocalKind localKindForType(const std::shared_ptr<Type>& type);
+        /// FFI: the C-side LocalKind for a foreign-function param/return
+        /// (maps string/pointers to RAW_PTR, unlike localKindForType).
+        static LocalKind ffiKindForType(const std::shared_ptr<Type>& type);
+        /// FFI: whether a type can be marshalled directly to C.
+        static bool isFFIMarshallable(const std::shared_ptr<Type>& type);
         /// Returns the raw LLVM type for a given LocalKind.
         llvm::Type* llvmTypeForLocalKind(LocalKind kind);
         /// Boxes a raw LLVM value into an AngaraObject.
@@ -278,6 +284,10 @@ namespace angara {
         struct RawFuncInfo {
             std::vector<LocalKind> param_kinds;
             LocalKind return_kind;
+            // Optional semantic param/return types for FFI marshalling (string→char*,
+            // *T pointers). Populated for foreign funcs with marshalled params.
+            std::vector<std::shared_ptr<Type>> param_types;
+            std::shared_ptr<Type> return_type;
         };
         std::map<std::string, RawFuncInfo> m_raw_functions;
 
@@ -288,7 +298,6 @@ namespace angara {
         llvm::Value* m_pending_callback_context = nullptr;
 
         bool m_freestanding = false;
-        std::string m_gc_strategy;
         bool m_dump_ir = false;
         bool m_emit_llvm = false;
         bool m_debug = false;
@@ -306,10 +315,6 @@ namespace angara {
         int m_lambda_counter = 0;
 
         // GC root frame state
-        llvm::Value* m_gc_current_frame = nullptr;
-        int m_gc_frame_slot_idx = 0;
-        int m_gc_frame_max_slots = 0;
-        llvm::StructType* m_gc_frame_type = nullptr;
 
         // BUG-5: exception-frame leak. A `try` pushes a frame onto the global
         // exception chain; the pop (__ang_try_end) is only emitted on the
@@ -319,6 +324,11 @@ namespace angara {
         // exit (emitGcPopFrame), and save/restore per-loop for break/continue.
         llvm::Value* m_exc_chain_save = nullptr;          // function-entry chain
         std::vector<llvm::Value*> m_exc_loop_chain_saves; // one per enclosing loop
+
+        // v5: Chaperone exception-unwind plan (ThrowStmt* → vars to auto-drop).
+
+        // v5: Set of tracked type names (owned + class) for drop cascades.
+        std::set<std::string> m_tracked_types;
 
         void emitGcPushFrame(llvm::Function* fn, int slot_count);
         void emitGcPopFrame();

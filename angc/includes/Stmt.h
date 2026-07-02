@@ -33,6 +33,7 @@ namespace angara {
     struct DataStmt;
     struct EnumStmt;
     struct UnsafeBlockStmt;
+    struct DropStmt;
 
 // Statement Visitor Interface (returns void)
     class StmtVisitor {
@@ -59,6 +60,7 @@ namespace angara {
         virtual void visit(std::shared_ptr<const DataStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const EnumStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const UnsafeBlockStmt> stmt) = 0;
+        virtual void visit(std::shared_ptr<const DropStmt> stmt) = 0;
     };
     // A simple struct to pair a parameter's name with its type annotation.
     struct Parameter {
@@ -307,19 +309,17 @@ namespace angara {
 
     struct TryStmt final : Stmt {
         const std::shared_ptr<Stmt> tryBlock;
-        const Token catchName; // The 'e' in catch(e)
-
-        // --- NEW FIELD ---
-        const std::shared_ptr<ASTType> catchType; // The optional `as <type>`
-
+        const Token catchName;
+        const std::shared_ptr<ASTType> catchType;
         const std::shared_ptr<Stmt> catchBlock;
+        const std::shared_ptr<Stmt> finallyBlock;  // v5: optional finally {}
 
-        // --- UPDATE CONSTRUCTOR ---
-        TryStmt(std::shared_ptr<Stmt> tryBlock, Token catchName, std::shared_ptr<ASTType> catchType, std::shared_ptr<Stmt> catchBlock)
+        TryStmt(std::shared_ptr<Stmt> tryBlock, Token catchName, std::shared_ptr<ASTType> catchType, std::shared_ptr<Stmt> catchBlock, std::shared_ptr<Stmt> finallyBlock = nullptr)
                 : tryBlock(std::move(tryBlock)),
                   catchName(std::move(catchName)),
-                  catchType(std::move(catchType)), // Store the new type
-                  catchBlock(std::move(catchBlock)) {}
+                  catchType(std::move(catchType)),
+                  catchBlock(std::move(catchBlock)),
+                  finallyBlock(std::move(finallyBlock)) {}
 
         void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const TryStmt>(self));
@@ -409,6 +409,7 @@ namespace angara {
         bool is_foreign = false;
         bool is_opaque = false;
         bool is_union = false;
+        bool is_owned = false;  // v5: `owned` keyword — heap type, must be dropped
 
         DataStmt(Token name, std::vector<std::shared_ptr<VarDeclStmt>> fields,
                  std::vector<Token> type_params = {})
@@ -468,6 +469,17 @@ namespace angara {
 
         void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const UnsafeBlockStmt>(self));
+        }
+    };
+
+    // v5: `drop x;` — explicit deallocation via the Allocator.
+    struct DropStmt final : Stmt {
+        const Token name;
+
+        DropStmt(Token name) : name(std::move(name)) {}
+
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
+            visitor.visit(std::static_pointer_cast<const DropStmt>(self));
         }
     };
 }

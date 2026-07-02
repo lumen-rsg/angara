@@ -23,8 +23,8 @@ void RuntimeBuilder::generateFreestandingStubs() {
         auto* e = BasicBlock::Create(m_ctx, "entry", fn); IRBuilder<> b(e); b.CreateRet(make_nil(b));
     };
 
-    // GC stubs for freestanding mode
-    m_gc->generateFreestandingStubs();
+    // Memory management stubs (no GC — direct malloc + no-ops)
+    generateMemoryManagement();
 
     {
         auto* fn = createRuntimeFunc("__ang_equals", FunctionType::get(obj_ty, {obj_ty, obj_ty}, false));

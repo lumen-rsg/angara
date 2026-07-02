@@ -1,0 +1,47 @@
+// Test 13: Optional narrowing after nil check (TS-5)
+// `if (x != nil)` narrows x to its unwrapped type in the then-branch;
+// `if (x == nil) { } else { }` narrows in the else-branch.
+
+attach io;
+
+class Box {
+    let value as i64;
+    func init(this, v as i64) { this.value = v; }
+    public:
+    func get(this) -> i64 { return this.value; }
+}
+
+export func main() -> i64 {
+    // Test 1: != nil narrows in the then-branch
+    let b1 as Box? = Box(42);
+    if (b1 != nil) {
+        let v = b1.get();   // b1 is narrowed to Box — method call works
+        io.println(1, string(v));
+    }
+    drop b1;
+
+    // Test 2: == nil narrows in the else-branch
+    let b2 as Box? = Box(99);
+    if (b2 == nil) {
+        io.println(2, "unexpected nil");
+        drop b2;
+        return 1;
+    } else {
+        let v = b2.get();   // b2 is narrowed to Box in the else-branch
+        io.println(1, string(v));
+    }
+    drop b2;
+
+    // Test 3: actually-nil optional — the then-branch doesn't execute
+    let b3 as Box? = nil;
+    if (b3 != nil) {
+        io.println(2, "should not reach");
+        drop b3;
+        return 1;
+    } else {
+        io.println(1, "b3 is nil — correct");
+    }
+    drop b3;
+
+    return 0;
+}

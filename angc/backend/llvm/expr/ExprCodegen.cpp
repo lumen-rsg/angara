@@ -514,11 +514,19 @@ llvm::Value* LLVMBackend::cgUnary(const Unary& e) {
 llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
     auto* v = cg(e.value);
     if (auto* var = dynamic_cast<const VarExpr*>(e.target.get())) {
-        // Under GC, assignment just overwrites the alloca. The old value's
-        // lifetime is determined by reachability — no manual decref needed.
+        // v5: data types copy-on-assign. If the target variable is a plain
+        // `data` type (not owned/class — those are tracked for drop), deep-clone
+        // the value so the target is independent of the source.
         auto type_it = namedTypes.find(var->name.lexeme);
-        if (type_it != namedTypes.end() && isSizedIntType(type_it->second)) {
-            v = truncateForType(v, type_it->second);
+        if (type_it != namedTypes.end() && type_it->second) {
+            auto& vt = type_it->second;
+            if (vt->kind == TypeKind::DATA &&
+                m_tracked_types.count(vt->toString()) == 0) {
+                v = callRtByName("__ang_deep_clone", {v});
+            }
+            if (isSizedIntType(vt)) {
+                v = truncateForType(v, vt);
+            }
         }
         storeVar(var->name.lexeme, v);
         return v;
@@ -688,18 +696,25 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                 std::string resolved_method;
                 auto type_it = m_type_checker.getExpressionTypes().find(obj);
                 if (type_it != m_type_checker.getExpressionTypes().end() &&
-                    type_it->second->kind == TypeKind::INSTANCE) {
-                    auto inst = std::dynamic_pointer_cast<InstanceType>(type_it->second);
-                    if (inst && inst->class_type) {
-                        auto cls = inst->class_type;
-                        while (cls) {
-                            auto qit = methodLookup.find(cls->name + "." + fnName);
-                            if (qit != methodLookup.end()) {
-                                resolved_method = qit->second;
-                                break;
-                            }
-                            cls = cls->superclass;
+                    (type_it->second->kind == TypeKind::INSTANCE ||
+                     type_it->second->kind == TypeKind::CLASS)) {
+                    // For INSTANCE types, walk class_type; for native CLASS
+                    // types (returned by module constructors like amqp.connect),
+                    // use the class name directly.
+                    std::shared_ptr<ClassType> cls;
+                    if (type_it->second->kind == TypeKind::INSTANCE) {
+                        auto inst = std::dynamic_pointer_cast<InstanceType>(type_it->second);
+                        if (inst) cls = inst->class_type;
+                    } else {
+                        cls = std::dynamic_pointer_cast<ClassType>(type_it->second);
+                    }
+                    while (cls) {
+                        auto qit = methodLookup.find(cls->name + "." + fnName);
+                        if (qit != methodLookup.end()) {
+                            resolved_method = qit->second;
+                            break;
                         }
+                        cls = cls->superclass;
                     }
                 }
                 // Fall back to unqualified lookup if no qualified match
@@ -707,6 +722,32 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                     auto mit = methodLookup.find(fnName);
                     if (mit != methodLookup.end())
                         resolved_method = mit->second;
+                }
+                // Fallback: resolve via codegen's namedTypes if expression-type
+                // pointer lookup missed (handles native instances from module
+                // constructors whose VarExpr pointer may not be in the type
+                // checker's expression-type map).
+                if (resolved_method.empty()) {
+                    auto nt_it = namedTypes.find(modName);
+                    if (nt_it != namedTypes.end() && nt_it->second) {
+                        auto& t = nt_it->second;
+                        std::shared_ptr<ClassType> cls;
+                        if (t->kind == TypeKind::INSTANCE) {
+                            auto inst = std::dynamic_pointer_cast<InstanceType>(t);
+                            if (inst) cls = inst->class_type;
+                        } else if (t->kind == TypeKind::CLASS) {
+                            cls = std::dynamic_pointer_cast<ClassType>(t);
+                        }
+                        while (cls) {
+                            auto qit = methodLookup.find(cls->name + "." + fnName);
+                            if (qit != methodLookup.end()) { resolved_method = qit->second; break; }
+                            cls = cls->superclass;
+                        }
+                        if (resolved_method.empty()) {
+                            auto mit2 = methodLookup.find(fnName);
+                            if (mit2 != methodLookup.end()) resolved_method = mit2->second;
+                        }
+                    }
                 }
                 if (!resolved_method.empty()) {
                     llvm::Function* mf = this->mod->getFunction(resolved_method);
@@ -1052,6 +1093,32 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
     llvm::Function* f = this->mod->getFunction(mangled);
     if (!f) f = this->mod->getFunction("__ang_"+sanitize(fn));
 
+    // If no fixed-arity wrapper exists, check for the native (argc, ptr)
+    // convention — this is how variadic module functions are called.
+    if (!f) {
+        std::string native_name = "Angara_" + mod + "_" + fn;
+        llvm::Function* native_f = this->mod->getFunction(native_name);
+        if (native_f) {
+            // Call with native convention: (argc, AngaraObject* args[])
+            std::vector<llvm::Value*> native_args;
+            auto cnt = args.size();
+            native_args.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), (int)cnt));
+            if (cnt > 0) {
+                auto* aa = builder->CreateAlloca(llvm::ArrayType::get(objType, cnt));
+                for (size_t i = 0; i < cnt; i++) {
+                    auto* ep = builder->CreateGEP(llvm::ArrayType::get(objType, cnt), aa,
+                        {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
+                         llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
+                    builder->CreateStore(cg(args[i]), ep);
+                }
+                native_args.push_back(builder->CreateBitCast(aa, llvm::PointerType::get(*ctx, 0)));
+            } else {
+                native_args.push_back(llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)));
+            }
+            return builder->CreateCall(native_f, native_args);
+        }
+    }
+
     if (!f) {
         // Check if we know this is a raw-signature function
         auto raw_it = m_raw_functions.find(mangled);
@@ -1100,7 +1167,15 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
         std::vector<llvm::Value*> llvmArgs;
         for (size_t i = 0; i < args.size() && i < info.param_kinds.size(); i++) {
             auto* boxed = cg(args[i]);
-            llvmArgs.push_back(unboxToRaw(boxed, info.param_kinds[i]));
+            // FFI marshalling: if this is a foreign func carrying the param's
+            // semantic type, marshal string→char* and pointers via marshalAngaraToC
+            // (unboxToRaw only handles numeric primitives).
+            if (!info.param_types.empty() && i < info.param_types.size()
+                && info.param_kinds[i] == LocalKind::RAW_PTR) {
+                llvmArgs.push_back(marshalAngaraToC(boxed, info.param_types[i]));
+            } else {
+                llvmArgs.push_back(unboxToRaw(boxed, info.param_kinds[i]));
+            }
         }
         while (llvmArgs.size() < ft->getNumParams()) {
             auto kind = llvmArgs.size() < info.param_kinds.size()
@@ -1609,13 +1684,9 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     auto saved_kinds = std::move(namedKinds);
     auto* saved_ret_alloca = m_inlined_main_ret_alloca;
     auto* saved_cleanup_bb = m_inlined_main_cleanup_bb;
-    auto* saved_gc_frame = m_gc_current_frame;
     auto* saved_exc_chain = m_exc_chain_save;
-    int saved_gc_slot_idx = m_gc_frame_slot_idx;
-    int saved_gc_max_slots = m_gc_frame_max_slots;
     m_inlined_main_ret_alloca = nullptr;
     m_inlined_main_cleanup_bb = nullptr;
-    m_gc_current_frame = nullptr;
     namedVals.clear();
     namedTypes.clear();
     namedKinds.clear();
@@ -1655,7 +1726,7 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     }
 
     if (!builder->GetInsertBlock()->getTerminator()) {
-        if (m_gc_current_frame) emitGcPopFrame();
+        if (m_exc_chain_save) emitGcPopFrame();
         builder->CreateRet(makeNil());
     }
 
@@ -1664,10 +1735,7 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     namedKinds = std::move(saved_kinds);
     m_inlined_main_ret_alloca = saved_ret_alloca;
     m_inlined_main_cleanup_bb = saved_cleanup_bb;
-    m_gc_current_frame = saved_gc_frame;
     m_exc_chain_save = saved_exc_chain;
-    m_gc_frame_slot_idx = saved_gc_slot_idx;
-    m_gc_frame_max_slots = saved_gc_max_slots;
 
     if (saved_insert_block) {
         builder->SetInsertPoint(saved_insert_block);

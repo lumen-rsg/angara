@@ -120,6 +120,7 @@ func test_concurrency() {
 
     let expected = num_threads * ops_per_thread;
     assert.eq(counter.value, expected, "Threaded counter value");
+    drop counter;
 }
 
 // --- TEST 5: Clone vs Deep Clone (Memory Model Stress) ---

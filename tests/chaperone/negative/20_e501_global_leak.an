@@ -1,0 +1,17 @@
+// Chaperone negative test — E501 (module-level/global tracked allocation leaks, G1)
+// A tracked allocation at module scope is never dropped — the Chaperone
+// previously ignored top-level lets, so globals leaked silently. Must now
+// report E501 (or require @manual).
+//
+// expect: E501
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+let g = Buf(42);   // module-level, never dropped — leak
+
+export func main() -> i64 {
+    return 0;
+}

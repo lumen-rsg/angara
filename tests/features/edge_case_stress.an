@@ -884,6 +884,10 @@ func test_inheritance() {
     c.add(7);
     assert.eq(c.value, 10, "counter after add(7) = 10");
 
+    drop animal;
+    drop dog;
+    drop guide;
+    drop c;
     io.println(1, "  [11] PASSED");
 }
 
@@ -1072,6 +1076,8 @@ func test_concurrency() {
     }
     assert.eq(ctr2.value, 1000, "reverse join: 5 x 200 = 1000");
 
+    drop ctr;
+    drop ctr2;
     io.println(1, "  [14] PASSED");
 }
 
@@ -1199,11 +1205,14 @@ func test_interactions() {
 
     // Counter + exception
     let c = Counter();
+    let before as i64 = 0;
     try {
         c.inc();
+        before = c.value;            // capture before the throw
+        drop c;                       // v5: release before throwing (c is live at throw otherwise)
         throw Exception("stop");
     } catch (e) {
-        assert.eq(c.value, 1, "counter incremented before exception was thrown");
+        assert.eq(before, 1, "counter incremented before exception was thrown");
     }
 
     // Record + list

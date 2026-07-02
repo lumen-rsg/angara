@@ -1,29 +1,26 @@
 attach http;
-attach "json.an";
+attach json;
 attach io;
 
-func println(s as string) -> void {
-  io.write(1, s + "\n");
-}
 
 export func main() -> i64 {
-  println("--- Angara JSON Parser Test ---");
+  io.println(1, "--- Angara JSON Parser Test ---");
 
   const POKE_API_URL = "https://pokeapi.co/api/v2/pokemon/pikachu";
 
   let request_options = { "method": "GET", "url": POKE_API_URL };
 
   try {
-    println("Fetching JSON from: " + POKE_API_URL);
+    io.println(1, "Fetching JSON from: " + POKE_API_URL);
     let response_any = http.request(request_options);
     let response as {status_code: i64, body: string} = response_any;
 
     if (response["status_code"] != 200) {
-      println("HTTP request failed!");
+      io.println(1, "HTTP request failed!");
       return 1;
     }
 
-    println("Successfully received JSON. Parsing...");
+    io.println(1, "Successfully received JSON. Parsing...");
 
     // --- Use the new JSON parser! ---
     let data_any = json.parse(response["body"]);
@@ -35,20 +32,20 @@ export func main() -> i64 {
       abilities: list<any>
     } = data_any;
 
-    println("\n--- Parsed Pokémon Data ---");
-    println("Name: " + pokemon_data["name"]);
-    println("National Dex ID: " + string(i64(pokemon_data["id"])));
+    io.println(1, "\n--- Parsed Pokémon Data ---");
+    io.println(1, "Name: " + pokemon_data["name"]);
+    io.println(1, "National Dex ID: " + string(i64(pokemon_data["id"])));
 
-    println("\nAbilities:");
+    io.println(1, "\nAbilities:");
     for (ability_obj in pokemon_data["abilities"]) {
       // Assert the shape of the objects inside the list
       let ability_info as {ability: {name: string}} = ability_obj;
-      println(" - " + ability_info["ability"]["name"]);
+      io.println(1, " - " + ability_info["ability"]["name"]);
     }
 
   } catch (e) {
     // This will catch errors from http.request OR json.parse
-    println("\nAn error occurred: " + string(e));
+    io.println(1, "\nAn error occurred: " + string(e));
     return 1;
   }
 

@@ -7,8 +7,9 @@ public:
   }
 }
 func main() -> i64 {
-    let f = Foo();
-    let l as list<any> = [f, "test", 15];
+    // The Foo is constructed directly in the list (no separate tracked local),
+    // so there's no Live binding to escape or double-drop — the list owns it.
+    let l as list<any> = [Foo(), "test", 15];
 
     for (item in l) {
       // At this point, `item` is of type `any`.

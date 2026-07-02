@@ -120,6 +120,7 @@ namespace angara {
         if (match({TokenType::IF})) return ifStatement();
         if (match({TokenType::WHILE})) return whileStatement();
         if (match({TokenType::THROW})) return throwStatement();
+        if (match({TokenType::DROP})) return dropStatement();
         if (match({TokenType::RETURN})) return returnStatement();
         if (match({TokenType::LEFT_BRACE})) return std::make_shared<BlockStmt>(block());
         if (match({TokenType::SEMICOLON})) return std::make_shared<EmptyStmt>();
@@ -188,7 +189,7 @@ namespace angara {
             case TokenType::STATIC: case TokenType::PRIVATE: case TokenType::PUBLIC:
             case TokenType::EXPORT: case TokenType::CONTRACT: case TokenType::SIGNS:
             case TokenType::BREAK: case TokenType::CONTINUE: case TokenType::IS:
-            case TokenType::DATA: case TokenType::ENUM: case TokenType::MATCH:
+            case TokenType::DATA: case TokenType::ENUM: case TokenType::MATCH: case TokenType::DROP: case TokenType::OWNED:
             case TokenType::CASE: case TokenType::FOREIGN: case TokenType::INTRINSIC:
             case TokenType::UNION: case TokenType::AS:
             case TokenType::TYPE_STRING: case TokenType::TYPE_INT:

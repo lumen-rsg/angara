@@ -1,0 +1,20 @@
+// Chaperone negative test — E506 (loop-body double-free)
+// A tracked variable allocated before a loop is dropped inside the loop body
+// without reassignment, so iteration 2+ would double-free. Must report E506.
+//
+// expect: E506
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let i as i64 = 0;
+    while (i < 3) {
+        drop b;          // dropped inside loop, never reassigned
+        i = i + 1;
+    }
+    return 0;
+}

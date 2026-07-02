@@ -204,6 +204,7 @@ export func main() -> i64 {
   let conn as Connection = make_conn("smart_home_sim");
   if (!wait_connected(conn, 5.0)) {
     io.println(2, "[FAIL] Could not connect to broker");
+    drop conn;
     return 1;
   }
   io.println(1, "Connected to " + BROKER_URL);
@@ -227,5 +228,6 @@ export func main() -> i64 {
   }
 
   conn.disconnect();
+  drop conn;
   return 0;
 }

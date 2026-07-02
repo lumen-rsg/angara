@@ -253,7 +253,7 @@ AngaraObject Angara_rpc_create_server(int argc, AngaraObject args[]) {
 }
 
 
-AngaraObject Angara_Server_service(int argc, AngaraObject args[]) {
+AngaraObject Angara_RpcServer_service(int argc, AngaraObject args[]) {
     if (argc < 1) return ang_nil();
     RpcServer* srv = (RpcServer*)ang_api->native_instance_data(args[0]);
     if (!srv || srv->listen_fd < 0) return ang_nil();
@@ -271,7 +271,7 @@ AngaraObject Angara_Server_service(int argc, AngaraObject args[]) {
 }
 
 
-AngaraObject Angara_Server_poll_clients(int argc, AngaraObject args[]) {
+AngaraObject Angara_RpcServer_poll_clients(int argc, AngaraObject args[]) {
     if (argc < 1) return ang_nil();
     RpcServer* srv = (RpcServer*)ang_api->native_instance_data(args[0]);
     if (!srv || srv->listen_fd < 0) return ang_nil();
@@ -291,7 +291,7 @@ AngaraObject Angara_Server_poll_clients(int argc, AngaraObject args[]) {
 }
 
 
-AngaraObject Angara_Server_read_request(int argc, AngaraObject args[]) {
+AngaraObject Angara_RpcServer_read_request(int argc, AngaraObject args[]) {
     if (argc < 2) return ang_nil();
     if (!ang_is_i64(args[0])) return ang_nil();
     RpcServer* srv = (RpcServer*)ang_api->native_instance_data(args[0]);
@@ -371,7 +371,7 @@ AngaraObject Angara_Server_read_request(int argc, AngaraObject args[]) {
 }
 
 
-AngaraObject Angara_Server_respond(int argc, AngaraObject args[]) {
+AngaraObject Angara_RpcServer_respond(int argc, AngaraObject args[]) {
     if (argc < 4) {
         ang_api->throw_error("rpc.respond expects (id, result, client_fd).");
         return ang_nil();
@@ -418,7 +418,7 @@ AngaraObject Angara_Server_respond(int argc, AngaraObject args[]) {
 }
 
 
-AngaraObject Angara_Server_close(int argc, AngaraObject args[]) {
+AngaraObject Angara_RpcServer_close(int argc, AngaraObject args[]) {
     if (argc < 1) return ang_nil();
     RpcServer* srv = (RpcServer*)ang_api->native_instance_data(args[0]);
     if (srv && srv->listen_fd >= 0) {
@@ -684,11 +684,11 @@ AngaraObject Angara_rpc_notify(int argc, AngaraObject args[]) {
 
 
 static const AngaraMethodDef SERVER_METHODS[] = {
-    {"service",       (AngaraMethodFn)Angara_Server_service,       "->n"},
-    {"poll_clients",  (AngaraMethodFn)Angara_Server_poll_clients,  "->l<i>"},
-    {"read_request",  (AngaraMethodFn)Angara_Server_read_request,  "i->{}?"},
-    {"respond",       (AngaraMethodFn)Angara_Server_respond,       "aai->n"},
-    {"close",         (AngaraMethodFn)Angara_Server_close,         "->n"},
+    {"service",       (AngaraMethodFn)Angara_RpcServer_service,       "->n"},
+    {"poll_clients",  (AngaraMethodFn)Angara_RpcServer_poll_clients,  "->l<i>"},
+    {"read_request",  (AngaraMethodFn)Angara_RpcServer_read_request,  "i->{}?"},
+    {"respond",       (AngaraMethodFn)Angara_RpcServer_respond,       "aai->n"},
+    {"close",         (AngaraMethodFn)Angara_RpcServer_close,         "->n"},
     {NULL, NULL, NULL}
 };
 
@@ -696,8 +696,8 @@ static const AngaraClassDef SERVER_CLASS_DEF = { "RpcServer", NULL, SERVER_METHO
 
 static const AngaraFuncDef RPC_EXPORTS[] = {
     {"create_server", Angara_rpc_create_server, "i->RpcServer", &SERVER_CLASS_DEF},
-    {"call",          Angara_rpc_call,           "sisl?a->a",    NULL},
-    {"notify",        Angara_rpc_notify,         "sis->n",       NULL},
+    {"call",          Angara_rpc_call,           "sisl<a>?->a",  NULL},
+    {"notify",        Angara_rpc_notify,         "sisl<a>?->n",  NULL},
     ANGARA_FUNC_END
 };
 

@@ -5,7 +5,7 @@ attach time;
 
 const BROKER_URL as string = "mqtt://localhost:11883";
 
-func wait_connected(conn as Connection, max_wait as f64) -> bool {
+func wait_connected(conn as ref<Connection>, max_wait as f64) -> bool {
   let attempts as i64 = 0;
   let max_attempts as i64 = i64(max_wait * 20.0);
   while (!conn.is_connected() && attempts < max_attempts) {
@@ -43,6 +43,7 @@ export func main() -> i64 {
     }
   }
   conn1.disconnect();
+  drop conn1;
   time.sleep(0.2);
 
   // Test B: Custom client ID
@@ -63,6 +64,7 @@ export func main() -> i64 {
     }
   }
   conn2.disconnect();
+  drop conn2;
   time.sleep(0.2);
 
   // Test C: cleanSession=false
@@ -78,6 +80,7 @@ export func main() -> i64 {
     io.println(1, "[PASS] C: Persistent session connected");
   }
   conn3.disconnect();
+  drop conn3;
   time.sleep(0.2);
 
   // Test D: Short keepalive
@@ -100,6 +103,7 @@ export func main() -> i64 {
     }
   }
   conn4.disconnect();
+  drop conn4;
   time.sleep(0.2);
 
   // Test E: URL with explicit port
@@ -115,6 +119,7 @@ export func main() -> i64 {
     io.println(1, "[PASS] E: URL with port connected");
   }
   conn5.disconnect();
+  drop conn5;
 
   // Summary
   io.println(1, "");

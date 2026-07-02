@@ -5,7 +5,7 @@ attach time;
 
 const BROKER_URL as string = "mqtt://localhost:11883";
 
-func wait_connected(conn as Connection, max_wait as f64) -> bool {
+func wait_connected(conn as ref<Connection>, max_wait as f64) -> bool {
   let attempts as i64 = 0;
   let max_attempts as i64 = i64(max_wait * 20.0);
   while (!conn.is_connected() && attempts < max_attempts) {
@@ -26,6 +26,7 @@ func test_qos(qos as i64) -> bool {
   let sub as Connection = make_conn("qos_sub_" + string(qos));
   if (!wait_connected(sub, 3.0)) {
     io.println(2, "  [FAIL] Subscriber connect failed for QoS " + string(qos));
+    drop sub;
     return false;
   }
 
@@ -36,6 +37,8 @@ func test_qos(qos as i64) -> bool {
   if (!wait_connected(pub, 3.0)) {
     io.println(2, "  [FAIL] Publisher connect failed for QoS " + string(qos));
     sub.disconnect();
+    drop sub;
+    drop pub;
     return false;
   }
 
@@ -60,6 +63,8 @@ func test_qos(qos as i64) -> bool {
     }
   } else {
     io.println(2, "  [FAIL] No message received for QoS " + string(qos));
+    drop sub;
+    drop pub;
     return false;
   }
 }

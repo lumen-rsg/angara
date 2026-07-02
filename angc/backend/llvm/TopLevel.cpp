@@ -5,13 +5,23 @@ namespace angara {
 
 void LLVMBackend::codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>& statements) {
     codegenNativeModuleDecls(statements);
+
+    // v5: collect tracked type names for drop cascades.
+    for (const auto& stmt : statements) {
+        if (auto s = std::dynamic_pointer_cast<const ClassStmt>(stmt))
+            m_tracked_types.insert(s->name.lexeme);
+        else if (auto s = std::dynamic_pointer_cast<const DataStmt>(stmt))
+            if (s->is_owned)
+                m_tracked_types.insert(s->name.lexeme);
+    }
+
     for (const auto& stmt : statements) {
         if (auto s = std::dynamic_pointer_cast<const VarDeclStmt>(stmt))
             codegenGlobalVarDecl(*s);
         else if (auto s = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
             if (s->is_intrinsic) continue;
             if (s->is_foreign) { codegenForeignFuncDecl(*s); continue; }
-            if (s->name.lexeme == "main") continue;  // inlined into C main
+            if (s->name.lexeme == "main") continue;
             codegenFunctionDecl(*s, moduleName);
         }
         else if (auto s = std::dynamic_pointer_cast<const ClassStmt>(stmt))
@@ -58,24 +68,45 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     auto sem_fn_type = (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION)
         ? std::dynamic_pointer_cast<FunctionType>(sem_sym->type) : nullptr;
 
-    // Check if this function can use a raw (unboxed) signature
+    // Check if this function can use a raw (unboxed) signature. Foreign funcs
+    // use the FFI-marshallable set (includes `string`→char* and pointer types),
+    // so `foreign func strlen(s as string) -> i64` gets a real C signature.
+    // Non-foreign funcs keep the stricter unboxable set (locals only).
+    // Exported functions are always boxed — cross-module calls use the
+    // uniform (objType...) -> objType ABI, avoiding signature mismatches
+    // between the defining and calling modules.
+    bool is_foreign_fn = stmt.is_foreign;
     bool is_raw = false;
     RawFuncInfo raw_info;
     raw_info.return_kind = LocalKind::BOXED;
 
-    if (sem_fn_type && stmt.type_params.empty()) {
+    if (sem_fn_type && stmt.type_params.empty() && !stmt.is_exported) {
         auto ret_type = sem_fn_type->return_type;
-        bool all_unboxable = ret_type && isUnboxableType(ret_type);
-        raw_info.return_kind = all_unboxable ? localKindForType(ret_type) : LocalKind::BOXED;
+        auto can_marshal = is_foreign_fn ? isFFIMarshallable(ret_type)
+                                        : (ret_type && isUnboxableType(ret_type));
+        raw_info.return_kind = can_marshal
+            ? (is_foreign_fn ? ffiKindForType(ret_type) : localKindForType(ret_type))
+            : LocalKind::BOXED;
 
-        for (size_t i = 0; i < sem_fn_type->param_types.size() && all_unboxable; i++) {
-            if (!isUnboxableType(sem_fn_type->param_types[i])) all_unboxable = false;
+        bool all_marshalable = can_marshal;
+        for (size_t i = 0; i < sem_fn_type->param_types.size() && all_marshalable; i++) {
+            auto& pt = sem_fn_type->param_types[i];
+            bool ok = is_foreign_fn ? isFFIMarshallable(pt) : isUnboxableType(pt);
+            if (!ok) all_marshalable = false;
         }
 
-        if (all_unboxable) {
+        if (all_marshalable) {
             is_raw = true;
             for (size_t i = 0; i < sem_fn_type->param_types.size(); i++) {
-                raw_info.param_kinds.push_back(localKindForType(sem_fn_type->param_types[i]));
+                auto& pt = sem_fn_type->param_types[i];
+                raw_info.param_kinds.push_back(is_foreign_fn ? ffiKindForType(pt)
+                                                             : localKindForType(pt));
+            }
+            if (is_foreign_fn) {
+                // Carry the semantic types so the call site can marshal
+                // (string→char*) via marshalAngaraToC instead of plain unbox.
+                raw_info.param_types = sem_fn_type->param_types;
+                raw_info.return_type = ret_type;
             }
             m_raw_functions[func_name] = raw_info;
         }
@@ -161,6 +192,15 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     auto saved_raw_ret = m_current_raw_return_kind;
     m_current_raw_return_kind = is_raw ? raw_info.return_kind : std::optional<LocalKind>{};
 
+    // Reset per-function codegen state. m_exc_chain_save holds an LLVM Value
+    // (an alloca) from emitGcPushFrame; if a prior function set it and this one
+    // doesn't push a frame, a stale value would make emitGcPopFrame reference
+    // an instruction in another function → LLVM module-verify failure. Same for
+    // the inlined-main members. Reset before the conditional push below.
+    m_exc_chain_save = nullptr;
+    m_inlined_main_ret_alloca = nullptr;
+    m_inlined_main_cleanup_bb = nullptr;
+
     // Only push GC frame if the function has heap-referencing values.
     // Raw primitive-only functions (like fib) don't need GC at all.
     bool needs_gc = !is_raw || functionNeedsGC(stmt);
@@ -176,7 +216,7 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     }
 
     if (!builder->GetInsertBlock()->getTerminator()) {
-        if (m_gc_current_frame) emitGcPopFrame();
+        if (m_exc_chain_save) emitGcPopFrame();
         if (is_raw) {
             auto* zero = llvm::ConstantInt::get(llvmTypeForLocalKind(raw_info.return_kind), 0);
             builder->CreateRet(zero);
@@ -293,7 +333,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
             }
 
             if (!builder->GetInsertBlock()->getTerminator()) {
-                if (m_gc_current_frame) emitGcPopFrame();
+                if (m_exc_chain_save) emitGcPopFrame();
                 builder->CreateRet(makeNil());
             }
 
@@ -747,7 +787,7 @@ void LLVMBackend::codegenEnumDecl(const EnumStmt& stmt) {
 
 void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& statements,
                                         const std::string& module_name,
-                                        const std::vector<std::string>&) {
+                                        const std::vector<std::string>& all_module_names) {
     std::string entry_name = m_freestanding ? "_start" : "main";
     auto* main_type = llvm::FunctionType::get(
         m_freestanding ? llvm::Type::getVoidTy(*ctx) : llvm::Type::getInt32Ty(*ctx), false);
@@ -818,6 +858,24 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
     // codegen), this call always executes every init, even for literals first
     // referenced in functions compiled after this call site.
     builder->CreateCall(m_strlit_init_fn);
+
+    // Call each imported .an module's string-literal init function.
+    // Each module has its own __ang_strlit_init_<moduleName> with
+    // ExternalLinkage; we emit calls to them here so their string
+    // literals are initialized before any user code runs.
+    for (const auto& mod_name : all_module_names) {
+        std::string init_name = "__ang_strlit_init_" + mod_name;
+        if (auto* init_fn = mod->getFunction(init_name)) {
+            builder->CreateCall(init_fn);
+        } else {
+            // Declare it as an external — the linker resolves it from
+            // the imported module's object file.
+            auto* ft = llvm::FunctionType::get(llvm::Type::getVoidTy(*ctx), false);
+            auto* ext_fn = llvm::Function::Create(ft,
+                llvm::Function::ExternalLinkage, init_name, mod.get());
+            builder->CreateCall(ext_fn);
+        }
+    }
 
     for (const auto& stmt : statements) {
         if (std::dynamic_pointer_cast<const FuncStmt>(stmt)) continue;
@@ -902,7 +960,7 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
 
             // Cleanup block: pop frame, teardown GC thread, branch to exit
             builder->SetInsertPoint(cleanup_bb);
-            if (m_gc_current_frame) emitGcPopFrame();
+            if (m_exc_chain_save) emitGcPopFrame();
             builder->CreateBr(exit_bb);
 
             // Exit block: load return value and return
@@ -986,11 +1044,13 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
                         }
                         if (ms) builder->SetInsertPoint(ms);
                         methodLookup[method_name] = mwn;
+                        methodLookup[class_type->name + "." + method_name] = mwn;
                     }
                 }
                 continue;
             }
             int param_count = (int)func_type->param_types.size();
+            bool is_variadic = func_type->is_variadic;
 
             std::string native_name = "Angara_" + mod_name + "_" + export_name;
             auto* native_fn_type = llvm::FunctionType::get(objType,
@@ -999,6 +1059,16 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
                                     native_name, mod.get());
 
             std::string wrapper_name = mangle(mod_name, export_name);
+
+            // For variadic native functions, skip the fixed-arity wrapper.
+            // The call site (callModuleFn) handles packing args into the
+            // (argc, args[]) native calling convention directly.
+            if (is_variadic) {
+                // Register the native name as a known function so callModuleFn
+                // can find it and use the native (argc, ptr) calling convention.
+                continue;
+            }
+
             std::vector<llvm::Type*> wpt(param_count, objType);
             auto* wft = llvm::FunctionType::get(objType, wpt, false);
             auto* wf = llvm::Function::Create(wft, llvm::Function::ExternalLinkage, wrapper_name, mod.get());
@@ -1017,6 +1087,7 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
                 }
                 auto* nf = mod->getFunction(native_name);
                 if (!nf) {
+                    if (sb) builder->SetInsertPoint(sb);
                     continue;
                 }
                 auto* cr = builder->CreateCall(nf, {
@@ -1026,6 +1097,7 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
             } else {
                 auto* nf = mod->getFunction(native_name);
                 if (!nf) {
+                    if (sb) builder->SetInsertPoint(sb);
                     continue;
                 }
                 auto* cr = builder->CreateCall(nf, {

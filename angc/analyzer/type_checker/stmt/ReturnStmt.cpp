@@ -84,6 +84,13 @@ bool TypeChecker::check_type_compatibility(
         return expected_data->toString() == actual_gen->base_type->toString();
     }
 
+    // v5: ref<T> — implicit conversion from a tracked type to ref<T>.
+    // A Buffer is assignable to a ref<Buffer> (taking a non-owning reference).
+    if (expected->kind == TypeKind::REF) {
+        auto ref_expected = std::dynamic_pointer_cast<RefType>(expected);
+        return check_type_compatibility(ref_expected->inner_type, actual);
+    }
+
     return false;
 }
 

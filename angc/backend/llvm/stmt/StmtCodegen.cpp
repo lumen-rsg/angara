@@ -44,6 +44,7 @@ void LLVMBackend::cgStmt(const std::shared_ptr<Stmt>& s) {
     }
     else if (auto* p = dynamic_cast<const ThrowStmt*>(s.get())) { setDebugLoc(p->keyword); cgThrow(*p); }
     else if (auto* p = dynamic_cast<const TryStmt*>(s.get())) { setDebugLoc(p->catchName); cgTry(*p); }
+    else if (auto* p = dynamic_cast<const DropStmt*>(s.get())) { setDebugLoc(p->name); cgDrop(*p); }
     else if (auto* p = dynamic_cast<const UnsafeBlockStmt*>(s.get())) {
         if (p->block) {
             for (auto& st : p->block->statements) {
@@ -59,6 +60,17 @@ void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
 
     if (s.initializer) {
         v = cg(s.initializer);
+        // v5: data types copy-on-assign. If this variable is a plain `data`
+        // type (not owned, not class — those are tracked for drop), deep-clone
+        // the initializer so p2 is independent of p1.
+        auto type_it2 = m_type_checker.getVariableTypes().find(&s);
+        if (type_it2 != m_type_checker.getVariableTypes().end() && type_it2->second) {
+            auto& vt = type_it2->second;
+            if (vt->kind == TypeKind::DATA &&
+                m_tracked_types.count(vt->toString()) == 0) {
+                v = callRtByName("__ang_deep_clone", {v});
+            }
+        }
     } else if (s.typeAnnotation) {
         // Check if this is a foreign data type that needs default construction
         auto type_it = m_type_checker.getVariableTypes().find(&s);
@@ -246,10 +258,10 @@ void LLVMBackend::cgReturn(const ReturnStmt& s) {
         // Raw-signature function: unbox the return value
         auto* result = s.value ? cg(s.value) : makeNil();
         auto* raw = unboxToRaw(result, *m_current_raw_return_kind);
-        if (m_gc_current_frame) emitGcPopFrame();
+        if (m_exc_chain_save) emitGcPopFrame();
         builder->CreateRet(raw);
     } else {
-        if (m_gc_current_frame) emitGcPopFrame();
+        if (m_exc_chain_save) emitGcPopFrame();
         builder->CreateRet(s.value ? cg(s.value) : makeNil());
     }
 }
@@ -257,6 +269,8 @@ void LLVMBackend::cgReturn(const ReturnStmt& s) {
 void LLVMBackend::cgThrow(const ThrowStmt& s) {
     // The expression (e.g. Exception("msg")) already creates the exception
     // object via __ang_exception_new in cgCall, so just throw it directly.
+    // v5: no auto-unwind — the Chaperone reports leaks on throw paths as
+    // errors; the programmer uses `finally {}` for explicit cleanup.
     callRtByName("__ang_throw", {cg(s.expression)});
 }
 
@@ -264,6 +278,7 @@ void LLVMBackend::cgTry(const TryStmt& s) {
     auto* fn = builder->GetInsertBlock()->getParent();
     auto* tryBB = llvm::BasicBlock::Create(*ctx,"try_body",fn);
     auto* catchBB = llvm::BasicBlock::Create(*ctx,"catch",fn);
+    auto* finallyBB = s.finallyBlock ? llvm::BasicBlock::Create(*ctx,"finally",fn) : nullptr;
     auto* afterAll = llvm::BasicBlock::Create(*ctx,"after_try",fn);
 
     auto* frameType = llvm::StructType::create(*ctx,
@@ -297,7 +312,7 @@ void LLVMBackend::cgTry(const TryStmt& s) {
     cgStmt(s.tryBlock);
     if (!builder->GetInsertBlock()->getTerminator()) {
         callRtByName("__ang_try_end",{});
-        builder->CreateBr(afterAll);
+        builder->CreateBr(s.finallyBlock ? finallyBB : afterAll);
     }
 
     builder->SetInsertPoint(catchBB);
@@ -316,10 +331,81 @@ void LLVMBackend::cgTry(const TryStmt& s) {
         namedKinds = sk;
     }
     if (!builder->GetInsertBlock()->getTerminator()) {
-        builder->CreateBr(afterAll);
+        builder->CreateBr(s.finallyBlock ? finallyBB : afterAll);
+    }
+
+    // v5: finally block — runs on both normal and catch paths.
+    if (s.finallyBlock) {
+        builder->SetInsertPoint(finallyBB);
+        cgStmt(s.finallyBlock);
+        if (!builder->GetInsertBlock()->getTerminator()) {
+            builder->CreateBr(afterAll);
+        }
     }
 
     builder->SetInsertPoint(afterAll);
+}
+
+void LLVMBackend::cgDrop(const DropStmt& s) {
+    auto it = namedVals.find(s.name.lexeme);
+    if (it == namedVals.end()) return;
+
+    auto* alloca = it->second;
+    auto* val = builder->CreateLoad(objType, alloca, "drop_val");
+
+    // Extract the heap pointer from the AngaraObject payload.
+    auto* payload = builder->CreateExtractValue(val, {1});
+    auto* ptr_i64 = builder->CreateBitCast(payload, llvm::Type::getInt64Ty(*ctx));
+    auto* obj_ptr = builder->CreateIntToPtr(ptr_i64, llvm::PointerType::get(*ctx, 0));
+
+    // v5: Drop cascade — for each tracked field, load it via __ang_record_get
+    // and drop it before freeing the parent. Fields are emitted at compile time
+    // based on the type declaration; ref<T> fields are NOT cascaded (non-owning).
+    auto type_it = namedTypes.find(s.name.lexeme);
+    if (type_it != namedTypes.end() && type_it->second) {
+        auto& type = type_it->second;
+
+        auto drop_field = [&](const std::string& field_name) {
+            auto* name_gstr = builder->CreateGlobalStringPtr(field_name, "fld");
+            auto* field_val = callRtByName("__ang_record_get", {val, name_gstr});
+            auto* f_payload = builder->CreateExtractValue(field_val, {1});
+            auto* f_ptr_i64 = builder->CreateBitCast(f_payload, llvm::Type::getInt64Ty(*ctx));
+            auto* f_obj_ptr = builder->CreateIntToPtr(f_ptr_i64, llvm::PointerType::get(*ctx, 0));
+            callRtByName("__ang_gc_finalize", {f_obj_ptr});
+            callRtByName("__ang_gc_free",
+                {f_obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
+        };
+
+        if (type->kind == TypeKind::DATA) {
+            auto dt = std::dynamic_pointer_cast<DataType>(type);
+            if (dt) {
+                for (auto& [fname, finfo] : dt->fields) {
+                    if (finfo.type && m_tracked_types.count(finfo.type->toString()))
+                        drop_field(fname);
+                }
+            }
+        } else if (type->kind == TypeKind::CLASS || type->kind == TypeKind::INSTANCE) {
+            std::shared_ptr<ClassType> ct;
+            if (type->kind == TypeKind::INSTANCE)
+                ct = std::dynamic_pointer_cast<InstanceType>(type)->class_type;
+            else
+                ct = std::dynamic_pointer_cast<ClassType>(type);
+            if (ct) {
+                for (auto& [fname, finfo] : ct->fields) {
+                    if (finfo.type && m_tracked_types.count(finfo.type->toString()))
+                        drop_field(fname);
+                }
+            }
+        }
+    }
+
+    // Finalize + free the parent.
+    callRtByName("__ang_gc_finalize", {obj_ptr});
+    callRtByName("__ang_gc_free",
+        {obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
+
+    // Invalidate the variable.
+    builder->CreateStore(makeNil(), alloca);
 }
 
 }

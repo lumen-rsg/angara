@@ -1,16 +1,23 @@
 // Test 07: Foreign function interface (FFI)
 attach io;
 
-foreign "stdlib.h";
+// Modern FFI: declare the C function signature directly with `foreign func`.
+// No header include is needed — the compiler infers linkage from the signature
+// and links against libc automatically. String args are marshalled to char*.
 foreign func abs(val as i64) -> i64;
+foreign func strlen(s as string) -> i64;
 
 export func main() -> i64 {
-    // Call C stdlib function
+    // Call C stdlib functions like any Angara function.
     let v = abs(-42);
     io.println(1, string(v));               // 42
 
     let v2 = abs(10);
     io.println(1, string(v2));              // 10
+
+    // String args marshal to char* for the C call.
+    let n = strlen("hello");
+    io.println(1, string(n));               // 5
 
     return 0;
 }

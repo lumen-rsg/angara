@@ -495,10 +495,10 @@ AngaraObject Angara_Controller_node_description(int arg_count, AngaraObject* arg
 
 static const AngaraMethodDef CONTROLLER_METHODS[] = {
     {"commission",      (AngaraMethodFn)Angara_Controller_commission,       "si?->n"},
-    {"devices",         (AngaraMethodFn)Angara_Controller_devices,          "->l{}"},
+    {"devices",         (AngaraMethodFn)Angara_Controller_devices,          "->l<{}>"},
     {"read",            (AngaraMethodFn)Angara_Controller_read,             "iiii?->s"},
     {"write",           (AngaraMethodFn)Angara_Controller_write,            "iiiia->n"},
-    {"command",         (AngaraMethodFn)Angara_Controller_command,          "iisl->s"},
+    {"command",         (AngaraMethodFn)Angara_Controller_command,          "iisl<a>?->s"},
     {"subscribe",       (AngaraMethodFn)Angara_Controller_subscribe,        "iiiiii->n"},
     {"decommission",    (AngaraMethodFn)Angara_Controller_decommission,     "i->n"},
     {"disconnect",      (AngaraMethodFn)Angara_Controller_disconnect,       "->n"},

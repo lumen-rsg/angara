@@ -1,0 +1,23 @@
+// Chaperone negative test — W510 (branch asymmetry, a WARNING not an error)
+// A tracked variable is dropped on one branch of an if but not the other.
+// The Chaperone must report W510 at the merge point, but as a warning —
+// compilation must NOT be halted (only errors gate codegen, not warnings).
+//
+// expect: W510
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let cond as i64 = 1;
+    if (cond > 0) {
+        drop b;
+    } else {
+        // `b` not dropped on this path — handled differently
+    }
+    drop b;   // second drop (legal on the else path; a double-drop on the if path)
+    return 0;
+}

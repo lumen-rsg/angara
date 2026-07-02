@@ -21,6 +21,11 @@ namespace angara {
         stmt->catchBlock->accept(*this, stmt->catchBlock);
 
         exitScopeAndWarn();
+
+        // v5: finally block (runs on both normal and catch paths).
+        if (stmt->finallyBlock) {
+            stmt->finallyBlock->accept(*this, stmt->finallyBlock);
+        }
     }
 
 }

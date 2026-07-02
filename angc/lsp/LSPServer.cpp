@@ -8,6 +8,7 @@
 #include "Type.h"
 #include "Stmt.h"
 #include "Expr.h"
+#include "Chaperone.h"
 
 #include <iostream>
 #include <filesystem>
@@ -458,10 +459,20 @@ void LSPServer::analyzeDocument(const std::string& uri) {
             TypeChecker typeChecker(driver, errorHandler, base_name);
             typeChecker.check(statements);
 
-            // Collect all diagnostics (including type errors)
+            // Stage 4: Chaperone — compile-time memory verification. Runs only
+            // if type-checking succeeded (the pass needs a typed AST). Unlike the
+            // compiler driver, the LSP does NOT halt on Chaperone errors — they
+            // are published as diagnostics (squiggles) so hover/completion still
+            // work while the programmer fixes the memory bug. (Stage 8.)
+            if (!errorHandler.hadError()) {
+                Chaperone::run(statements, typeChecker, errorHandler);
+            }
+
+            // Collect all diagnostics (type errors + Chaperone E5xx/W510)
             result.diagnostics = errorHandler.diagnostics;
 
-            // Build hover/definition/completion cache from type checker results
+            // Build hover/definition/completion cache from type checker results.
+            // Runs regardless of Chaperone errors so the editor stays usable.
             // Cast to const shared_ptr for storage
             std::vector<std::shared_ptr<const Stmt>> constStmts;
             for (auto& s : statements) constStmts.push_back(s);

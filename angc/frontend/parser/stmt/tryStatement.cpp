@@ -19,7 +19,14 @@ namespace angara {
             consume(TokenType::LEFT_BRACE, "Expected '{' to begin 'catch' block.", "E206");
             std::shared_ptr<Stmt> catchBlock = std::make_shared<BlockStmt>(block());
 
-            return std::make_shared<TryStmt>(std::move(tryBlock), std::move(catchName), catchType, std::move(catchBlock));
+            // v5: optional finally block
+            std::shared_ptr<Stmt> finallyBlock = nullptr;
+            if (match({TokenType::FINALLY})) {
+                consume(TokenType::LEFT_BRACE, "Expected '{' to begin 'finally' block.", "E207");
+                finallyBlock = std::make_shared<BlockStmt>(block());
+            }
+
+            return std::make_shared<TryStmt>(std::move(tryBlock), std::move(catchName), catchType, std::move(catchBlock), std::move(finallyBlock));
     }
 
 }

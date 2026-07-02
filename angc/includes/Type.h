@@ -34,6 +34,7 @@ namespace angara {
         TYPE_PARAM, // A generic type parameter (e.g., T in data Box<T>)
         GENERIC_INSTANCE, // A concrete instantiation of a generic type (e.g., Box<i64>)
         POINTER, // FFI pointer type (e.g., *i8, *void, **char)
+        REF,     // v5: non-owning reference (ref<T>)
         VOID,    // C void type (only valid in FFI pointer context or as return type)
         ERROR // A special type to prevent cascading error messages
     };
@@ -313,6 +314,20 @@ namespace angara {
 
         [[nodiscard]] std::string toString() const override {
             return wrapped_type->toString() + "?";
+        }
+    };
+
+    // v5: Non-owning reference type (ref<T>). The holder can read T's fields
+    // but does NOT own it — no drop needed. The Chaperone verifies the
+    // referent outlives the ref. At runtime, it's the same boxed AngaraObject
+    // (a pointer); ref<T> is a compile-time-only distinction.
+    struct RefType : Type {
+        const std::shared_ptr<Type> inner_type;
+        explicit RefType(std::shared_ptr<Type> inner)
+                : Type(TypeKind::REF), inner_type(std::move(inner)) {}
+
+        [[nodiscard]] std::string toString() const override {
+            return "ref<" + inner_type->toString() + ">";
         }
     };
 

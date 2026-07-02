@@ -418,4 +418,8 @@ namespace angara {
         return {};
     }
 
+    void ASTPrinter::visit(std::shared_ptr<const DropStmt> stmt) {
+        printHeader("DropStmt: " + stmt->name.lexeme);
+    }
+
 }

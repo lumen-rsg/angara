@@ -1,0 +1,16 @@
+// Chaperone negative test — E503 (double-free)
+// The same tracked variable is dropped twice. Must report E503.
+//
+// expect: E503
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    drop b;
+    drop b;   // double drop
+    return 0;
+}

@@ -1,0 +1,18 @@
+// Chaperone positive test — both branches handle the allocation the same way.
+// Dropped symmetrically on both sides of the if; no W510, no leak.
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let b = Buf(5);
+    let cond as i64 = 1;
+    if (cond > 0) {
+        drop b;
+    } else {
+        drop b;
+    }
+    return 0;
+}

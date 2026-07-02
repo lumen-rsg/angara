@@ -441,3 +441,10 @@ std::any Formatter::visit(const LambdaExpr& expr) {
 }
 
 } // namespace angara
+
+#include "Stmt.h"
+namespace angara {
+    void Formatter::visit(std::shared_ptr<const DropStmt> stmt) {
+        m_out << "drop " << stmt->name.lexeme << ";\n";
+    }
+} // namespace angara

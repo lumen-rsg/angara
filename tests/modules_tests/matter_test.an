@@ -24,10 +24,12 @@ func test_connection() -> bool {
   let connected = ctrl.is_connected();
   if (connected) {
     io.println(1, "[PASS] Controller is connected.");
+    drop ctrl;
     return true;
   } else {
     io.println(2, "[FAIL] Controller is not reachable.");
     io.println(2, "       Is matter-server running? Try: docker run -p 8400:8400 matter-server");
+    drop ctrl;
     return false;
   }
 }
@@ -41,9 +43,11 @@ func test_info() -> bool {
   let info = ctrl.info();
   if (info != nil) {
     io.println(1, "[PASS] Controller info: " + string(info));
+    drop ctrl;
     return true;
   } else {
     io.println(2, "[FAIL] Could not fetch controller info.");
+    drop ctrl;
     return false;
   }
 }
@@ -57,9 +61,11 @@ func test_devices() -> bool {
   let devices = ctrl.devices();
   if (devices != nil) {
     io.println(1, "[PASS] Device list retrieved.");
+    drop ctrl;
     return true;
   } else {
     io.println(2, "[FAIL] Could not list devices.");
+    drop ctrl;
     return false;
   }
 }
@@ -83,7 +89,7 @@ func test_light_control() -> bool {
   }
 
   // Turn on
-  let result = ctrl.command(NODE_ID, ENDPOINT, "on", {});
+  let result = ctrl.command(NODE_ID, ENDPOINT, "on", []);
   io.println(1, "       Turn ON response: " + string(result));
 
   // Read again
@@ -91,7 +97,7 @@ func test_light_control() -> bool {
   io.println(1, "       State after ON: " + string(state));
 
   // Turn off
-  result = ctrl.command(NODE_ID, ENDPOINT, "off", {});
+  result = ctrl.command(NODE_ID, ENDPOINT, "off", []);
   io.println(1, "       Turn OFF response: " + string(result));
 
   // Read again
@@ -99,6 +105,7 @@ func test_light_control() -> bool {
   io.println(1, "       State after OFF: " + string(state));
 
   io.println(1, "[PASS] Light control commands executed.");
+  drop ctrl;
   return true;
 }
 
@@ -111,9 +118,11 @@ func test_node_description() -> bool {
   let desc = ctrl.node_description(1);
   if (desc != nil) {
     io.println(1, "[PASS] Node description: " + string(desc));
+    drop ctrl;
     return true;
   } else {
     io.println(2, "[FAIL] Could not fetch node description.");
+    drop ctrl;
     return false;
   }
 }
@@ -126,6 +135,7 @@ func commission_device(setup_code as string) -> nil {
 
   ctrl.commission(setup_code);
   io.println(1, "[COMMISSION] Commissioning request sent.");
+  drop ctrl;
 }
 
 

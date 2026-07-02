@@ -1,0 +1,18 @@
+// Chaperone negative test — E502 (use-after-free)
+// A tracked variable is used (method call) after being dropped. Must report E502.
+//
+// expect: E502
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    drop b;
+    let x = b.get();   // use after free
+    return x;
+}

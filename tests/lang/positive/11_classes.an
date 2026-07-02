@@ -30,5 +30,7 @@ export func main() -> i64 {
     io.println(1, d.speak());                // Rex barks
 
     io.println(1, "Classes passed");
+    drop a;
+    drop d;
     return 0;
 }

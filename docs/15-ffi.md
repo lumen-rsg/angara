@@ -4,12 +4,13 @@ Call C functions, map C structs, and use pointers -- no glue code required.
 
 ---
 
-## Importing Headers and Functions
+## Importing Functions
 
-Use `foreign` to declare C headers and function signatures:
+Use `foreign func` to declare a C function's signature. No header include is
+needed — the compiler infers linkage from the signature and links against libc
+automatically (and you can link additional libraries via the build system).
 
 ```angara
-foreign "stdlib.h";
 foreign func abs(val as i64) -> i64;
 foreign func malloc(size as u64) -> *void;
 foreign func free(ptr as *void) -> nil;

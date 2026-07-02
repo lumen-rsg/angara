@@ -1,22 +1,33 @@
 // --- Test for Attaching Native C ABI Modules ---
+// Tests loading a native .so module and calling its functions.
+attach fs;
+attach io;
 
-// On Linux/macOS, the path would typically be "./libfs.so" or "./libfs.dylib"
-// This path is relative to where you run the final executable.
-// Let's assume the compiled module is in a `modules` subdirectory.
-attach "lib/libfs.so" as filesystem;
-
-func main() -> i64 {
-  print("--- Testing Native Module Attachment ---");
+export func main() -> i64 {
+  io.println(1, "--- Testing Native Module Attachment ---");
 
   // Call the native function imported from the fs module.
-  let content = filesystem.read_file("data.txt");
+  let content = fs.read_file("data.txt");
 
   if (content == nil) {
-    print("Failed to read file.");
-  } else {
-    print("Content of data.txt:");
-    print(content);
+    io.println(2, "  [FAIL] Could not read data.txt");
+    return 1;
   }
 
+  io.println(1, "  [PASS] Read file content: " + string(content));
+
+  // Test write_file
+  fs.write_file("output.txt", "Hello from Angara!");
+  io.println(1, "  [PASS] Wrote output.txt");
+
+  // Test exists
+  if (fs.exists("output.txt")) {
+    io.println(1, "  [PASS] output.txt exists");
+  } else {
+    io.println(2, "  [FAIL] output.txt does not exist");
+    return 1;
+  }
+
+  io.println(1, "\n--- All native module tests passed! ---");
   return 0;
 }

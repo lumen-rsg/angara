@@ -360,6 +360,17 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
             return std::make_shared<ListType>(element_type);
         }
 
+        // v5: ref<T> — non-owning reference.
+        if (base_name == "ref") {
+            if (generic->arguments.size() != 1) {
+                error(generic->name, "Type 'ref' expects exactly one type argument (e.g., 'ref<Buffer>').", "E251");
+                return m_type_error;
+            }
+            auto inner_type = resolveType(generic->arguments[0]);
+            if (inner_type->kind == TypeKind::ERROR) return m_type_error;
+            return std::make_shared<RefType>(inner_type);
+        }
+
         auto symbol = m_symbols.resolve(base_name);
         if (symbol) {
             auto& base_type = symbol->type;

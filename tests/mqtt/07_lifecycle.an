@@ -42,6 +42,7 @@ export func main() -> i64 {
   } else {
     io.println(1, "[PASS] B: is_connected() = false after disconnect");
   }
+  drop conn1;
 
   // Test C: New connection after previous disconnect
   io.println(1, "[C] Reconnect with new connection...");
@@ -56,6 +57,7 @@ export func main() -> i64 {
     io.println(1, "[PASS] C: Reconnection succeeded");
   }
   conn2.disconnect();
+  drop conn2;
   time.sleep(0.3);
 
   // Test D: Multiple connect/disconnect cycles
@@ -70,10 +72,12 @@ export func main() -> i64 {
     });
     if (!wait_connected(c, 3.0)) {
       io.println(2, "[FAIL] D: Cycle " + string(cycle) + " connect failed");
+      drop c;
       cycle_ok = false;
       cycle = 3; // break
     } else {
       c.disconnect();
+      drop c;
       time.sleep(0.2);
     }
     cycle = cycle + 1;

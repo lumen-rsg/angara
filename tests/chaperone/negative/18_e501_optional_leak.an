@@ -1,0 +1,15 @@
+// Chaperone negative test — E501 (optional tracked type leaks, G6)
+// An optional holding a tracked allocation must be dropped; previously optionals
+// were untracked so this leaked silently.
+//
+// expect: E501
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let b as Buf? = Buf(42);   // optional tracked — leaks if not dropped
+    return 0;
+}

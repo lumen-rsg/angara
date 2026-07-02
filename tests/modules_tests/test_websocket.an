@@ -109,6 +109,7 @@ export func main() -> i64 {
       sender_thread.join();
     }
 
+    drop ws;
     io.println(1, "[MAIN] Test complete.");
 
   } catch (e) {

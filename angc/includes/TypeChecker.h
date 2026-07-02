@@ -42,6 +42,9 @@ namespace angara {
         /// Visits an @unsafe block, enabling dynamic operations within.
         void visit(std::shared_ptr<const UnsafeBlockStmt> stmt) override;
 
+        /// v5: visits a `drop` statement — marks the variable as dropped.
+        void visit(std::shared_ptr<const DropStmt> stmt) override;
+
         /// Returns the symbol table (for use by later compiler stages).
         [[nodiscard]] const SymbolTable& getSymbolTable() const;
 

@@ -78,5 +78,6 @@ export func main() -> i64 {
   p.add_score(50);
   io.println(1, "Player description: " + p.describe());
 
+  drop p;
   return 0;
 }

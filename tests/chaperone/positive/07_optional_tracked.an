@@ -1,0 +1,17 @@
+// Chaperone positive test — optional tracked type is tracked (G6).
+// A `Buf?` holding a tracked allocation must be tracked like `Buf`: it must be
+// dropped before exit (no leak). Previously optionals were silently untracked,
+// so the allocation leaked.
+//
+// exit: 0
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let b as Buf? = Buf(42);   // optional tracked — must still be dropped
+    drop b;
+    return 0;
+}

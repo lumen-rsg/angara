@@ -17,8 +17,8 @@ namespace angara {
 
 LLVMBackend::~LLVMBackend() = default;
 
-LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir, bool debug, bool emit_llvm, const std::string& gc_strategy)
-    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_gc_strategy(gc_strategy), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm) {
+LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir, bool debug, bool emit_llvm)
+    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm) {
     ctx = std::make_unique<llvm::LLVMContext>();
     mod = std::make_unique<llvm::Module>("angara_module", *ctx);
     builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
@@ -52,7 +52,7 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
         m_di_cu = diCU;
     }
 
-    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding, m_gc_strategy);
+    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding);
     rt->generateRuntime();
     objType = rt->getAngaraObjType();
 }
@@ -211,10 +211,13 @@ void LLVMBackend::createStrlitInitFn() {
     if (m_strlit_init_fn) return;
     auto* fn_type = llvm::FunctionType::get(
         llvm::Type::getVoidTy(*ctx), false);
+    // External linkage + module-unique name so the main module can call
+    // each imported module's init function. Without this, string literals
+    // in .an source modules stay zero-initialized (nil) at runtime.
+    std::string init_name = "__ang_strlit_init_" + moduleName;
     m_strlit_init_fn = llvm::Function::Create(fn_type,
-        llvm::Function::InternalLinkage,
-        "__ang_strlit_init", mod.get());
-    m_strlit_init_fn->setDSOLocal(true);
+        llvm::Function::ExternalLinkage,
+        init_name, mod.get());
     auto* entry_bb = llvm::BasicBlock::Create(*ctx, "entry", m_strlit_init_fn);
     llvm::IRBuilder<>(entry_bb).CreateRetVoid();
 }
@@ -296,63 +299,6 @@ llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string&
     llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().begin());
     auto* alloca = tmp.CreateAlloca(objType, nullptr, name);
 
-    // Track in GC root frame if active — register in entry block to avoid
-    // re-registering (and incrementing count) inside loops.
-    // Insert AFTER the gc_push_frame call (which is near the end of entry block)
-    if (m_gc_current_frame) {
-        auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
-        auto* i64_ty = llvm::Type::getInt64Ty(*ctx);
-        auto* i8_ptr = llvm::PointerType::get(*ctx, 0);
-
-        // Find the gc_push_frame call to insert after it
-        llvm::Instruction* insertAfter = nullptr;
-        for (auto& inst : fn->getEntryBlock()) {
-            if (auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
-                if (call->getCalledFunction() &&
-                    call->getCalledFunction()->getName() == "__ang_gc_push_frame") {
-                    insertAfter = &inst;
-                    break;
-                }
-            }
-        }
-
-        // Use iterator-based insertion: insert right after gc_push_frame.
-        // getNextNode() can return null when the call is the last instruction
-        // (e.g. when all initializer expressions fold to constants), so use
-        // the iterator directly to handle that case.
-        auto insertPt = insertAfter ? std::next(insertAfter->getIterator())
-                                    : fn->getEntryBlock().begin();
-        llvm::IRBuilder<> regBuilder(&fn->getEntryBlock(), insertPt);
-
-        if (m_gc_frame_slot_idx < m_gc_frame_max_slots) {
-            // Store alloca address into frame slot
-            auto* slot_addr = regBuilder.CreateGEP(m_gc_frame_type, m_gc_current_frame,
-                {llvm::ConstantInt::get(i32_ty, 0), llvm::ConstantInt::get(i32_ty, 2),
-                 llvm::ConstantInt::get(i64_ty, m_gc_frame_slot_idx)});
-            auto* alloca_i8 = regBuilder.CreateBitCast(alloca, i8_ptr);
-            regBuilder.CreateStore(alloca_i8, slot_addr);
-
-            // Increment frame count
-            auto* count_addr = regBuilder.CreateStructGEP(m_gc_frame_type, m_gc_current_frame, 1);
-            auto* count = regBuilder.CreateLoad(i32_ty, count_addr, "frame_count");
-            regBuilder.CreateStore(regBuilder.CreateAdd(count, llvm::ConstantInt::get(i32_ty, 1)), count_addr);
-
-            m_gc_frame_slot_idx++;
-        } else {
-            // BUG-13: GC root frame is full (>256 tracked locals in one
-            // function). Emit a trap (once, when first exceeded) so a lost
-            // root is loud, not a silent collection of a still-reachable
-            // object. Extremely rare in practice. The slot_idx increment
-            // below ensures the trap is emitted only on the first overflow.
-            if (m_gc_frame_slot_idx == m_gc_frame_max_slots) {
-                auto* trap_fn = llvm::Intrinsic::getOrInsertDeclaration(
-                    mod.get(), llvm::Intrinsic::trap);
-                regBuilder.CreateCall(trap_fn);
-            }
-            m_gc_frame_slot_idx++;
-        }
-    }
-
     return alloca;
 }
 
@@ -368,56 +314,23 @@ llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string&
     return allocLocal(fn, name);
 }
 
-void LLVMBackend::emitGcPushFrame(llvm::Function* fn, int slot_count) {
-    // Create concrete frame type if not yet created
-    if (!m_gc_frame_type) {
-        auto* i8_ptr = llvm::PointerType::get(*ctx, 0);
-        m_gc_frame_type = llvm::StructType::create(*ctx, {
-            i8_ptr,                                             // prev_frame
-            llvm::Type::getInt32Ty(*ctx),                      // count
-            llvm::ArrayType::get(i8_ptr, slot_count)           // slots
-        }, "GcFrame");
-    }
-
-    // Alloca at entry block beginning (before any other instructions)
-    auto& entry = fn->getEntryBlock();
-    llvm::IRBuilder<> tmp(&entry, entry.begin());
-    m_gc_current_frame = tmp.CreateAlloca(m_gc_frame_type, nullptr, "gc_frame");
-
-    // Init count = 0
-    auto* count_addr = tmp.CreateStructGEP(m_gc_frame_type, m_gc_current_frame, 1);
-    tmp.CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0), count_addr);
-
-    // BUG-5: snapshot the exception-chain pointer at function entry. Non-local
-    // exits (return / fall-through) restore this in emitGcPopFrame, popping any
-    // try frames left on the chain by a return/break/continue inside a try.
+void LLVMBackend::emitGcPushFrame(llvm::Function* fn, int /*slot_count*/) {
+    // v5: no GC frame. Only the BUG-5 exception-chain snapshot remains.
     if (auto* chain_gv = rt->getExceptionChain()) {
         auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
+        llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().begin());
         m_exc_chain_save = tmp.CreateAlloca(ptr_ty, nullptr, "exc_chain_save");
         tmp.CreateStore(tmp.CreateLoad(ptr_ty, chain_gv, "entry_chain"), m_exc_chain_save);
     }
-
-    // Call __ang_gc_push_frame at current builder position
-    auto* frame_i8 = builder->CreateBitCast(m_gc_current_frame, llvm::PointerType::get(*ctx, 0));
-    callRtByName("__ang_gc_push_frame", {frame_i8});
-
-    m_gc_frame_slot_idx = 0;
-    m_gc_frame_max_slots = slot_count;
 }
 
 void LLVMBackend::emitGcPopFrame() {
-    callRtByName("__ang_gc_pop_frame", {});
-    // BUG-5: restore the exception chain to its function-entry value, popping
-    // any try frames left on the chain by a return/break/continue that exited a
-    // try body without reaching its fall-through __ang_try_end. Idempotent when
-    // the chain is already balanced (normal try completion).
+    // v5: no GC frame pop. Only the BUG-5 exception-chain restore remains.
     if (m_exc_chain_save) {
         auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
         builder->CreateStore(builder->CreateLoad(ptr_ty, m_exc_chain_save, "saved_chain"),
                              rt->getExceptionChain());
     }
-    m_gc_current_frame = nullptr;
-    m_gc_frame_slot_idx = 0;
 }
 
 llvm::Value* LLVMBackend::emitGcThreadSetup() {
@@ -528,11 +441,43 @@ LLVMBackend::LocalKind LLVMBackend::localKindForType(const std::shared_ptr<Type>
     return LocalKind::BOXED;
 }
 
+// FFI marshalling: the C-side kind for a foreign-function param/return.
+// Like localKindForType but also maps `string` and pointer types to RAW_PTR
+// (a C char*/pointer), so `foreign func strlen(s as string) -> i64` gets a
+// real C signature instead of passing a boxed AngaraObject to libc.
+LLVMBackend::LocalKind LLVMBackend::ffiKindForType(const std::shared_ptr<Type>& type) {
+    if (!type) return LocalKind::BOXED;
+    if (type->kind == TypeKind::PRIMITIVE) {
+        const auto& n = type->toString();
+        if (n == "string") return LocalKind::RAW_PTR;   // char*
+        if (n == "bool")   return LocalKind::RAW_I1;
+        if (isFloat(type)) return LocalKind::RAW_F64;
+        if (isInteger(type)) return LocalKind::RAW_I64;
+        return LocalKind::BOXED;
+    }
+    // Pointer types (*T, *void) marshal as a C pointer.
+    if (type->kind == TypeKind::POINTER) return LocalKind::RAW_PTR;
+    return LocalKind::BOXED;
+}
+
+// Whether a type can be marshalled directly to C in a foreign-function
+// signature (primitives + string + pointers). Aggregate/owned types stay boxed.
+bool LLVMBackend::isFFIMarshallable(const std::shared_ptr<Type>& type) {
+    if (!type) return false;
+    if (type->kind == TypeKind::POINTER) return true;
+    if (type->kind == TypeKind::PRIMITIVE) {
+        const auto& n = type->toString();
+        return n == "string" || n == "bool" || isInteger(type) || isFloat(type);
+    }
+    return false;
+}
+
 llvm::Type* LLVMBackend::llvmTypeForLocalKind(LocalKind kind) {
     switch (kind) {
         case LocalKind::RAW_I1:  return llvm::Type::getInt1Ty(*ctx);
         case LocalKind::RAW_I64: return llvm::Type::getInt64Ty(*ctx);
         case LocalKind::RAW_F64: return llvm::Type::getDoubleTy(*ctx);
+        case LocalKind::RAW_PTR: return llvm::PointerType::get(*ctx, 0);
         case LocalKind::BOXED:   return objType;
     }
     return objType;
@@ -543,6 +488,10 @@ llvm::Value* LLVMBackend::boxRaw(llvm::Value* raw, LocalKind kind) {
         case LocalKind::RAW_I1:  return makeBool(raw);
         case LocalKind::RAW_I64: return makeI64(raw);
         case LocalKind::RAW_F64: return makeF64(raw);
+        // RAW_PTR: a C pointer returned to Angara is carried as an opaque i64
+        // payload (boxed). Marshalling back to a usable Angara value is the
+        // caller's responsibility (e.g. via @own string adoption).
+        case LocalKind::RAW_PTR: return makeI64(builder->CreatePtrToInt(raw, llvm::Type::getInt64Ty(*ctx)));
         case LocalKind::BOXED:   return raw;
     }
     return raw;
@@ -553,6 +502,10 @@ llvm::Value* LLVMBackend::unboxToRaw(llvm::Value* objVal, LocalKind kind) {
         case LocalKind::RAW_I1:  return getBool(objVal);
         case LocalKind::RAW_I64: return getI64(objVal);
         case LocalKind::RAW_F64: return getF64(objVal);
+        // RAW_PTR: treat the boxed value's i64 payload as a pointer. (For
+        // string args, the call site uses marshalAngaraToC instead, which
+        // extracts the char* correctly; this is the fallback for stored ptrs.)
+        case LocalKind::RAW_PTR: return builder->CreateIntToPtr(getI64(objVal), llvm::PointerType::get(*ctx, 0));
         case LocalKind::BOXED:   return objVal;
     }
     return objVal;
@@ -620,10 +573,12 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
         const auto& n = type->toString();
         if (n == "bool")   return getBool(obj);
         if (n == "string") {
-            // Extract char* from AngaraString: payload -> AngaraString* -> GEP(field 2) -> load char*
+            // Extract char* from AngaraString. The boxed payload is a pointer to
+            // the AngaraString struct { ObjHeader, i64 len, i64 cap, ptr chars },
+            // so chars is at field index 3.
             auto* str_ptr = builder->CreateIntToPtr(getI64(obj), llvm::PointerType::get(*ctx, 0));
             auto* string_type = rt->getStringType();
-            auto* chars_ptr = builder->CreateStructGEP(string_type, str_ptr, 2);
+            auto* chars_ptr = builder->CreateStructGEP(string_type, str_ptr, 3);
             auto* raw = builder->CreateLoad(llvm::PointerType::get(*ctx, 0), chars_ptr);
             auto prim = std::dynamic_pointer_cast<PrimitiveType>(type);
             if (prim && prim->is_owned) {

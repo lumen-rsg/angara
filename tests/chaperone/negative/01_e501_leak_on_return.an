@@ -1,0 +1,16 @@
+// Chaperone negative test — E501 (memory leak on return path)
+// A tracked `class` instance is allocated but never dropped before the
+// function returns. The Chaperone must report E501 at the return and halt
+// compilation (no binary ships with a leak).
+//
+// expect: E501
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    return 0;   // `b` leaks here — never dropped
+}
