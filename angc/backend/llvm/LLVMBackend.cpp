@@ -696,20 +696,61 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
             builder->CreateStore(angara_val, slot);
         }
 
-        // 3. Call __ang_call(closure, argc, args_array)
+        // RT-1: wrap the callback invocation in a setjmp/try so a throw lands
+        // inside the trampoline (not across C frames). Mirrors cgTry exactly.
+        auto* frameType = llvm::StructType::create(*ctx,
+            {llvm::ArrayType::get(llvm::Type::getInt8Ty(*ctx), 512),
+             llvm::PointerType::get(*ctx, 0)}, "EF");
+        auto* frame = builder->CreateAlloca(frameType);
+        auto* frame_raw = builder->CreateBitCast(frame, llvm::PointerType::get(*ctx, 0));
+        auto* prev_addr = builder->CreateStructGEP(frameType, frame, 1);
+        auto* old_chain = builder->CreateLoad(llvm::PointerType::get(*ctx, 0),
+            rt->getExceptionChain(), "old_chain");
+        builder->CreateStore(old_chain, prev_addr);
+        builder->CreateStore(frame_raw, rt->getExceptionChain());
+
+        auto* jmp_buf_ptr = builder->CreateStructGEP(frameType, frame, 0);
+        auto* i8_ptr_ty = llvm::PointerType::get(*ctx, 0);
+        auto* setjmp_fn = mod->getFunction("setjmp");
+        auto* sr = builder->CreateCall(
+            llvm::FunctionType::get(llvm::Type::getInt32Ty(*ctx), {i8_ptr_ty}, false),
+            setjmp_fn,
+            {builder->CreateBitCast(jmp_buf_ptr, i8_ptr_ty)}, "setjmp_result");
+        if (auto* ci = llvm::dyn_cast<llvm::CallInst>(sr)) {
+            ci->addFnAttr(llvm::Attribute::ReturnsTwice);
+        }
+
+        auto* tram = trampoline;
+        auto* normalBB = llvm::BasicBlock::Create(*ctx, "cb_normal", tram);
+        auto* caughtBB = llvm::BasicBlock::Create(*ctx, "cb_caught", tram);
+        builder->CreateCondBr(
+            builder->CreateICmpEQ(sr, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0)),
+            normalBB, caughtBB);
+
+        // Normal path: run the callback, pop the frame, marshal + ret.
+        builder->SetInsertPoint(normalBB);
         auto* call_result = callRtByName("__ang_call", {
             closure,
             llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), callback_arg_count),
             builder->CreateBitCast(args_array, llvm::PointerType::get(*ctx, 0))
         });
-
-        // 4. Marshal the result back to C
+        // Pop the exception frame (restore the chain to the outer frame).
+        callRtByName("__ang_try_end", {});
         auto* c_result = marshalAngaraToC(call_result, func_type->return_type);
-
         if (func_type->return_type->kind == TypeKind::VOID) {
             builder->CreateRetVoid();
         } else {
             builder->CreateRet(c_result);
+        }
+
+        // Caught-throw path: __ang_throw already unlinked our frame. Translate
+        // to a C error return (the @on_throw value, or 0 if unset).
+        builder->SetInsertPoint(caughtBB);
+        int64_t throw_ret = func_type->on_throw_value.value_or(0);
+        if (func_type->return_type->kind == TypeKind::VOID) {
+            builder->CreateRetVoid();
+        } else {
+            builder->CreateRet(llvm::ConstantInt::get(c_return_type, throw_ret, true));
         }
 
         builder->restoreIP(saved_insert_point);

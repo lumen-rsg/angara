@@ -125,6 +125,10 @@ namespace angara {
         // for callback FUNCTION params. These are auto-filled by the FFI layer
         // and hidden from the user at call sites.
         std::vector<size_t> userdata_param_indices;
+        // RT-1: @on_throw value — set on a callback param's FunctionType in
+        // defineFunctionHeader so the FFI trampoline knows what C value to
+        // return if the callback throws (instead of longjmping across C frames).
+        std::optional<int64_t> on_throw_value;
 
         // Update constructor to accept the flag, defaulting to false.
         FunctionType(std::vector<std::shared_ptr<Type>> params, std::shared_ptr<Type> ret, bool is_variadic = false)
@@ -588,6 +592,7 @@ namespace angara {
                     auto nf = std::make_shared<FunctionType>(new_params, new_ret, f->is_variadic);
                     nf->is_foreign = f->is_foreign;
                     nf->is_intrinsic = f->is_intrinsic;
+                    nf->on_throw_value = f->on_throw_value;  // RT-1
                     return nf;
                 }
                 case TypeKind::POINTER: {

@@ -64,6 +64,12 @@ namespace angara {
             // These are auto-filled by the FFI layer and hidden from callers.
             for (size_t i = 0; i < param_types.size(); i++) {
                 if (param_types[i]->kind == TypeKind::FUNCTION) {
+                    // RT-1: stamp @on_throw value onto the callback's FunctionType
+                    // so the FFI trampoline knows what C value to return on throw.
+                    if (stmt.on_throw_value) {
+                        auto cb_ft = std::dynamic_pointer_cast<FunctionType>(param_types[i]);
+                        if (cb_ft) cb_ft->on_throw_value = stmt.on_throw_value;
+                    }
                     for (size_t j = i + 1; j < param_types.size(); j++) {
                         if (param_types[j]->kind == TypeKind::POINTER) {
                             function_type->userdata_param_indices.push_back(j);

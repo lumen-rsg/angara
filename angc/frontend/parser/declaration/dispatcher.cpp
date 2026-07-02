@@ -3,6 +3,26 @@ namespace angara {
 
     std::shared_ptr<Stmt> Parser::declaration() {
         try {
+            // RT-1: parse @on_throw(<value>) annotation for foreign funcs.
+            std::optional<int64_t> pending_on_throw;
+            if (check(TokenType::AT_SIGN)) {
+                int saved = m_current;
+                advance(); // consume '@'
+                Token ann = peek();
+                if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "on_throw") {
+                    advance();
+                    consume(TokenType::LEFT_PAREN, "Expected '(' after '@on_throw'.", "E393");
+                    bool neg = match({TokenType::MINUS});
+                    Token val = consume(TokenType::NUMBER_INT, "Expected an integer value in @on_throw(...).", "E394");
+                    consume(TokenType::RIGHT_PAREN, "Expected ')' after @on_throw value.", "E395");
+                    int64_t v = std::stoll(val.lexeme);
+                    pending_on_throw = neg ? -v : v;
+                } else {
+                    // Not @on_throw — restore and let other handlers deal with it.
+                    m_current = saved;
+                }
+            }
+
             bool is_exported = match({TokenType::EXPORT});
             if (match({TokenType::FUNC})) {
                 auto func_decl = std::static_pointer_cast<FuncStmt>(function("function"));
@@ -29,6 +49,9 @@ namespace angara {
                         throw error(func_decl->name, "A foreign function cannot have a body — its implementation comes from an external library.", "E130");
                     }
                     func_decl->is_foreign = true;
+                    if (pending_on_throw) {
+                        func_decl->on_throw_value = pending_on_throw;
+                    }
                     return func_decl;
                 }
 

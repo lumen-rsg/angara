@@ -7,6 +7,8 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <optional>
+#include <cstdint>
 #include "Token.h"
 #include "Expr.h"
 #include "ASTTypes.h"
@@ -246,6 +248,9 @@ namespace angara {
         bool is_intrinsic = false;
         // Stores the header name, e.g., "unistd.h"
         std::vector<Token> foreign_headers;
+        // RT-1: @on_throw(<value>) — the C value to return if an Angara callback
+        // passed to this foreign func throws. Applied to the first callback param.
+        std::optional<int64_t> on_throw_value;
 
         // --- GENERIC SUPPORT ---
         // Type parameter names (e.g., {"T"} for `func identity<T>(x as T) -> T`)
