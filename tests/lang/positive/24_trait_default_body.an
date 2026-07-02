@@ -1,0 +1,30 @@
+// TS-1 Phase D: default trait method bodies. A trait method may carry a default
+// implementation; a class that doesn't override it gets the default via the
+// vtable, and a class that does override gets its own.
+attach io;
+
+trait Greeter {
+    func greet(this) -> string { return "hello"; }   // default body
+    func name(this) -> string;                        // required (no default)
+}
+
+// Uses the default greet(); only implements the required name().
+class DefaultGreeter uses Greeter {
+public:
+    func name(this) -> string { return "default-class"; }
+}
+
+// Overrides both.
+class OverrideGreeter uses Greeter {
+public:
+    func greet(this) -> string { return "hi!"; }
+    func name(this) -> string { return "override-class"; }
+}
+
+export func main() -> i64 {
+    let d as Greeter = DefaultGreeter();
+    io.println(0, d.greet() + " from " + d.name());   // hello from default-class
+    let o as Greeter = OverrideGreeter();
+    io.println(0, o.greet() + " from " + o.name());   // hi! from override-class
+    return 0;
+}
