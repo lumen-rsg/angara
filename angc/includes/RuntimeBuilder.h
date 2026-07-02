@@ -35,6 +35,7 @@ static constexpr int OBJ_NATIVE_INSTANCE = 9;
 static constexpr int OBJ_DATA_INSTANCE   = 10;
 static constexpr int OBJ_ENUM_INSTANCE   = 11;
 static constexpr int OBJ_BOUND_METHOD    = 12;
+static constexpr int OBJ_TRAIT_OBJECT    = 13;  // TS-1: value viewed through a trait/contract
 
 /// Generates all runtime types and functions as LLVM IR directly into the module.
 /// This eliminates the need for an external runtime library — the runtime is
@@ -81,6 +82,8 @@ public:
     llvm::StructType* getMutexType()      const { return m_mutex_type; }
     /// Returns the AngaraBoundMethod struct type.
     llvm::StructType* getBoundMethodType() const { return m_bound_method_type; }
+    /// TS-1: Returns the AngaraTraitObject struct type.
+    llvm::StructType* getTraitObjectType() const { return m_trait_object_type; }
 
     // --- Runtime function accessors ---
 
@@ -112,6 +115,8 @@ public:
     llvm::FunctionCallee getFuncTryBegin()        const { return m_fn_try_begin; }
     llvm::FunctionCallee getFuncTryEnd()          const { return m_fn_try_end; }
     llvm::FunctionCallee getFuncBoundMethodNew()  const { return m_fn_bound_method_new; }
+    /// TS-1: __ang_trait_object_new(receiver, vtable_ptr) -> obj.
+    llvm::FunctionCallee getFuncTraitObjectNew() const { return m_fn_trait_object_new; }
     llvm::FunctionCallee getFuncThreadSpawn()     const { return m_fn_thread_spawn; }
     llvm::FunctionCallee getFuncThreadJoin()      const { return m_fn_thread_join; }
     llvm::FunctionCallee getFuncMutexNew()        const { return m_fn_mutex_new; }
@@ -228,6 +233,7 @@ private:
     llvm::StructType* m_thread_type = nullptr;
     llvm::StructType* m_mutex_type = nullptr;
     llvm::StructType* m_bound_method_type = nullptr;
+    llvm::StructType* m_trait_object_type = nullptr;  // TS-1
     llvm::StructType* m_native_instance_type = nullptr;
 
     llvm::FunctionCallee m_fn_string_from_c;
@@ -258,6 +264,7 @@ private:
     llvm::FunctionCallee m_fn_try_begin;
     llvm::FunctionCallee m_fn_try_end;
     llvm::FunctionCallee m_fn_bound_method_new;
+    llvm::FunctionCallee m_fn_trait_object_new;  // TS-1
     llvm::FunctionCallee m_fn_thread_spawn;
     llvm::FunctionCallee m_fn_thread_join;
     llvm::FunctionCallee m_fn_mutex_new;

@@ -125,6 +125,16 @@ void RuntimeBuilder::generateTypes() {
         m_angara_obj_type
     }, "AngaraBoundMethod");
 
+    // TS-1: a trait object — a value viewed through a trait/contract interface.
+    // Carries the concrete receiver and a pointer to a per-(class,interface)
+    // vtable (a ConstantArray of function pointers, one per interface method in
+    // declaration order). Boxed inside a normal {TAG_OBJ, payload} AngaraObject.
+    m_trait_object_type = StructType::create(m_ctx, {
+        m_obj_header_type,
+        m_angara_obj_type,            // receiver: the concrete instance
+        PointerType::get(m_ctx, 0)    // vtable_ptr: -> [n x ptr] function pointers
+    }, "AngaraTraitObject");
+
     m_native_instance_type = StructType::create(m_ctx, {
         m_obj_header_type,
         PointerType::get(m_ctx, 0),

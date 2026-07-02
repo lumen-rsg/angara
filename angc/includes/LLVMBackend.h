@@ -264,6 +264,14 @@ namespace angara {
         std::map<std::string, std::string> constructorLookup;
         std::map<std::string, int> enumVariantIndex;  // "EnumName.VariantName" -> declaration order index
         std::map<std::string, std::string> methodLookup;
+        // TS-1: per-(class,interface) vtable globals, keyed "ClassName->InterfaceName".
+        // Each is a ConstantArray of function pointers (one per interface method, in
+        // declaration order). Populated in codegenClassDecl; consumed by trait-object
+        // boxing (Phase C) and indirect dispatch.
+        std::map<std::string, llvm::GlobalVariable*> traitVtables;
+        // TS-1: method-name -> slot index within an interface's vtable, keyed
+        // "InterfaceName.methodName". Lets indirect dispatch GEP the right slot.
+        std::map<std::string, int> traitMethodSlots;
         std::string m_current_superclass;
 
         // Inlined main: when set, cgReturn emits branch+store instead of ret

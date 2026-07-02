@@ -343,6 +343,61 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
         }
     }
 
+    // TS-1: emit per-(class,interface) vtables. For each trait/contract this
+    // class adopts, build a ConstantArray of the class's implementing method
+    // function pointers (one per interface method in declaration order) and a
+    // global for it. Slot order = the interface's method-map order. Default-
+    // method bodies (Phase D) would fill slots the class doesn't override.
+    {
+        auto sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(class_name);
+        if (sym && sym->type && sym->type->kind == TypeKind::CLASS) {
+            auto cls = std::dynamic_pointer_cast<ClassType>(sym->type);
+            auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
+            auto emit_vtable = [&](const std::string& iface_name,
+                                   const std::vector<std::string>& method_names) {
+                std::vector<llvm::Constant*> fns;
+                for (const auto& mname : method_names) {
+                    // Resolve the implementing method by walking the class chain
+                    // (matches static dispatch): Class.method then bare method.
+                    std::string resolved;
+                    for (auto cur = cls; cur && resolved.empty(); cur = cur->superclass) {
+                        auto qit = methodLookup.find(cur->name + "." + mname);
+                        if (qit != methodLookup.end()) resolved = qit->second;
+                    }
+                    if (resolved.empty()) {
+                        auto mit = methodLookup.find(mname);
+                        if (mit != methodLookup.end()) resolved = mit->second;
+                    }
+                    if (auto* f = mod->getFunction(resolved)) {
+                        fns.push_back(llvm::ConstantExpr::getBitCast(f, ptr_ty));
+                    } else {
+                        fns.push_back(llvm::ConstantPointerNull::get(ptr_ty));
+                    }
+                }
+                std::string vkey = class_name + "->" + iface_name;
+                auto* arr_ty = llvm::ArrayType::get(ptr_ty, fns.size());
+                auto* arr = llvm::ConstantArray::get(arr_ty, fns);
+                auto* gv = new llvm::GlobalVariable(*mod, arr_ty, true,
+                    llvm::GlobalValue::InternalLinkage, arr, "__ang_vtable_" + vkey);
+                traitVtables[vkey] = gv;
+                // Record slot indices for indirect dispatch.
+                for (size_t i = 0; i < method_names.size(); ++i) {
+                    traitMethodSlots[iface_name + "." + method_names[i]] = static_cast<int>(i);
+                }
+            };
+            for (const auto& trait : cls->adopted_traits) {
+                std::vector<std::string> names;
+                for (const auto& [n, sig] : trait->methods) names.push_back(n);
+                emit_vtable(trait->name, names);
+            }
+            for (const auto& contract : cls->signed_contracts) {
+                std::vector<std::string> names;
+                for (const auto& [n, info] : contract->methods) names.push_back(n);
+                emit_vtable(contract->name, names);
+            }
+        }
+    }
+
     size_t ctor_param_count = (init_method || init_param_count > 0)
         ? init_param_count
         : class_fields.size();

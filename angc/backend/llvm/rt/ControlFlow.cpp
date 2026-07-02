@@ -148,6 +148,32 @@ void RuntimeBuilder::generateClosureOps() {
 
         b.CreateRet(pack_obj(b, bm_ptr));
     }
+
+    // TS-1: __ang_trait_object_new(receiver, vtable_ptr) -> obj. Allocates an
+    // AngaraTraitObject {header, receiver, vtable_ptr} tagged OBJ_TRAIT_OBJECT
+    // and boxes it. The vtable_ptr is a per-(class,interface) ConstantArray of
+    // function pointers emitted by the backend (Phase B2).
+    {
+        auto* ptr_ty = PointerType::get(m_ctx, 0);
+        auto* fn_ty = FunctionType::get(obj_ty, {obj_ty, ptr_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_trait_object_new", fn_ty);
+        m_fn_trait_object_new = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+        auto* recv_arg = fn->arg_begin();
+        auto* vtable_arg = fn->arg_begin() + 1;
+
+        auto* to_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_trait_object_type));
+        auto* to_ptr = b.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+            {to_size, ConstantInt::get(i32_ty, OBJ_TRAIT_OBJECT)}, "to_mem");
+
+        b.CreateStore(recv_arg, b.CreateStructGEP(m_trait_object_type, to_ptr, 1));
+        b.CreateStore(vtable_arg, b.CreateStructGEP(m_trait_object_type, to_ptr, 2));
+
+        b.CreateRet(pack_obj(b, to_ptr));
+    }
 }
 
 void RuntimeBuilder::generateExceptionOps() {
