@@ -1,7 +1,7 @@
 #include "Parser.h"
 
 namespace angara {
-    Parser::Parser(const std::vector<Token> &tokens, ErrorHandler &errorHandler)
+    Parser::Parser(std::vector<Token> &tokens, ErrorHandler &errorHandler)
             : m_tokens(tokens), m_errorHandler(errorHandler), m_panicMode(false) {}
 
 
@@ -51,6 +51,7 @@ namespace angara {
             std::vector<std::shared_ptr<ASTType>> params;
             if (!check(TokenType::RIGHT_PAREN)) {
                 do {
+                    if (check(TokenType::RIGHT_PAREN)) break;
                     params.push_back(type());
                 } while (match({TokenType::COMMA}));
             }
@@ -71,9 +72,10 @@ namespace angara {
             if (match({TokenType::LESS})) {
                 std::vector<std::shared_ptr<ASTType>> arguments;
                 do {
+                    if (check(TokenType::GREATER) || check(TokenType::RSHIFT)) break;
                     arguments.push_back(type());
                 } while (match({TokenType::COMMA}));
-                consume(TokenType::GREATER, "Expected '>' after generic type arguments.", "E108");
+                consumeClosingAngle();  // LANG-16: handles >> splitting for nested generics
                 base_type = std::make_shared<GenericType>(type_name_token, std::move(arguments));
             } else {
                 base_type = std::make_shared<SimpleType>(type_name_token);
@@ -243,11 +245,31 @@ namespace angara {
         m_errorHandler.warning(token, message);
     }
 
+    // LANG-16: consume a closing '>' for generic type arguments/params. If the
+    // token is RSHIFT ('>>'), split it: consume one '>' and leave the other for
+    // the enclosing generic context (by replacing the current token with GREATER
+    // and backing up m_current so the next consume sees it).
+    void Parser::consumeClosingAngle() {
+        if (check(TokenType::GREATER)) {
+            advance();
+        } else if (check(TokenType::RSHIFT)) {
+            // Split: consume the '>>', replace it with a single '>', and back up.
+            Token& tok = m_tokens[m_current];
+            tok.type = TokenType::GREATER;
+            tok.lexeme = ">";
+        } else {
+            throw error(peek(), "Expected '>' after generic type arguments.", "E108");
+        }
+    }
+
     void Parser::synchronize() {
         advance();
 
         while (!isAtEnd()) {
-            if (previous().type == TokenType::SEMICOLON) return;
+            if (previous().type == TokenType::SEMICOLON) {
+                m_panicMode = false;  // LANG-2: reset so the next declaration reports errors.
+                return;
+            }
 
             switch (peek().type) {
                 case TokenType::FUNC:
@@ -256,11 +278,13 @@ namespace angara {
                 case TokenType::IF:
                 case TokenType::WHILE:
                 case TokenType::RETURN:
+                    m_panicMode = false;  // LANG-2: reset at declaration/statement boundaries.
                     return;
                 default: ;
             }
             advance();
         }
+        m_panicMode = false;  // LANG-2: reset at EOF too.
     }
 
     std::vector<Token> Parser::parseTypeParams(std::map<std::string, Token>& bounds) {
@@ -296,6 +320,13 @@ namespace angara {
 
             if (check(TokenType::GREATER)) {
                 advance();
+                return params;
+            }
+            // LANG-16: accept >> and split for nested generics.
+            if (check(TokenType::RSHIFT)) {
+                Token& tok = m_tokens[m_current];
+                tok.type = TokenType::GREATER;
+                tok.lexeme = ">";
                 return params;
             }
 

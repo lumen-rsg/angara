@@ -96,7 +96,7 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 
 ### Verified gaps
 - [ ] **LANG-1** 🔴 Ranges (`0..n`, `0...n`) — documented but unparsed. (`frontend/parser`, no `DOT_DOT` consumer; `Lexer.cpp:429-434`)
-- [ ] **LANG-2** 🔴 Parser reports ~1 error per declaration after the first (panic-mode flag is set but never reset). `frontend/parser/Parser.cpp:236`
+- [x] **LANG-2** ✅ Fixed — Parser reports ~1 error per declaration after the first (panic-mode flag is set but never reset). `frontend/parser/Parser.cpp:236` _(m_panicMode is now reset at every synchronize() boundary — after SEMICOLON, at declaration/statement keywords, and at EOF — so each declaration reports its own errors independently.)_
 
 ### String & literal gaps
 - [ ] **LANG-3** No **string interpolation** (`$"x = {x}"`) — biggest daily friction; everything is `"x = " + string(x)`.
@@ -107,7 +107,7 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 ### Pattern matching / data
 - [ ] **LANG-7** `match` binds only **one** payload variable per variant; no multi-payload destructuring, no literal patterns (`case 5:`), no guards (`case X if c:`), no `or`-patterns, no nested patterns.
 - [ ] **LANG-8** No **generic enums** (`enum Result<T,E>`) — only `data` and `func` are generic.
-- [ ] **LANG-9** No generic bounds (`<T: Trait>`).
+- [x] **LANG-9** ✅ Fixed — No generic bounds (`<T: Trait>`). _(Already implemented in TS-2 Phase 2a/2b — parseTypeParams handles the `:` bound, defineFunctionHeader/defineDataHeader resolve and store it, and bounds are checked at instantiation via conformsToTrait + E391.)_
 
 ### Structuring / calls
 - [ ] **LANG-10** No **tuples** / tuple types / multi-return; no destructuring (assign, pattern, or `for (k, v in map)`).
@@ -117,10 +117,10 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 - [ ] **LANG-14** No `protected` access level (only `public`/`private`).
 
 ### Operator / syntax nits
-- [ ] **LANG-15** No compound bitwise/modulus assignment (`&= |= ^= %= <<= >>=`).
-- [ ] **LANG-16** `list<list<i64>>` fails — lexer forms a single `>>`; needs a space. (No `>>`-splitting in the type parser.)
-- [ ] **LANG-17** Lambda expression-statements rejected — `func(){...}();` (IIFE) needs wrapping parens.
-- [ ] **LANG-18** Trailing commas inconsistent (allowed in list/record literals, rejected in call args/params/enum variants/generic args).
+- [ ] **LANG-15** No compound bitwise/modulus assignment (`&= |= ^= %= <<= >>=`). _(Note: the existing `+=`/`-=`/`*=`/`/=` are also likely mis-compiled at the LLVM level — cgAssign stores only the RHS without reading the current value. Fixing LANG-15 requires fixing all 10 operators in codegen.)_
+- [x] **LANG-16** ✅ Fixed — `list<list<i64>>` fails — lexer forms a single `>>`; needs a space. _(A `consumeClosingAngle()` helper splits `>>` into two `>` in the type parser and parseTypeParams — standard C++/Rust technique. `m_tokens` changed from `const&` to non-const `&` to allow the in-place split.)_
+- [x] **LANG-17** ✅ Fixed — Lambda expression-statements rejected — `func(){...}();` (IIFE) needs wrapping parens. _(declaration() now checks if `func` is immediately followed by `(` — if so, it falls through to statement() as an expression-statement. The lambda parser and IIFE codegen path already existed.)_
+- [x] **LANG-18** ✅ Fixed — Trailing commas inconsistent (allowed in list/record literals, rejected in call args/params/enum variants/generic args). _(Added a `check(RIGHT_CLOSER) break;` guard as the first line of each `do { ... } while (match(COMMA))` loop in call args, function params, enum variants, generic type args, function-type params. Now consistent everywhere.)_
 
 ---
 

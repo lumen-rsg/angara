@@ -10,6 +10,7 @@ namespace angara {
                 std::vector<std::shared_ptr<Expr>> arguments;
                 if (!check(TokenType::RIGHT_PAREN)) {
                     do {
+                        if (check(TokenType::RIGHT_PAREN)) break;
                         if (arguments.size() >= 255) {
                             error(peek(), "Too many arguments in function call — maximum is 255.", "E215");
                         }

@@ -9,6 +9,7 @@ namespace angara {
 
         if (!check(TokenType::RIGHT_BRACE)) {
             do {
+                if (check(TokenType::RIGHT_BRACE)) break;
                 Token variant_name = consume(TokenType::IDENTIFIER, "Expected variant name in enum.", "E161");
 
                 std::vector<EnumVariantParam> params;

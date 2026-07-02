@@ -24,6 +24,14 @@ namespace angara {
             }
 
             bool is_exported = match({TokenType::EXPORT});
+            // LANG-17: if 'func' is immediately followed by '(' (no name), it's
+            // a lambda expression-statement (IIFE: func(){...}()), not a
+            // declaration. Fall through to statement() so the lambda parser
+            // (primaryExpression) handles it.
+            if (check(TokenType::FUNC) && m_current + 1 < (int)m_tokens.size() &&
+                m_tokens[m_current + 1].type == TokenType::LEFT_PAREN) {
+                return statement();
+            }
             if (match({TokenType::FUNC})) {
                 auto func_decl = std::static_pointer_cast<FuncStmt>(function("function"));
                 func_decl->is_exported = is_exported;

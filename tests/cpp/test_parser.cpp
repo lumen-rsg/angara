@@ -583,8 +583,9 @@ TEST(error_on_missing_brace) {
 }
 
 TEST(error_on_extra_token) {
-    // Function declaration doesn't expect random tokens
-    ASSERT_TRUE(hasParseError("func ( ) { } ;;;;"));
+    // Function declaration doesn't expect random tokens after the body.
+    // (Note: "func () {} ;;;;" is now a valid IIFE after LANG-17.)
+    ASSERT_TRUE(hasParseError("func f() -> i64 { return 1; } extra_token"));
 }
 
 // ── Logical expressions ──

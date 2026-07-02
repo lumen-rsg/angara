@@ -16,7 +16,7 @@ namespace angara {
         /// Constructs a Parser over the given token list.
         /// @param tokens        Token stream produced by the Lexer (must end with EOF_TOKEN).
         /// @param errorHandler  Error reporter used for diagnostics.
-        Parser(const std::vector<Token> &tokens, ErrorHandler &errorHandler);
+        Parser(std::vector<Token> &tokens, ErrorHandler &errorHandler);
 
         /// Parses the entire token stream and returns a list of top-level statements.
         /// @return Ordered vector of AST statement nodes.
@@ -273,8 +273,11 @@ namespace angara {
 
         /// Discards tokens until a statement boundary is found, allowing the parser to resume.
         void synchronize();
+        /// LANG-16: consume a closing '>' (or split '>>' into two '>').
+        void consumeClosingAngle();
 
-        const std::vector<Token> &m_tokens;
+        // LANG-16: non-const so >> can be split into two > for nested generics.
+        std::vector<Token> &m_tokens;
         int m_current = 0;
         ErrorHandler &m_errorHandler;
         bool m_panicMode = false;

@@ -21,6 +21,7 @@ namespace angara {
 
             if (!check(TokenType::RIGHT_PAREN)) {
                 do {
+                    if (check(TokenType::RIGHT_PAREN)) break;
                     Token param_name = consume(TokenType::IDENTIFIER, "Expected parameter name.", "E190");
                     consume(TokenType::AS, "Expected 'as' followed by a type after parameter name.", "E191");
                     std::shared_ptr<ASTType> param_type = type();

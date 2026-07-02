@@ -1,0 +1,35 @@
+// LANG-16: nested generics compile (>> splitting).
+// LANG-17: IIFE (lambda expression statement).
+// LANG-18: trailing commas in various positions.
+attach io;
+
+// LANG-16: list<list<i64>> — the lexer forms >> but the parser splits it.
+data Box<T> { let v as T; }
+
+// LANG-18: trailing commas in function params and enum variants.
+func add(a as i64, b as i64,) -> i64 {
+    return a + b;
+}
+
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+export func main() -> i64 {
+    // LANG-16: nested generic instantiation.
+    let nested = Box(Box(42));
+    io.println(0, "nested: " + string(nested.v.v));  // 42
+
+    // LANG-17: IIFE — a lambda called immediately as an expression-statement.
+    func(x as i64) -> nil {
+        io.println(0, "iife: " + string(x));
+    }(99);
+
+    // LANG-18: trailing comma in call args.
+    let sum = add(10, 20,);
+    io.println(0, "sum: " + string(sum));  // 30
+
+    return 0;
+}
