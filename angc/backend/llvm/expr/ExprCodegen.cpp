@@ -134,6 +134,23 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
     bool right_typed = rt_it != m_type_checker.getExpressionTypes().end();
     bool types_known = left_typed && right_typed;
 
+    // RT-5: integer wrap flags. NSW/NUW tell LLVM overflow won't happen,
+    // unlocking int optimizations (overflow becomes poison/UB). No Angara
+    // syntax relies on wrap, so this is safe. NUW only when both operands
+    // are unsigned; NSW when at least one is signed (the conservative flag
+    // for mixed/unknown signedness — the generic tag-dispatch path uses
+    // NSW-only since runtime sign is unknown).
+    bool int_nuw = false, int_nsw = false;
+    if (types_known) {
+        auto& ltype = lt_it->second;
+        auto& rtype = rt_it->second;
+        if (isInteger(ltype) && isInteger(rtype)) {
+            bool both_uns = isUnsignedIntType(ltype) && isUnsignedIntType(rtype);
+            int_nuw = both_uns;
+            int_nsw = true;   // safe for signed, unsigned (no wrap), and mixed
+        }
+    }
+
     // Helper: convert an AngaraObject to double based on its runtime tag.
     // If TAG_F64, bitcast payload; if TAG_I64, SIToFP convert.
     auto* f64_ty = llvm::Type::getDoubleTy(*ctx);
@@ -152,7 +169,7 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
                 auto& ltype = lt_it->second;
                 auto& rtype = rt_it->second;
                 if (isInteger(ltype) && isInteger(rtype))
-                    return makeI64(builder->CreateAdd(getI64(l), getI64(r)));
+                    return makeI64(builder->CreateAdd(getI64(l), getI64(r), "", int_nuw, int_nsw));
                 if (isFloat(ltype) || isFloat(rtype)) {
                     auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
                     auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
@@ -188,7 +205,7 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             auto* checkF64BB = llvm::BasicBlock::Create(*ctx,"chkf",fn);
             builder->CreateCondBr(bothI64, iaddBB, checkF64BB);
             builder->SetInsertPoint(iaddBB);
-            auto* ia = makeI64(builder->CreateAdd(getI64(l),getI64(r)));
+            auto* ia = makeI64(builder->CreateAdd(getI64(l),getI64(r), "", /*HasNUW*/false, /*HasNSW*/true));
             iaddBB = builder->GetInsertBlock();
             builder->CreateBr(maddBB);
             builder->SetInsertPoint(checkF64BB);
@@ -212,7 +229,7 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
                 auto& ltype = lt_it->second;
                 auto& rtype = rt_it->second;
                 if (isInteger(ltype) && isInteger(rtype))
-                    return makeI64(builder->CreateSub(getI64(l), getI64(r)));
+                    return makeI64(builder->CreateSub(getI64(l), getI64(r), "", int_nuw, int_nsw));
                 if (isFloat(ltype) || isFloat(rtype)) {
                     auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
                     auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
@@ -234,7 +251,7 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             fsubBB = builder->GetInsertBlock();
             builder->CreateBr(msubBB);
             builder->SetInsertPoint(isubBB);
-            auto* ia = makeI64(builder->CreateSub(getI64(l),getI64(r)));
+            auto* ia = makeI64(builder->CreateSub(getI64(l),getI64(r), "", /*HasNUW*/false, /*HasNSW*/true));
             isubBB = builder->GetInsertBlock();
             builder->CreateBr(msubBB);
             builder->SetInsertPoint(msubBB);
@@ -248,7 +265,7 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
                 auto& ltype = lt_it->second;
                 auto& rtype = rt_it->second;
                 if (isInteger(ltype) && isInteger(rtype))
-                    return makeI64(builder->CreateMul(getI64(l), getI64(r)));
+                    return makeI64(builder->CreateMul(getI64(l), getI64(r), "", int_nuw, int_nsw));
                 if (isFloat(ltype) || isFloat(rtype)) {
                     auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
                     auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
@@ -276,7 +293,7 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             fmulBB = builder->GetInsertBlock();
             builder->CreateBr(mmulBB);
             builder->SetInsertPoint(imulBB);
-            auto* ia = makeI64(builder->CreateMul(getI64(l),getI64(r)));
+            auto* ia = makeI64(builder->CreateMul(getI64(l),getI64(r), "", /*HasNUW*/false, /*HasNSW*/true));
             imulBB = builder->GetInsertBlock();
             builder->CreateBr(mmulBB);
             builder->SetInsertPoint(mmulBB);
