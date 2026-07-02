@@ -172,6 +172,12 @@ namespace angara {
                                     const std::shared_ptr<Type>& source,
                                     const Literal* lit);
 
+        /// TS-2: does `subject` conform to `trait`? A marker trait (no methods)
+        /// is satisfied by any type; a trait with methods requires the subject be
+        /// a class instance whose methods match the trait's signatures.
+        bool conformsToTrait(const std::shared_ptr<Type>& subject,
+                             const std::shared_ptr<TraitType>& trait);
+
         /// TS-6: true iff every control-flow path through `stmt` ends in a
         /// `return` or `throw` (control cannot fall off the end). Conservative.
         bool definitelyReturns(const std::shared_ptr<const Stmt>& stmt);

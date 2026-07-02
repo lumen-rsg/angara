@@ -44,6 +44,7 @@ namespace angara {
     struct EnumType;
     struct EnumVariantType;
     struct ClassType; // Needed for DataType and others
+    struct TraitType; // TS-2: needed for type_param_bounds on ClassType/DataType
 
     // TS-4: structural type identity. Nominal types (CLASS/DATA/ENUM/TRAIT/
     // CONTRACT) compare by canonical pointer identity (each declaration is
@@ -191,6 +192,8 @@ namespace angara {
 
         // --- GENERIC SUPPORT ---
         std::vector<std::string> type_params;
+        // TS-2: resolved bounds, e.g. "K" -> TraitType("Hashable") for `<K: Hashable>`.
+        std::map<std::string, std::shared_ptr<TraitType>> type_param_bounds;
 
         // TS-4: the declaring module's name. Empty for built-ins. Set at every
         // construction site; preserved across module imports (the shared object
@@ -399,6 +402,8 @@ namespace angara {
         // --- GENERIC SUPPORT ---
         // Type parameter names for this generic data type (e.g., {"T"} for Box<T>)
         std::vector<std::string> type_params;
+        // TS-2: resolved bounds, e.g. "K" -> TraitType("Hashable") for `<K: Hashable>`.
+        std::map<std::string, std::shared_ptr<TraitType>> type_param_bounds;
         std::string home_module;  // TS-4: declaring module (for qualified diagnostics)
 
         explicit DataType(std::string name)

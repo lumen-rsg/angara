@@ -1,0 +1,32 @@
+// TS-2 Phase 2: generic bounds `<T: Trait>`. A marker trait is satisfied by
+// any type; a method-bearing trait requires the type-arg to conform.
+attach io;
+
+// Marker trait (no methods) — satisfied by any type. Lets a container express
+// "I store hashable things" at the type level even before body-level dispatch.
+trait Hashable {}
+
+// Method-bearing trait — only class instances with the matching method conform.
+trait Drawable { func draw(this) -> nil; }
+
+class Box {
+public:
+    let w as i64;
+    func init(this, w as i64) { this.w = w; }
+    func draw(this) -> nil { io.println(0, "drawing box w=" + string(this.w)); }
+}
+
+// Generic containers parameterized with bounds.
+data Map<K: Hashable, V> { let k as K; let v as V; }
+data Widget<T: Drawable> { let child as T; }
+
+export func main() -> i64 {
+    // K=i64 satisfies the marker bound Hashable.
+    let m = Map(1, 2);
+    io.println(0, "map entry: " + string(m.k) + " -> " + string(m.v));
+
+    // T=Box satisfies Drawable (Box has draw()).
+    let wg = Widget(Box(7));
+    wg.child.draw();
+    return 0;
+}

@@ -12,6 +12,19 @@ namespace angara {
             data_type->type_params.push_back(tp.lexeme);
         }
 
+        // TS-2: resolve type-param bounds (<T: Trait>) to their TraitType.
+        for (const auto& [param_name, bound_token] : stmt.type_param_bounds) {
+            auto bound_symbol = m_symbols.resolve(bound_token.lexeme);
+            if (!bound_symbol) {
+                error(bound_token, "Trait '" + bound_token.lexeme + "' used as a bound is not defined.", "E389");
+            } else if (bound_symbol->type->kind != TypeKind::TRAIT) {
+                error(bound_token, "'" + bound_token.lexeme + "' is not a trait and cannot be used as a bound.", "E390");
+            } else {
+                data_type->type_param_bounds[param_name] =
+                    std::dynamic_pointer_cast<TraitType>(bound_symbol->type);
+            }
+        }
+
         auto saved_type_params = m_active_type_params;
         for (const auto& tp : stmt.type_params) {
             m_active_type_params[tp.lexeme] = std::make_shared<TypeParameterType>(tp.lexeme);

@@ -215,4 +215,33 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
         m_current_class = enclosing_class;
     }
 
+    // TS-2: does `subject` conform to `trait`? A marker trait (empty methods map)
+    // is satisfied by any type. A trait with method signatures requires the subject
+    // be a class instance whose class (or an ancestor) implements every required
+    // method with a matching signature. Mirrors the class-trait conformance loop
+    // above (lines 139-167) but parameterized over an arbitrary subject type.
+    bool TypeChecker::conformsToTrait(const std::shared_ptr<Type>& subject,
+                                      const std::shared_ptr<TraitType>& trait) {
+        if (!subject || !trait) return false;
+        // A marker trait (e.g. `trait Hashable {}`) imposes no method requirements.
+        if (trait->methods.empty()) return true;
+
+        // Only class instances can satisfy a method-bearing trait today.
+        std::shared_ptr<ClassType> cls;
+        if (subject->kind == TypeKind::INSTANCE) {
+            cls = std::dynamic_pointer_cast<InstanceType>(subject)->class_type;
+        } else if (subject->kind == TypeKind::CLASS) {
+            cls = std::dynamic_pointer_cast<ClassType>(subject);
+        }
+        if (!cls) return false;
+
+        for (const auto& [name, required_sig] : trait->methods) {
+            const ClassType::MemberInfo* info = cls->findProperty(name);
+            if (!info) return false;
+            auto impl_sig = std::dynamic_pointer_cast<FunctionType>(info->type);
+            if (!impl_sig || !impl_sig->equals(*required_sig)) return false;
+        }
+        return true;
+    }
+
 }

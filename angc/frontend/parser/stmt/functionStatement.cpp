@@ -3,7 +3,8 @@ namespace angara {
 
     std::shared_ptr<Stmt> Parser::function(const std::string& kind) {
         Token name = consume(TokenType::IDENTIFIER, "Expected " + kind + " name.", "E187");
-        auto type_params = parseTypeParams();
+        std::map<std::string, Token> type_param_bounds;
+        auto type_params = parseTypeParams(type_param_bounds);
 
         consume(TokenType::LEFT_PAREN, "Expected '(' after " + kind + " name.", "E188");
         bool has_this = (kind == "method");
@@ -49,6 +50,6 @@ namespace angara {
             throw error(peek(), "Expected '{' for the " + kind + " body, or ';' for a declaration without a body.", "E194");
         }
 
-        return std::make_shared<FuncStmt>(std::move(name), has_this, std::move(parameters), returnType, body, std::move(type_params));
+        return std::make_shared<FuncStmt>(std::move(name), has_this, std::move(parameters), returnType, body, std::move(type_params), std::move(type_param_bounds));
     }
 }

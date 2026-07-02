@@ -5,6 +5,7 @@
 #pragma once
 
 #include <vector>
+#include <map>
 #include <memory>
 #include "Token.h"
 #include "Expr.h"
@@ -249,18 +250,22 @@ namespace angara {
         // --- GENERIC SUPPORT ---
         // Type parameter names (e.g., {"T"} for `func identity<T>(x as T) -> T`)
         const std::vector<Token> type_params;
+        // TS-2: type-param bounds (e.g., T -> Trait token for `<T: Hashable>`).
+        const std::map<std::string, Token> type_param_bounds;
 
         // TODO ignore `throws` for now and add it when exceptions are fully implemented.
 
         FuncStmt(Token name, bool has_this, std::vector<Parameter> params,
          std::shared_ptr<ASTType> returnType, std::optional<std::vector<std::shared_ptr<Stmt>>> body,
-         std::vector<Token> type_params = {})
+         std::vector<Token> type_params = {},
+         std::map<std::string, Token> type_param_bounds = {})
         : name(std::move(name)),
           params(std::move(params)),
           returnType(std::move(returnType)),
           has_this(has_this),
           body(std::move(body)),
-          type_params(std::move(type_params)) {}
+          type_params(std::move(type_params)),
+          type_param_bounds(std::move(type_param_bounds)) {}
 
         void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const FuncStmt>(self));
@@ -405,6 +410,8 @@ namespace angara {
         // --- GENERIC SUPPORT ---
         // Type parameter names (e.g., {"T", "U"} for `data Pair<T, U>`)
         const std::vector<Token> type_params;
+        // TS-2: type-param bounds (e.g., T -> Trait token for `<T: Hashable>`).
+        const std::map<std::string, Token> type_param_bounds;
         bool is_exported = false;
         bool is_foreign = false;
         bool is_opaque = false;
@@ -412,10 +419,12 @@ namespace angara {
         bool is_owned = false;  // v5: `owned` keyword — heap type, must be dropped
 
         DataStmt(Token name, std::vector<std::shared_ptr<VarDeclStmt>> fields,
-                 std::vector<Token> type_params = {})
+                 std::vector<Token> type_params = {},
+                 std::map<std::string, Token> type_param_bounds = {})
             : name(std::move(name)),
               fields(std::move(fields)),
-              type_params(std::move(type_params)) {}
+              type_params(std::move(type_params)),
+              type_param_bounds(std::move(type_param_bounds)) {}
 
         void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const DataStmt>(self));

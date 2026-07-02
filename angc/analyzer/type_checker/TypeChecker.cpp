@@ -395,7 +395,16 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
                     for (size_t i = 0; i < generic->arguments.size(); ++i) {
                         auto arg_type = resolveType(generic->arguments[i]);
                         if (arg_type->kind == TypeKind::ERROR) return m_type_error;
-                        type_args[data_type->type_params[i]] = arg_type;
+                        // TS-2: enforce the param's bound, if any.
+                        const std::string& pname = data_type->type_params[i];
+                        auto bound_it = data_type->type_param_bounds.find(pname);
+                        if (bound_it != data_type->type_param_bounds.end() &&
+                            !conformsToTrait(arg_type, bound_it->second)) {
+                            error(generic->name,
+                                  "Type argument '" + arg_type->toString() + "' does not satisfy the bound '" +
+                                  pname + ": " + bound_it->second->toString() + "'.", "E391");
+                        }
+                        type_args[pname] = arg_type;
                     }
 
                     return std::make_shared<GenericInstanceType>(data_type, std::move(type_args));
@@ -417,7 +426,16 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
                     for (size_t i = 0; i < generic->arguments.size(); ++i) {
                         auto arg_type = resolveType(generic->arguments[i]);
                         if (arg_type->kind == TypeKind::ERROR) return m_type_error;
-                        type_args[class_type->type_params[i]] = arg_type;
+                        // TS-2: enforce the param's bound, if any.
+                        const std::string& pname = class_type->type_params[i];
+                        auto bound_it = class_type->type_param_bounds.find(pname);
+                        if (bound_it != class_type->type_param_bounds.end() &&
+                            !conformsToTrait(arg_type, bound_it->second)) {
+                            error(generic->name,
+                                  "Type argument '" + arg_type->toString() + "' does not satisfy the bound '" +
+                                  pname + ": " + bound_it->second->toString() + "'.", "E391");
+                        }
+                        type_args[pname] = arg_type;
                     }
 
                     return std::make_shared<GenericInstanceType>(class_type, std::move(type_args));

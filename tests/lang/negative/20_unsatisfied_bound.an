@@ -1,0 +1,9 @@
+// TS-2 Phase 2: a type argument that doesn't satisfy its declared bound errors.
+// NoDraw has no draw() method, so it does not satisfy `T: Drawable`.
+trait Drawable { func draw(this) -> nil; }
+class NoDraw {
+public:
+    func something(this) -> nil { }
+}
+data Widget<T: Drawable> { let child as T; }
+export func make() -> Widget<NoDraw> { return Widget(NoDraw()); }  // E391

@@ -263,7 +263,7 @@ namespace angara {
         }
     }
 
-    std::vector<Token> Parser::parseTypeParams() {
+    std::vector<Token> Parser::parseTypeParams(std::map<std::string, Token>& bounds) {
         if (!check(TokenType::LESS)) {
             return {};
         }
@@ -286,6 +286,13 @@ namespace angara {
             }
 
             params.push_back(advance());
+
+            // TS-2: optional bound `<T: TraitName>`.
+            if (check(TokenType::COLON)) {
+                advance();
+                Token bound = consume(TokenType::IDENTIFIER, "Expected a trait name after ':' in a type-parameter bound.", "E388");
+                bounds[params.back().lexeme] = bound;
+            }
 
             if (check(TokenType::GREATER)) {
                 advance();

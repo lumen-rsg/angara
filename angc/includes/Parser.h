@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <map>
 #include <memory>
 #include "Token.h"
 #include "Expr.h"
@@ -142,8 +143,10 @@ namespace angara {
 
         /// Parses a generic type-parameter list `<T, U, V>` after a declaration name.
         /// Uses lookahead to disambiguate from a comparison expression.
+        /// @param bounds  (out) Filled with type-param name -> bound trait token
+        ///                for any `<T: Trait>` parsed. Empty if no bounds.
         /// @return Vector of type-parameter tokens, or empty if none found.
-        std::vector<Token> parseTypeParams();
+        std::vector<Token> parseTypeParams(std::map<std::string, Token>& bounds);
 
         /// Parses an anonymous function (lambda) expression after the `func` keyword.
         /// @param keyword  The `func` token (for error reporting).

@@ -3,7 +3,8 @@ namespace angara {
 
     std::shared_ptr<Stmt> Parser::dataDeclaration() {
         Token name = consume(TokenType::IDENTIFIER, "Expected name after 'data'.", "E120");
-        auto type_params = parseTypeParams();
+        std::map<std::string, Token> type_param_bounds;
+        auto type_params = parseTypeParams(type_param_bounds);
 
         consume(TokenType::LEFT_BRACE, "Expected '{' before data body.", "E121");
 
@@ -29,7 +30,7 @@ namespace angara {
         }
 
         consume(TokenType::RIGHT_BRACE, "Expected '}' after data body.", "E127");
-        return std::make_shared<DataStmt>(std::move(name), std::move(fields), std::move(type_params));
+        return std::make_shared<DataStmt>(std::move(name), std::move(fields), std::move(type_params), std::move(type_param_bounds));
     }
 
 }
