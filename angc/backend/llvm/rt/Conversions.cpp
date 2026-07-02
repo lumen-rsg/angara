@@ -268,6 +268,8 @@ void RuntimeBuilder::generateEquality() {
         auto* fn = createRuntimeFunc("__ang_equals", fn_ty);
         m_fn_equals = FunctionCallee(fn);
 
+        auto* zero_i64 = ConstantInt::get(i64_ty, 0);
+
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<> bb(entry);
         auto* a = fn->arg_begin();
@@ -341,26 +343,193 @@ void RuntimeBuilder::generateEquality() {
             IRBuilder<> boe(obj_eq_bb);
             auto* pa = boe.CreateBitCast(payload_a, i64_ty);
             auto* pb = boe.CreateBitCast(payload_b, i64_ty);
-            auto* is_string_bb = BasicBlock::Create(m_ctx, "is_str_eq", fn);
-            auto* ptr_eq_bb = BasicBlock::Create(m_ctx, "ptr_eq", fn);
             auto* ptr_a = boe.CreateIntToPtr(pa, PointerType::get(m_ctx, 0));
             auto* obj_type_a = boe.CreateLoad(i32_ty, boe.CreateStructGEP(m_obj_header_type, ptr_a, 0));
-            auto* is_str_a = boe.CreateICmpEQ(obj_type_a, ConstantInt::get(i32_ty, OBJ_STRING));
             auto* ptr_b = boe.CreateIntToPtr(pb, PointerType::get(m_ctx, 0));
             auto* obj_type_b = boe.CreateLoad(i32_ty, boe.CreateStructGEP(m_obj_header_type, ptr_b, 0));
-            auto* is_str_b = boe.CreateICmpEQ(obj_type_b, ConstantInt::get(i32_ty, OBJ_STRING));
-            auto* both_str = boe.CreateAnd(is_str_a, is_str_b);
-            boe.CreateCondBr(both_str, is_string_bb, ptr_eq_bb);
+            auto* same_obj_type = boe.CreateICmpEQ(obj_type_a, obj_type_b);
 
-            IRBuilder<> bse(is_string_bb);
-            auto* str_a = bse.CreateIntToPtr(pa, PointerType::get(m_ctx, 0));
-            auto* str_b = bse.CreateIntToPtr(pb, PointerType::get(m_ctx, 0));
-            auto* chars_a = bse.CreateLoad(i8_ptr, bse.CreateStructGEP(m_string_type, str_a, 3));
-            auto* chars_b = bse.CreateLoad(i8_ptr, bse.CreateStructGEP(m_string_type, str_b, 3));
-            auto* strcmp_fn = m_module.getFunction("strcmp");
-            auto* cmp = bse.CreateCall(strcmp_fn, {chars_a, chars_b});
-            auto* eq = bse.CreateICmpEQ(cmp, ConstantInt::get(i32_ty, 0));
-            bse.CreateRet(pack_bool(bse, eq));
+            auto* dispatch_bb = BasicBlock::Create(m_ctx, "obj_dispatch", fn);
+            auto* ptr_eq_bb = BasicBlock::Create(m_ctx, "ptr_eq", fn);
+            boe.CreateCondBr(same_obj_type, dispatch_bb, ptr_eq_bb);
+
+            // Dispatch on the (shared) obj subtype: string/list/record -> deep;
+            // everything else -> pointer identity.
+            IRBuilder<> bd(dispatch_bb);
+            auto* str_eq_bb = BasicBlock::Create(m_ctx, "str_eq", fn);
+            auto* list_eq_bb = BasicBlock::Create(m_ctx, "list_eq", fn);
+            auto* record_eq_bb = BasicBlock::Create(m_ctx, "record_eq", fn);
+            auto* obj_fallback_bb = BasicBlock::Create(m_ctx, "obj_fallback", fn);
+            auto* od_sw = bd.CreateSwitch(obj_type_a, obj_fallback_bb, 3);
+            od_sw->addCase(ConstantInt::get(i32_ty, OBJ_STRING), str_eq_bb);
+            od_sw->addCase(ConstantInt::get(i32_ty, OBJ_LIST), list_eq_bb);
+            od_sw->addCase(ConstantInt::get(i32_ty, OBJ_RECORD), record_eq_bb);
+
+            // String: deep strcmp.
+            IRBuilder<> bse(str_eq_bb);
+            {
+                auto* str_a = bse.CreateIntToPtr(pa, PointerType::get(m_ctx, 0));
+                auto* str_b = bse.CreateIntToPtr(pb, PointerType::get(m_ctx, 0));
+                auto* chars_a = bse.CreateLoad(i8_ptr, bse.CreateStructGEP(m_string_type, str_a, 3));
+                auto* chars_b = bse.CreateLoad(i8_ptr, bse.CreateStructGEP(m_string_type, str_b, 3));
+                auto* strcmp_fn = m_module.getFunction("strcmp");
+                auto* cmp = bse.CreateCall(strcmp_fn, {chars_a, chars_b});
+                bse.CreateRet(pack_bool(bse, bse.CreateICmpEQ(cmp, ConstantInt::get(i32_ty, 0))));
+            }
+
+            // List: equal length, then pairwise __ang_equals recursion.
+            IRBuilder<> ble(list_eq_bb);
+            {
+                auto* list_a = ble.CreateIntToPtr(pa, m_list_type->getPointerTo());
+                auto* list_b = ble.CreateIntToPtr(pb, m_list_type->getPointerTo());
+                auto* cnt_a = ble.CreateLoad(i64_ty, ble.CreateStructGEP(m_list_type, list_a, 1), "cnt_a");
+                auto* cnt_b = ble.CreateLoad(i64_ty, ble.CreateStructGEP(m_list_type, list_b, 1), "cnt_b");
+                auto* len_eq = ble.CreateICmpEQ(cnt_a, cnt_b);
+                auto* list_neq_bb = BasicBlock::Create(m_ctx, "list_neq", fn);
+                auto* list_loop_pre_bb = BasicBlock::Create(m_ctx, "list_loop_pre", fn);
+                ble.CreateCondBr(len_eq, list_loop_pre_bb, list_neq_bb);
+
+                IRBuilder<> blne(list_neq_bb);
+                blne.CreateRet(pack_bool(blne, ConstantInt::get(Type::getInt1Ty(m_ctx), 0)));
+
+                // Loop: i = 0; while i < cnt_a { eq = __ang_equals(elems_a[i], elems_b[i]); if (!eq) ret false; i++ } ret true
+                IRBuilder<> blp(list_loop_pre_bb);
+                auto* elems_a = blp.CreateLoad(m_angara_obj_type->getPointerTo(),
+                    blp.CreateStructGEP(m_list_type, list_a, 3), "elems_a");
+                auto* elems_b = blp.CreateLoad(m_angara_obj_type->getPointerTo(),
+                    blp.CreateStructGEP(m_list_type, list_b, 3), "elems_b");
+                auto* list_loop_bb = BasicBlock::Create(m_ctx, "list_loop", fn);
+                auto* list_done_bb = BasicBlock::Create(m_ctx, "list_done", fn);
+                blp.CreateBr(list_loop_bb);
+
+                IRBuilder<> bll(list_loop_bb);
+                auto* i = bll.CreatePHI(i64_ty, 2, "i");
+                i->addIncoming(zero_i64, list_loop_pre_bb);
+                auto* cont = bll.CreateICmpSLT(i, cnt_a);
+                auto* list_body_bb = BasicBlock::Create(m_ctx, "list_body", fn);
+                bll.CreateCondBr(cont, list_body_bb, list_done_bb);
+
+                IRBuilder<> blb(list_body_bb);
+                auto* ea = blb.CreateLoad(m_angara_obj_type, blb.CreateGEP(m_angara_obj_type, elems_a, {i}));
+                auto* eb = blb.CreateLoad(m_angara_obj_type, blb.CreateGEP(m_angara_obj_type, elems_b, {i}));
+                auto* el_eq = blb.CreateCall(m_fn_equals, {ea, eb});
+                auto* el_eq_bool = blb.CreateICmpNE(
+                    blb.CreateExtractValue(el_eq, {1}), zero_i64);
+                auto* list_next_bb = BasicBlock::Create(m_ctx, "list_next", fn);
+                auto* list_early_false_bb = BasicBlock::Create(m_ctx, "list_ef", fn);
+                blb.CreateCondBr(el_eq_bool, list_next_bb, list_early_false_bb);
+
+                IRBuilder<> blef(list_early_false_bb);
+                blef.CreateRet(pack_bool(blef, ConstantInt::get(Type::getInt1Ty(m_ctx), 0)));
+
+                IRBuilder<> blnx(list_next_bb);
+                auto* i_next = blnx.CreateAdd(i, ConstantInt::get(i64_ty, 1));
+                i->addIncoming(i_next, list_next_bb);
+                blnx.CreateBr(list_loop_bb);
+
+                IRBuilder<> bld(list_done_bb);
+                bld.CreateRet(pack_bool(bld, ConstantInt::get(Type::getInt1Ty(m_ctx), 1)));
+            }
+
+            // Record: equal count, then each entry's value compared by __ang_equals.
+            // (Keys are strdup'd strings; compare keys with strcmp, values recursively.)
+            IRBuilder<> bre(record_eq_bb);
+            {
+                auto* rec_a = bre.CreateIntToPtr(pa, m_record_type->getPointerTo());
+                auto* rec_b = bre.CreateIntToPtr(pb, m_record_type->getPointerTo());
+                auto* cnt_a = bre.CreateLoad(i64_ty, bre.CreateStructGEP(m_record_type, rec_a, 1), "rcnt_a");
+                auto* cnt_b = bre.CreateLoad(i64_ty, bre.CreateStructGEP(m_record_type, rec_b, 1), "rcnt_b");
+                auto* len_eq = bre.CreateICmpEQ(cnt_a, cnt_b);
+                auto* rec_neq_bb = BasicBlock::Create(m_ctx, "rec_neq", fn);
+                auto* rec_loop_pre_bb = BasicBlock::Create(m_ctx, "rec_loop_pre", fn);
+                bre.CreateCondBr(len_eq, rec_loop_pre_bb, rec_neq_bb);
+
+                IRBuilder<> brne(rec_neq_bb);
+                brne.CreateRet(pack_bool(brne, ConstantInt::get(Type::getInt1Ty(m_ctx), 0)));
+
+                IRBuilder<> brp(rec_loop_pre_bb);
+                auto* entries_a = brp.CreateLoad(m_record_entry_type->getPointerTo(),
+                    brp.CreateStructGEP(m_record_type, rec_a, 3), "entries_a");
+                auto* rec_loop_bb = BasicBlock::Create(m_ctx, "rec_loop", fn);
+                auto* rec_done_bb = BasicBlock::Create(m_ctx, "rec_done", fn);
+                brp.CreateBr(rec_loop_bb);
+
+                IRBuilder<> brl(rec_loop_bb);
+                auto* ri = brl.CreatePHI(i64_ty, 2, "ri");
+                ri->addIncoming(zero_i64, rec_loop_pre_bb);
+                auto* rcont = brl.CreateICmpSLT(ri, cnt_a);
+                auto* rec_body_bb = BasicBlock::Create(m_ctx, "rec_body", fn);
+                brl.CreateCondBr(rcont, rec_body_bb, rec_done_bb);
+
+                IRBuilder<> brb(rec_body_bb);
+                // entry_a = entries_a[ri]; find a matching key in entries_b by strcmp,
+                // then compare values. For simplicity (records are usually small and
+                // unordered), linear-scan entries_b for the same key.
+                auto* entry_a = brb.CreateGEP(m_record_entry_type, entries_a, {ri});
+                auto* key_a = brb.CreateLoad(i8_ptr, brb.CreateStructGEP(m_record_entry_type, entry_a, 0), "rkey_a");
+                auto* val_a = brb.CreateLoad(m_angara_obj_type, brb.CreateStructGEP(m_record_entry_type, entry_a, 1), "rval_a");
+                // Inner scan over entries_b.
+                auto* inner_pre_bb = BasicBlock::Create(m_ctx, "rec_inner_pre", fn);
+                brb.CreateBr(inner_pre_bb);
+                IRBuilder<> bip(inner_pre_bb);
+                // entries_b loaded lazily; need it from rec_b.
+                auto* entries_b = bip.CreateLoad(m_record_entry_type->getPointerTo(),
+                    bip.CreateStructGEP(m_record_type, rec_b, 3), "entries_b");
+                auto* inner_loop_bb = BasicBlock::Create(m_ctx, "rec_inner", fn);
+                auto* inner_none_bb = BasicBlock::Create(m_ctx, "rec_inner_none", fn);
+                bip.CreateBr(inner_loop_bb);
+
+                IRBuilder<> bil(inner_loop_bb);
+                auto* j = bil.CreatePHI(i64_ty, 2, "j");
+                j->addIncoming(zero_i64, inner_pre_bb);
+                auto* jcont = bil.CreateICmpSLT(j, cnt_b);
+                auto* inner_body_bb = BasicBlock::Create(m_ctx, "rec_inner_body", fn);
+                bil.CreateCondBr(jcont, inner_body_bb, inner_none_bb);
+
+                IRBuilder<> bib(inner_body_bb);
+                auto* entry_b = bib.CreateGEP(m_record_entry_type, entries_b, {j});
+                auto* key_b = bib.CreateLoad(i8_ptr, bib.CreateStructGEP(m_record_entry_type, entry_b, 0));
+                auto* strcmp_fn2 = m_module.getFunction("strcmp");
+                auto* kcmp = bib.CreateCall(strcmp_fn2, {key_a, key_b});
+                auto* kmatch = bib.CreateICmpEQ(kcmp, ConstantInt::get(i32_ty, 0));
+                auto* inner_cmp_val_bb = BasicBlock::Create(m_ctx, "rec_inner_cmp", fn);
+                auto* inner_next_bb = BasicBlock::Create(m_ctx, "rec_inner_next", fn);
+                bib.CreateCondBr(kmatch, inner_cmp_val_bb, inner_next_bb);
+
+                IRBuilder<> bicv(inner_cmp_val_bb);
+                auto* val_b = bicv.CreateLoad(m_angara_obj_type, bicv.CreateStructGEP(m_record_entry_type, entry_b, 1));
+                auto* v_eq = bicv.CreateCall(m_fn_equals, {val_a, val_b});
+                auto* v_eq_bool = bicv.CreateICmpNE(bicv.CreateExtractValue(v_eq, {1}), zero_i64);
+                auto* rec_outer_next_bb = BasicBlock::Create(m_ctx, "rec_outer_next", fn);
+                auto* rec_ef_bb = BasicBlock::Create(m_ctx, "rec_ef", fn);
+                bicv.CreateCondBr(v_eq_bool, rec_outer_next_bb, rec_ef_bb);
+
+                IRBuilder<> bref(rec_ef_bb);
+                bref.CreateRet(pack_bool(bref, ConstantInt::get(Type::getInt1Ty(m_ctx), 0)));
+
+                // key not found yet -> advance inner j.
+                IRBuilder<> binx(inner_next_bb);
+                auto* j_next = binx.CreateAdd(j, ConstantInt::get(i64_ty, 1));
+                j->addIncoming(j_next, inner_next_bb);
+                binx.CreateBr(inner_loop_bb);
+
+                // No matching key in b -> not equal.
+                IRBuilder<> binn(inner_none_bb);
+                binn.CreateRet(pack_bool(binn, ConstantInt::get(Type::getInt1Ty(m_ctx), 0)));
+
+                // Found-and-equal entry -> advance outer i.
+                IRBuilder<> bronx(rec_outer_next_bb);
+                auto* ri_next = bronx.CreateAdd(ri, ConstantInt::get(i64_ty, 1));
+                ri->addIncoming(ri_next, rec_outer_next_bb);
+                bronx.CreateBr(rec_loop_bb);
+
+                IRBuilder<> brd(rec_done_bb);
+                brd.CreateRet(pack_bool(brd, ConstantInt::get(Type::getInt1Ty(m_ctx), 1)));
+            }
+
+            // Other object subtypes (closure/instance/...) or mismatched subtypes -> pointer eq.
+            IRBuilder<> bofb(obj_fallback_bb);
+            bofb.CreateBr(ptr_eq_bb);
 
             IRBuilder<> bpe(ptr_eq_bb);
             bpe.CreateRet(pack_bool(bpe, bpe.CreateICmpEQ(pa, pb)));
@@ -374,6 +543,183 @@ void RuntimeBuilder::generateEquality() {
         auto* a_as_f64 = bcn.CreateSelect(a_is_i64, da, bcn.CreateBitCast(payload_a, f64_ty));
         auto* b_as_f64 = bcn.CreateSelect(a_is_i64, db, bcn.CreateBitCast(payload_b, f64_ty));
         bcn.CreateRet(pack_bool(bcn, bcn.CreateFCmpOEQ(a_as_f64, b_as_f64)));
+    }
+}
+
+// TS-2: general object hash. Hashes any AngaraObject to an i64 for use as a
+// map/set key. Scalars hash by their payload; strings via FNV-1a over their
+// bytes; lists and records by folding each element/entry's hash. Other object
+// subtypes hash by their pointer (identity). The function is recursive
+// (__ang_obj_hash calls itself for list/record contents).
+void RuntimeBuilder::generateObjectHash() {
+    auto* i32_ty = Type::getInt32Ty(m_ctx);
+    auto* i64_ty = Type::getInt64Ty(m_ctx);
+    auto* f64_ty = Type::getDoubleTy(m_ctx);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
+    auto* obj_ty = m_angara_obj_type;
+
+    auto* fn_ty = FunctionType::get(i64_ty, {obj_ty}, false);
+    auto* fn = createRuntimeFunc("__ang_obj_hash", fn_ty);
+    m_fn_obj_hash = FunctionCallee(fn);
+
+    auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+    IRBuilder<> bb(entry);
+    auto* arg = fn->arg_begin();
+    auto* tag = bb.CreateExtractValue(arg, {0}, "tag");
+    auto* payload = bb.CreateExtractValue(arg, {1}, "payload");
+
+    // FNV-1a constants.
+    auto* fnv_offset = ConstantInt::get(i64_ty, 0xcbf29ce484222325ULL);
+    auto* fnv_prime = ConstantInt::get(i64_ty, 0x100000001b3ULL);
+
+    auto* nil_h_bb = BasicBlock::Create(m_ctx, "nil_h", fn);
+    auto* sw = bb.CreateSwitch(tag, nil_h_bb, 4);
+
+    // default / nil -> 0
+    IRBuilder<> bnh(nil_h_bb);
+    bnh.CreateRet(ConstantInt::get(i64_ty, 0));
+
+    // bool/i64 -> payload (as i64)
+    auto* int_h_bb = BasicBlock::Create(m_ctx, "int_h", fn);
+    sw->addCase(ConstantInt::get(i32_ty, TAG_BOOL), int_h_bb);
+    sw->addCase(ConstantInt::get(i32_ty, TAG_I64), int_h_bb);
+    {
+        IRBuilder<> bih(int_h_bb);
+        bih.CreateRet(bih.CreateBitCast(payload, i64_ty));
+    }
+
+    // f64 -> bitcast to i64
+    auto* f64_h_bb = BasicBlock::Create(m_ctx, "f64_h", fn);
+    sw->addCase(ConstantInt::get(i32_ty, TAG_F64), f64_h_bb);
+    {
+        IRBuilder<> bfh(f64_h_bb);
+        bfh.CreateRet(bfh.CreateBitCast(payload, i64_ty));
+    }
+
+    // obj -> dispatch on subtype
+    auto* obj_h_bb = BasicBlock::Create(m_ctx, "obj_h", fn);
+    sw->addCase(ConstantInt::get(i32_ty, TAG_OBJ), obj_h_bb);
+    {
+        IRBuilder<> boh(obj_h_bb);
+        auto* ptr = boh.CreateIntToPtr(boh.CreateBitCast(payload, i64_ty), PointerType::get(m_ctx, 0));
+        auto* obj_type = boh.CreateLoad(i32_ty, boh.CreateStructGEP(m_obj_header_type, ptr, 0));
+
+        auto* str_h_bb = BasicBlock::Create(m_ctx, "str_h", fn);
+        auto* list_h_bb = BasicBlock::Create(m_ctx, "list_h", fn);
+        auto* record_h_bb = BasicBlock::Create(m_ctx, "record_h", fn);
+        auto* ident_h_bb = BasicBlock::Create(m_ctx, "ident_h", fn);
+        auto* h_sw = boh.CreateSwitch(obj_type, ident_h_bb, 3);
+        h_sw->addCase(ConstantInt::get(i32_ty, OBJ_STRING), str_h_bb);
+        h_sw->addCase(ConstantInt::get(i32_ty, OBJ_LIST), list_h_bb);
+        h_sw->addCase(ConstantInt::get(i32_ty, OBJ_RECORD), record_h_bb);
+
+        // String: FNV-1a over bytes.
+        IRBuilder<> bsh(str_h_bb);
+        {
+            auto* str = bsh.CreateIntToPtr(bsh.CreateBitCast(payload, i64_ty), m_string_type->getPointerTo());
+            auto* chars = bsh.CreateLoad(i8_ptr, bsh.CreateStructGEP(m_string_type, str, 3), "chars");
+            auto* slen = bsh.CreateLoad(i64_ty, bsh.CreateStructGEP(m_string_type, str, 1), "slen");
+            auto* loop_bb = BasicBlock::Create(m_ctx, "str_h_loop", fn);
+            auto* done_bb = BasicBlock::Create(m_ctx, "str_h_done", fn);
+            bsh.CreateBr(loop_bb);
+
+            IRBuilder<> bl(loop_bb);
+            auto* i = bl.CreatePHI(i64_ty, 2, "si");
+            auto* h = bl.CreatePHI(i64_ty, 2, "sh");
+            i->addIncoming(ConstantInt::get(i64_ty, 0), str_h_bb);
+            h->addIncoming(fnv_offset, str_h_bb);
+            auto* cont = bl.CreateICmpSLT(i, slen);
+            auto* body_bb = BasicBlock::Create(m_ctx, "str_h_body", fn);
+            bl.CreateCondBr(cont, body_bb, done_bb);
+
+            IRBuilder<> bb2(body_bb);
+            auto* byte_ptr = bb2.CreateGEP(Type::getInt8Ty(m_ctx), chars, {i});
+            auto* byte = bb2.CreateLoad(Type::getInt8Ty(m_ctx), byte_ptr);
+            auto* byte_zext = bb2.CreateZExt(byte, i64_ty);
+            auto* h_xor = bb2.CreateXor(h, byte_zext);
+            auto* h_mul = bb2.CreateMul(h_xor, fnv_prime);
+            auto* i_next = bb2.CreateAdd(i, ConstantInt::get(i64_ty, 1));
+            i->addIncoming(i_next, body_bb);
+            h->addIncoming(h_mul, body_bb);
+            bb2.CreateBr(loop_bb);
+
+            IRBuilder<> bd2(done_bb);
+            bd2.CreateRet(h);
+        }
+
+        // List: fold hash of each element via __ang_obj_hash, XOR-mixed.
+        IRBuilder<> blh(list_h_bb);
+        {
+            auto* list = blh.CreateIntToPtr(blh.CreateBitCast(payload, i64_ty), m_list_type->getPointerTo());
+            auto* cnt = blh.CreateLoad(i64_ty, blh.CreateStructGEP(m_list_type, list, 1), "lhcnt");
+            auto* elems = blh.CreateLoad(obj_ty->getPointerTo(),
+                blh.CreateStructGEP(m_list_type, list, 3), "lhelems");
+            auto* loop_bb = BasicBlock::Create(m_ctx, "list_h_loop", fn);
+            auto* done_bb = BasicBlock::Create(m_ctx, "list_h_done", fn);
+            blh.CreateBr(loop_bb);
+
+            IRBuilder<> bl(loop_bb);
+            auto* i = bl.CreatePHI(i64_ty, 2, "li");
+            auto* h = bl.CreatePHI(i64_ty, 2, "lh");
+            i->addIncoming(ConstantInt::get(i64_ty, 0), list_h_bb);
+            h->addIncoming(fnv_offset, list_h_bb);
+            auto* cont = bl.CreateICmpSLT(i, cnt);
+            auto* body_bb = BasicBlock::Create(m_ctx, "list_h_body", fn);
+            bl.CreateCondBr(cont, body_bb, done_bb);
+
+            IRBuilder<> bb2(body_bb);
+            auto* elem = bb2.CreateLoad(obj_ty, bb2.CreateGEP(obj_ty, elems, {i}));
+            auto* elem_h = bb2.CreateCall(m_fn_obj_hash, {elem});
+            auto* h_xor = bb2.CreateXor(
+                bb2.CreateMul(h, fnv_prime), elem_h);
+            auto* i_next = bb2.CreateAdd(i, ConstantInt::get(i64_ty, 1));
+            i->addIncoming(i_next, body_bb);
+            h->addIncoming(h_xor, body_bb);
+            bb2.CreateBr(loop_bb);
+
+            IRBuilder<> bd2(done_bb);
+            bd2.CreateRet(h);
+        }
+
+        // Record: fold each entry's value hash (keys are strings already folded
+        // into the element hash via the value comparison semantics; here we mix
+        // each value's hash).
+        IRBuilder<> brh(record_h_bb);
+        {
+            auto* rec = brh.CreateIntToPtr(brh.CreateBitCast(payload, i64_ty), m_record_type->getPointerTo());
+            auto* cnt = brh.CreateLoad(i64_ty, brh.CreateStructGEP(m_record_type, rec, 1), "rhcnt");
+            auto* entries = brh.CreateLoad(m_record_entry_type->getPointerTo(),
+                brh.CreateStructGEP(m_record_type, rec, 3), "rhentries");
+            auto* loop_bb = BasicBlock::Create(m_ctx, "record_h_loop", fn);
+            auto* done_bb = BasicBlock::Create(m_ctx, "record_h_done", fn);
+            brh.CreateBr(loop_bb);
+
+            IRBuilder<> bl(loop_bb);
+            auto* i = bl.CreatePHI(i64_ty, 2, "ri");
+            auto* h = bl.CreatePHI(i64_ty, 2, "rh");
+            i->addIncoming(ConstantInt::get(i64_ty, 0), record_h_bb);
+            h->addIncoming(fnv_offset, record_h_bb);
+            auto* cont = bl.CreateICmpSLT(i, cnt);
+            auto* body_bb = BasicBlock::Create(m_ctx, "record_h_body", fn);
+            bl.CreateCondBr(cont, body_bb, done_bb);
+
+            IRBuilder<> bb2(body_bb);
+            auto* entry_e = bb2.CreateGEP(m_record_entry_type, entries, {i});
+            auto* val = bb2.CreateLoad(obj_ty, bb2.CreateStructGEP(m_record_entry_type, entry_e, 1));
+            auto* val_h = bb2.CreateCall(m_fn_obj_hash, {val});
+            auto* h_xor = bb2.CreateXor(bb2.CreateMul(h, fnv_prime), val_h);
+            auto* i_next = bb2.CreateAdd(i, ConstantInt::get(i64_ty, 1));
+            i->addIncoming(i_next, body_bb);
+            h->addIncoming(h_xor, body_bb);
+            bb2.CreateBr(loop_bb);
+
+            IRBuilder<> bd2(done_bb);
+            bd2.CreateRet(h);
+        }
+
+        // Other object subtypes -> hash by pointer identity.
+        IRBuilder<> bih(ident_h_bb);
+        bih.CreateRet(bih.CreateBitCast(payload, i64_ty));
     }
 }
 

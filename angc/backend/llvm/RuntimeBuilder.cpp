@@ -27,6 +27,7 @@ void RuntimeBuilder::generateRuntime() {
     generateMemoryManagement();
     generateStringOps();
     generateEquality();
+    generateObjectHash();
     generateListOps();
     generateRecordOps();
     generateConversions();

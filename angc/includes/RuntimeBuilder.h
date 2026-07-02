@@ -97,6 +97,7 @@ public:
     llvm::FunctionCallee getFuncRecordGet()       const { return m_fn_record_get; }
     llvm::FunctionCallee getFuncRecordSet()       const { return m_fn_record_set; }
     llvm::FunctionCallee getFuncEquals()          const { return m_fn_equals; }
+    llvm::FunctionCallee getFuncObjHash()         const { return m_fn_obj_hash; }
     llvm::FunctionCallee getFuncDeepClone()       const { return m_fn_deep_clone; }
     llvm::FunctionCallee getFuncToI64()           const { return m_fn_to_i64; }
     llvm::FunctionCallee getFuncToF64()           const { return m_fn_to_f64; }
@@ -180,8 +181,10 @@ private:
     void generateRecordOps();
     /// Generates type conversion functions (to_i64, to_f64, to_bool, typeof).
     void generateConversions();
-    /// Generates the equality comparison function.
+    /// Generates the equality comparison function (deep for lists/records/strings).
     void generateEquality();
+    /// Generates the general object hash function __ang_obj_hash.
+    void generateObjectHash();
     /// Generates the deep clone function (currently a shallow incref clone).
     void generateDeepClone();
     /// Generates closure allocation and the generic __ang_call dispatcher.
@@ -240,6 +243,7 @@ private:
     llvm::FunctionCallee m_fn_record_get;
     llvm::FunctionCallee m_fn_record_set;
     llvm::FunctionCallee m_fn_equals;
+    llvm::FunctionCallee m_fn_obj_hash;
     llvm::FunctionCallee m_fn_deep_clone;
     llvm::FunctionCallee m_fn_to_i64;
     llvm::FunctionCallee m_fn_to_f64;

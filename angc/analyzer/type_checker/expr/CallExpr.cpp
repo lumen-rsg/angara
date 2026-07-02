@@ -3,6 +3,28 @@
 namespace angara {
 
     std::any TypeChecker::visit(const CallExpr& expr) {
+        // TS-2: intercept builtin free functions whose names are NOT user symbols
+        // (hash) before accepting the callee, so they don't trigger E377.
+        // `spawn` is also handled here for symmetry (it resolves as a function).
+        if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
+            if (var_expr->name.lexeme == "hash") {
+                std::vector<std::shared_ptr<Type>> arg_types;
+                for (const auto& arg_expr : expr.arguments) {
+                    arg_expr->accept(*this);
+                    arg_types.push_back(popType());
+                }
+                if (m_hadError) { pushAndSave(&expr, m_type_error); return {}; }
+                if (arg_types.size() != 1) {
+                    error(var_expr->name, "hash() takes exactly one argument, but got " +
+                                          std::to_string(arg_types.size()) + ".", "E392");
+                    pushAndSave(&expr, m_type_error);
+                    return {};
+                }
+                pushAndSave(&expr, m_type_i64);
+                return {};
+            }
+        }
+
         expr.callee->accept(*this);
         auto callee_type = popType();
         std::vector<std::shared_ptr<Type>> arg_types;

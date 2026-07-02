@@ -965,6 +965,13 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             builder->CreateCall(donothing, {});
             return makeNil();
         }
+        // TS-2: builtin hash(x) -> i64. Hashes any value via __ang_obj_hash.
+        if (fn == "hash") {
+            if (!expr.arguments.empty()) {
+                return makeI64(callRtByName("__ang_obj_hash", {cg(expr.arguments[0])}));
+            }
+            return makeI64((int64_t)0);
+        }
 
         if (fn=="string") {
             if (!expr.arguments.empty()) return callRtByName("__ang_to_string", {cg(expr.arguments[0])});
