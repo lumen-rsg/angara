@@ -24,9 +24,44 @@ namespace angara {
 
         if (callee_type->kind == TypeKind::FUNCTION) {
             auto func_type = std::dynamic_pointer_cast<FunctionType>(callee_type);
-            check_function_call(expr, func_type, arg_types);
+
+            // TS-2: generic function call — infer type args from the concrete
+            // arguments, then substitute the param/return types so the call is
+            // checked against a concrete signature (and the result type is a
+            // concrete type, not a raw TypeParameterType). Non-generic functions
+            // skip this and check directly.
+            std::shared_ptr<FunctionType> check_type = func_type;
+            std::map<std::string, std::shared_ptr<Type>> inferred_args;
+            bool is_generic_fn = false;
+            for (const auto& pt : func_type->param_types) {
+                if (pt && pt->kind == TypeKind::TYPE_PARAM) { is_generic_fn = true; break; }
+            }
+            if (!is_generic_fn && func_type->return_type &&
+                func_type->return_type->kind == TypeKind::TYPE_PARAM) {
+                is_generic_fn = true;
+            }
+
+            if (is_generic_fn) {
+                // Infer by matching each param pattern against its concrete arg.
+                size_t n = std::min(func_type->param_types.size(), arg_types.size());
+                for (size_t i = 0; i < n; ++i) {
+                    extract_type_args(func_type->param_types[i], arg_types[i], inferred_args);
+                }
+                // Build a substituted signature to check/return against.
+                if (!inferred_args.empty()) {
+                    std::vector<std::shared_ptr<Type>> sub_params;
+                    sub_params.reserve(func_type->param_types.size());
+                    for (const auto& pt : func_type->param_types) {
+                        sub_params.push_back(substituteTypeArgs(pt, inferred_args));
+                    }
+                    auto sub_ret = substituteTypeArgs(func_type->return_type, inferred_args);
+                    check_type = std::make_shared<FunctionType>(sub_params, sub_ret, func_type->is_variadic);
+                }
+            }
+
+            check_function_call(expr, check_type, arg_types);
             if (!m_hadError) {
-                result_type = func_type->return_type;
+                result_type = check_type->return_type;
             }
         }
         else if (callee_type->kind == TypeKind::CLASS) {
@@ -47,16 +82,32 @@ namespace angara {
             }
         } else if (callee_type->kind == TypeKind::DATA) {
             auto data_type = std::dynamic_pointer_cast<DataType>(callee_type);
-            check_function_call(expr, data_type->constructor_type, arg_types);
+            // TS-2: for a generic data constructor, infer the type args from the
+            // concrete arguments FIRST, substitute the constructor signature, then
+            // check the substituted (concrete) signature. (Previously the raw
+            // TypeParameterType-bearing signature was checked, which only passed
+            // because TYPE_PARAM was compatible with anything.)
+            std::shared_ptr<FunctionType> ctor_check = data_type->constructor_type;
+            std::map<std::string, std::shared_ptr<Type>> inferred_args;
+            if (data_type->is_generic()) {
+                const auto& ctor_params = data_type->constructor_type->param_types;
+                for (size_t i = 0; i < std::min(ctor_params.size(), arg_types.size()); ++i) {
+                    extract_type_args(ctor_params[i], arg_types[i], inferred_args);
+                }
+                if (!inferred_args.empty()) {
+                    std::vector<std::shared_ptr<Type>> sub_params;
+                    sub_params.reserve(ctor_params.size());
+                    for (const auto& pt : ctor_params) {
+                        sub_params.push_back(substituteTypeArgs(pt, inferred_args));
+                    }
+                    ctor_check = std::make_shared<FunctionType>(
+                        sub_params, data_type->constructor_type->return_type,
+                        data_type->constructor_type->is_variadic);
+                }
+            }
+            check_function_call(expr, ctor_check, arg_types);
             if (!m_hadError) {
                 if (data_type->is_generic()) {
-                    // Infer type arguments by matching constructor param patterns
-                    // (which contain TypeParameterType) against concrete arg types.
-                    std::map<std::string, std::shared_ptr<Type>> inferred_args;
-                    const auto& ctor_params = data_type->constructor_type->param_types;
-                    for (size_t i = 0; i < std::min(ctor_params.size(), arg_types.size()); ++i) {
-                        extract_type_args(ctor_params[i], arg_types[i], inferred_args);
-                    }
                     result_type = std::make_shared<GenericInstanceType>(data_type, std::move(inferred_args));
                 } else {
                     result_type = data_type;

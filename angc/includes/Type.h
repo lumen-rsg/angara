@@ -53,6 +53,12 @@ namespace angara {
     bool sameType(const std::shared_ptr<Type>& a, const std::shared_ptr<Type>& b);
     // TS-4: qualified display name ("Foo" or "mod::Foo") for collision diagnostics.
     std::string qualifiedName(const Type& t);
+    // TS-2: substitute TypeParameterType names with concrete types from `args`,
+    // recursing into compound types at any depth. Used to specialize a generic
+    // function signature at a call site from inferred type arguments.
+    std::shared_ptr<Type> substituteTypeArgs(
+        const std::shared_ptr<Type>& type,
+        const std::map<std::string, std::shared_ptr<Type>>& args);
 
     // --- BASE TYPE CLASS ---
     struct Type {
@@ -496,17 +502,71 @@ namespace angara {
             return ss.str();
         }
 
-        // Substitute a type parameter with its concrete type.
-        // If the type is a TypeParameterType, look it up in type_args.
-        // Otherwise return the type unchanged.
+        // TS-2: substitute type parameters with their concrete types, recursing
+        // into compound types at any depth. (Previously this was one level — a
+        // field of type `list<T>` or `Box<T>` leaked an unbound TypeParameter.)
         [[nodiscard]] std::shared_ptr<Type> substitute(const std::shared_ptr<Type>& type) const {
             if (!type) return type;
+
+            // Bare type parameter: replace if bound, else unchanged.
             if (type->kind == TypeKind::TYPE_PARAM) {
                 auto* tp = dynamic_cast<const TypeParameterType*>(type.get());
                 auto it = type_args.find(tp->name);
                 if (it != type_args.end()) return it->second;
+                return type;
             }
-            return type;
+
+            // Compound types: rebuild with substituted constituents.
+            switch (type->kind) {
+                case TypeKind::LIST: {
+                    auto l = std::dynamic_pointer_cast<ListType>(type);
+                    return std::make_shared<ListType>(substitute(l->element_type));
+                }
+                case TypeKind::OPTIONAL: {
+                    auto o = std::dynamic_pointer_cast<OptionalType>(type);
+                    return std::make_shared<OptionalType>(substitute(o->wrapped_type));
+                }
+                case TypeKind::REF: {
+                    auto r = std::dynamic_pointer_cast<RefType>(type);
+                    return std::make_shared<RefType>(substitute(r->inner_type));
+                }
+                case TypeKind::GENERIC_INSTANCE: {
+                    auto g = std::dynamic_pointer_cast<GenericInstanceType>(type);
+                    std::map<std::string, std::shared_ptr<Type>> new_args;
+                    for (const auto& [k, v] : g->type_args) new_args[k] = substitute(v);
+                    return std::make_shared<GenericInstanceType>(g->base_type, std::move(new_args));
+                }
+                case TypeKind::RECORD: {
+                    auto r = std::dynamic_pointer_cast<RecordType>(type);
+                    std::map<std::string, std::shared_ptr<Type>> new_fields;
+                    for (const auto& [k, v] : r->fields) new_fields[k] = substitute(v);
+                    return std::make_shared<RecordType>(std::move(new_fields));
+                }
+                case TypeKind::FUNCTION: {
+                    auto f = std::dynamic_pointer_cast<FunctionType>(type);
+                    std::vector<std::shared_ptr<Type>> new_params;
+                    new_params.reserve(f->param_types.size());
+                    for (const auto& p : f->param_types) new_params.push_back(substitute(p));
+                    auto new_ret = substitute(f->return_type);
+                    auto nf = std::make_shared<FunctionType>(new_params, new_ret, f->is_variadic);
+                    nf->is_foreign = f->is_foreign;
+                    nf->is_intrinsic = f->is_intrinsic;
+                    return nf;
+                }
+                case TypeKind::POINTER: {
+                    auto p = std::dynamic_pointer_cast<PointerType>(type);
+                    auto np = std::make_shared<PointerType>(substitute(p->pointee_type), p->depth);
+                    np->byval = p->byval;
+                    return np;
+                }
+                case TypeKind::FIXED_ARRAY: {
+                    auto a = std::dynamic_pointer_cast<FixedArrayType>(type);
+                    return std::make_shared<FixedArrayType>(substitute(a->element_type), a->size);
+                }
+                default:
+                    // Primitives, nominal types, etc. carry no type params.
+                    return type;
+            }
         }
     };
 
@@ -644,6 +704,68 @@ namespace angara {
             return qualifiedName(t);
         }
         return t.toString();
+    }
+
+    // TS-2: substitute TypeParameterType names with concrete types, recursing.
+    inline std::shared_ptr<Type> substituteTypeArgs(
+        const std::shared_ptr<Type>& type,
+        const std::map<std::string, std::shared_ptr<Type>>& args
+    ) {
+        if (!type || args.empty()) return type;
+
+        if (type->kind == TypeKind::TYPE_PARAM) {
+            auto* tp = dynamic_cast<const TypeParameterType*>(type.get());
+            auto it = args.find(tp->name);
+            if (it != args.end()) return it->second;
+            return type;
+        }
+
+        switch (type->kind) {
+            case TypeKind::LIST:
+                return std::make_shared<ListType>(
+                    substituteTypeArgs(std::dynamic_pointer_cast<ListType>(type)->element_type, args));
+            case TypeKind::OPTIONAL:
+                return std::make_shared<OptionalType>(
+                    substituteTypeArgs(std::dynamic_pointer_cast<OptionalType>(type)->wrapped_type, args));
+            case TypeKind::REF:
+                return std::make_shared<RefType>(
+                    substituteTypeArgs(std::dynamic_pointer_cast<RefType>(type)->inner_type, args));
+            case TypeKind::GENERIC_INSTANCE: {
+                auto g = std::dynamic_pointer_cast<GenericInstanceType>(type);
+                std::map<std::string, std::shared_ptr<Type>> na;
+                for (const auto& [k, v] : g->type_args) na[k] = substituteTypeArgs(v, args);
+                return std::make_shared<GenericInstanceType>(g->base_type, std::move(na));
+            }
+            case TypeKind::RECORD: {
+                auto r = std::dynamic_pointer_cast<RecordType>(type);
+                std::map<std::string, std::shared_ptr<Type>> nf;
+                for (const auto& [k, v] : r->fields) nf[k] = substituteTypeArgs(v, args);
+                return std::make_shared<RecordType>(std::move(nf));
+            }
+            case TypeKind::FUNCTION: {
+                auto f = std::dynamic_pointer_cast<FunctionType>(type);
+                std::vector<std::shared_ptr<Type>> np;
+                np.reserve(f->param_types.size());
+                for (const auto& p : f->param_types) np.push_back(substituteTypeArgs(p, args));
+                auto nr = substituteTypeArgs(f->return_type, args);
+                auto nf = std::make_shared<FunctionType>(np, nr, f->is_variadic);
+                nf->is_foreign = f->is_foreign;
+                nf->is_intrinsic = f->is_intrinsic;
+                return nf;
+            }
+            case TypeKind::POINTER: {
+                auto p = std::dynamic_pointer_cast<PointerType>(type);
+                auto np = std::make_shared<PointerType>(substituteTypeArgs(p->pointee_type, args), p->depth);
+                np->byval = p->byval;
+                return np;
+            }
+            case TypeKind::FIXED_ARRAY: {
+                auto a = std::dynamic_pointer_cast<FixedArrayType>(type);
+                return std::make_shared<FixedArrayType>(substituteTypeArgs(a->element_type, args), a->size);
+            }
+            default:
+                return type;
+        }
     }
 
 } // namespace angara

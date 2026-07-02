@@ -1,0 +1,22 @@
+// TS-2 Phase 1: sound generics — bodies check correctly, call sites infer.
+attach io;
+
+// Generic function: identity. Body is sound (T -> T) so it type-checks.
+func identity<T>(x as T) -> T {
+    return x;
+}
+
+// Generic data with a nested generic field — exercises the deep substitute().
+data Box<T> { let value as T; }
+data Nested<T> { let inner as Box<T>; }
+
+export func main() -> i64 {
+    // Call-site inference: result types are concrete, not raw TypeParameterType.
+    let n = identity(42);        // n: i64
+    let s = identity("hello");   // s: string
+
+    // Nested generic instantiation: the inner field resolves to Box<i64>.
+    let nb = Nested(Box(99));    // nb: Nested<i64>, nb.inner: Box<i64>
+    io.println(0, string(n) + " " + s + " " + string(nb.inner.value));
+    return 0;
+}

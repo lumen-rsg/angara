@@ -70,7 +70,21 @@ bool TypeChecker::check_type_compatibility(
 
     if (expected->kind == TypeKind::ANY || actual->kind == TypeKind::ANY) return true;
 
-    if (expected->kind == TypeKind::TYPE_PARAM || actual->kind == TypeKind::TYPE_PARAM) return true;
+    // TS-2: type-parameter compatibility. Inside a generic body, a type
+    // parameter is only compatible with itself (same name). A bare TYPE_PARAM is
+    // NOT compatible with a concrete type here — that case is handled at generic
+    // *call sites* by inferring the binding and substituting before checking, so
+    // by the time we reach this predicate with a concrete actual, the expected
+    // has already been substituted to a concrete type. (Previously TYPE_PARAM
+    // was compatible with ANYTHING, leaving generic bodies unchecked.)
+    if (expected->kind == TypeKind::TYPE_PARAM || actual->kind == TypeKind::TYPE_PARAM) {
+        if (expected->kind == TypeKind::TYPE_PARAM && actual->kind == TypeKind::TYPE_PARAM) {
+            auto* ep = dynamic_cast<const TypeParameterType*>(expected.get());
+            auto* ap = dynamic_cast<const TypeParameterType*>(actual.get());
+            return ep->name == ap->name;
+        }
+        return false;
+    }
 
     // TS-3: integer conversions. Widening and same-width-same-sign are always
     // allowed. Narrowing (i64->u8, u64->i8, ...) is rejected in safe code unless
