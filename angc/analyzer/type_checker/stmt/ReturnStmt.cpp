@@ -86,6 +86,30 @@ bool TypeChecker::check_type_compatibility(
         return false;
     }
 
+    // TS-1: trait/contract object assignability. A concrete instance (INSTANCE)
+    // may flow into a slot typed as a TRAIT or CONTRACT it adopts (upcast), and
+    // into a TRAIT_OBJECT of such an interface. A TRAIT_OBJECT is assignable to
+    // its own interface (TRAIT/CONTRACT) and to a TRAIT_OBJECT of the same
+    // interface. The reverse (interface → concrete) requires an explicit `as`.
+    if (expected->kind == TypeKind::TRAIT || expected->kind == TypeKind::CONTRACT) {
+        if (actual->kind == TypeKind::INSTANCE || actual->kind == TypeKind::TRAIT_OBJECT) {
+            return adoptsInterface(actual, expected);
+        }
+    }
+    if (expected->kind == TypeKind::TRAIT_OBJECT) {
+        auto exp_obj = std::dynamic_pointer_cast<TraitObjectType>(expected);
+        // A concrete instance upcast into a trait-object slot.
+        if (actual->kind == TypeKind::INSTANCE) {
+            return exp_obj && adoptsInterface(actual, exp_obj->interface_type);
+        }
+        // A trait object viewed through a compatible interface.
+        if (actual->kind == TypeKind::TRAIT_OBJECT) {
+            auto act_obj = std::dynamic_pointer_cast<TraitObjectType>(actual);
+            return exp_obj && act_obj &&
+                   adoptsInterface(act_obj->impl_type, exp_obj->interface_type);
+        }
+    }
+
     // TS-3: integer conversions. Widening and same-width-same-sign are always
     // allowed. Narrowing (i64->u8, u64->i8, ...) is rejected in safe code unless
     // the source is an integer literal whose value fits the target range, or we

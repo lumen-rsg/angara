@@ -1,0 +1,12 @@
+// TS-1 Phase A: a concrete instance that does NOT adopt a trait cannot flow
+// into a trait-typed slot. Conformance is explicit (`uses`); a class with a
+// structurally-matching method but no `uses` clause is NOT substitutable.
+trait Drawable { func draw(this) -> i64; }
+class NotADrawable {
+public:
+    func something(this) -> i64 { return 0; }
+}
+func render(d as Drawable) -> i64 { return d.draw(); }
+export func main() -> i64 {
+    return render(NotADrawable());  // E332: NotADrawable does not adopt Drawable
+}

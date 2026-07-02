@@ -36,6 +36,7 @@ namespace angara {
         POINTER, // FFI pointer type (e.g., *i8, *void, **char)
         REF,     // v5: non-owning reference (ref<T>)
         VOID,    // C void type (only valid in FFI pointer context or as return type)
+        TRAIT_OBJECT, // TS-1: a value viewed through a trait/contract interface (erased impl)
         ERROR // A special type to prevent cascading error messages
     };
 
@@ -45,6 +46,7 @@ namespace angara {
     struct EnumVariantType;
     struct ClassType; // Needed for DataType and others
     struct TraitType; // TS-2: needed for type_param_bounds on ClassType/DataType
+    struct ContractType; // TS-1: needed for signed_contracts on ClassType
 
     // TS-4: structural type identity. Nominal types (CLASS/DATA/ENUM/TRAIT/
     // CONTRACT) compare by canonical pointer identity (each declaration is
@@ -194,6 +196,13 @@ namespace angara {
         std::vector<std::string> type_params;
         // TS-2: resolved bounds, e.g. "K" -> TraitType("Hashable") for `<K: Hashable>`.
         std::map<std::string, std::shared_ptr<TraitType>> type_param_bounds;
+
+        // TS-1: the interfaces this class conforms to (resolved at header time
+        // from `uses`/`signs`). Retained on the semantic type so conformance is
+        // queryable anywhere a ClassType is in hand — precise `is Trait`, trait-
+        // object vtable construction, and trait/contract assignability.
+        std::vector<std::shared_ptr<TraitType>> adopted_traits;
+        std::vector<std::shared_ptr<ContractType>> signed_contracts;
 
         // TS-4: the declaring module's name. Empty for built-ins. Set at every
         // construction site; preserved across module imports (the shared object
@@ -349,6 +358,23 @@ namespace angara {
             : Type(TypeKind::CONTRACT), name(std::move(name)) {}
 
         [[nodiscard]] std::string toString() const override { return "contract<" + name + ">"; }
+    };
+
+    // TS-1: the static type of a value viewed through a trait/contract interface.
+    // Like InstanceType wraps a ClassType, a TraitObjectType wraps the interface
+    // a concrete value is being accessed through. The interface is the TRAIT or
+    // CONTRACT; impl_type is the concrete (INSTANCE/DATA/...) type underneath
+    // (kept for diagnostics; dispatch and field access go via the interface and
+    // the runtime trait object's embedded receiver).
+    struct TraitObjectType : Type {
+        const std::shared_ptr<Type> interface_type;  // TraitType or ContractType
+        const std::shared_ptr<Type> impl_type;       // concrete type of the value (may be null)
+        TraitObjectType(std::shared_ptr<Type> iface, std::shared_ptr<Type> impl)
+            : Type(TypeKind::TRAIT_OBJECT),
+              interface_type(std::move(iface)), impl_type(std::move(impl)) {}
+        [[nodiscard]] std::string toString() const override {
+            return interface_type ? interface_type->toString() : "trait_object";
+        }
     };
 
     struct ExceptionType : Type {
@@ -613,6 +639,14 @@ namespace angara {
                 auto lb = std::dynamic_pointer_cast<InstanceType>(b);
                 // InstanceType is minted per-use; compare the canonical class.
                 return la && lb && sameType(la->class_type, lb->class_type);
+            }
+
+            case TypeKind::TRAIT_OBJECT: {
+                // TS-1: two trait-object views are the same iff they view
+                // through the same interface (impl_type is informational).
+                auto la = std::dynamic_pointer_cast<TraitObjectType>(a);
+                auto lb = std::dynamic_pointer_cast<TraitObjectType>(b);
+                return la && lb && sameType(la->interface_type, lb->interface_type);
             }
 
             case TypeKind::GENERIC_INSTANCE: {

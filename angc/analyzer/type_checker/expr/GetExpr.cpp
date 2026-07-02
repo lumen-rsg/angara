@@ -86,6 +86,39 @@ std::any TypeChecker::visit(const GetExpr& expr) {
             error(expr.op, "Cannot access properties on generic instance of '" + generic_instance->base_type->toString() + "'.", "E345");
         }
     }
+    // TS-1: access through a trait/contract interface (or a trait-object view).
+    // Resolve the member against the interface's method/field signature map; the
+    // result type is the member's signature (methods → FunctionType, fields → the
+    // field type). Codegen (Phase C) lowers these to indirect dispatch / receiver
+    // field access via the runtime trait object.
+    else if (unwrapped_object_type->kind == TypeKind::TRAIT ||
+             unwrapped_object_type->kind == TypeKind::CONTRACT ||
+             unwrapped_object_type->kind == TypeKind::TRAIT_OBJECT) {
+        std::shared_ptr<Type> iface = unwrapped_object_type;
+        if (unwrapped_object_type->kind == TypeKind::TRAIT_OBJECT) {
+            iface = std::dynamic_pointer_cast<TraitObjectType>(unwrapped_object_type)->interface_type;
+        }
+        if (iface->kind == TypeKind::TRAIT) {
+            auto trait = std::dynamic_pointer_cast<TraitType>(iface);
+            auto it = trait->methods.find(property_name);
+            if (it == trait->methods.end()) {
+                error(expr.name, "Trait '" + trait->name + "' has no method named '" + property_name + "'.", "E338");
+            } else {
+                property_type = it->second;
+            }
+        } else if (iface->kind == TypeKind::CONTRACT) {
+            auto contract = std::dynamic_pointer_cast<ContractType>(iface);
+            auto fit = contract->fields.find(property_name);
+            auto mit = contract->methods.find(property_name);
+            if (mit != contract->methods.end()) {
+                property_type = mit->second.type;
+            } else if (fit != contract->fields.end()) {
+                property_type = fit->second.type;
+            } else {
+                error(expr.name, "Contract '" + contract->name + "' has no member named '" + property_name + "'.", "E338");
+            }
+        }
+    }
     else if (unwrapped_object_type->kind == TypeKind::INSTANCE) {
         auto instance_type = std::dynamic_pointer_cast<InstanceType>(unwrapped_object_type);
         const ClassType::MemberInfo* prop_info = instance_type->class_type->findProperty(property_name);

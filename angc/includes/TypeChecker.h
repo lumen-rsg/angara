@@ -178,6 +178,12 @@ namespace angara {
         bool conformsToTrait(const std::shared_ptr<Type>& subject,
                              const std::shared_ptr<TraitType>& trait);
 
+        /// TS-1: does the concrete `subject` type adopt the `iface` (a TraitType
+        /// or ContractType)? Returns false for non-instance subjects. Used to
+        /// decide whether a concrete value may flow into a trait/contract slot.
+        bool adoptsInterface(const std::shared_ptr<Type>& subject,
+                             const std::shared_ptr<Type>& iface);
+
         /// TS-6: true iff every control-flow path through `stmt` ends in a
         /// `return` or `throw` (control cannot fall off the end). Conservative.
         bool definitelyReturns(const std::shared_ptr<const Stmt>& stmt);

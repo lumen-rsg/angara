@@ -84,7 +84,7 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
             continue;
         }
         auto contract_type = std::dynamic_pointer_cast<ContractType>(contract_symbol->type);
-
+        class_type->signed_contracts.push_back(contract_type);  // TS-1: retain conformance
         for (const auto& [name, required_field] : contract_type->fields) {
             const auto* class_prop = class_type->findProperty(name);
             if (!class_prop) {
@@ -147,20 +147,24 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
                 continue;
             }
             auto trait_type = std::dynamic_pointer_cast<TraitType>(trait_symbol->type);
+            class_type->adopted_traits.push_back(trait_type);  // TS-1: retain conformance
 
             for (const auto& [name, required_sig] : trait_type->methods) {
-                auto method_it = class_type->methods.find(name);
-                if (method_it == class_type->methods.end()) {
+                // TS-1: use findProperty (walks the superclass chain), not the
+                // current-class-only methods map — a class inherits a trait
+                // method from its superclass. (Matches the contract check and
+                // conformsToTrait; fixes a latent E304 false positive.)
+                const ClassType::MemberInfo* info = class_type->findProperty(name);
+                if (!info) {
                     error(stmt.name, "Class '" + stmt.name.lexeme + "' does not implement required trait method '" + name + "'.", "E304");
                 } else {
-                    auto implemented_sig_info = method_it->second;
-                    auto implemented_sig = std::dynamic_pointer_cast<FunctionType>(implemented_sig_info.type);
+                    auto implemented_sig = std::dynamic_pointer_cast<FunctionType>(info->type);
 
-                    if (!implemented_sig->equals(*required_sig)) {
+                    if (!implemented_sig || !implemented_sig->equals(*required_sig)) {
                         error(stmt.name, "Signature of method '" + name + "' in class '" + stmt.name.lexeme +
                             "' does not match trait '" + trait_type->name + "'.\n" +
                             "  Required: " + required_sig->toString() + "\n" +
-                            "  Found:    " + implemented_sig->toString(), "E305");
+                            "  Found:    " + (implemented_sig ? implemented_sig->toString() : "<not a method>") , "E305");
                     }
                 }
             }
@@ -242,6 +246,37 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
             if (!impl_sig || !impl_sig->equals(*required_sig)) return false;
         }
         return true;
+    }
+
+    // TS-1: does the concrete `subject` type adopt the `iface` (TraitType or
+    // ContractType)? Walks the subject class's superclass chain consulting the
+    // retained adopted_traits/signed_contracts lists (Phase A1). Returns false
+    // for non-instance subjects.
+    bool TypeChecker::adoptsInterface(const std::shared_ptr<Type>& subject,
+                                      const std::shared_ptr<Type>& iface) {
+        if (!subject || !iface) return false;
+        std::shared_ptr<ClassType> cls;
+        if (subject->kind == TypeKind::INSTANCE) {
+            cls = std::dynamic_pointer_cast<InstanceType>(subject)->class_type;
+        } else if (subject->kind == TypeKind::TRAIT_OBJECT) {
+            // A trait object viewed through another interface: adopt iff the
+            // underlying impl type does.
+            auto to = std::dynamic_pointer_cast<TraitObjectType>(subject);
+            return to && adoptsInterface(to->impl_type, iface);
+        }
+        if (!cls) return false;
+        for (auto cur = cls; cur; cur = cur->superclass) {
+            if (iface->kind == TypeKind::TRAIT) {
+                for (const auto& t : cur->adopted_traits) {
+                    if (sameType(t, iface)) return true;
+                }
+            } else if (iface->kind == TypeKind::CONTRACT) {
+                for (const auto& c : cur->signed_contracts) {
+                    if (sameType(c, iface)) return true;
+                }
+            }
+        }
+        return false;
     }
 
 }
