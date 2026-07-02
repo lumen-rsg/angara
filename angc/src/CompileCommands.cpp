@@ -211,6 +211,9 @@ int angara::CLI::cmdCompileSingleFile(const std::string& source_file) {
         cmd_link << " -nostdlib -Wno-return-type";
 #endif
     } else {
+        // RT-6: position-independent executable (matches LLVMBackend's PIC
+        // relocation model). Freestanding/nostdlib builds stay non-PIE.
+        cmd_link << " -fPIE -pie";
         cmd_link << " -pthread -lm -Wno-return-type";
         cmd_link << " -Wl,-rpath,/opt/angara/modules";
     }

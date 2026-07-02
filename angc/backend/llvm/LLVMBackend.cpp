@@ -32,7 +32,9 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
     std::string te;
     if (auto* t = llvm::TargetRegistry::lookupTarget(llvm::Triple(targetTriple.str()), te)) {
         llvm::TargetOptions opt;
-        if (auto tm = std::unique_ptr<llvm::TargetMachine>(t->createTargetMachine(targetTriple,"generic","",opt,std::nullopt)))
+        // RT-6: PIC relocation model + Small code model — must match the emitter
+        // (below) so the DataLayout and emitted code agree.
+        if (auto tm = std::unique_ptr<llvm::TargetMachine>(t->createTargetMachine(targetTriple,"generic","",opt,llvm::Reloc::PIC_,llvm::CodeModel::Small)))
             mod->setDataLayout(tm->createDataLayout());
     }
 
@@ -129,7 +131,7 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     std::error_code ec;
     std::string le; auto* tgt = llvm::TargetRegistry::lookupTarget(llvm::Triple(targetTriple.str()),le);
     if (!tgt) { std::cerr<<"No target: "<<le<<"\n"; return false; }
-    llvm::TargetOptions opt; auto* tm = tgt->createTargetMachine(targetTriple,"generic","",opt,std::nullopt);
+    llvm::TargetOptions opt; auto* tm = tgt->createTargetMachine(targetTriple,"generic","",opt,llvm::Reloc::PIC_,llvm::CodeModel::Small);
     if (!tm) { std::cerr<<"No TM\n"; return false; }
 
     {

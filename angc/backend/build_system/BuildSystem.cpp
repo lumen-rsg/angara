@@ -538,6 +538,10 @@ namespace angara {
 
         if (config.type == ProjectType::LIBRARY) {
             cmd << " -shared -fPIC";
+        } else {
+            // RT-6: emit a position-independent executable (matches the PIC
+            // relocation model set in LLVMBackend's target machine).
+            cmd << " -fPIE -pie";
         }
 
         for (const auto& file : object_files) {
