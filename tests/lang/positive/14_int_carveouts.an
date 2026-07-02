@@ -1,0 +1,26 @@
+// TS-3 positive cases: the narrowing policy's carve-outs.
+attach io;
+
+func main() -> i64 {
+    // 1. In-range integer literal into a narrower type: ALLOWED.
+    let b as u8 = 200;
+    io.println(0, "u8 = " + string(b));
+
+    // 2. Widening (u8 -> i64) is always allowed.
+    let wide as i64 = b;
+
+    // 3. Narrowing inside @unsafe is the universal opt-out.
+    let big as i64 = 100000;
+    let truncated as u8;
+    @unsafe {
+        truncated = big;
+    }
+    io.println(0, "truncated = " + string(truncated));
+
+    // 4. Explicit `as` cast for intentional narrowing.
+    let casted as u8 = 300 as u8;
+    io.println(0, "casted = " + string(casted));
+
+    io.println(0, "wide = " + string(wide));
+    return 0;
+}

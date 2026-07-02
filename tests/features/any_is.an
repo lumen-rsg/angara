@@ -28,4 +28,5 @@ func main() -> i64 {
         io.println(1, "Found something else.");
       }
     }
+    return 0;
 }

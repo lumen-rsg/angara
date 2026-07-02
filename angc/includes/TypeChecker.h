@@ -158,11 +158,23 @@ namespace angara {
         void pushAndSave(const Expr *expr, const std::shared_ptr<Type>& type);
 
         /// Checks whether `actual` can be assigned where `expected` is required.
-        bool check_type_compatibility(const std::shared_ptr<Type> &expected, const std::shared_ptr<Type> &actual);
+        /// `narrowing_literal` (optional) is the source expression when it's a bare
+        /// integer literal — used by TS-3 to permit in-range literal narrowing.
+        bool check_type_compatibility(const std::shared_ptr<Type> &expected, const std::shared_ptr<Type> &actual,
+                                      const Literal* narrowing_literal = nullptr);
 
         /// Checks structural compatibility between a DataType and a RecordType.
         bool check_structural_match(const std::shared_ptr<DataType>& data_type,
                                     const std::shared_ptr<RecordType>& record_type);
+
+        /// TS-3: true if `lit` is an integer literal whose value fits in `target`.
+        bool narrowing_literal_fits(const std::shared_ptr<Type>& target,
+                                    const std::shared_ptr<Type>& source,
+                                    const Literal* lit);
+
+        /// TS-6: true iff every control-flow path through `stmt` ends in a
+        /// `return` or `throw` (control cannot fall off the end). Conservative.
+        bool definitelyReturns(const std::shared_ptr<const Stmt>& stmt);
 
         /// Validates a `spawn()` call: first arg must be a function, remaining args match its parameters.
         void check_spawn_call(const CallExpr &call, const std::vector<std::shared_ptr<Type>> &arg_types);

@@ -125,6 +125,23 @@ namespace angara {
             bodyStmt->accept(*this, bodyStmt);
         }
 
+        // TS-6: definite-return check. If the function declares a non-nil return
+        // type, every control-flow path must end in a `return` (or `throw`).
+        // Skip when this function already reported an error (avoid cascades).
+        if (!m_hadError && func_type->return_type &&
+            func_type->return_type->kind != TypeKind::NIL &&
+            func_type->return_type->kind != TypeKind::VOID) {
+            bool body_definitely_returns = false;
+            for (const auto& bodyStmt : (*stmt->body)) {
+                if (definitelyReturns(bodyStmt)) { body_definitely_returns = true; break; }
+            }
+            if (!body_definitely_returns) {
+                error(stmt->name, "Missing 'return' on some control-flow paths in function '" +
+                                  stmt->name.lexeme + "' declared to return '" +
+                                  func_type->return_type->toString() + "'.", "E387");
+            }
+        }
+
         m_active_type_params = saved_type_params;
         m_function_return_types.pop();
         exitScopeAndWarn();

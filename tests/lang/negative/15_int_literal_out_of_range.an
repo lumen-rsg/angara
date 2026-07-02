@@ -1,0 +1,5 @@
+// TS-3: an out-of-range integer literal does NOT get the in-range carve-out.
+// 999 does not fit in u8 (max 255), so this must error.
+func main() -> nil {
+    let b as u8 = 999;  // E275: out-of-range narrowing
+}

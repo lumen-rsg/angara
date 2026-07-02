@@ -1,0 +1,13 @@
+// TS-7b: comparing a typed value with `any` is unsound and rejected in safe code.
+attach io;
+
+func main() -> nil {
+    let items as list<any> = [true, false];
+    let i = 0;
+    while (i < len(items)) {
+        if (items[i] == true) {  // E383: any vs typed value
+            io.println(0, "true");
+        }
+        i = i + 1;
+    }
+}

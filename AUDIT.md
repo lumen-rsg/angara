@@ -23,6 +23,11 @@
 | Stdlib / modules | — | 3 | 9 | 12 |
 | Toolchain / DX | — | 1 | 5 | 6 |
 
+> **Resolved since this audit (on `v5-chaperone`):** the Chaperone memory model
+> removed the GC entirely (closing BUG-1/BUG-2/GC-1's whole class — see
+> `CHAPERONE.md`). In the type system: **TS-3, TS-5, TS-6, TS-7** are fixed
+> (TS-1 trait objects, TS-2 sound generics, TS-4 type identity remain open).
+
 **The two issues that most block building real applications today:**
 1. 🔴 **BUG-1** — "value semantics / deep copy" advertised in the README does not happen; assignment aliases.
 2. 🔴 **GC-1** — the GC crashes (SIGSEGV/SIGABRT) under the language's own `spawn`; multithreaded Angara is currently unsound.
@@ -74,11 +79,11 @@ The precise, type-directed root discovery and tracing is **genuinely well done**
 |---|---|---|---|---|
 | - [ ] **TS-1** | 🟡 Source | High | **No trait objects / dynamic dispatch.** Traits & contracts are compile-time checklists only — no vtable, no `func f(x as Drawable)`, no `list<Drawable>`. Biggest semantic gap for idiomatic code; polymorphism = inheritance or `any`. | `analyzer/type_checker/stmt/ClassStmt.cpp:139-167` |
 | - [ ] **TS-2** | 🟡 Source | High | **Generics erased, unbounded, and weakly checked.** Single boxed body per generic fn (no monomorphization → no perf/value-type generics); no `where T: Trait` bounds; generic fn bodies are effectively untype-checked; `substitute` is one level deep. | `Type.h:437-445`; `TopLevel.cpp:66`; `ReturnStmt.cpp:29` |
-| - [ ] **TS-3** | 🟡 Source | High | **Integer types silently interconvert.** `i64 → u8`, `u64 → i8`, returning `-1` from a `u8` fn — all type-check with no truncation/overflow/range warning. Flows through every assign/call/return. | `analyzer/type_checker/stmt/ReturnStmt.cpp:32` |
+| - [x] **TS-3** | ✅ Fixed | High | **Integer types silently interconvert.** `i64 → u8`, `u64 → i8`, returning `-1` from a `u8` fn — all type-check with no truncation/overflow/range warning. Flows through every assign/call/return. _(Narrowing is now rejected in safe code; widening is allowed. Carve-outs: an integer literal whose value fits the target type is accepted silently, so `let b as u8 = 200;` still works; and `@unsafe` is the universal opt-out. All conversions route through the single `check_type_compatibility` gate via a new `IntConv`/`classifyIntConv` helper in `Type.h`. The old ad-hoc literal-i64 carve-outs in `VarDeclStmt`/`AssignExpr` were removed in favour of the centralized, range-checked one. Two real `i64→i32` latent bugs in `modules/system/unix.an` were surfaced and fixed with explicit `as i32` casts.)_ | `analyzer/type_checker/stmt/ReturnStmt.cpp`; `includes/Type.h` (`classifyIntConv`) |
 | - [ ] **TS-4** | 🟡 Source | Medium | **Type identity is `toString()`-based** throughout comparisons → cross-module name collisions treated as identical; no namespace qualification. | `ReturnStmt.cpp:25`; `Type.h:145,151`; `MatchExpr.cpp:37,85` |
-| - [ ] **TS-5** | 🟡 Source | Medium | **`if (x != nil)` does not narrow `x` to non-optional** in the branch — only `is Type` narrows. Contradicts the docs' null-safety promise. | `analyzer/type_checker/stmt/IfStmt.cpp:43-66` |
-| - [ ] **TS-6** | 🟡 Source | Medium | **No definite-return / reachability analysis.** A fn declared `-> i64` with a missing `return` produces no "control reaches end" error. | `ReturnStmt.cpp` |
-| - [ ] **TS-7** | 🟡 Source | Low | Records with empty fields match any record; `is` accepts arbitrary targets; `any` participates in `==` with anything. | `ReturnStmt.cpp:52-58`; `BinaryExpr.cpp:123-128`; `IsExpr.cpp:8` |
+| - [x] **TS-5** | ✅ Fixed | Medium | **`if (x != nil)` does not narrow `x` to non-optional** in the branch — only `is Type` narrows. Contradicts the docs' null-safety promise. _(Already resolved on this branch: `detectNilCheck` in `IfStmt.cpp` narrows `Optional<T>` to `T` in the `!= nil` then-branch and the `== nil` else-branch.)_ | `analyzer/type_checker/stmt/IfStmt.cpp:97-129` |
+| - [x] **TS-6** | ✅ Fixed | Medium | **No definite-return / reachability analysis.** A fn declared `-> i64` with a missing `return` produces no "control reaches end" error. _(New `definitelyReturns()` reachability pass walks the AST: `return`/`throw` terminate; an `if` definitely-returns iff both branches do; a `try` iff try + catch both do; loops and everything else are conservatively non-terminating. Hooked at the end of `FuncStmt::visit` — emits E387 for non-nil-returning functions that can fall off the end. Surfaced two latent missing-returns in the test suite, both fixed.)_ | `analyzer/type_checker/stmt/Reachability.cpp`; `FuncStmt.cpp` |
+| - [x] **TS-7** | ✅ Fixed | Low | Records with empty fields match any record; `is` accepts arbitrary targets; `any` participates in `==` with anything. _(Three fixes, all suppressed inside `@unsafe`: (a) a populated record no longer matches an empty actual, and two populated records must agree field-by-field — the bare `record` keyword as a *target* remains the dynamic-map escape hatch; (b) comparing `any` with a typed value errors E383 in safe code; (c) `x is UnrelatedType` errors E384 when the target can't describe the object's runtime type. `modules/collections/collections.an`'s intentional dynamic `list<any>` bool comparisons were wrapped in `@unsafe`.)_ | `ReturnStmt.cpp`; `BinaryExpr.cpp`; `IsExpr.cpp` |
 
 ---
 

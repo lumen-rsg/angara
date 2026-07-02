@@ -16,7 +16,7 @@ let sender_thread as Thread;
 // This function will be executed in a separate thread.
 // Its logic is already correct. It will only be *started*
 // after the connection is confirmed to be open.
-func message_sender(ws as WebSocket) -> any {
+func message_sender(ws as WebSocket) -> nil {
   io.println(1, "[SENDER] Sender thread has started.");
   let count = 0;
   while (count < 5) {

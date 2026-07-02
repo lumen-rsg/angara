@@ -182,22 +182,22 @@ func readlink_str(path as string) -> string {
 
 // Convenience: check if a path is accessible
 func exists(path as string) -> bool {
-    return access(path, F_OK) == 0;
+    return access(path, F_OK as i32) == 0;
 }
 
 func readable(path as string) -> bool {
-    return access(path, R_OK) == 0;
+    return access(path, R_OK as i32) == 0;
 }
 
 func writable(path as string) -> bool {
-    return access(path, W_OK) == 0;
+    return access(path, W_OK as i32) == 0;
 }
 
 func executable(path as string) -> bool {
-    return access(path, X_OK) == 0;
+    return access(path, X_OK as i32) == 0;
 }
 
 // Convenience: get page size
 func pagesize() -> i64 {
-    return sysconf(_SC_PAGESIZE);
+    return sysconf(_SC_PAGESIZE as i32);
 }

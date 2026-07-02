@@ -1,0 +1,19 @@
+// TS-6 positive case: a function whose branches all return type-checks cleanly.
+attach io;
+
+func classify(x as i64) -> string {
+    if (x < 0) {
+        return "negative";
+    } else if (x == 0) {
+        return "zero";
+    } else {
+        return "positive";
+    }
+}
+
+func main() -> i64 {
+    io.println(0, classify(-5));
+    io.println(0, classify(0));
+    io.println(0, classify(42));
+    return 0;
+}

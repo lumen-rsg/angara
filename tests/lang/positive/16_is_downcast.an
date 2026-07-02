@@ -1,0 +1,11 @@
+// TS-7c positive case: a plausible `is` downcast (optional unwrap) type-checks.
+attach io;
+
+func main() -> i64 {
+    let maybe_name as string? = "Angara";
+    if (maybe_name is string) {
+        // Narrowed: maybe_name is known to be string here.
+        io.println(0, "name is " + maybe_name);
+    }
+    return 0;
+}

@@ -120,8 +120,24 @@ namespace angara {
                                        left_type->toString() + "' and '" + right_type->toString() + "'.", "E356");
                     }
                 }
+                else if (left_type->kind == TypeKind::ANY && right_type->kind == TypeKind::ANY) {
+                    // any == any is allowed (both sides opt into dynamic comparison).
+                    result_type = m_type_bool;
+                }
+                else if (left_type->kind == TypeKind::ANY || right_type->kind == TypeKind::ANY) {
+                    // TS-7b: comparing a typed value with `any` is unsound — the
+                    // result depends on the hidden runtime type. Allowed inside an
+                    // @unsafe block (the programmer takes responsibility); an error
+                    // in safe code.
+                    if (m_is_in_unsafe_context) {
+                        result_type = m_type_bool;
+                    } else {
+                        error(expr.op, "Cannot compare 'any' with a typed value '" +
+                                       (left_type->kind == TypeKind::ANY ? right_type : left_type)->toString() +
+                                       "' — the result depends on the runtime type. Use an @unsafe block to opt in.", "E383");
+                    }
+                }
                 else if (left_type->toString() == right_type->toString() ||
-                    left_type->kind == TypeKind::ANY || right_type->kind == TypeKind::ANY ||
                     left_type->kind == TypeKind::NIL || right_type->kind == TypeKind::NIL ||
                     (isNumeric(left_type) && isNumeric(right_type)))
                 {

@@ -114,7 +114,8 @@ namespace angara {
             const auto& expected_type = func_type->param_types[i];
             const auto& actual_type = arg_types[i + 1];
 
-            if (!check_type_compatibility(expected_type, actual_type)) {
+            if (!check_type_compatibility(expected_type, actual_type,
+                    std::dynamic_pointer_cast<const Literal>(call.arguments[i + 1]).get())) {
                 error(call.paren, "Type mismatch for argument " + std::to_string(i + 1) + " of spawned function. " +
                                   "Expected '" + expected_type->toString() + "', but got '" + actual_type->toString() + "'.", "E330");
 
@@ -203,7 +204,8 @@ namespace angara {
                 }
             }
 
-            if (!check_type_compatibility(expected_type, actual_type)) {
+            if (!check_type_compatibility(expected_type, actual_type,
+                    std::dynamic_pointer_cast<const Literal>(arg_expr).get())) {
                 error(call.paren, "Type mismatch for argument " + std::to_string(i + 1) + ". " +
                                   "Expected '" + expected_type->toString() +
                                   "', but got '" + actual_type->toString() + "'.", "E332");

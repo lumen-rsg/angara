@@ -27,13 +27,11 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         auto initializer_type = popType();
 
         if (final_type->kind != TypeKind::ERROR && initializer_type->kind != TypeKind::ERROR) {
-            bool types_match = check_type_compatibility(final_type, initializer_type);
-
-            if (!types_match && isInteger(final_type) && initializer_type->toString() == "i64") {
-                if (std::dynamic_pointer_cast<const Literal>(stmt->initializer)) {
-                    types_match = true;
-                }
-            }
+            // TS-3: pass a bare integer literal so in-range narrowing (e.g.
+            // `let b as u8 = 200;`) is permitted; out-of-range still errors via
+            // the predicate returning false.
+            const Literal* init_lit = std::dynamic_pointer_cast<const Literal>(stmt->initializer).get();
+            bool types_match = check_type_compatibility(final_type, initializer_type, init_lit);
 
             if (!types_match) {
                 error(stmt->name, "Type mismatch. Variable is annotated as '" +

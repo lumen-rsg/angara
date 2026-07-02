@@ -248,6 +248,38 @@ namespace angara {
         return name == "u8" || name == "u16" || name == "u32" || name == "u64";
     }
 
+    // TS-3: classify an integer-to-integer conversion by whether it preserves
+    // the value. `Widen` never loses information (e.g. u8 -> i64). `Narrow` may
+    // (e.g. i64 -> u8, u64 -> i8). `Identical` means same width and sign.
+    enum class IntConv { Identical, Widen, Narrow };
+
+    // Bit width (8/16/32/64) of an integer primitive type, or 0 if not integer.
+    inline int intWidth(const std::shared_ptr<Type>& type) {
+        if (!isInteger(type)) return 0;
+        const auto& name = type->toString();
+        if (name == "i8"  || name == "u8")  return 8;
+        if (name == "i16" || name == "u16") return 16;
+        if (name == "i32" || name == "u32") return 32;
+        return 64;  // i64 / u64 / int
+    }
+
+    inline IntConv classifyIntConv(const std::shared_ptr<Type>& target,
+                                   const std::shared_ptr<Type>& source) {
+        if (!target || !source) return IntConv::Narrow;
+        if (target->toString() == source->toString()) return IntConv::Identical;
+        int tw = intWidth(target), sw = intWidth(source);
+        bool t_unsigned = isUnsignedInteger(target);
+        bool s_unsigned = isUnsignedInteger(source);
+        // A conversion widens iff the target can represent every value of the
+        // source: strictly more bits, and (target signed) requires the source
+        // be unsigned or at least as wide minus the sign bit.
+        bool widen = (tw > sw) || (tw == sw && !(s_unsigned && !t_unsigned));
+        // Equal width with differing signedness (e.g. u32 -> i32) narrows: the
+        // top half of the unsigned range is not representable.
+        if (tw == sw && t_unsigned != s_unsigned) return IntConv::Narrow;
+        return widen ? IntConv::Widen : IntConv::Narrow;
+    }
+
     inline bool isNumeric(const std::shared_ptr<Type>& type) {
         return isInteger(type) || isFloat(type);
     }

@@ -56,13 +56,9 @@ namespace angara {
             return {};
         }
 
-        if (!check_type_compatibility(lhs_type, rhs_type)) {
+        if (!check_type_compatibility(lhs_type, rhs_type,
+                std::dynamic_pointer_cast<const Literal>(expr.value).get())) {
             bool types_match = false;
-            if (isInteger(lhs_type) && rhs_type->toString() == "i64") {
-                if (std::dynamic_pointer_cast<const Literal>(expr.value)) {
-                    types_match = true;
-                }
-            }
             if (m_is_in_unsafe_context && rhs_type->kind == TypeKind::ANY) {
                 types_match = true;
             }
