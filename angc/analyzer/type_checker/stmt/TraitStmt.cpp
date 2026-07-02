@@ -29,6 +29,10 @@ namespace angara {
                 error(method_stmt->name, "Duplicate method '" + method_stmt->name.lexeme + "' in trait '" + stmt.name.lexeme + "'.", "E307");
             } else {
                 trait_type->methods[method_stmt->name.lexeme] = method_type;
+                // TS-1/Phase D: retain a default body if the trait method has one.
+                if (method_stmt->body) {
+                    trait_type->default_bodies[method_stmt->name.lexeme] = method_stmt;
+                }
             }
         }
 

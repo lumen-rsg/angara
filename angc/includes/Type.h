@@ -47,6 +47,7 @@ namespace angara {
     struct ClassType; // Needed for DataType and others
     struct TraitType; // TS-2: needed for type_param_bounds on ClassType/DataType
     struct ContractType; // TS-1: needed for signed_contracts on ClassType
+    struct FuncStmt; // TS-1/Phase D: default_bodies on TraitType
 
     // TS-4: structural type identity. Nominal types (CLASS/DATA/ENUM/TRAIT/
     // CONTRACT) compare by canonical pointer identity (each declaration is
@@ -254,6 +255,11 @@ namespace angara {
         const std::string name;
         // A map from method name to that method's FunctionType.
         std::map<std::string, std::shared_ptr<FunctionType>> methods;
+        // TS-1/Phase D: default method bodies. A trait method may declare a
+        // default implementation (parsed as a FuncStmt with a body); stored
+        // here so a class that doesn't override it gets the default in its
+        // vtable slot. Empty entry = no default (signature-only).
+        std::map<std::string, std::shared_ptr<const FuncStmt>> default_bodies;
         std::string home_module;  // TS-4: declaring module (for qualified diagnostics)
 
         explicit TraitType(std::string name)

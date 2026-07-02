@@ -156,6 +156,9 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
                 // conformsToTrait; fixes a latent E304 false positive.)
                 const ClassType::MemberInfo* info = class_type->findProperty(name);
                 if (!info) {
+                    // TS-1/Phase D: a trait method with a default body need not be
+                    // implemented by the class — the default fills the vtable slot.
+                    if (trait_type->default_bodies.count(name)) continue;
                     error(stmt.name, "Class '" + stmt.name.lexeme + "' does not implement required trait method '" + name + "'.", "E304");
                 } else {
                     auto implemented_sig = std::dynamic_pointer_cast<FunctionType>(info->type);
@@ -241,7 +244,11 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
 
         for (const auto& [name, required_sig] : trait->methods) {
             const ClassType::MemberInfo* info = cls->findProperty(name);
-            if (!info) return false;
+            if (!info) {
+                // TS-1/Phase D: a default-bodied trait method is satisfied by the default.
+                if (trait->default_bodies.count(name)) continue;
+                return false;
+            }
             auto impl_sig = std::dynamic_pointer_cast<FunctionType>(info->type);
             if (!impl_sig || !impl_sig->equals(*required_sig)) return false;
         }

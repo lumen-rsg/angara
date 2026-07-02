@@ -353,12 +353,109 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
         if (sym && sym->type && sym->type->kind == TypeKind::CLASS) {
             auto cls = std::dynamic_pointer_cast<ClassType>(sym->type);
             auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
-            auto emit_vtable = [&](const std::string& iface_name,
-                                   const std::vector<std::string>& method_names) {
+            // TS-1/Phase D: emit a trait's default method body as a function
+            // (memoized — once per trait-method, shared by all non-overriding
+            // classes). Signature matches a regular method: (obj this, ...args) -> obj.
+            auto get_or_emit_default = [&](const std::string& trait_name,
+                                           const std::string& mname,
+                                           const std::shared_ptr<const FuncStmt>& body) -> std::string {
+                std::string fn_name = "__ang_default_" + trait_name + "_" + mname;
+                if (mod->getFunction(fn_name)) return fn_name;  // already emitted
+                std::vector<llvm::Type*> param_types(body->params.size() + 1, objType);
+                auto* fn_type = llvm::FunctionType::get(objType, param_types, false);
+                auto* fn = llvm::Function::Create(fn_type, llvm::Function::ExternalLinkage,
+                                                   fn_name, mod.get());
+                auto* entry = llvm::BasicBlock::Create(*ctx, "entry", fn);
+                builder->SetInsertPoint(entry);
+                auto saved_values = std::move(namedVals);
+                auto saved_types = std::move(namedTypes);
+                auto saved_kinds = std::move(namedKinds);
+                namedVals.clear(); namedTypes.clear(); namedKinds.clear();
+                auto* this_alloca = allocLocal(fn, "this");
+                builder->CreateStore(&*fn->arg_begin(), this_alloca);
+                namedVals["this"] = this_alloca;
+                namedKinds["this"] = LocalKind::BOXED;
+                size_t pi = 0;
+                for (auto it = fn->arg_begin() + 1; it != fn->arg_end() && pi < body->params.size(); ++it, ++pi) {
+                    std::string pname = sanitize(body->params[pi].name.lexeme);
+                    auto* alloca = allocLocal(fn, pname);
+                    builder->CreateStore(&*it, alloca);
+                    namedVals[pname] = alloca;
+                    namedKinds[pname] = LocalKind::BOXED;
+                }
+                emitGcPushFrame(fn, 256);
+                if (body->body) {
+                    for (const auto& s : *body->body) {
+                        if (builder->GetInsertBlock()->getTerminator()) break;
+                        cgStmt(s);
+                    }
+                }
+                if (!builder->GetInsertBlock()->getTerminator()) {
+                    if (m_exc_chain_save) emitGcPopFrame();
+                    builder->CreateRet(makeNil());
+                }
+                namedVals = std::move(saved_values);
+                namedTypes = std::move(saved_types);
+                namedKinds = std::move(saved_kinds);
+                return fn_name;
+            };
+            auto emit_vtable = [&](const std::shared_ptr<TraitType>& trait) {
+                const std::string& iface_name = trait->name;
                 std::vector<llvm::Constant*> fns;
-                for (const auto& mname : method_names) {
+                for (const auto& [mname, sig] : trait->methods) {
                     // Resolve the implementing method by walking the class chain
                     // (matches static dispatch): Class.method then bare method.
+                    std::string resolved;
+                    for (auto cur = cls; cur && resolved.empty(); cur = cur->superclass) {
+                        auto qit = methodLookup.find(cur->name + "." + mname);
+                        if (qit != methodLookup.end()) resolved = qit->second;
+                    }
+                    if (resolved.empty()) {
+                        auto mit = methodLookup.find(mname);
+                        if (mit != methodLookup.end()) resolved = mit->second;
+                    }
+                    // TS-1/Phase D: if the class doesn't override, fall back to the
+                    // trait's default body (if any).
+                    if (resolved.empty()) {
+                        auto dit = trait->default_bodies.find(mname);
+                        if (dit != trait->default_bodies.end() && dit->second) {
+                            resolved = get_or_emit_default(trait->name, mname, dit->second);
+                        }
+                    }
+                    if (auto* f = mod->getFunction(resolved)) {
+                        fns.push_back(llvm::ConstantExpr::getBitCast(f, ptr_ty));
+                    } else {
+                        fns.push_back(llvm::ConstantPointerNull::get(ptr_ty));
+                    }
+                }
+                std::string vkey = class_name + "->" + iface_name;
+                auto* arr_ty = llvm::ArrayType::get(ptr_ty, fns.size());
+                auto* arr = llvm::ConstantArray::get(arr_ty, fns);
+                auto* gv = new llvm::GlobalVariable(*mod, arr_ty, true,
+                    llvm::GlobalValue::InternalLinkage, arr, "__ang_vtable_" + vkey);
+                traitVtables[vkey] = gv;
+                for (const auto& [mname, sig] : trait->methods) {
+                    // Record slot index = the method's position in the iteration order.
+                    // (std::map is ordered, so iteration is deterministic; recompute idx.)
+                    int idx = 0;
+                    for (const auto& [n, s] : trait->methods) {
+                        if (n == mname) break;
+                        idx++;
+                    }
+                    traitMethodSlots[iface_name + "." + mname] = idx;
+                }
+            };
+            for (const auto& trait : cls->adopted_traits) {
+                emit_vtable(trait);
+            }
+            // Contracts have no default bodies (parser rejects method bodies in
+            // contracts), so emit a plain vtable from the class's overrides only.
+            for (const auto& contract : cls->signed_contracts) {
+                const std::string& iface_name = contract->name;
+                std::vector<llvm::Constant*> fns;
+                std::vector<std::string> names;
+                for (const auto& [n, info] : contract->methods) names.push_back(n);
+                for (const auto& mname : names) {
                     std::string resolved;
                     for (auto cur = cls; cur && resolved.empty(); cur = cur->superclass) {
                         auto qit = methodLookup.find(cur->name + "." + mname);
@@ -380,20 +477,9 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
                 auto* gv = new llvm::GlobalVariable(*mod, arr_ty, true,
                     llvm::GlobalValue::InternalLinkage, arr, "__ang_vtable_" + vkey);
                 traitVtables[vkey] = gv;
-                // Record slot indices for indirect dispatch.
-                for (size_t i = 0; i < method_names.size(); ++i) {
-                    traitMethodSlots[iface_name + "." + method_names[i]] = static_cast<int>(i);
+                for (size_t i = 0; i < names.size(); ++i) {
+                    traitMethodSlots[iface_name + "." + names[i]] = static_cast<int>(i);
                 }
-            };
-            for (const auto& trait : cls->adopted_traits) {
-                std::vector<std::string> names;
-                for (const auto& [n, sig] : trait->methods) names.push_back(n);
-                emit_vtable(trait->name, names);
-            }
-            for (const auto& contract : cls->signed_contracts) {
-                std::vector<std::string> names;
-                for (const auto& [n, info] : contract->methods) names.push_back(n);
-                emit_vtable(contract->name, names);
             }
         }
     }
