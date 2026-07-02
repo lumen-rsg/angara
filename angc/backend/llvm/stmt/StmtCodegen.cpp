@@ -59,13 +59,23 @@ void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
     llvm::Value* v = nullptr;
 
     if (s.initializer) {
+        // TS-1: if this variable is list<Trait>, flow the element type down so a
+        // list literal initializer boxes each element into a trait object.
+        auto pre_type = m_type_checker.getVariableTypes().find(&s);
+        if (pre_type != m_type_checker.getVariableTypes().end() && pre_type->second &&
+            pre_type->second->kind == TypeKind::LIST) {
+            m_expected_list_elem_type = std::dynamic_pointer_cast<ListType>(pre_type->second)->element_type;
+        }
         v = cg(s.initializer);
+        m_expected_list_elem_type.reset();
         // v5: data types copy-on-assign. If this variable is a plain `data`
         // type (not owned, not class — those are tracked for drop), deep-clone
         // the initializer so p2 is independent of p1.
         auto type_it2 = m_type_checker.getVariableTypes().find(&s);
         if (type_it2 != m_type_checker.getVariableTypes().end() && type_it2->second) {
             auto& vt = type_it2->second;
+            // TS-1: box into a trait object if the variable is trait/contract-typed.
+            v = maybeBoxTraitObject(v, s.initializer.get(), vt);
             if (vt->kind == TypeKind::DATA &&
                 m_tracked_types.count(vt->toString()) == 0) {
                 v = callRtByName("__ang_deep_clone", {v});

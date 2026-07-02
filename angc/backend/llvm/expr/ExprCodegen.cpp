@@ -511,9 +511,56 @@ llvm::Value* LLVMBackend::cgUnary(const Unary& e) {
     return o;
 }
 
+// TS-1: box a concrete instance into a trait object when assigning it into a
+// trait/contract-typed slot. Looks up the per-(class,interface) vtable global
+// emitted in codegenClassDecl and calls __ang_trait_object_new. No-op for any
+// other (non-trait/contract) destination type.
+llvm::Value* LLVMBackend::maybeBoxTraitObject(llvm::Value* value, const Expr* src_expr,
+                                              const std::shared_ptr<Type>& dst_type) {
+    if (!dst_type || !src_expr) return value;
+    if (dst_type->kind != TypeKind::TRAIT &&
+        dst_type->kind != TypeKind::CONTRACT &&
+        dst_type->kind != TypeKind::TRAIT_OBJECT) {
+        return value;
+    }
+    // Resolve the interface name.
+    std::string iface_name;
+    if (dst_type->kind == TypeKind::TRAIT_OBJECT) {
+        auto to = std::dynamic_pointer_cast<TraitObjectType>(dst_type);
+        if (!to || !to->interface_type) return value;
+        iface_name = to->interface_type->toString();
+    } else {
+        iface_name = dst_type->toString();
+    }
+    if (iface_name.rfind("contract<", 0) == 0) {
+        iface_name = iface_name.substr(9, iface_name.size() - 10);
+    }
+    // Resolve the source's concrete class name.
+    auto src_it = m_type_checker.getExpressionTypes().find(src_expr);
+    if (src_it == m_type_checker.getExpressionTypes().end() || !src_it->second) return value;
+    std::string class_name;
+    if (src_it->second->kind == TypeKind::INSTANCE) {
+        class_name = std::dynamic_pointer_cast<InstanceType>(src_it->second)->class_type->name;
+    } else if (src_it->second->kind == TypeKind::CLASS) {
+        class_name = std::dynamic_pointer_cast<ClassType>(src_it->second)->name;
+    } else {
+        return value;  // not a boxable instance
+    }
+    auto vt_it = traitVtables.find(class_name + "->" + iface_name);
+    if (vt_it == traitVtables.end()) return value;  // no vtable (shouldn't happen if conformance checked)
+    auto* vtable = vt_it->second;
+    auto* vtable_ptr = builder->CreateBitCast(vtable, llvm::PointerType::get(*ctx, 0));
+    return callRtByName("__ang_trait_object_new", {value, vtable_ptr});
+}
+
 llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
     auto* v = cg(e.value);
     if (auto* var = dynamic_cast<const VarExpr*>(e.target.get())) {
+        // TS-1: box into a trait object if the target is trait/contract-typed.
+        auto tgt_it = namedTypes.find(var->name.lexeme);
+        if (tgt_it != namedTypes.end() && tgt_it->second) {
+            v = maybeBoxTraitObject(v, e.value.get(), tgt_it->second);
+        }
         // v5: data types copy-on-assign. If the target variable is a plain
         // `data` type (not owned/class — those are tracked for drop), deep-clone
         // the value so the target is independent of the source.
@@ -687,8 +734,106 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                 }
             }
         }
+        // TS-1: trait/contract object — indirect dispatch via the vtable, for an
+        // arbitrary receiver expression (var, subscript, call, ...). When the
+        // receiver's static type is a trait/contract (or trait-object view),
+        // evaluate the receiver, load the function pointer from its vtable, and
+        // call indirectly. (The bare-VarExpr fast path below handles the same
+        // case without re-evaluating; this catches shapes[i].draw() etc.)
+        {
+            auto rot = m_type_checker.getExpressionTypes().find(get->object.get());
+            if (rot != m_type_checker.getExpressionTypes().end()) {
+                auto& rt2 = rot->second;
+                if (rt2 && (rt2->kind == TypeKind::TRAIT ||
+                            rt2->kind == TypeKind::CONTRACT ||
+                            rt2->kind == TypeKind::TRAIT_OBJECT) &&
+                    !dynamic_cast<const VarExpr*>(get->object.get())) {
+                    std::string iface_name;
+                    if (rt2->kind == TypeKind::TRAIT_OBJECT) {
+                        auto to = std::dynamic_pointer_cast<TraitObjectType>(rt2);
+                        if (to && to->interface_type) iface_name = to->interface_type->toString();
+                    } else {
+                        iface_name = rt2->toString();
+                    }
+                    if (iface_name.rfind("contract<", 0) == 0) {
+                        iface_name = iface_name.substr(9, iface_name.size() - 10);
+                    }
+                    auto slot_it = traitMethodSlots.find(iface_name + "." + get->name.lexeme);
+                    if (slot_it != traitMethodSlots.end()) {
+                        auto* recv_val = cg(get->object);
+                        auto* payload = builder->CreateExtractValue(recv_val, {1}, "to_payload");
+                        auto* to_ptr = builder->CreateIntToPtr(payload, rt->getTraitObjectType()->getPointerTo());
+                        auto* vtable_ptr = builder->CreateLoad(llvm::PointerType::get(*ctx, 0),
+                            builder->CreateStructGEP(rt->getTraitObjectType(), to_ptr, 2), "vtable");
+                        auto* slot_ptr = builder->CreateGEP(llvm::PointerType::get(*ctx, 0), vtable_ptr,
+                            {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), slot_it->second)}, "slot");
+                        auto* fn_ptr = builder->CreateLoad(llvm::PointerType::get(*ctx, 0), slot_ptr, "mfn");
+                        std::vector<llvm::Type*> param_tys(expr.arguments.size() + 1, objType);
+                        auto* mfn_ty = llvm::FunctionType::get(objType, param_tys, false);
+                        auto* embedded_recv = builder->CreateLoad(objType,
+                            builder->CreateStructGEP(rt->getTraitObjectType(), to_ptr, 1), "to_recv");
+                        std::vector<llvm::Value*> args;
+                        args.push_back(embedded_recv);
+                        for (auto& a : expr.arguments) args.push_back(cg(a));
+                        return builder->CreateCall(mfn_ty, fn_ptr, args);
+                    }
+                }
+            }
+        }
         if (auto* obj = dynamic_cast<const VarExpr*>(get->object.get())) {
             std::string modName = obj->name.lexeme, fnName = get->name.lexeme;
+
+            // TS-1: trait/contract object — indirect dispatch via the vtable.
+            // When the receiver's static type is a trait/contract (or a trait-
+            // object view), the concrete method is unknown at compile time; load
+            // the function pointer from the trait object's vtable and call it.
+            // Mirrors __ang_call's closure branch.
+            auto recv_type_it = m_type_checker.getExpressionTypes().find(obj);
+            if (recv_type_it != m_type_checker.getExpressionTypes().end()) {
+                auto& rt2 = recv_type_it->second;
+                if (rt2 && (rt2->kind == TypeKind::TRAIT ||
+                            rt2->kind == TypeKind::CONTRACT ||
+                            rt2->kind == TypeKind::TRAIT_OBJECT)) {
+                    // Resolve the interface name (TRAIT/CONTRACT directly; for a
+                    // TRAIT_OBJECT, its interface_type).
+                    std::string iface_name;
+                    if (rt2->kind == TypeKind::TRAIT_OBJECT) {
+                        auto to = std::dynamic_pointer_cast<TraitObjectType>(rt2);
+                        if (to && to->interface_type) iface_name = to->interface_type->toString();
+                    } else {
+                        iface_name = rt2->toString();
+                    }
+                    // Contracts toString as "contract<Name>"; normalize to bare name.
+                    if (iface_name.rfind("contract<", 0) == 0) {
+                        iface_name = iface_name.substr(9, iface_name.size() - 10);
+                    }
+                    auto slot_it = traitMethodSlots.find(iface_name + "." + fnName);
+                    if (slot_it != traitMethodSlots.end()) {
+                        auto* recv_val = loadVar(modName);
+                        // Unbox the trait object pointer.
+                        auto* payload = builder->CreateExtractValue(recv_val, {1}, "to_payload");
+                        auto* to_ptr = builder->CreateIntToPtr(payload, rt->getTraitObjectType()->getPointerTo());
+                        // Load the vtable pointer (field 2) and the slot.
+                        auto* vtable_ptr = builder->CreateLoad(llvm::PointerType::get(*ctx, 0),
+                            builder->CreateStructGEP(rt->getTraitObjectType(), to_ptr, 2), "vtable");
+                        auto* slot_ptr = builder->CreateGEP(llvm::PointerType::get(*ctx, 0), vtable_ptr,
+                            {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), slot_it->second)}, "slot");
+                        auto* fn_ptr = builder->CreateLoad(llvm::PointerType::get(*ctx, 0), slot_ptr, "mfn");
+                        // Build the method signature: (obj, obj...) -> obj.
+                        std::vector<llvm::Type*> param_tys(expr.arguments.size() + 1, objType);
+                        auto* mfn_ty = llvm::FunctionType::get(objType, param_tys, false);
+                        // The receiver passed to the method is the concrete
+                        // instance embedded in the trait object (field 1), so
+                        // `this` inside the impl is the real object.
+                        auto* embedded_recv = builder->CreateLoad(objType,
+                            builder->CreateStructGEP(rt->getTraitObjectType(), to_ptr, 1), "to_recv");
+                        std::vector<llvm::Value*> args;
+                        args.push_back(embedded_recv);
+                        for (auto& a : expr.arguments) args.push_back(cg(a));
+                        return builder->CreateCall(mfn_ty, fn_ptr, args);
+                    }
+                }
+            }
             {
                 // Type-aware method dispatch: use the variable's class type to
                 // look up the qualified key (e.g. "Animal.speak"), walking the
@@ -1089,13 +1234,21 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         if (vfit != m_variadic_foreign_funcs.end()) {
             return callVariadicForeignFn(fn, vfit->second, expr.arguments);
         }
-        return callModuleFn(moduleName, fn, expr.arguments);
+        // TS-1: gather param types so callModuleFn can box trait/contract args.
+        const std::vector<std::shared_ptr<Type>>* param_types = nullptr;
+        auto ctit = m_type_checker.getExpressionTypes().find(expr.callee.get());
+        if (ctit != m_type_checker.getExpressionTypes().end() &&
+            ctit->second && ctit->second->kind == TypeKind::FUNCTION) {
+            param_types = &std::dynamic_pointer_cast<FunctionType>(ctit->second)->param_types;
+        }
+        return callModuleFn(moduleName, fn, expr.arguments, param_types);
     }
     return makeNil();
 }
 
 llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string& fn,
-                                        const std::vector<std::shared_ptr<Expr>>& args) {
+                                        const std::vector<std::shared_ptr<Expr>>& args,
+                                        const std::vector<std::shared_ptr<Type>>* param_types) {
     std::string mangled = mangle(mod, fn);
     llvm::Function* f = this->mod->getFunction(mangled);
     if (!f) f = this->mod->getFunction("__ang_"+sanitize(fn));
@@ -1195,7 +1348,14 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
 
     // Standard boxed call
     std::vector<llvm::Value*> llvmArgs;
-    for (auto& a : args) llvmArgs.push_back(cg(a));
+    for (size_t i = 0; i < args.size(); i++) {
+        auto* v = cg(args[i]);
+        // TS-1: box into a trait object if this parameter is trait/contract-typed.
+        if (param_types && i < param_types->size()) {
+            v = maybeBoxTraitObject(v, args[i].get(), (*param_types)[i]);
+        }
+        llvmArgs.push_back(v);
+    }
     while (llvmArgs.size() < ft->getNumParams()) llvmArgs.push_back(makeNil());
     return builder->CreateCall(f, llvmArgs);
 }
@@ -1262,7 +1422,23 @@ llvm::Value* LLVMBackend::cgGet(const GetExpr& e) {
 
 llvm::Value* LLVMBackend::cgList(const ListExpr& e) {
     auto* l = callRtByName("__ang_list_new",{});
-    for (auto& el : e.elements) callRtByName("__ang_list_push",{l, cg(el)});
+    // TS-1: if this list's element type is a trait/contract, box each element
+    // into a trait object as it's pushed (so list<Drawable> holds trait objects).
+    // Prefer the downward-flowing expected element type (set when the list is
+    // assigned to a typed slot); fall back to the list's own inferred element.
+    std::shared_ptr<Type> elem_type = m_expected_list_elem_type;
+    if (!elem_type) {
+        auto lt = m_type_checker.getExpressionTypes().find(&e);
+        if (lt != m_type_checker.getExpressionTypes().end() && lt->second &&
+            lt->second->kind == TypeKind::LIST) {
+            elem_type = std::dynamic_pointer_cast<ListType>(lt->second)->element_type;
+        }
+    }
+    for (auto& el : e.elements) {
+        auto* v = cg(el);
+        if (elem_type) v = maybeBoxTraitObject(v, el.get(), elem_type);
+        callRtByName("__ang_list_push",{l, v});
+    }
     return l;
 }
 

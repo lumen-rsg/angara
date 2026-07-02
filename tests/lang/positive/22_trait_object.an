@@ -1,0 +1,45 @@
+// TS-1: trait objects — dynamic dispatch through a trait interface. A value
+// viewed as `Drawable` carries its concrete method via a per-(class,trait)
+// vtable, so d.draw() calls the right implementation at runtime.
+attach io;
+
+trait Drawable { func draw(this) -> i64; }
+
+class Circle uses Drawable {
+public:
+    func draw(this) -> i64 { return 1; }
+}
+class Square uses Drawable {
+public:
+    func draw(this) -> i64 { return 2; }
+}
+class Triangle uses Drawable {
+public:
+    func draw(this) -> i64 { return 3; }
+}
+
+// Polymorphic over anything Drawable (trait as a parameter type).
+func total_draw(d as Drawable) -> i64 {
+    return d.draw();
+}
+
+export func main() -> i64 {
+    // A single trait object: upcast + indirect dispatch.
+    let d as Drawable = Circle();
+    io.println(0, "single: " + string(d.draw()));   // 1
+
+    // A heterogeneous list<Drawable>: three different concrete types, each
+    // dispatched to its own draw() through the vtable.
+    let shapes as list<Drawable> = [Circle(), Square(), Triangle()];
+    let sum = 0;
+    let i = 0;
+    while (i < len(shapes)) {
+        sum = sum + shapes[i].draw();
+        i = i + 1;
+    }
+    io.println(0, "heterogeneous: " + string(sum));  // 6
+
+    // A function taking the trait type.
+    io.println(0, "via fn: " + string(total_draw(Square())));  // 2
+    return 0;
+}

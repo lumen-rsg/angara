@@ -81,6 +81,11 @@ namespace angara {
 
         /// Expression codegen dispatch. Returns the computed AngaraObject value.
         llvm::Value* cg(const std::shared_ptr<Expr>& expr);
+        // TS-1: if `dst_type` is a trait/contract and the source expression is a
+        // concrete instance, box the value into a trait object (looking up the
+        // right per-(class,interface) vtable). Otherwise return the value as-is.
+        llvm::Value* maybeBoxTraitObject(llvm::Value* value, const Expr* src_expr,
+                                         const std::shared_ptr<Type>& dst_type);
         llvm::Value* cgLiteral(const Literal& e);
         llvm::Value* cgBinary(const Binary& e);
         llvm::Value* cgUnary(const Unary& e);
@@ -104,7 +109,8 @@ namespace angara {
 
         /// Calls a function from a resolved module by name.
         llvm::Value* callModuleFn(const std::string& mod, const std::string& fn,
-                                   const std::vector<std::shared_ptr<Expr>>& args);
+                                   const std::vector<std::shared_ptr<Expr>>& args,
+                                   const std::vector<std::shared_ptr<Type>>* param_types = nullptr);
 
         /// Calls a variadic foreign C function directly, marshalling fixed and variadic args.
         llvm::Value* callVariadicForeignFn(const std::string& c_func_name,
@@ -332,6 +338,11 @@ namespace angara {
         // exit (emitGcPopFrame), and save/restore per-loop for break/continue.
         llvm::Value* m_exc_chain_save = nullptr;          // function-entry chain
         std::vector<llvm::Value*> m_exc_loop_chain_saves; // one per enclosing loop
+
+        // TS-1: downward-flowing expected element type for list-literal boxing.
+        // Set by cgVarDecl/cgAssign when the target is list<Trait>, consulted by
+        // cgList to box each element into a trait object. Null = no expectation.
+        std::shared_ptr<Type> m_expected_list_elem_type;
 
         // v5: Chaperone exception-unwind plan (ThrowStmt* → vars to auto-drop).
 
