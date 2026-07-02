@@ -1241,14 +1241,19 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             ctit->second && ctit->second->kind == TypeKind::FUNCTION) {
             param_types = &std::dynamic_pointer_cast<FunctionType>(ctit->second)->param_types;
         }
-        return callModuleFn(moduleName, fn, expr.arguments, param_types);
+        // TS-1/C4: arg indices to box into trait objects (generic fn with bounds).
+        const std::vector<std::pair<size_t, std::shared_ptr<TraitType>>>* boxed_idx = nullptr;
+        auto bit = m_type_checker.getGenericBoxedArgs().find(&expr);
+        if (bit != m_type_checker.getGenericBoxedArgs().end()) boxed_idx = &bit->second;
+        return callModuleFn(moduleName, fn, expr.arguments, param_types, boxed_idx);
     }
     return makeNil();
 }
 
 llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string& fn,
                                         const std::vector<std::shared_ptr<Expr>>& args,
-                                        const std::vector<std::shared_ptr<Type>>* param_types) {
+                                        const std::vector<std::shared_ptr<Type>>* param_types,
+                                        const std::vector<std::pair<size_t, std::shared_ptr<TraitType>>>* boxed_idx) {
     std::string mangled = mangle(mod, fn);
     llvm::Function* f = this->mod->getFunction(mangled);
     if (!f) f = this->mod->getFunction("__ang_"+sanitize(fn));
@@ -1353,6 +1358,16 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
         // TS-1: box into a trait object if this parameter is trait/contract-typed.
         if (param_types && i < param_types->size()) {
             v = maybeBoxTraitObject(v, args[i].get(), (*param_types)[i]);
+        }
+        // TS-1/C4: box a generic-fn bounded arg into a trait object (the bound
+        // trait is the boxing target) so the body receives a trait object.
+        if (boxed_idx) {
+            for (const auto& [idx, trait] : *boxed_idx) {
+                if (idx == i && trait) {
+                    v = maybeBoxTraitObject(v, args[i].get(), trait);
+                    break;
+                }
+            }
         }
         llvmArgs.push_back(v);
     }

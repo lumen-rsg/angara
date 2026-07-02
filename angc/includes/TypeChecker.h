@@ -68,6 +68,9 @@ namespace angara {
         /// Returns the map of attach statements to their resolved module types.
         [[nodiscard]] const std::map<const AttachStmt*, std::shared_ptr<ModuleType>>& getModuleResolutions() const { return m_module_resolutions; }
 
+        /// TS-1/C4: arg indices to box into trait objects at a generic-fn call.
+        [[nodiscard]] const std::map<const CallExpr*, std::vector<std::pair<size_t, std::shared_ptr<TraitType>>>>& getGenericBoxedArgs() const { return m_generic_boxed_args; }
+
         /// Returns the set of native symbols used from imported modules.
         [[nodiscard]] const std::set<UsedNativeSymbol>& getUsedNativeSymbols() const { return m_used_native_symbols; }
 
@@ -246,6 +249,22 @@ namespace angara {
         std::shared_ptr<ClassType> m_current_class = nullptr;
         std::map<const Symbol*, std::shared_ptr<Type>> m_narrowed_types;
         std::map<std::string, std::shared_ptr<TypeParameterType>> m_active_type_params;
+        // TS-1/C4: active generic-body bounds — type-param name -> the TraitType
+        // it's bound to (e.g. T -> Drawable for `func f<T: Drawable>`). Lets a
+        // generic body resolve `x.draw()` against the bound and dispatch via the
+        // trait-object vtable. Empty for unbounded type params.
+        std::map<std::string, std::shared_ptr<TraitType>> m_active_type_param_bounds;
+        // TS-1/C4: for a generic-function call with bounded params, the args
+        // that must be boxed into trait objects at the call site (so the body
+        // receives a trait object and indirect dispatch works without
+        // monomorphization). Each entry: (arg index, the bound TraitType).
+        // Keyed by the CallExpr pointer.
+        std::map<const CallExpr*, std::vector<std::pair<size_t, std::shared_ptr<TraitType>>>> m_generic_boxed_args;
+        // TS-1/C4: a function's resolved param-bounds, keyed by function name ->
+        // (param index -> bound TraitType). Populated in defineFunctionHeader so
+        // call sites can determine which args to box without a Symbol->FuncStmt
+        // back-reference.
+        std::map<std::string, std::map<size_t, std::shared_ptr<TraitType>>> m_function_bounds;
 
         // --- Mapped state (populated during type checking, read by backend) ---
 

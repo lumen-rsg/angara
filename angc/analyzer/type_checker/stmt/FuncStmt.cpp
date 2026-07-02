@@ -24,6 +24,27 @@ namespace angara {
             }
         }
 
+        // TS-1/C4: record this function's param-bounds (param index -> bound
+        // TraitType) so call sites can box bounded args into trait objects.
+        {
+            std::map<size_t, std::shared_ptr<TraitType>> bounds;
+            for (size_t i = 0; i < stmt.params.size(); ++i) {
+                if (stmt.params[i].type) {
+                    if (auto st = std::dynamic_pointer_cast<const SimpleType>(stmt.params[i].type)) {
+                        auto bit = stmt.type_param_bounds.find(st->name.lexeme);
+                        if (bit != stmt.type_param_bounds.end()) {
+                            if (auto bsym = m_symbols.resolve(bit->second.lexeme)) {
+                                if (bsym->type && bsym->type->kind == TypeKind::TRAIT) {
+                                    bounds[i] = std::dynamic_pointer_cast<TraitType>(bsym->type);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (!bounds.empty()) m_function_bounds[stmt.name.lexeme] = std::move(bounds);
+        }
+
         std::shared_ptr<Type> return_type = m_type_nil;
         if (stmt.returnType) {
             return_type = resolveType(stmt.returnType);
@@ -108,8 +129,18 @@ namespace angara {
         m_function_return_types.push(func_type->return_type);
 
         auto saved_type_params = m_active_type_params;
+        auto saved_bounds = m_active_type_param_bounds;
         for (const auto& tp : stmt->type_params) {
             m_active_type_params[tp.lexeme] = std::make_shared<TypeParameterType>(tp.lexeme);
+        }
+        // TS-1/C4: resolve this generic fn's bounds (T -> TraitType) so the body
+        // can resolve trait methods against them and codegen can dispatch.
+        for (const auto& [pname, bound_token] : stmt->type_param_bounds) {
+            auto bsym = m_symbols.resolve(bound_token.lexeme);
+            if (bsym && bsym->type && bsym->type->kind == TypeKind::TRAIT) {
+                m_active_type_param_bounds[pname] =
+                    std::dynamic_pointer_cast<TraitType>(bsym->type);
+            }
         }
 
         if (stmt->has_this && m_current_class) {
@@ -143,6 +174,7 @@ namespace angara {
         }
 
         m_active_type_params = saved_type_params;
+        m_active_type_param_bounds = saved_bounds;
         m_function_return_types.pop();
         exitScopeAndWarn();
 

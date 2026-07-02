@@ -110,7 +110,8 @@ namespace angara {
         /// Calls a function from a resolved module by name.
         llvm::Value* callModuleFn(const std::string& mod, const std::string& fn,
                                    const std::vector<std::shared_ptr<Expr>>& args,
-                                   const std::vector<std::shared_ptr<Type>>* param_types = nullptr);
+                                   const std::vector<std::shared_ptr<Type>>* param_types = nullptr,
+                                   const std::vector<std::pair<size_t, std::shared_ptr<TraitType>>>* boxed_idx = nullptr);
 
         /// Calls a variadic foreign C function directly, marshalling fixed and variadic args.
         llvm::Value* callVariadicForeignFn(const std::string& c_func_name,

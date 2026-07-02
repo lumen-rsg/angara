@@ -1,0 +1,22 @@
+// TS-1/C4: generic-body trait dispatch. A generic function bounded by a trait
+// can call the trait's methods on its type-param argument — dispatch goes
+// through the vtable (the bounded arg is boxed at the call site). This closes
+// the TS-2 Phase 2d deferral.
+attach io;
+
+trait Drawable { func draw(this) -> i64; }
+
+class Circle uses Drawable {
+public:
+    func draw(this) -> i64 { return 7; }
+}
+
+// `x as T` where T: Drawable — x.draw() resolves against the bound.
+func render<T: Drawable>(x as T) -> i64 {
+    return x.draw();
+}
+
+export func main() -> i64 {
+    io.println(0, "rendered: " + string(render(Circle())));  // 7
+    return 0;
+}

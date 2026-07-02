@@ -79,6 +79,21 @@ namespace angara {
                     auto sub_ret = substituteTypeArgs(func_type->return_type, inferred_args);
                     check_type = std::make_shared<FunctionType>(sub_params, sub_ret, func_type->is_variadic);
                 }
+                // TS-1/C4: if the callee has trait-bounded params, record which
+                // args must be boxed into trait objects at the call site (so the
+                // generic body receives a trait object and indirect dispatch
+                // works without monomorphization). m_function_bounds carries the
+                // resolved per-param bounds keyed by function name.
+                if (auto var = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
+                    auto fbit = m_function_bounds.find(var->name.lexeme);
+                    if (fbit != m_function_bounds.end()) {
+                        std::vector<std::pair<size_t, std::shared_ptr<TraitType>>> boxed;
+                        for (const auto& [pi, trait] : fbit->second) {
+                            if (pi < expr.arguments.size()) boxed.push_back({pi, trait});
+                        }
+                        if (!boxed.empty()) m_generic_boxed_args[&expr] = std::move(boxed);
+                    }
+                }
             }
 
             check_function_call(expr, check_type, arg_types);

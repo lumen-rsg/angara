@@ -31,7 +31,28 @@ std::any TypeChecker::visit(const GetExpr& expr) {
     const std::string& property_name = expr.name.lexeme;
     std::shared_ptr<Type> property_type = m_type_error;
 
-    if (unwrapped_object_type->kind == TypeKind::DATA) {
+    // TS-1/C4: a generic type param with a trait bound — resolve the member
+    // against the bound and tag the receiver as a trait-object view so codegen
+    // dispatches indirectly (the bound's method via the vtable). This is what
+    // makes `func f<T: Drawable>(x as T) { x.draw() }` work.
+    if (unwrapped_object_type->kind == TypeKind::TYPE_PARAM) {
+        auto tp = std::dynamic_pointer_cast<TypeParameterType>(unwrapped_object_type);
+        auto bound_it = m_active_type_param_bounds.find(tp->name);
+        if (bound_it != m_active_type_param_bounds.end() && bound_it->second) {
+            auto trait = bound_it->second;
+            auto mit = trait->methods.find(property_name);
+            if (mit != trait->methods.end()) {
+                // Tag the receiver expression as a trait-object view (bound trait).
+                m_expression_types[expr.object.get()] =
+                    std::make_shared<TraitObjectType>(trait, unwrapped_object_type);
+                property_type = mit->second;
+            } else {
+                error(expr.name, "Trait '" + trait->name + "' (bound of type parameter '" +
+                      tp->name + "') has no method named '" + property_name + "'.", "E338");
+            }
+        }
+    }
+    else if (unwrapped_object_type->kind == TypeKind::DATA) {
         auto data_type = std::dynamic_pointer_cast<DataType>(unwrapped_object_type);
 
         if (property_name == "clone") {
