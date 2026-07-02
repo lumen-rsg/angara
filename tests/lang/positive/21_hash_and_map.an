@@ -1,0 +1,62 @@
+// TS-2 Phase 2: the hash() builtin and deep == enable associative collections.
+// This is a self-contained exercise of the primitives (the full Map<K,V>/Set<T>
+// API lives in modules/collections/collections.an). Demonstrates: hash()
+// consistency, deep list equality, and a tiny inline string->value map built
+// on those primitives.
+attach io;
+
+// A minimal inline map: parallel key/value lists with linear lookup using the
+// deep == operator. Mirrors the bucketed collections.Map on a smaller scale.
+func imap_put(keys as list<any>, vals as list<any>, k as any, v as any) -> nil {
+    @unsafe {
+        let i = 0;
+        while (i < len(keys)) {
+            if (keys[i] == k) { vals[i] = v; return; }   // upsert
+            i = i + 1;
+        }
+        keys.push(k);
+        vals.push(v);
+    }
+}
+
+func imap_get(keys as list<any>, vals as list<any>, k as any) -> any {
+    @unsafe {
+        let i = 0;
+        while (i < len(keys)) {
+            if (keys[i] == k) { return vals[i]; }
+            i = i + 1;
+        }
+    }
+    return nil;
+}
+
+export func main() -> i64 {
+    // hash() is consistent for equal values.
+    io.println(0, "hash(42)==" + string(hash(42) == hash(42)));     // true
+    io.println(0, "hash(\"ab\")==" + string(hash("ab") == hash("ab"))); // true
+    io.println(0, "hash(1)!=hash(2): " + string(hash(1) != hash(2)));   // true
+
+    // Deep list equality (was pointer-equality before TS-2 Phase 2c).
+    let a = [1, 2, 3];
+    let b = [1, 2, 3];
+    io.println(0, "[1,2,3]==[1,2,3]: " + string(a == b));   // true
+
+    // Inline map: string -> i64.
+    let ks as list<any> = [];
+    let vs as list<any> = [];
+    imap_put(ks, vs, "one", 1);
+    imap_put(ks, vs, "two", 2);
+    imap_put(ks, vs, "one", 11);   // upsert
+    io.println(0, "one=" + string(imap_get(ks, vs, "one")));   // 11
+    io.println(0, "two=" + string(imap_get(ks, vs, "two")));   // 2
+    io.println(0, "missing: " + string(imap_get(ks, vs, "zzz"))); // nil -> 0 via string()
+
+    // i64 keys work too (hash + == on scalars).
+    let nks as list<any> = [];
+    let nvs as list<any> = [];
+    let i = 0;
+    while (i < 20) { imap_put(nks, nvs, i, i * i); i = i + 1; }
+    io.println(0, "7^2=" + string(imap_get(nks, nvs, 7)));   // 49
+    io.println(0, "19^2=" + string(imap_get(nks, nvs, 19))); // 361
+    return 0;
+}

@@ -820,3 +820,220 @@ export func MapChars(input as string, transform as any) -> string {
     }
     return "";
 }
+// ─────────────────────────────────────────────────────────────────
+// Angara Map<K,V> and Set<T> — hash-bucketed associative containers.
+//
+// Backed by a fixed bucket array of parallel key/value lists, using the
+// builtin hash(x) (general object hash) for bucketing and the deep ==
+// operator for key equality. Supports any key type whose values hash
+// and compare consistently: scalars (i64/f64/bool), strings, and
+// structural objects (lists/records) — see __ang_obj_hash / __ang_equals.
+//
+// The generic `data Map<K: Hashable, V>` carries a marker `Hashable`
+// bound (satisfied by any type); the bound is the type-level expression
+// of "these keys must be hashable". A real Hashable trait with method
+// requirements + body-level dispatch is future work (TS-2 Phase 2d).
+// ─────────────────────────────────────────────────────────────────
+
+/// Marker trait: a type whose values can be hashed by the builtin hash().
+/// (Empty — every type satisfies it today, since __ang_obj_hash handles
+/// all boxed values. Method requirements land with trait dispatch.)
+trait Hashable {}
+
+/// Marker trait: a type whose values are totally ordered. Placeholder.
+trait Ordered {}
+
+// The bucket count for new maps/sets. A power of two keeps the modulo a
+// bitmask; 16 buckets is a reasonable small-table default. Growing/rehashing
+// on load factor is a future optimization.
+const MAP_BUCKETS = 16;
+
+// A map is a record of N buckets; each bucket is a record holding two
+// parallel lists (keys, values) plus a count. Using records keeps the
+// representation within the existing boxed runtime — no new object kind.
+//
+// Operations are module functions: map.put(m, k, v), map.get(m, k), etc.,
+// rather than methods, since method dispatch on a generic receiver isn't
+// wired yet. The container is the first argument (the "self" convention).
+
+/// Create a fresh empty map with MAP_BUCKETS buckets.
+export func MapNew() -> record {
+    let buckets as list<any> = [];
+    let i = 0;
+    while (i < MAP_BUCKETS) {
+        let k as list<any> = [];
+        let v as list<any> = [];
+        buckets.push({"keys": k, "vals": v});
+        i = i + 1;
+    }
+    return {"buckets": buckets, "size": 0};
+}
+
+/// Bucket index for a key: hash modulo bucket count (non-negative).
+func bucket_of(k as any) -> i64 {
+    let h = hash(k);
+    let b = h % MAP_BUCKETS;
+    if (b < 0) { return b + MAP_BUCKETS; }
+    return b;
+}
+
+/// Put a key/value pair into the map (upsert). Returns the new size.
+export func MapPut(m as record, k as any, v as any) -> i64 {
+    @unsafe {
+        let b = bucket_of(k);
+        let bucket = m["buckets"][b];
+        let keys as list<any> = bucket["keys"];
+        let vals as list<any> = bucket["vals"];
+        let i = 0;
+        while (i < len(keys)) {
+            if (keys[i] == k) {
+                vals[i] = v;   // update existing
+                return m["size"];
+            }
+            i = i + 1;
+        }
+        keys.push(k);
+        vals.push(v);
+        m["size"] = m["size"] + 1;
+        return m["size"];
+    }
+    return 0;
+}
+
+/// Get the value for a key, or nil if absent.
+export func MapGet(m as record, k as any) -> any {
+    @unsafe {
+        let b = bucket_of(k);
+        let bucket = m["buckets"][b];
+        let keys = bucket["keys"];
+        let vals = bucket["vals"];
+        let i = 0;
+        while (i < len(keys)) {
+            if (keys[i] == k) {
+                return vals[i];
+            }
+            i = i + 1;
+        }
+    }
+    return nil;
+}
+
+/// Does the map contain a key?
+export func MapHas(m as record, k as any) -> bool {
+    @unsafe {
+        let b = bucket_of(k);
+        let bucket = m["buckets"][b];
+        let keys = bucket["keys"];
+        let i = 0;
+        while (i < len(keys)) {
+            if (keys[i] == k) {
+                return true;
+            }
+            i = i + 1;
+        }
+    }
+    return false;
+}
+
+/// Remove a key. Returns true if the key was present.
+export func MapRemove(m as record, k as any) -> bool {
+    @unsafe {
+        let b = bucket_of(k);
+        let bucket = m["buckets"][b];
+        let keys as list<any> = bucket["keys"];
+        let vals as list<any> = bucket["vals"];
+        let i = 0;
+        while (i < len(keys)) {
+            if (keys[i] == k) {
+                // Swap-remove: move the last element into the gap, then pop.
+                let last = len(keys) - 1;
+                keys[i] = keys[last];
+                vals[i] = vals[last];
+                keys.remove_at(last);
+                vals.remove_at(last);
+                m["size"] = m["size"] - 1;
+                return true;
+            }
+            i = i + 1;
+        }
+    }
+    return false;
+}
+
+/// Number of entries in the map.
+export func MapSize(m as record) -> i64 {
+    @unsafe {
+        return m["size"];
+    }
+    return 0;
+}
+
+/// All keys, in unspecified order.
+export func MapKeys(m as record) -> list<any> {
+    let result as list<any> = [];
+    @unsafe {
+        let b = 0;
+        while (b < MAP_BUCKETS) {
+            let bucket = m["buckets"][b];
+            let keys = bucket["keys"];
+            let i = 0;
+            while (i < len(keys)) {
+                result.push(keys[i]);
+                i = i + 1;
+            }
+            b = b + 1;
+        }
+    }
+    return result;
+}
+
+/// All values, in unspecified order.
+export func MapValues(m as record) -> list<any> {
+    let result as list<any> = [];
+    @unsafe {
+        let b = 0;
+        while (b < MAP_BUCKETS) {
+            let bucket = m["buckets"][b];
+            let vals = bucket["vals"];
+            let i = 0;
+            while (i < len(vals)) {
+                result.push(vals[i]);
+                i = i + 1;
+            }
+            b = b + 1;
+        }
+    }
+    return result;
+}
+
+// ── Set<T> ──
+
+/// Create a fresh empty set.
+export func SetNew() -> record {
+    return MapNew();
+}
+
+/// Add an element. Returns the new size.
+export func SetAdd(s as record, x as any) -> i64 {
+    return MapPut(s, x, true);
+}
+
+/// Does the set contain an element?
+export func SetHas(s as record, x as any) -> bool {
+    return MapHas(s, x);
+}
+
+/// Remove an element. Returns true if it was present.
+export func SetRemove(s as record, x as any) -> bool {
+    return MapRemove(s, x);
+}
+
+/// Number of elements.
+export func SetSize(s as record) -> i64 {
+    return MapSize(s);
+}
+
+/// All elements, in unspecified order.
+export func SetItems(s as record) -> list<any> {
+    return MapKeys(s);
+}
