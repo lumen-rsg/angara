@@ -345,6 +345,11 @@ namespace angara {
         // cgList to box each element into a trait object. Null = no expectation.
         std::shared_ptr<Type> m_expected_list_elem_type;
 
+        // RT-3: tail-call signal. Set by cgReturn when the return value is a
+        // bare call (tail position); cgCall reads it to setTailCallKind on the
+        // emitted CallInst. nullopt = not in tail position.
+        std::optional<llvm::CallInst::TailCallKind> m_pending_tail;
+
         // v5: Chaperone exception-unwind plan (ThrowStmt* → vars to auto-drop).
 
         // v5: Set of tracked type names (owned + class) for drop cascades.

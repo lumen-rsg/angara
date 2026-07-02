@@ -1342,6 +1342,12 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
         return builder->CreateCall(f, llvmArgs);
     }
 
+    // RT-3: capture the tail-position signal now and clear the member, so a
+    // call nested inside argument evaluation doesn't consume it. Only the
+    // outermost return-position call (the one cgReturn flagged) is marked.
+    auto pending_tail = m_pending_tail;
+    m_pending_tail.reset();
+
     // Check if this is a raw-signature function
     auto raw_it = m_raw_functions.find(mangled);
     if (raw_it != m_raw_functions.end()) {
@@ -1365,6 +1371,9 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
             llvmArgs.push_back(llvm::ConstantInt::get(llvmTypeForLocalKind(kind), 0));
         }
         auto* raw_result = builder->CreateCall(f, llvmArgs);
+        // RT-3: best-effort tail hint on the raw-signature path (musttail is
+        // illegal here — boxRaw intervenes between call and ret).
+        if (pending_tail) raw_result->setTailCallKind(llvm::CallInst::TCK_Tail);
         return boxRaw(raw_result, info.return_kind);
     }
 
@@ -1388,8 +1397,24 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
         }
         llvmArgs.push_back(v);
     }
+    // RT-3: if this call is in tail position, decide the tail kind before
+    // padding (musttail requires exact arity — no makeNil() padding). Promote
+    // to TCK_MustTail (guaranteed TCO) only when: callee is on the boxed ABI
+    // (not a raw-signature fn), the call supplies exactly ft->getNumParams()
+    // args, and the callee returns the boxed objType. Otherwise TCK_Tail.
+    llvm::CallInst::TailCallKind tck = llvm::CallInst::TCK_None;
+    if (pending_tail) {
+        bool exact_arity = (llvmArgs.size() == ft->getNumParams());
+        bool callee_boxed = (m_raw_functions.find(mangled) == m_raw_functions.end());
+        bool callee_returns_obj = ft->getReturnType() == objType;
+        tck = (exact_arity && callee_boxed && callee_returns_obj && !m_current_raw_return_kind)
+            ? llvm::CallInst::TCK_MustTail
+            : llvm::CallInst::TCK_Tail;
+    }
     while (llvmArgs.size() < ft->getNumParams()) llvmArgs.push_back(makeNil());
-    return builder->CreateCall(f, llvmArgs);
+    auto* call = builder->CreateCall(f, llvmArgs);
+    if (tck != llvm::CallInst::TCK_None) call->setTailCallKind(tck);
+    return call;
 }
 
 llvm::Value* LLVMBackend::cgGet(const GetExpr& e) {

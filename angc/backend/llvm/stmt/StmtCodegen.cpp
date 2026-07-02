@@ -271,8 +271,17 @@ void LLVMBackend::cgReturn(const ReturnStmt& s) {
         if (m_exc_chain_save) emitGcPopFrame();
         builder->CreateRet(raw);
     } else {
+        // RT-3: if the return value is a bare call, signal cgCall to mark it as
+        // a tail call (best-effort TCK_Tail; cgCall may promote to TCK_MustTail
+        // under the strict boxed+arity gate). The GC pop frame is a no-op today
+        // and must precede the call (not sit between call and ret) for the tail
+        // marker to be meaningful.
         if (m_exc_chain_save) emitGcPopFrame();
-        builder->CreateRet(s.value ? cg(s.value) : makeNil());
+        bool is_tail = s.value && dynamic_cast<const CallExpr*>(s.value.get());
+        if (is_tail) m_pending_tail = llvm::CallInst::TCK_Tail;
+        auto* result = s.value ? cg(s.value) : makeNil();
+        m_pending_tail.reset();
+        builder->CreateRet(result);
     }
 }
 

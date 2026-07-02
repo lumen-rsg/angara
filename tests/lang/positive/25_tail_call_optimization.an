@@ -1,0 +1,17 @@
+// RT-3: tail-call optimization. A self-recursive function in tail position
+// (the recursive call is the direct return value) is compiled as a tail call,
+// so deep recursion doesn't blow the stack. sumto(1,000,000) returns cleanly.
+attach io;
+
+func sumto(n as i64, acc as i64) -> i64 {
+    if (n == 0) {
+        return acc;
+    }
+    return sumto(n - 1, acc + n);   // tail position — TCO'd into a loop
+}
+
+export func main() -> i64 {
+    let r = sumto(1000000, 0);      // would segfault without TCO
+    io.println(0, "sumto(1M)=" + string(r));   // 500000500000
+    return 0;
+}
