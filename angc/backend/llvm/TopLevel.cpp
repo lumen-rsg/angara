@@ -178,6 +178,9 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
         } else {
             namedKinds[pname] = LocalKind::BOXED;
         }
+        // RT-2: emit debug info for the parameter (spilled to a stack alloca).
+        emitDbgDeclare(alloca, pname, stmt.params[idx].name.line,
+                       stmt.params[idx].name.column, namedKinds[pname]);
         if (is_raw) {
             // Raw arg arrives as raw type — store directly
             builder->CreateStore(&arg, alloca);

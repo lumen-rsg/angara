@@ -119,6 +119,9 @@ void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
         } else {
             namedKinds[s.name.lexeme] = LocalKind::BOXED;
         }
+        // RT-2: emit debug info for this local so gdb/lldb can inspect it.
+        emitDbgDeclare(a, s.name.lexeme, s.name.line, s.name.column,
+                       namedKinds[s.name.lexeme]);
         storeVar(s.name.lexeme, v);
     }
 }

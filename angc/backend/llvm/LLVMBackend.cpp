@@ -316,6 +316,63 @@ llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string&
     return allocLocal(fn, name);
 }
 
+// RT-2: returns a cached DWARF DIType for a LocalKind, so gdb/lldb can show a
+// variable's raw storage type (i64, double, bool, pointer, or the {i32,i64}
+// AngaraObject struct for boxed values).
+llvm::DIType* LLVMBackend::diTypeForLocalKind(LocalKind kind) {
+    if (!m_debug || !m_di_builder) return nullptr;
+    auto it = m_di_types.find(static_cast<int>(kind));
+    if (it != m_di_types.end()) return it->second;
+
+    llvm::DIType* diType = nullptr;
+    switch (kind) {
+        case LocalKind::RAW_I64:
+            diType = m_di_builder->createBasicType("i64", 64, llvm::dwarf::DW_ATE_signed);
+            break;
+        case LocalKind::RAW_F64:
+            diType = m_di_builder->createBasicType("f64", 64, llvm::dwarf::DW_ATE_float);
+            break;
+        case LocalKind::RAW_I1:
+            diType = m_di_builder->createBasicType("bool", 8, llvm::dwarf::DW_ATE_boolean);
+            break;
+        case LocalKind::RAW_PTR:
+            diType = m_di_builder->createPointerType(nullptr, 64);
+            break;
+        case LocalKind::BOXED: {
+            // Show the {i32 tag, i64 payload} struct so the tag is visible.
+            auto* tag_t = m_di_builder->createBasicType("tag", 32, llvm::dwarf::DW_ATE_unsigned);
+            auto* payload_t = m_di_builder->createBasicType("payload", 64, llvm::dwarf::DW_ATE_unsigned);
+            auto* tag_member = m_di_builder->createMemberType(
+                m_di_cu, "tag", m_di_file, 0, 32, 32, 0, llvm::DINode::FlagZero, tag_t);
+            auto* payload_member = m_di_builder->createMemberType(
+                m_di_cu, "payload", m_di_file, 0, 64, 64, 32, llvm::DINode::FlagZero, payload_t);
+            diType = m_di_builder->createStructType(
+                m_di_cu, "AngaraObject", m_di_file, 0, 128, 64,
+                llvm::DINode::FlagZero, nullptr,
+                m_di_builder->getOrCreateArray({tag_member, payload_member}));
+            break;
+        }
+    }
+    m_di_types[static_cast<int>(kind)] = diType;
+    return diType;
+}
+
+// RT-2: emit llvm.dbg.declare for a local variable at the current insert point,
+// making it inspectable in gdb/lldb.
+void LLVMBackend::emitDbgDeclare(llvm::AllocaInst* alloca, const std::string& name,
+                                  int line, int col, LocalKind kind) {
+    if (!m_debug || !m_di_scope || !m_di_builder || !alloca) return;
+    auto* diType = diTypeForLocalKind(kind);
+    if (!diType) return;
+    auto* localVar = m_di_builder->createAutoVariable(
+        m_di_scope, name, m_di_file, line, diType, true,
+        llvm::DINode::FlagZero);
+    m_di_builder->insertDeclare(
+        alloca, localVar, m_di_builder->createExpression(),
+        llvm::DILocation::get(*ctx, line, col, m_di_scope),
+        builder->GetInsertBlock());
+}
+
 void LLVMBackend::emitGcPushFrame(llvm::Function* fn, int /*slot_count*/) {
     // v5: no GC frame. Only the BUG-5 exception-chain snapshot remains.
     if (auto* chain_gv = rt->getExceptionChain()) {

@@ -220,6 +220,12 @@ namespace angara {
         /// Kind of local variable storage: boxed (AngaraObject) or raw LLVM primitive.
         /// RAW_PTR is a C pointer (string→char*, *T, *void) used for FFI marshalling.
         enum class LocalKind { BOXED, RAW_I1, RAW_I64, RAW_F64, RAW_PTR };
+
+        /// RT-2: returns (cached) a DWARF DIType for a LocalKind.
+        llvm::DIType* diTypeForLocalKind(LocalKind kind);
+        /// RT-2: emit llvm.dbg.declare for a local variable at the current insert point.
+        void emitDbgDeclare(llvm::AllocaInst* alloca, const std::string& name,
+                            int line, int col, LocalKind kind);
         /// Returns true if a type can be stored as a raw LLVM primitive (not boxed).
         static bool isUnboxableType(const std::shared_ptr<Type>& type);
         /// Maps a semantic type to the appropriate LocalKind.
@@ -322,6 +328,7 @@ namespace angara {
         llvm::DIFile* m_di_file = nullptr;
         llvm::DICompileUnit* m_di_cu = nullptr;
         std::map<std::string, llvm::DISubprogram*> m_di_functions;
+        std::map<int, llvm::DIType*> m_di_types;  // RT-2: LocalKind -> DIType cache
         llvm::DIScope* m_di_scope = nullptr;  // current debug scope (function/subprogram)
         llvm::DIFile* getOrCreateDIFile(const std::string& filename);
         void setDebugLoc(const Token& tok);
