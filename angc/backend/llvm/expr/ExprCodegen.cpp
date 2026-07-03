@@ -103,6 +103,7 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
     if (auto* p = dynamic_cast<const DerefExpr*>(e.get())) return cgDeref(*p);
     if (auto* p = dynamic_cast<const MatchExpr*>(e.get())) return cgMatch(*p);
     if (auto* p = dynamic_cast<const LambdaExpr*>(e.get())) return cgLambda(*p);
+    if (auto* p = dynamic_cast<const RangeExpr*>(e.get())) return cgRange(*p);
     return makeNil();
 }
 
@@ -2032,6 +2033,44 @@ llvm::Value* LLVMBackend::cgClosureCall(llvm::Value* callee, const std::vector<l
         llvm::ConstantInt::get(i32_ty, 0),
         llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0))
     });
+}
+
+// LANG-1: eager range materialization — builds a list<i64> from start to end.
+// Used when a range appears outside a for-in (e.g. `let xs = 0..5`).
+// For-in detects RangeExpr directly and skips this (zero-allocation C loop).
+llvm::Value* LLVMBackend::cgRange(const RangeExpr& e) {
+    auto* start = getI64(cg(e.left));
+    auto* end = getI64(cg(e.right));
+    bool inclusive = (e.op.type == TokenType::DOT_DOT_DOT);
+
+    auto* fn = builder->GetInsertBlock()->getParent();
+    auto* list = callRtByName("__ang_list_new", {});
+
+    // for (i = start; i < end; i++) { push(makeI64(i)); }
+    // if inclusive: i <= end
+    auto* i_alloca = builder->CreateAlloca(llvm::Type::getInt64Ty(*ctx), nullptr, "range_i");
+    builder->CreateStore(start, i_alloca);
+
+    auto* cond_bb = llvm::BasicBlock::Create(*ctx, "range_cond", fn);
+    auto* body_bb = llvm::BasicBlock::Create(*ctx, "range_body", fn);
+    auto* done_bb = llvm::BasicBlock::Create(*ctx, "range_done", fn);
+    builder->CreateBr(cond_bb);
+
+    builder->SetInsertPoint(cond_bb);
+    auto* i_val = builder->CreateLoad(llvm::Type::getInt64Ty(*ctx), i_alloca, "range_i_val");
+    auto* cond = inclusive
+        ? builder->CreateICmpSLE(i_val, end)
+        : builder->CreateICmpSLT(i_val, end);
+    builder->CreateCondBr(cond, body_bb, done_bb);
+
+    builder->SetInsertPoint(body_bb);
+    callRtByName("__ang_list_push", {list, makeI64(i_val)});
+    auto* next = builder->CreateAdd(i_val, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 1), "", false, true);
+    builder->CreateStore(next, i_alloca);
+    builder->CreateBr(cond_bb);
+
+    builder->SetInsertPoint(done_bb);
+    return list;
 }
 
 }

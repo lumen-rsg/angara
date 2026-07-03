@@ -440,6 +440,13 @@ std::any Formatter::visit(const LambdaExpr& expr) {
     return r;
 }
 
+std::any Formatter::visit(const RangeExpr& expr) {
+    std::string r = fmtExpr(expr.left);
+    r += (expr.op.type == TokenType::DOT_DOT_DOT) ? "..." : "..";
+    r += fmtExpr(expr.right);
+    return r;
+}
+
 } // namespace angara
 
 #include "Stmt.h"

@@ -418,6 +418,13 @@ namespace angara {
         return {};
     }
 
+    std::any ASTPrinter::visit(const RangeExpr& expr) {
+        printHeader("RangeExpr [" + expr.op.lexeme + "]");
+        printChild("left", expr.left, false);
+        printChild("right", expr.right, true);
+        return {};
+    }
+
     void ASTPrinter::visit(std::shared_ptr<const DropStmt> stmt) {
         printHeader("DropStmt: " + stmt->name.lexeme);
     }

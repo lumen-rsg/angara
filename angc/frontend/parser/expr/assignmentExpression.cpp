@@ -2,7 +2,7 @@
 namespace angara {
 
     std::shared_ptr<Expr> Parser::assignment() {
-        std::shared_ptr<Expr> expr = ternary();
+        std::shared_ptr<Expr> expr = range();  // LANG-1: range binds tighter than assignment
 
         if (match({TokenType::EQUAL, TokenType::PLUS_EQUAL, TokenType::MINUS_EQUAL,
                    TokenType::STAR_EQUAL, TokenType::SLASH_EQUAL})) {

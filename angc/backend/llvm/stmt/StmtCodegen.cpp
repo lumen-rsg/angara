@@ -218,6 +218,66 @@ void LLVMBackend::cgFor(const ForStmt& s) {
 
 void LLVMBackend::cgForIn(const ForInStmt& s) {
     auto* fn = builder->GetInsertBlock()->getParent();
+
+    // LANG-1: if the iterable is a RangeExpr (0..n), emit a zero-allocation
+    // C-style for loop — no list materialization, no __ang_list_get calls.
+    if (auto* range = dynamic_cast<const RangeExpr*>(s.collection.get())) {
+        auto* start = getI64(cg(range->left));
+        auto* end = getI64(cg(range->right));
+        bool inclusive = (range->op.type == TokenType::DOT_DOT_DOT);
+
+        auto sv = namedVals;
+        auto stv = namedTypes;
+        auto skv = namedKinds;
+        auto* ac = allocLocal(fn, s.name.lexeme);
+        namedVals[s.name.lexeme] = ac;
+        namedKinds[s.name.lexeme] = LocalKind::BOXED;
+
+        auto* lp = llvm::BasicBlock::Create(*ctx, "rg_c", fn);
+        auto* bd = llvm::BasicBlock::Create(*ctx, "rg_b", fn);
+        auto* en = llvm::BasicBlock::Create(*ctx, "rg_e", fn);
+        auto* sv2 = loopExit; auto* svc = loopContinue;
+        loopExit = en; loopContinue = lp; loopDepth++;
+
+        // BUG-5: snapshot exception chain at loop entry.
+        if (auto* chain_gv = rt->getExceptionChain()) {
+            llvm::IRBuilder<> lexc(&fn->getEntryBlock(), fn->getEntryBlock().getFirstInsertionPt());
+            auto* loop_exc_save = lexc.CreateAlloca(llvm::PointerType::get(*ctx, 0), nullptr, "loop_exc_save");
+            builder->CreateStore(builder->CreateLoad(llvm::PointerType::get(*ctx, 0), chain_gv),
+                                 loop_exc_save);
+            m_exc_loop_chain_saves.push_back(loop_exc_save);
+        }
+
+        // i = start; loop while i < end (exclusive) or i <= end (inclusive).
+        llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().getFirstInsertionPt());
+        auto* ia = tmp.CreateAlloca(llvm::Type::getInt64Ty(*ctx), nullptr, "__rg_i");
+        builder->CreateStore(start, ia);
+        builder->CreateBr(lp);
+
+        builder->SetInsertPoint(lp);
+        auto* i = builder->CreateLoad(llvm::Type::getInt64Ty(*ctx), ia, "rg_i");
+        auto* cond = inclusive
+            ? builder->CreateICmpSLE(i, end)
+            : builder->CreateICmpSLT(i, end);
+        builder->CreateCondBr(cond, bd, en);
+
+        builder->SetInsertPoint(bd);
+        builder->CreateStore(makeI64(i), ac);
+        cgStmt(s.body);
+        if (!builder->GetInsertBlock()->getTerminator()) {
+            auto* next = builder->CreateAdd(i, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 1), "", false, true);
+            builder->CreateStore(next, ia);
+            builder->CreateBr(lp);
+        }
+
+        builder->SetInsertPoint(en);
+        if (rt->getExceptionChain()) m_exc_loop_chain_saves.pop_back();
+        loopExit = sv2; loopContinue = svc; loopDepth--;
+        namedVals = sv; namedTypes = stv; namedKinds = skv;
+        return;
+    }
+
+    // --- Existing list iteration path ---
     auto sv = namedVals;
     auto stv = namedTypes;
     auto skv = namedKinds;

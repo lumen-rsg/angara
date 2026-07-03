@@ -95,7 +95,7 @@ The precise, type-directed root discovery and tracing is **genuinely well done**
 Everyday conveniences absent today (most are documented but unimplemented — noted where verified).
 
 ### Verified gaps
-- [ ] **LANG-1** 🔴 Ranges (`0..n`, `0...n`) — documented but unparsed. (`frontend/parser`, no `DOT_DOT` consumer; `Lexer.cpp:429-434`)
+- [x] **LANG-1** ✅ Fixed — Ranges (`0..n`, `0...n`) — documented but unparsed. (`frontend/parser`, no `DOT_DOT` consumer; `Lexer.cpp:429-434`) _(The lexer already produced DOT_DOT / DOT_DOT_DOT; added a `range()` parser between `assignment()` and `ternary()` that builds a `RangeExpr` AST node. Type-checker: both bounds must be integer; result is `list<i64>`. Codegen hybrid: `for (i in 0..n)` emits a zero-allocation C-style for loop (no list materialization, no __ang_list_get); `let xs = 0..n` eagerly materializes a `list<i64>` via a runtime loop. Exclusive (`..`) uses `<`, inclusive (`...`) uses `<=`. Verified: `0..5` sums to 10; `0...5` sums to 15; `for (i in 0..1000000)` completes without crash (lazy path).)_
 - [x] **LANG-2** ✅ Fixed — Parser reports ~1 error per declaration after the first (panic-mode flag is set but never reset). `frontend/parser/Parser.cpp:236` _(m_panicMode is now reset at every synchronize() boundary — after SEMICOLON, at declaration/statement keywords, and at EOF — so each declaration reports its own errors independently.)_
 
 ### String & literal gaps

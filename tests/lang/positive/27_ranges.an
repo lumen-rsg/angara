@@ -1,0 +1,25 @@
+// LANG-1: ranges — `start..end` (exclusive) and `start...end` (inclusive).
+// For-in over a range generates a zero-allocation C-style loop.
+attach io;
+
+export func main() -> i64 {
+    // Exclusive: 0..5 yields 0,1,2,3,4.
+    let excl_sum = 0;
+    for (i in 0..5) {
+        excl_sum = excl_sum + i;
+    }
+    io.println(0, "exclusive sum: " + string(excl_sum));   // 10
+
+    // Inclusive: 0...5 yields 0,1,2,3,4,5.
+    let incl_sum = 0;
+    for (i in 0...5) {
+        incl_sum = incl_sum + i;
+    }
+    io.println(0, "inclusive sum: " + string(incl_sum));   // 15
+
+    // Eager: a range as a list value.
+    let xs = 0..3;
+    io.println(0, "eager len: " + string(len(xs)));        // 3
+
+    return 0;
+}
