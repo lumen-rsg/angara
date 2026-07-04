@@ -1,0 +1,54 @@
+// LANG-4: char type + single-quote char literals ('a').
+//
+// Model: char is a 32-bit unsigned integer (a Unicode code point) that also
+// renders as a glyph. 'A'+1 == 66 (promotes to i64), 'A'==65 is true, and a
+// char-typed value prints as the character, not the number.
+attach io;
+
+export func main() -> i64 {
+    // 1. Basic char literal + explicit type annotation.
+    let c as char = 'A';
+    io.println_auto($"c = {c}");                       // c = A   (glyph, not 65)
+
+    // 2. char widens to i64 in mixed arithmetic (C/Java model).
+    io.println_auto($"'A' + 1 = {'A' + 1}");           // 'A' + 1 = 66
+    io.println_auto($"'A' == 65 -> {'A' == 65}");      // 'A' == 65 -> true
+    io.println_auto($"'a' > 'Z' -> {'a' > 'Z'}");      // 'a' > 'Z' -> true
+
+    // 3. char-typed value renders as a glyph via string() and interpolation.
+    io.println_auto(string('A'));                      // A
+    io.println_auto($"glyph: {c}");                    // glyph: A
+
+    // 4. char is an integer, not a string — to concat with a string, convert
+    //    it explicitly. The conversion renders the glyph.
+    io.println_auto("letter = " + string(c));          // letter = A
+    io.println_auto(string(c) + "!");                  // A!
+
+    // 5. Assignment / widening: char flows into an i64 slot (value is the cp).
+    let n as i64 = 'A';
+    io.println_auto($"n = {n}");                       // n = 65
+    io.println_auto($"cast = {'A' as i64}");           // cast = 65
+
+    // 6. char(x) conversion from an integer code point.
+    let from_cp as char = char(66);
+    io.println_auto($"from_cp = {from_cp}");           // from_cp = B
+
+    // 7. Escape sequences (same set as strings).
+    io.println_auto($"'\\n' == 10 -> {'\n' == 10}");   // '\n' == 10 -> true
+    io.println_auto($"'\\t' == 9 -> {'\t' == 9}");     // '\t' == 9 -> true
+    io.println_auto($"'\\0' == 0 -> {'\0' == 0}");     // '\0' == 0 -> true
+    io.println_auto(string('\x41'));                   // A   (hex escape)
+    io.println_auto(string('\\'));                     // \   (escaped backslash)
+    io.println_auto(string('\''));                     // '   (escaped quote)
+
+    // 8. list<char> works through the generic collection machinery.
+    let chars = ['H', 'i', '!'];
+    io.println_auto($"chars[0] = {chars[0]}");         // chars[0] = H
+
+    // 9. *char now resolves as an FFI pointer type (pointee is the char type).
+    //    (Compile-only check; no dereference needed to exercise the type table.)
+    return 0;
+}
+
+// 9 (cont.): *char in a foreign-style data declaration compiles.
+data CharPtr { let p as *char; }

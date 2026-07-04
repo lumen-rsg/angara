@@ -432,6 +432,121 @@ void RuntimeBuilder::generateStringOps() {
         }
     }
 
+    // LANG-4: __ang_char_to_string — render a char (TAG_I64 carrying a Unicode
+    // code point) as a single-character UTF-8 AngaraString. Mirrors __ang_to_string's
+    // i64 block but emits a UTF-8 encoder instead of %ld, so 'A' prints as "A"
+    // (not "65"). 5-byte alloca accommodates the longest encoding (4) + NUL.
+    {
+        auto* fn_ty = FunctionType::get(obj_ty, {obj_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_char_to_string", fn_ty);
+        m_fn_char_to_string = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+        auto* val = fn->arg_begin();
+        auto* payload = b.CreateExtractValue(val, {1});
+        auto* cp = b.CreateBitCast(payload, i64_ty, "cp");
+
+        // 5-byte buffer: up to 4 UTF-8 bytes + NUL terminator.
+        auto* buf = b.CreateAlloca(ArrayType::get(i8_ty, 5));
+        auto* buf_ptr = b.CreateBitCast(buf, i8_ptr);
+
+        // Length (in bytes) written; assigned in each branch.
+        auto* len_alloca = b.CreateAlloca(i32_ty);
+        b.CreateStore(ConstantInt::get(i32_ty, 0), len_alloca);
+
+        auto* le7f_bb   = BasicBlock::Create(m_ctx, "le7f",   fn);
+        auto* le7ff_bb  = BasicBlock::Create(m_ctx, "le7ff",  fn);
+        auto* leffff_bb = BasicBlock::Create(m_ctx, "leffff", fn);
+        auto* rest_bb   = BasicBlock::Create(m_ctx, "rest",   fn);
+        auto* done_bb   = BasicBlock::Create(m_ctx, "done",   fn);
+
+        // Chain of range tests: cp <= 0x7F → 1 byte; else cp <= 0x7FF → 2;
+        // else cp <= 0xFFFF → 3; else 4. Built sequentially so each block's
+        // terminator is well-formed at creation.
+        auto* sw7ff_bb  = BasicBlock::Create(m_ctx, "sw7ff",  fn);
+        auto* swffff_bb = BasicBlock::Create(m_ctx, "swffff", fn);
+        {
+            auto* c7f = b.CreateICmpULE(cp, ConstantInt::get(i64_ty, 0x7F));
+            b.CreateCondBr(c7f, le7f_bb, sw7ff_bb);
+        }
+        {
+            IRBuilder<> bs(sw7ff_bb);
+            auto* c7ff = bs.CreateICmpULE(cp, ConstantInt::get(i64_ty, 0x7FF));
+            bs.CreateCondBr(c7ff, le7ff_bb, swffff_bb);
+        }
+        {
+            IRBuilder<> bs(swffff_bb);
+            auto* cffff = bs.CreateICmpULE(cp, ConstantInt::get(i64_ty, 0xFFFF));
+            bs.CreateCondBr(cffff, leffff_bb, rest_bb);
+        }
+
+        // 1-byte: 0xxxxxxx
+        {
+            IRBuilder<> bn(le7f_bb);
+            auto* byte0 = bn.CreateTrunc(cp, i8_ty);
+            auto* p0 = bn.CreateGEP(i8_ty, buf_ptr, {ConstantInt::get(i64_ty, 0)});
+            bn.CreateStore(byte0, p0);
+            bn.CreateStore(ConstantInt::get(i32_ty, 1), len_alloca);
+            bn.CreateBr(done_bb);
+        }
+        // 2-byte: 110xxxxx 10xxxxxx
+        {
+            IRBuilder<> bn(le7ff_bb);
+            auto* b0 = bn.CreateTrunc(bn.CreateLShr(cp, 6), i8_ty);
+            b0 = bn.CreateOr(b0, ConstantInt::get(i8_ty, 0xC0));
+            auto* b1 = bn.CreateTrunc(bn.CreateAnd(cp, 0x3F), i8_ty);
+            b1 = bn.CreateOr(b1, ConstantInt::get(i8_ty, 0x80));
+            bn.CreateStore(b0, bn.CreateGEP(i8_ty, buf_ptr, {ConstantInt::get(i64_ty, 0)}));
+            bn.CreateStore(b1, bn.CreateGEP(i8_ty, buf_ptr, {ConstantInt::get(i64_ty, 1)}));
+            bn.CreateStore(ConstantInt::get(i32_ty, 2), len_alloca);
+            bn.CreateBr(done_bb);
+        }
+        // 3-byte: 1110xxxx 10xxxxxx 10xxxxxx
+        {
+            IRBuilder<> bn(leffff_bb);
+            auto* b0 = bn.CreateTrunc(bn.CreateLShr(cp, 12), i8_ty);
+            b0 = bn.CreateOr(b0, ConstantInt::get(i8_ty, 0xE0));
+            auto* b1 = bn.CreateTrunc(bn.CreateAnd(bn.CreateLShr(cp, 6), 0x3F), i8_ty);
+            b1 = bn.CreateOr(b1, ConstantInt::get(i8_ty, 0x80));
+            auto* b2 = bn.CreateTrunc(bn.CreateAnd(cp, 0x3F), i8_ty);
+            b2 = bn.CreateOr(b2, ConstantInt::get(i8_ty, 0x80));
+            bn.CreateStore(b0, bn.CreateGEP(i8_ty, buf_ptr, {ConstantInt::get(i64_ty, 0)}));
+            bn.CreateStore(b1, bn.CreateGEP(i8_ty, buf_ptr, {ConstantInt::get(i64_ty, 1)}));
+            bn.CreateStore(b2, bn.CreateGEP(i8_ty, buf_ptr, {ConstantInt::get(i64_ty, 2)}));
+            bn.CreateStore(ConstantInt::get(i32_ty, 3), len_alloca);
+            bn.CreateBr(done_bb);
+        }
+        // 4-byte: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+        {
+            IRBuilder<> bn(rest_bb);
+            auto* b0 = bn.CreateTrunc(bn.CreateLShr(cp, 18), i8_ty);
+            b0 = bn.CreateOr(b0, ConstantInt::get(i8_ty, 0xF0));
+            auto* b1 = bn.CreateTrunc(bn.CreateAnd(bn.CreateLShr(cp, 12), 0x3F), i8_ty);
+            b1 = bn.CreateOr(b1, ConstantInt::get(i8_ty, 0x80));
+            auto* b2 = bn.CreateTrunc(bn.CreateAnd(bn.CreateLShr(cp, 6), 0x3F), i8_ty);
+            b2 = bn.CreateOr(b2, ConstantInt::get(i8_ty, 0x80));
+            auto* b3 = bn.CreateTrunc(bn.CreateAnd(cp, 0x3F), i8_ty);
+            b3 = bn.CreateOr(b3, ConstantInt::get(i8_ty, 0x80));
+            bn.CreateStore(b0, bn.CreateGEP(i8_ty, buf_ptr, {ConstantInt::get(i64_ty, 0)}));
+            bn.CreateStore(b1, bn.CreateGEP(i8_ty, buf_ptr, {ConstantInt::get(i64_ty, 1)}));
+            bn.CreateStore(b2, bn.CreateGEP(i8_ty, buf_ptr, {ConstantInt::get(i64_ty, 2)}));
+            bn.CreateStore(b3, bn.CreateGEP(i8_ty, buf_ptr, {ConstantInt::get(i64_ty, 3)}));
+            bn.CreateStore(ConstantInt::get(i32_ty, 4), len_alloca);
+            bn.CreateBr(done_bb);
+        }
+        // NUL-terminate at buf[len], then build the string.
+        {
+            IRBuilder<> bd(done_bb);
+            auto* len = bd.CreateLoad(i32_ty, len_alloca, "len");
+            auto* len64 = bd.CreateZExt(len, i64_ty);
+            auto* term = bd.CreateGEP(i8_ty, buf_ptr, {len64});
+            bd.CreateStore(ConstantInt::get(i8_ty, 0), term);
+            auto* str_from_c = m_module.getFunction("__ang_string_from_c");
+            bd.CreateRet(bd.CreateCall(str_from_c, {buf_ptr}));
+        }
+    }
+
     // __ang_string_compare: lexicographic comparison of two strings.
     // Returns AngaraObject wrapping i64: -1 if a < b, 0 if a == b, 1 if a > b.
     // Falls back to __ang_to_string for non-string operands.

@@ -161,6 +161,83 @@ namespace angara {
         }
     }
 
+    // LANG-4: shared escape-sequence decoder. The caller has already consumed
+    // the backslash; `escaped` is the character that followed it. Decodes the
+    // same set of escapes for both string and char literals (octal, \xNN hex;
+    // \u/\U rejected with E005 — deferred to LANG-5). Appends the decoded
+    // byte(s) to `out`. Reports errors via m_errorHandler. The token-type arg
+    // makes the diagnostic token read sensibly in either context.
+    void Lexer::lexEscape(char escaped, std::stringstream& out, TokenType diag_type) {
+        switch (escaped) {
+            case '"':  out << '"'; break;
+            case '\'': out << '\''; break;
+            case '\\': out << '\\'; break;
+            case 'n':  out << '\n'; break;
+            case 'r':  out << '\r'; break;
+            case 't':  out << '\t'; break;
+            case 'b':  out << '\b'; break;
+            case 'f':  out << '\f'; break;
+            case 'v':  out << '\v'; break;
+            case 'a':  out << '\a'; break;
+
+            case '0': case '1': case '2': case '3':
+            case '4': case '5': case '6': case '7': {
+                std::string octal_str;
+                octal_str += escaped;
+                for (int i = 0; i < 2; ++i) {
+                    if (peek() >= '0' && peek() <= '7') {
+                        octal_str += advance();
+                    } else {
+                        break;
+                    }
+                }
+                char octal_char = static_cast<char>(strtol(octal_str.c_str(), nullptr, 8));
+                out << octal_char;
+                break;
+            }
+
+            case 'x': {
+                std::string hex_str;
+                for (int i = 0; i < 2; ++i) {
+                    if (isxdigit(peek())) {
+                        hex_str += advance();
+                    } else {
+                        break;
+                    }
+                }
+                if (hex_str.empty()) {
+                    m_errorHandler.report(
+                        Token(diag_type, "", m_line, m_column, m_filename),
+                        "Incomplete hex escape sequence '\\x'.", "E004"
+                    );
+                } else {
+                    char hex_char = static_cast<char>(strtol(hex_str.c_str(), nullptr, 16));
+                    out << hex_char;
+                }
+                break;
+            }
+
+            case 'u':
+            case 'U': {
+                m_errorHandler.report(
+                    Token(diag_type, "", m_line, m_column, m_filename),
+                    "Unicode escape sequences ('\\u', '\\U') are not yet supported.", "E005"
+                );
+                int limit = (escaped == 'u' ? 4 : 8);
+                for (int i = 0; i < limit; ++i) { if (isxdigit(peek())) advance(); }
+                break;
+            }
+
+            default:
+                m_errorHandler.report(
+                    Token(diag_type, "", m_line, m_column, m_filename),
+                    "Unknown escape sequence '\\" + std::string(1, escaped) + "'.", "E006"
+                );
+                out << escaped;
+                break;
+        }
+    }
+
     void Lexer::string() {
         std::stringstream value;
 
@@ -183,75 +260,7 @@ namespace angara {
                     );
                     return;
                 }
-
-                char escaped = advance();
-                switch (escaped) {
-                    case '"':  value << '"'; break;
-                    case '\\': value << '\\'; break;
-                    case 'n':  value << '\n'; break;
-                    case 'r':  value << '\r'; break;
-                    case 't':  value << '\t'; break;
-                    case 'b':  value << '\b'; break;
-                    case 'f':  value << '\f'; break;
-                    case 'v':  value << '\v'; break;
-                    case 'a':  value << '\a'; break;
-
-                    case '0': case '1': case '2': case '3':
-                    case '4': case '5': case '6': case '7': {
-                        std::string octal_str;
-                        octal_str += escaped;
-                        for (int i = 0; i < 2; ++i) {
-                            if (peek() >= '0' && peek() <= '7') {
-                                octal_str += advance();
-                            } else {
-                                break;
-                            }
-                        }
-                        char octal_char = static_cast<char>(strtol(octal_str.c_str(), nullptr, 8));
-                        value << octal_char;
-                        break;
-                    }
-
-                    case 'x': {
-                        std::string hex_str;
-                        for (int i = 0; i < 2; ++i) {
-                            if (isxdigit(peek())) {
-                                hex_str += advance();
-                            } else {
-                                break;
-                            }
-                        }
-                        if (hex_str.empty()) {
-                            m_errorHandler.report(
-                                Token(TokenType::STRING, "", m_line, m_column, m_filename),
-                                "Incomplete hex escape sequence '\\x'.", "E004"
-                            );
-                        } else {
-                            char hex_char = static_cast<char>(strtol(hex_str.c_str(), nullptr, 16));
-                            value << hex_char;
-                        }
-                        break;
-                    }
-
-                    case 'u':
-                    case 'U': {
-                        m_errorHandler.report(
-                            Token(TokenType::STRING, "", m_line, m_column, m_filename),
-                            "Unicode escape sequences ('\\u', '\\U') are not yet supported.", "E005"
-                        );
-                        int limit = (escaped == 'u' ? 4 : 8);
-                        for (int i = 0; i < limit; ++i) { if (isxdigit(peek())) advance(); }
-                        break;
-                    }
-
-                    default:
-                        m_errorHandler.report(
-                            Token(TokenType::STRING, "", m_line, m_column, m_filename),
-                            "Unknown escape sequence '\\" + std::string(1, escaped) + "'.", "E006"
-                        );
-                        value << escaped;
-                        break;
-                }
+                lexEscape(advance(), value, TokenType::STRING);
             } else {
                 value << c;
             }
@@ -337,6 +346,85 @@ namespace angara {
         }
         advance(); // consume closing "
         addToken(TokenType::INTERP_STRING, body);
+    }
+
+    // LANG-4: scans a single-quoted char literal. Decodes the same escapes as
+    // `string()` and requires exactly one resulting code point. The CHAR token's
+    // lexeme is the resolved code point as a decimal string (so cgLiteral can
+    // stoll it like a NUMBER_INT). Errors: E016 empty, E017 multi-char,
+    // E018 unterminated. Newline inside is rejected (E018) to keep literals on
+    // one source line.
+    void Lexer::charLiteral() {
+        std::stringstream decoded;
+
+        if (peek() == '\'') {
+            // '' — empty. Consume the closing quote for a clean recovery.
+            advance();
+            m_errorHandler.report(
+                Token(TokenType::CHAR, "", m_line, m_column, m_filename),
+                "Empty char literal.", "E016");
+            addToken(TokenType::CHAR, "0");
+            return;
+        }
+
+        if (peek() == '\n' || isAtEnd()) {
+            m_errorHandler.report(
+                Token(TokenType::CHAR, "", m_line, m_column, m_filename),
+                "Unterminated char literal.", "E018");
+            return;
+        }
+
+        char c = advance();
+        if (c == '\\') {
+            if (isAtEnd()) {
+                m_errorHandler.report(
+                    Token(TokenType::CHAR, "", m_line, m_column, m_filename),
+                    "Unterminated char literal; ends with '\\'.", "E018");
+                return;
+            }
+            lexEscape(advance(), decoded, TokenType::CHAR);
+        } else {
+            decoded << c;
+        }
+
+        // Consume to the closing quote. Any extra content before it ('ab',
+        // 'a\nb') means the literal has more than one character — track that
+        // so we can report E017. (A multi-byte escape like \xNN decodes to a
+        // single byte and does NOT count as multi-char.)
+        std::string chars = decoded.str();
+        bool multi = false;
+
+        while (peek() != '\'' && !isAtEnd()) {
+            if (peek() == '\n') {
+                m_errorHandler.report(
+                    Token(TokenType::CHAR, chars, m_line, m_column, m_filename),
+                    "Unterminated char literal.", "E018");
+                return;
+            }
+            multi = true;
+            advance();
+        }
+
+        if (isAtEnd()) {
+            m_errorHandler.report(
+                Token(TokenType::CHAR, chars, m_line, m_column, m_filename),
+                "Unterminated char literal.", "E018");
+            return;
+        }
+
+        advance();  // consume closing '
+
+        if (multi || chars.size() != 1) {
+            m_errorHandler.report(
+                Token(TokenType::CHAR, chars, m_line, m_column, m_filename),
+                "Char literal must contain exactly one character.", "E017");
+            addToken(TokenType::CHAR, "0");
+            return;
+        }
+
+        // Code point value: treat the single decoded byte as unsigned.
+        unsigned char cp = static_cast<unsigned char>(chars[0]);
+        addToken(TokenType::CHAR, std::to_string(static_cast<unsigned long>(cp)));
     }
 
     void Lexer::multilineString() {
@@ -609,6 +697,11 @@ namespace angara {
                 } else {
                     string();
                 }
+                break;
+
+            // LANG-4: char literal — 'a', '\n', '\x41'. Exactly one code point.
+            case '\'':
+                charLiteral();
                 break;
 
             case ' ':

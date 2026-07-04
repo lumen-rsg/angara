@@ -282,13 +282,26 @@ namespace angara {
         if (!type || type->kind != TypeKind::PRIMITIVE) return false;
         const auto& name = type->toString();
         return name == "i8" || name == "i16" || name == "i32" || name == "i64" ||
-               name == "u8" || name == "u16" || name == "u32" || name == "u64";
+               name == "u8" || name == "u16" || name == "u32" || name == "u64" ||
+               name == "char";  // LANG-4: char is a 32-bit unsigned int subtype (C/Java model)
+    }
+
+    // LANG-4: true for the primitive `char` type. char participates in integer
+    // arithmetic/comparison (it's a numeric, code-point-typed integer) but
+    // renders as a glyph — codegen consults this to route char-typed values
+    // through __ang_char_to_string instead of __ang_to_string.
+    inline bool isChar(const std::shared_ptr<Type>& type) {
+        if (!type || type->kind != TypeKind::PRIMITIVE) return false;
+        return type->toString() == "char";
     }
 
     inline bool isUnsignedInteger(const std::shared_ptr<Type>& type) {
         if (!type || type->kind != TypeKind::PRIMITIVE) return false;
         const auto& name = type->toString();
-        return name == "u8" || name == "u16" || name == "u32" || name == "u64";
+        // char is unsigned (code points are non-negative; range 0..0x10FFFF in
+        // principle, modeled as a 32-bit unsigned for int-conv classification).
+        return name == "u8" || name == "u16" || name == "u32" || name == "u64" ||
+               name == "char";
     }
 
     // TS-3: classify an integer-to-integer conversion by whether it preserves
@@ -302,7 +315,7 @@ namespace angara {
         const auto& name = type->toString();
         if (name == "i8"  || name == "u8")  return 8;
         if (name == "i16" || name == "u16") return 16;
-        if (name == "i32" || name == "u32") return 32;
+        if (name == "i32" || name == "u32" || name == "char") return 32;  // LANG-4: char is 32-bit
         return 64;  // i64 / u64 / int
     }
 

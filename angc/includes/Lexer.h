@@ -53,6 +53,12 @@ namespace angara {
         /// Scans a double-quoted string literal, handling escape sequences, and emits a STRING token.
         void string();
 
+        /// LANG-4: Scans a single-quoted char literal ('a', '\n', '\x41'), decoding
+        /// the same escape sequences as `string()`. Emits a CHAR token whose lexeme
+        /// is the resolved code point as a decimal string (so cgLiteral can stoll it).
+        /// Exactly one code point per literal — `''` and `'ab'` are errors.
+        void charLiteral();
+
         /// LANG-3: Scans an interpolated string ($"...") and emits an INTERP_STRING
         /// token carrying the raw body (between the quotes). The parser splits it
         /// into literal/expr segments.
@@ -60,6 +66,11 @@ namespace angara {
 
         /// Scans a triple-quoted (""") multiline string literal and emits a STRING token.
         void multilineString();
+
+        /// LANG-4: shared escape-sequence decoder used by `string()` and
+        /// `charLiteral()`. `escaped` is the character already consumed after
+        /// the backslash. Appends the decoded byte(s) to `out`.
+        void lexEscape(char escaped, std::stringstream& out, TokenType diag_type);
 
         /// Scans a numeric literal (decimal, hex 0x, binary 0b) with optional underscore separators,
         /// emitting either NUMBER_INT or NUMBER_FLOAT.

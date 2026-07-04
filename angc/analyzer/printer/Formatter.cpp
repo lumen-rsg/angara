@@ -1,6 +1,27 @@
 #include "Formatter.h"
+#include <cstdio>
 
 namespace angara {
+
+    // LANG-4: render a CHAR token's decimal-code-point lexeme back as a char
+    // literal body, reversing the common escapes for readable output.
+    static std::string renderCharLexeme(const std::string& lexeme) {
+        long cp = 0;
+        try { cp = std::stol(lexeme); } catch (...) { return "?"; }
+        switch (cp) {
+            case '\n': return "\\n";
+            case '\r': return "\\r";
+            case '\t': return "\\t";
+            case '\\': return "\\\\";
+            case '\'': return "\\'";
+            case '\0': return "\\0";
+            default:
+                if (cp >= 0x20 && cp < 0x7F) return std::string(1, static_cast<char>(cp));
+                char buf[6];
+                std::snprintf(buf, sizeof(buf), "\\x%02X", static_cast<int>(cp & 0xFF));
+                return buf;
+        }
+    }
 
 void Formatter::writeIndent() {
     if (m_at_line_start) {
@@ -319,6 +340,7 @@ void Formatter::visit(std::shared_ptr<const EmptyStmt>) { writeLine(";"); }
 
 std::any Formatter::visit(const Literal& expr) {
     if (expr.token.type == TokenType::STRING) return "\"" + expr.token.lexeme + "\"";
+    if (expr.token.type == TokenType::CHAR) return "'" + renderCharLexeme(expr.token.lexeme) + "'";  // LANG-4
     return expr.token.lexeme;
 }
 std::any Formatter::visit(const Binary& expr) { return fmtExpr(expr.left) + " " + expr.op.lexeme + " " + fmtExpr(expr.right); }

@@ -7,6 +7,7 @@ namespace angara {
             case TokenType::NUMBER_INT:   type = m_type_i64; break;
             case TokenType::NUMBER_FLOAT: type = m_type_f64; break;
             case TokenType::STRING:       type = m_type_string; break;
+            case TokenType::CHAR:         type = m_type_char; break;  // LANG-4
             case TokenType::TRUE:
             case TokenType::FALSE:        type = m_type_bool; break;
             case TokenType::NIL:          type = m_type_nil; break;

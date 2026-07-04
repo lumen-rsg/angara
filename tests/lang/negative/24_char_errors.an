@@ -1,0 +1,19 @@
+// LANG-4: char literal / type error cases (each should fail to compile).
+
+// 1. Empty char literal.
+let a = '';
+
+// 2. Multi-char char literal.
+let b = 'ab';
+
+// 3. Unicode escape — deferred to LANG-5 (E005).
+let c = '\u{41}';
+
+// 4. char narrows to u8 only via explicit cast or @unsafe (TS-3). Assigning a
+//    char-typed variable to a u8 slot is a narrowing conversion rejected in
+//    safe code.
+export func main() -> i64 {
+    let ch = 'A';           // ch is char
+    let small as u8 = ch;   // E: char -> u8 narrows
+    return 0;
+}

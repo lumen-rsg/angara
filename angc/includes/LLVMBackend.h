@@ -201,6 +201,14 @@ namespace angara {
         /// Calls a runtime function by name. Returns nil if the function is not found.
         llvm::Value* callRtByName(const std::string& name, const std::vector<llvm::Value*>& args);
 
+        /// LANG-4: converts `src`'s value to a string, choosing the right runtime
+        /// function from the static (compile-time) type: a `char`-typed operand
+        /// routes through __ang_char_to_string (renders the glyph); everything
+        /// else uses __ang_to_string. This is the type-aware entry point for all
+        /// string-conversion sites (println/print args, `string()` builtin,
+        /// interpolation holes, `+` with a string operand).
+        llvm::Value* toStrTyped(const std::shared_ptr<Expr>& src);
+
         /// Creates an alloca for an AngaraObject local variable at the function entry.
         llvm::AllocaInst* allocLocal(llvm::Function* fn, const std::string& name);
         /// Type-aware overload: uses raw LLVM type for unboxable primitives, skips GC root.

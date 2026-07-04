@@ -239,6 +239,7 @@ namespace angara {
         std::shared_ptr<Type> m_type_f32, m_type_f64;
         std::shared_ptr<Type> m_type_bool;
         std::shared_ptr<Type> m_type_string;
+        std::shared_ptr<Type> m_type_char;  // LANG-4
         std::shared_ptr<Type> m_type_nil;
         std::shared_ptr<Type> m_type_any;
         std::shared_ptr<Type> m_type_error;

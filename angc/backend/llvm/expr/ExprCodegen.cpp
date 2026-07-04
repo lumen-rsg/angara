@@ -122,7 +122,27 @@ llvm::Value* LLVMBackend::cgLiteral(const Literal& e) {
         catch (const std::exception&) { return makeF64(0.0); }
     }
     if (tok.type == TokenType::STRING) return makeStr(tok.lexeme);
+    // LANG-4: char literal — the lexer stored the resolved code point as a
+    // decimal string; emit it as a TAG_I64 integer (char IS a 32-bit int at
+    // runtime, per the C/Java model).
+    if (tok.type == TokenType::CHAR) {
+        try { return makeI64(std::stoll(tok.lexeme)); }
+        catch (const std::exception&) { return makeI64(static_cast<int64_t>(0)); }
+    }
     return makeNil();
+}
+
+// LANG-4: type-aware string conversion. Routes a char-typed operand through
+// __ang_char_to_string (renders the code point as the glyph) and everything
+// else through __ang_to_string. `src` is the source expression whose static
+// type is consulted.
+llvm::Value* LLVMBackend::toStrTyped(const std::shared_ptr<Expr>& src) {
+    auto* val = cg(src);
+    auto it = m_type_checker.getExpressionTypes().find(src.get());
+    if (it != m_type_checker.getExpressionTypes().end() && isChar(it->second)) {
+        return callRtByName("__ang_char_to_string", {val});
+    }
+    return callRtByName("__ang_to_string", {val});
 }
 
 llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
@@ -180,6 +200,10 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             }
             // If the type checker knows either operand is a string, skip the
             // runtime tag dispatch and call __ang_string_concat directly.
+            // (Under the LANG-4 integer model, char is not a string — char+char
+            // is integer arithmetic handled by the numeric fast path above, and
+            // string+char is a type error, so no char pre-conversion is needed
+            // here. Users concat a char into a string via explicit string(c).)
             {
                 auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
                 auto rt = m_type_checker.getExpressionTypes().find(e.right.get());
@@ -1138,8 +1162,16 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         }
 
         if (fn=="string") {
-            if (!expr.arguments.empty()) return callRtByName("__ang_to_string", {cg(expr.arguments[0])});
+            // LANG-4: type-aware — a char argument renders as the glyph.
+            if (!expr.arguments.empty()) return toStrTyped(expr.arguments[0]);
             return makeStr("");
+        }
+        if (fn=="char") {
+            // LANG-4: char(x) — at runtime char is a TAG_I64 integer, so the
+            // conversion is just the integer coercion __ang_to_i64 wrapped back
+            // into the boxed value (the type checker records the char type).
+            if (!expr.arguments.empty()) return callRtByName("__ang_to_i64",{cg(expr.arguments[0])});
+            return makeI64((int64_t)0);
         }
         if (fn=="i64" || fn=="int") {
             if (!expr.arguments.empty()) return callRtByName("__ang_to_i64",{cg(expr.arguments[0])});
@@ -1158,13 +1190,12 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         if (fn=="println" || fn=="print") {
             const char* rt = (fn=="println") ? "__ang_io_println" : "__ang_io_print";
             if (!expr.arguments.empty()) {
-                // Build a string by concatenating all arguments
-                auto* to_str_fn = this->mod->getFunction("__ang_to_string");
+                // Build a string by concatenating all arguments. LANG-4: each
+                // arg is converted type-aware (char args render as glyphs).
                 auto* concat_fn = this->mod->getFunction("__ang_string_concat");
                 llvm::Value* result = nullptr;
                 for (auto& a : expr.arguments) {
-                    auto* val = cg(a);
-                    auto* str_val = builder->CreateCall(to_str_fn, {val}, "str");
+                    auto* str_val = toStrTyped(a);
                     if (!result) {
                         result = str_val;
                     } else {
@@ -2092,13 +2123,14 @@ llvm::Value* LLVMBackend::cgInterpString(const InterpStringExpr& e) {
                 acc = callRtByName("__ang_string_concat", {acc, makeStr(lit)});
             }
         } else {
-            // Expression hole — convert to string and concat.
+            // Expression hole — convert to string and concat. LANG-4: type-aware
+            // (a char hole renders as the glyph, not the code-point number).
             if (!acc) {
                 // No preceding literal — start with the converted expression.
-                acc = callRtByName("__ang_to_string", {cg(sub_expr)});
+                acc = toStrTyped(sub_expr);
             } else {
                 acc = callRtByName("__ang_string_concat",
-                    {acc, callRtByName("__ang_to_string", {cg(sub_expr)})});
+                    {acc, toStrTyped(sub_expr)});
             }
         }
     }

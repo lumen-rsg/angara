@@ -42,6 +42,7 @@ namespace angara {
         m_type_f64 = std::make_shared<PrimitiveType>("f64");
         m_type_bool = std::make_shared<PrimitiveType>("bool");
         m_type_string = std::make_shared<PrimitiveType>("string");
+        m_type_char = std::make_shared<PrimitiveType>("char");  // LANG-4
         m_type_nil = std::make_shared<NilType>();
         m_type_any = std::make_shared<AnyType>();
         m_type_error = std::make_shared<PrimitiveType>("<error>");
@@ -104,6 +105,12 @@ namespace angara {
             std::vector<std::shared_ptr<Type>>{m_type_any}, m_type_bool
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "bool", 0, 0), bool_conv_type, true);
+
+        // LANG-4: char(x) conversion — narrows an integer/code-point to char.
+        auto char_conv_type = std::make_shared<FunctionType>(
+            std::vector<std::shared_ptr<Type>>{m_type_any}, m_type_char
+        );
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "char", 0, 0), char_conv_type, true);
 
         auto exception_constructor_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{m_type_string},
@@ -305,6 +312,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         if (name == "f32") return m_type_f32;
         if (name == "bool") return m_type_bool;
         if (name == "string") return m_type_string;
+        if (name == "char") return m_type_char;  // LANG-4
         if (name == "nil") return m_type_nil;
         if (name == "any") return m_type_any;
         if (name == "Thread") return m_type_thread;

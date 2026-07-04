@@ -1,6 +1,7 @@
 #include "ASTPrinter.h"
 #include "Colors.h"
 #include <sstream>
+#include <cstdio>
 
 namespace angara {
 
@@ -8,6 +9,27 @@ namespace angara {
     const char* const TREE_END  = "└── ";
     const char* const TREE_DOWN = "│   ";
     const char* const TREE_EMPTY= "    ";
+
+    // LANG-4: render a CHAR token's decimal-code-point lexeme back as a char
+    // literal body, reversing the common escapes for readable output.
+    static std::string renderCharLexeme(const std::string& lexeme) {
+        long cp = 0;
+        try { cp = std::stol(lexeme); } catch (...) { return "?"; }
+        switch (cp) {
+            case '\n': return "\\n";
+            case '\r': return "\\r";
+            case '\t': return "\\t";
+            case '\\': return "\\\\";
+            case '\'': return "\\'";
+            case '\0': return "\\0";
+            default:
+                if (cp >= 0x20 && cp < 0x7F) return std::string(1, static_cast<char>(cp));
+                // Non-printable / non-ASCII: show as \xHH.
+                char buf[6];
+                std::snprintf(buf, sizeof(buf), "\\x%02X", static_cast<int>(cp & 0xFF));
+                return buf;
+        }
+    }
 
     ASTPrinter::ASTPrinter() {}
 
@@ -115,6 +137,10 @@ namespace angara {
     std::any ASTPrinter::visit(const Literal& expr) {
         std::string val = expr.token.lexeme;
         if (expr.token.type == TokenType::STRING) val = "\"" + val + "\"";
+        else if (expr.token.type == TokenType::CHAR) {
+            // LANG-4: lexeme is the decimal code point; render as a char literal.
+            val = "'" + renderCharLexeme(val) + "'";
+        }
         printHeader("Literal", val);
         return {};
     }
