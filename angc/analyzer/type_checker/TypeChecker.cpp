@@ -534,6 +534,17 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         return prim;
     }
 
+    // LANG-10: tuple type — (T1, T2, ...)
+    if (auto tuple_type_expr = std::dynamic_pointer_cast<const TupleTypeExpr>(ast_type)) {
+        std::vector<std::shared_ptr<Type>> element_types;
+        for (const auto& elem_ast : tuple_type_expr->element_types) {
+            auto elem_type = resolveType(elem_ast);
+            if (elem_type->kind == TypeKind::ERROR) return m_type_error;
+            element_types.push_back(elem_type);
+        }
+        return std::make_shared<TupleType>(std::move(element_types));
+    }
+
     return m_type_error;
 }
 

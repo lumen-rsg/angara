@@ -28,6 +28,7 @@ void Chaperone::collectExprVarRefs(const std::shared_ptr<Expr>& expr,
     }
     if (auto* gt = dynamic_cast<const GetExpr*>(expr.get())) { collectExprVarRefs(gt->object, out); return; }
     if (auto* l = dynamic_cast<const ListExpr*>(expr.get())) { for (const auto& e : l->elements) collectExprVarRefs(e, out); return; }
+    if (auto* tup = dynamic_cast<const TupleExpr*>(expr.get())) { for (const auto& e : tup->elements) collectExprVarRefs(e, out); return; }  // LANG-10
     if (auto* lo = dynamic_cast<const LogicalExpr*>(expr.get())) { collectExprVarRefs(lo->left, out); collectExprVarRefs(lo->right, out); return; }
     if (auto* su = dynamic_cast<const SubscriptExpr*>(expr.get())) { collectExprVarRefs(su->object, out); collectExprVarRefs(su->index, out); return; }
     if (auto* re = dynamic_cast<const RecordExpr*>(expr.get())) { for (const auto& v : re->values) collectExprVarRefs(v, out); return; }
@@ -277,6 +278,15 @@ void Chaperone::analyzeExpr(Context& ctx,
     // tracked, so the value can't be dropped correctly (leak or double-free).
     if (auto* list = dynamic_cast<const ListExpr*>(expr.get())) {
         for (const auto& elem : list->elements) {
+            analyzeExpr(ctx, elem, state);
+            checkEscapeIntoContainer(ctx, elem, state);
+        }
+        return;
+    }
+
+    // TupleExpr (LANG-10): same as ListExpr — walk all elements, check escape.
+    if (auto* tup = dynamic_cast<const TupleExpr*>(expr.get())) {
+        for (const auto& elem : tup->elements) {
             analyzeExpr(ctx, elem, state);
             checkEscapeIntoContainer(ctx, elem, state);
         }

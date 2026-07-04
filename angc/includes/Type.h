@@ -37,6 +37,7 @@ namespace angara {
         REF,     // v5: non-owning reference (ref<T>)
         VOID,    // C void type (only valid in FFI pointer context or as return type)
         TRAIT_OBJECT, // TS-1: a value viewed through a trait/contract interface (erased impl)
+        TUPLE,   // LANG-10: heterogeneous fixed-arity tuple (e.g., (i64, string))
         ERROR // A special type to prevent cascading error messages
     };
 
@@ -437,6 +438,26 @@ namespace angara {
         }
     };
 
+    // LANG-10: heterogeneous fixed-arity tuple type (e.g., (i64, string)).
+    // At runtime represented as an AngaraList — the type system enforces
+    // fixed arity and positional (not uniform) element types.
+    struct TupleType : Type {
+        const std::vector<std::shared_ptr<Type>> element_types;
+        explicit TupleType(std::vector<std::shared_ptr<Type>> types)
+                : Type(TypeKind::TUPLE), element_types(std::move(types)) {}
+
+        [[nodiscard]] std::string toString() const override {
+            std::stringstream ss;
+            ss << "(";
+            for (size_t i = 0; i < element_types.size(); ++i) {
+                if (i > 0) ss << ", ";
+                ss << element_types[i]->toString();
+            }
+            ss << ")";
+            return ss.str();
+        }
+    };
+
     struct DataType : Type {
         const std::string name;
         // We can reuse MemberInfo to store field type and const-ness.
@@ -617,6 +638,13 @@ namespace angara {
                     auto r = std::dynamic_pointer_cast<RefType>(type);
                     return std::make_shared<RefType>(substitute(r->inner_type));
                 }
+                case TypeKind::TUPLE: {
+                    auto t = std::dynamic_pointer_cast<TupleType>(type);
+                    std::vector<std::shared_ptr<Type>> ne;
+                    ne.reserve(t->element_types.size());
+                    for (const auto& e : t->element_types) ne.push_back(substitute(e));
+                    return std::make_shared<TupleType>(std::move(ne));
+                }
                 case TypeKind::GENERIC_INSTANCE: {
                     auto g = std::dynamic_pointer_cast<GenericInstanceType>(type);
                     std::map<std::string, std::shared_ptr<Type>> new_args;
@@ -738,6 +766,17 @@ namespace angara {
                 return la && lb && sameType(la->inner_type, lb->inner_type);
             }
 
+            case TypeKind::TUPLE: {
+                auto la = std::dynamic_pointer_cast<TupleType>(a);
+                auto lb = std::dynamic_pointer_cast<TupleType>(b);
+                if (!la || !lb) return false;
+                if (la->element_types.size() != lb->element_types.size()) return false;
+                for (size_t i = 0; i < la->element_types.size(); ++i) {
+                    if (!sameType(la->element_types[i], lb->element_types[i])) return false;
+                }
+                return true;
+            }
+
             case TypeKind::FUNCTION: {
                 auto la = std::dynamic_pointer_cast<FunctionType>(a);
                 auto lb = std::dynamic_pointer_cast<FunctionType>(b);
@@ -826,6 +865,13 @@ namespace angara {
             case TypeKind::REF:
                 return std::make_shared<RefType>(
                     substituteTypeArgs(std::dynamic_pointer_cast<RefType>(type)->inner_type, args));
+            case TypeKind::TUPLE: {
+                auto t = std::dynamic_pointer_cast<TupleType>(type);
+                std::vector<std::shared_ptr<Type>> ne;
+                ne.reserve(t->element_types.size());
+                for (const auto& e : t->element_types) ne.push_back(substituteTypeArgs(e, args));
+                return std::make_shared<TupleType>(std::move(ne));
+            }
             case TypeKind::GENERIC_INSTANCE: {
                 auto g = std::dynamic_pointer_cast<GenericInstanceType>(type);
                 std::map<std::string, std::shared_ptr<Type>> na;

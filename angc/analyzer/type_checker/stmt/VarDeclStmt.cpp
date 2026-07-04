@@ -2,6 +2,67 @@
 namespace angara {
 
 void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
+    // LANG-10: destructuring declaration — let (a, b) = expr;
+    if (!stmt->destructure_names.empty()) {
+        std::shared_ptr<Type> rhs_type = nullptr;
+
+        if (stmt->typeAnnotation && stmt->initializer) {
+            rhs_type = resolveType(stmt->typeAnnotation);
+            auto saved_expected = m_expected_type;
+            m_expected_type = rhs_type;
+            stmt->initializer->accept(*this);
+            m_expected_type = saved_expected;
+            auto init_type = popType();
+            if (rhs_type->kind != TypeKind::ERROR && init_type->kind != TypeKind::ERROR) {
+                if (!check_type_compatibility(rhs_type, init_type)) {
+                    error(stmt->destructure_names[0],
+                        "Type mismatch. Destructuring target is annotated as '" +
+                        displayType(*rhs_type, *init_type) + "' but is initialized with '" +
+                        displayType(*init_type, *rhs_type) + "'.",
+                        "E275");
+                    rhs_type = m_type_error;
+                }
+            }
+        } else if (stmt->initializer) {
+            stmt->initializer->accept(*this);
+            rhs_type = popType();
+        } else {
+            rhs_type = resolveType(stmt->typeAnnotation);
+        }
+
+        if (rhs_type->kind != TypeKind::TUPLE && rhs_type->kind != TypeKind::ERROR) {
+            error(stmt->destructure_names[0],
+                "Cannot destructure a value of type '" + rhs_type->toString() +
+                "'. Destructuring requires a tuple type like (i64, string).",
+                "E385");
+            return;
+        }
+
+        if (rhs_type->kind == TypeKind::TUPLE) {
+            auto tuple_type = std::dynamic_pointer_cast<TupleType>(rhs_type);
+            if (tuple_type->element_types.size() != stmt->destructure_names.size()) {
+                error(stmt->destructure_names[0],
+                    "Destructuring arity mismatch. The tuple has " +
+                    std::to_string(tuple_type->element_types.size()) +
+                    " element(s) but the pattern expects " +
+                    std::to_string(stmt->destructure_names.size()) + ".",
+                    "E386");
+                return;
+            }
+
+            for (size_t i = 0; i < stmt->destructure_names.size(); ++i) {
+                auto elem_type = tuple_type->element_types[i];
+                if (auto conflicting = m_symbols.declare(stmt->destructure_names[i], elem_type, stmt->is_const)) {
+                    error(stmt->destructure_names[i],
+                        "Symbol '" + stmt->destructure_names[i].lexeme + "' is already declared.",
+                        "E276");
+                    note(conflicting->declaration_token, "Previous declaration was here.");
+                }
+            }
+        }
+        return;
+    }
+
     std::shared_ptr<Type> final_type = nullptr;
 
     // Foreign const: resolve type only, no initializer

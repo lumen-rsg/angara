@@ -105,6 +105,8 @@ namespace angara {
         llvm::Value* cgRange(const RangeExpr& e);
         /// LANG-3: lowers an interpolated string to a concat chain.
         llvm::Value* cgInterpString(const InterpStringExpr& e);
+        /// LANG-10: lowers a tuple literal to a list (same runtime repr).
+        llvm::Value* cgTuple(const TupleExpr& e);
         llvm::Value* cgMatch(const MatchExpr& e);
         llvm::Value* cgLambda(const LambdaExpr& e);
 

@@ -318,7 +318,18 @@ namespace angara {
 
     void ASTPrinter::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         std::string kind = stmt->is_const ? "ConstDecl" : "VarDecl";
-        std::string info = stmt->name.lexeme;
+        std::string info;
+        // LANG-10: show destructure names if present
+        if (!stmt->destructure_names.empty()) {
+            info = "(";
+            for (size_t i = 0; i < stmt->destructure_names.size(); ++i) {
+                if (i > 0) info += ", ";
+                info += stmt->destructure_names[i].lexeme;
+            }
+            info += ")";
+        } else {
+            info = stmt->name.lexeme;
+        }
         if (stmt->is_exported) info += " [export]";
         if (stmt->is_static) info += " [static]";
 
@@ -367,7 +378,19 @@ namespace angara {
     }
 
     void ASTPrinter::visit(std::shared_ptr<const ForInStmt> stmt) {
-        printHeader("ForInStmt", stmt->name.lexeme);
+        // LANG-10: show destructure names if present
+        std::string info;
+        if (!stmt->destructure_names.empty()) {
+            info = "(";
+            for (size_t i = 0; i < stmt->destructure_names.size(); ++i) {
+                if (i > 0) info += ", ";
+                info += stmt->destructure_names[i].lexeme;
+            }
+            info += ")";
+        } else {
+            info = stmt->name.lexeme;
+        }
+        printHeader("ForInStmt", info);
         printChild("collection", stmt->collection, false);
         printChild("body", stmt->body, true);
     }
@@ -504,6 +527,13 @@ namespace angara {
                 printChild("expr", sub, isLast);
             }
         }
+        return {};
+    }
+
+    // LANG-10
+    std::any ASTPrinter::visit(const TupleExpr& expr) {
+        printHeader("TupleLiteral", "size: " + std::to_string(expr.elements.size()));
+        printChildren("elements", expr.elements, true);
         return {};
     }
 

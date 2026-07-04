@@ -20,6 +20,7 @@ namespace angara {
     struct FixedArrayTypeExpr;
     struct PointerTypeExpr;
     struct OwnedTypeNode;
+    struct TupleTypeExpr;  // LANG-10
 
 
     // Visitor pattern for AST Type nodes
@@ -34,6 +35,7 @@ namespace angara {
         virtual void visit(const FixedArrayTypeExpr& type) = 0;
         virtual void visit(const PointerTypeExpr& type) = 0;
         virtual void visit(const OwnedTypeNode& type) = 0;
+        virtual void visit(const TupleTypeExpr& type) = 0;  // LANG-10
     };
 
     // Base class for all AST Type representations
@@ -148,6 +150,19 @@ namespace angara {
 
         explicit OwnedTypeNode(std::shared_ptr<ASTType> inner)
             : inner_type(std::move(inner)) {}
+
+        void accept(ASTTypeVisitor& visitor) const override {
+            visitor.visit(*this);
+        }
+    };
+
+    // LANG-10: tuple type annotation, e.g. (i64, string)
+    struct TupleTypeExpr : ASTType {
+        const Token paren;  // the opening '(' token
+        const std::vector<std::shared_ptr<ASTType>> element_types;
+
+        TupleTypeExpr(Token paren, std::vector<std::shared_ptr<ASTType>> types)
+            : paren(std::move(paren)), element_types(std::move(types)) {}
 
         void accept(ASTTypeVisitor& visitor) const override {
             visitor.visit(*this);

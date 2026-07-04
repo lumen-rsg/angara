@@ -226,6 +226,20 @@ bool TypeChecker::check_type_compatibility(
         return check_type_compatibility(ref_expected->inner_type, actual, nullptr);
     }
 
+    // LANG-10: tuple type compatibility — same arity, element-wise compatibility.
+    if (expected->kind == TypeKind::TUPLE && actual->kind == TypeKind::TUPLE) {
+        auto expected_tuple = std::dynamic_pointer_cast<TupleType>(expected);
+        auto actual_tuple = std::dynamic_pointer_cast<TupleType>(actual);
+        if (expected_tuple->element_types.size() != actual_tuple->element_types.size())
+            return false;
+        for (size_t i = 0; i < expected_tuple->element_types.size(); ++i) {
+            if (!check_type_compatibility(expected_tuple->element_types[i],
+                                          actual_tuple->element_types[i], nullptr))
+                return false;
+        }
+        return true;
+    }
+
     return false;
 }
 

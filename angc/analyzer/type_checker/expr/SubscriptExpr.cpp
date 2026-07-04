@@ -59,6 +59,26 @@ namespace angara {
                 }
             }
         }
+        else if (collection_type->kind == TypeKind::TUPLE) {
+            // LANG-10: tuple subscript — index by position
+            auto tuple_type = std::dynamic_pointer_cast<TupleType>(collection_type);
+            if (!isInteger(index_type)) {
+                error(expr.bracket, "Tuple index must be an integer, but got '" + index_type->toString() + "'.", "E352");
+            } else if (auto idx_literal = std::dynamic_pointer_cast<const Literal>(expr.index)) {
+                // Constant integer index: resolve the element type at that position
+                int idx = std::stoi(idx_literal->token.lexeme);
+                if (idx < 0 || static_cast<size_t>(idx) >= tuple_type->element_types.size()) {
+                    error(expr.bracket, "Tuple index " + std::to_string(idx) +
+                        " is out of bounds (tuple has " +
+                        std::to_string(tuple_type->element_types.size()) + " element(s)).", "E353");
+                } else {
+                    result_type = tuple_type->element_types[idx];
+                }
+            } else {
+                // Dynamic index: can't determine the element type statically
+                result_type = m_type_any;
+            }
+        }
         else if (collection_type->toString() == "string") {
             if (!isInteger(index_type)) {
                 error(expr.bracket, "String index must be an integer, but got '" + index_type->toString() + "'.", "E350");
@@ -67,7 +87,7 @@ namespace angara {
             }
         }
         else {
-            error(expr.bracket, "Type '" + collection_type->toString() + "' does not support subscript access. Only lists, records, and strings are subscriptable.", "E351");
+            error(expr.bracket, "Type '" + collection_type->toString() + "' does not support subscript access. Only lists, records, tuples, and strings are subscriptable.", "E351");
         }
 
         pushAndSave(&expr, result_type);

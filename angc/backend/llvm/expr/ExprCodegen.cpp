@@ -105,6 +105,7 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
     if (auto* p = dynamic_cast<const LambdaExpr*>(e.get())) return cgLambda(*p);
     if (auto* p = dynamic_cast<const RangeExpr*>(e.get())) return cgRange(*p);
     if (auto* p = dynamic_cast<const InterpStringExpr*>(e.get())) return cgInterpString(*p);
+    if (auto* p = dynamic_cast<const TupleExpr*>(e.get())) return cgTuple(*p);  // LANG-10
     return makeNil();
 }
 
@@ -1555,6 +1556,16 @@ llvm::Value* LLVMBackend::cgList(const ListExpr& e) {
         callRtByName("__ang_list_push",{l, v});
     }
     return l;
+}
+
+// LANG-10: tuple literal — reuses list runtime (__ang_list_new + push each element).
+llvm::Value* LLVMBackend::cgTuple(const TupleExpr& e) {
+    auto* t = callRtByName("__ang_list_new",{});
+    for (auto& el : e.elements) {
+        auto* v = cg(el);
+        callRtByName("__ang_list_push",{t, v});
+    }
+    return t;
 }
 
 llvm::Value* LLVMBackend::cgLogical(const LogicalExpr& e) {

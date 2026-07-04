@@ -111,6 +111,12 @@ void Formatter::fmtType(const std::shared_ptr<ASTType>& type) {
         fmtType(t->pointee_type);
     } else if (auto* t = dynamic_cast<const OwnedTypeNode*>(type.get())) {
         m_out << "@own "; fmtType(t->inner_type);
+    } else if (auto* t = dynamic_cast<const TupleTypeExpr*>(type.get())) {
+        // LANG-10
+        m_out << "(";
+        bool first = true;
+        for (auto& et : t->element_types) { if (!first) m_out << ", "; first = false; fmtType(et); }
+        m_out << ")";
     }
 }
 
@@ -147,7 +153,21 @@ void Formatter::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     std::string prefix;
     if (stmt->is_static) prefix += "static ";
     prefix += stmt->is_const ? "const " : "let ";
-    write(prefix + stmt->name.lexeme);
+
+    // LANG-10: destructuring declaration
+    if (!stmt->destructure_names.empty()) {
+        write(prefix + "(");
+        bool first = true;
+        for (auto& n : stmt->destructure_names) {
+            if (!first) m_out << ", ";
+            first = false;
+            m_out << n.lexeme;
+        }
+        m_out << ")";
+    } else {
+        write(prefix + stmt->name.lexeme);
+    }
+
     if (stmt->typeAnnotation) { m_out << " as "; fmtType(stmt->typeAnnotation); }
     if (stmt->initializer) m_out << " = " << fmtExpr(stmt->initializer);
     m_out << ";"; newLine();
@@ -202,7 +222,20 @@ void Formatter::visit(std::shared_ptr<const ForStmt> stmt) {
 }
 
 void Formatter::visit(std::shared_ptr<const ForInStmt> stmt) {
-    writeLine("for (" + stmt->name.lexeme + " in " + fmtExpr(stmt->collection) + ")");
+    // LANG-10: destructuring for-in
+    if (!stmt->destructure_names.empty()) {
+        std::string vars = "(";
+        bool first = true;
+        for (auto& n : stmt->destructure_names) {
+            if (!first) vars += ", ";
+            first = false;
+            vars += n.lexeme;
+        }
+        vars += ")";
+        writeLine("for (" + vars + " in " + fmtExpr(stmt->collection) + ")");
+    } else {
+        writeLine("for (" + stmt->name.lexeme + " in " + fmtExpr(stmt->collection) + ")");
+    }
     if (auto* block = dynamic_cast<const BlockStmt*>(stmt->body.get())) {
         fmtBlock(block);
     } else { increaseIndent(); fmtStmt(stmt->body); decreaseIndent(); }
@@ -503,6 +536,14 @@ std::any Formatter::visit(const InterpStringExpr& expr) {
     }
     r += "\"";
     return r;
+}
+
+// LANG-10
+std::any Formatter::visit(const TupleExpr& expr) {
+    std::string r = "(";
+    bool first = true;
+    for (auto& e : expr.elements) { if (!first) r += ", "; first = false; r += fmtExpr(e); }
+    return r + ")";
 }
 
 } // namespace angara

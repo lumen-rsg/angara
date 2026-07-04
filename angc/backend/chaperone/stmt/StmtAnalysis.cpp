@@ -133,6 +133,17 @@ void Chaperone::analyzeStmt(Context& ctx,
 
     // --- VarDeclStmt ---
     if (auto* var = dynamic_cast<const VarDeclStmt*>(stmt.get())) {
+        // LANG-10: destructuring declaration — each name is a sub-element
+        // of a tuple (untracked container). Mark all as Uninit.
+        if (!var->destructure_names.empty()) {
+            if (var->initializer)
+                analyzeExpr(ctx, var->initializer, state);
+            for (const auto& dn : var->destructure_names) {
+                state[dn.lexeme] = State::Uninit;
+            }
+            return;
+        }
+
         // Capture a move source BEFORE walking the initializer: if the
         // initializer is a bare tracked variable currently Live, `let x = y`
         // MOVES ownership from y to x (S1). Walking first would let the

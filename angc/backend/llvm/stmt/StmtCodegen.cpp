@@ -58,6 +58,35 @@ void LLVMBackend::cgStmt(const std::shared_ptr<Stmt>& s) {
 void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
     llvm::Value* v = nullptr;
 
+    // LANG-10: destructuring declaration — evaluate RHS once, extract each element.
+    if (!s.destructure_names.empty()) {
+        if (s.initializer) {
+            v = cg(s.initializer);
+        } else {
+            v = makeNil();
+        }
+
+        auto* fn = builder->GetInsertBlock()->getParent();
+        // Store the tuple value into a temp alloca so we can load it repeatedly.
+        auto* tmp_alloca = allocLocal(fn, "__tuple_tmp");
+        builder->CreateStore(v, tmp_alloca);
+
+        for (size_t i = 0; i < s.destructure_names.size(); ++i) {
+            auto* idx_val = makeI64(llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i));
+            auto* elem = callRtByName("__ang_list_get", {
+                builder->CreateLoad(objType, tmp_alloca), idx_val
+            });
+
+            auto* a = allocLocal(fn, sanitize(s.destructure_names[i].lexeme));
+            namedVals[sanitize(s.destructure_names[i].lexeme)] = a;
+            namedKinds[sanitize(s.destructure_names[i].lexeme)] = LocalKind::BOXED;
+            emitDbgDeclare(a, s.destructure_names[i].lexeme, s.destructure_names[i].line,
+                          s.destructure_names[i].column, LocalKind::BOXED);
+            builder->CreateStore(elem, a);
+        }
+        return;
+    }
+
     if (s.initializer) {
         // TS-1: if this variable is list<Trait>, flow the element type down so a
         // list literal initializer boxes each element into a trait object.
@@ -284,9 +313,23 @@ void LLVMBackend::cgForIn(const ForInStmt& s) {
     auto* iter = cg(s.collection);
     auto* len = callRtByName("__ang_len",{iter});
     auto* cnt = getI64(len);
-    auto* ac = allocLocal(fn, s.name.lexeme);
-    namedVals[s.name.lexeme] = ac;
-    namedKinds[s.name.lexeme] = LocalKind::BOXED;
+
+    // LANG-10: destructuring for-in — allocate per-name locals
+    llvm::AllocaInst* ac = nullptr;
+    std::vector<llvm::AllocaInst*> destructure_allocs;
+    if (!s.destructure_names.empty()) {
+        for (const auto& dn : s.destructure_names) {
+            auto* a = allocLocal(fn, sanitize(dn.lexeme));
+            namedVals[sanitize(dn.lexeme)] = a;
+            namedKinds[sanitize(dn.lexeme)] = LocalKind::BOXED;
+            destructure_allocs.push_back(a);
+        }
+    } else {
+        ac = allocLocal(fn, s.name.lexeme);
+        namedVals[s.name.lexeme] = ac;
+        namedKinds[s.name.lexeme] = LocalKind::BOXED;
+    }
+
     auto* lp = llvm::BasicBlock::Create(*ctx,"fic",fn);
     auto* bd = llvm::BasicBlock::Create(*ctx,"fib",fn);
     auto* en = llvm::BasicBlock::Create(*ctx,"fie",fn);
@@ -308,7 +351,17 @@ void LLVMBackend::cgForIn(const ForInStmt& s) {
     auto* i = builder->CreateLoad(llvm::Type::getInt64Ty(*ctx), ia, "i");
     builder->CreateCondBr(builder->CreateICmpSLT(i, cnt), bd, en);
     builder->SetInsertPoint(bd);
-    builder->CreateStore(callRtByName("__ang_list_get",{iter, makeI64(i)}), ac);
+    // LANG-10: destructuring for-in — extract each position from the tuple element
+    if (!s.destructure_names.empty()) {
+        auto* elem = callRtByName("__ang_list_get",{iter, makeI64(i)});
+        for (size_t di = 0; di < s.destructure_names.size(); ++di) {
+            auto* sub_elem = callRtByName("__ang_list_get",{elem,
+                makeI64(llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), di))});
+            builder->CreateStore(sub_elem, destructure_allocs[di]);
+        }
+    } else {
+        builder->CreateStore(callRtByName("__ang_list_get",{iter, makeI64(i)}), ac);
+    }
     cgStmt(s.body);
     if (!builder->GetInsertBlock()->getTerminator()) {
         builder->CreateStore(builder->CreateAdd(i, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),1)), ia);

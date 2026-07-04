@@ -81,9 +81,35 @@ namespace angara {
         }
 
         if (match({TokenType::LEFT_PAREN})) {
-            std::shared_ptr<Expr> expr = expression();
-            consume(TokenType::RIGHT_PAREN, "Expected ')' after grouped expression.", "E236");
-            return std::make_shared<Grouping>(std::move(expr));
+            Token paren = previous();
+
+            // LANG-10: distinguish tuple (a, b, ...) from grouping (a).
+            // Parse the first element; if a comma follows it's a tuple.
+            if (check(TokenType::RIGHT_PAREN)) {
+                // Empty parens: error — () is not a valid expression.
+                throw error(peek(), "Empty parentheses '()' is not a valid expression.", "E236");
+            }
+
+            std::shared_ptr<Expr> first = expression();
+
+            if (match({TokenType::COMMA})) {
+                // Tuple: (expr, expr, ...) or (expr,) — at least 2 elements or trailing comma
+                std::vector<std::shared_ptr<Expr>> elements;
+                elements.push_back(std::move(first));
+
+                if (!check(TokenType::RIGHT_PAREN)) {
+                    do {
+                        if (check(TokenType::RIGHT_PAREN)) break;
+                        elements.push_back(expression());
+                    } while (match({TokenType::COMMA}));
+                }
+                consume(TokenType::RIGHT_PAREN, "Expected ')' after tuple elements.", "E237");
+                return std::make_shared<TupleExpr>(std::move(paren), std::move(elements));
+            } else {
+                // Grouping: single expression in parens
+                consume(TokenType::RIGHT_PAREN, "Expected ')' after grouped expression.", "E238");
+                return std::make_shared<Grouping>(std::move(first));
+            }
         }
 
         if (match({TokenType::MATCH})) {

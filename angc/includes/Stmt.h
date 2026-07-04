@@ -123,11 +123,24 @@ namespace angara {
         bool is_unsafe = false;
         bool is_foreign = false;
 
+        // LANG-10: when non-empty, this is a destructuring declaration
+        // (e.g. `let (a, b) = expr;`). `name` is unused in this case.
+        const std::vector<Token> destructure_names;
+
         VarDeclStmt(Token name, std::shared_ptr<ASTType> type, std::shared_ptr<Expr> initializer, const bool is_const)
                 : name(std::move(name)),
                   typeAnnotation(std::move(type)),
                   initializer(std::move(initializer)),
                   is_const(is_const) {}
+
+        // LANG-10: constructor for destructuring declarations
+        VarDeclStmt(std::vector<Token> destructure_names, std::shared_ptr<ASTType> type,
+                    std::shared_ptr<Expr> initializer, const bool is_const)
+                : name(Token{}),  // unused
+                  typeAnnotation(std::move(type)),
+                  initializer(std::move(initializer)),
+                  is_const(is_const),
+                  destructure_names(std::move(destructure_names)) {}
 
         void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const VarDeclStmt>(self));
@@ -220,6 +233,15 @@ namespace angara {
                 collection(std::move(collection)),
                 body(std::move(body)) {}
 
+        // LANG-10: constructor for destructuring for-in (e.g. for (k, v) in map)
+        ForInStmt(Token keyword, std::vector<Token> destructure_names,
+                  std::shared_ptr<Expr> collection, std::shared_ptr<Stmt> body)
+                : keyword(std::move(keyword)),
+                  name(Token{}),  // unused
+                  collection(std::move(collection)),
+                  body(std::move(body)),
+                  destructure_names(std::move(destructure_names)) {}
+
         void accept(StmtVisitor &visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const ForInStmt>(self));
         }
@@ -228,6 +250,8 @@ namespace angara {
         const Token name;
         const std::shared_ptr<Expr> collection;
         const std::shared_ptr<Stmt> body;
+        // LANG-10: when non-empty, destructure each iteration element
+        const std::vector<Token> destructure_names;
 
     };
 

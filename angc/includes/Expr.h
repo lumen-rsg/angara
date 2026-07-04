@@ -40,6 +40,7 @@ namespace angara {
     struct LambdaExpr;
     struct RangeExpr;
     struct InterpStringExpr;
+    struct TupleExpr;  // LANG-10
 
     // The Visitor interface for expressions
     class ExprVisitor {
@@ -69,6 +70,7 @@ namespace angara {
         virtual std::any visit(const LambdaExpr& expr) = 0;
         virtual std::any visit(const RangeExpr& expr) = 0;
         virtual std::any visit(const InterpStringExpr& expr) = 0;
+        virtual std::any visit(const TupleExpr& expr) = 0;  // LANG-10
 
     };
 
@@ -387,6 +389,21 @@ namespace angara {
 
         explicit InterpStringExpr(std::vector<std::pair<std::string, std::shared_ptr<Expr>>> segs)
                 : segments(std::move(segs)) {}
+
+        std::any accept(ExprVisitor& visitor) const override {
+            return visitor.visit(*this);
+        }
+    };
+
+    // LANG-10: tuple literal expression, e.g. (1, "hello", true).
+    // Distinguished from Grouping by the presence of commas (2+ elements,
+    // or a trailing comma for 1 element).
+    struct TupleExpr : Expr {
+        const Token paren;  // the opening '(' token
+        const std::vector<std::shared_ptr<Expr>> elements;
+
+        TupleExpr(Token paren, std::vector<std::shared_ptr<Expr>> elements)
+                : paren(std::move(paren)), elements(std::move(elements)) {}
 
         std::any accept(ExprVisitor& visitor) const override {
             return visitor.visit(*this);
