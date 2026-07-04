@@ -1468,13 +1468,23 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
 llvm::Value* LLVMBackend::cgGet(const GetExpr& e) {
     if (auto* var = dynamic_cast<const VarExpr*>(e.object.get())) {
         auto type_it = m_type_checker.getExpressionTypes().find(e.object.get());
-        if (type_it != m_type_checker.getExpressionTypes().end() &&
-            type_it->second->kind == TypeKind::ENUM) {
-            auto enum_type = std::dynamic_pointer_cast<EnumType>(type_it->second);
-            std::string global_name = "Angara_enum_" + enum_type->name + "_" + e.name.lexeme;
-            auto* global = mod->getGlobalVariable(global_name, true);
-            if (global) {
-                return builder->CreateLoad(objType, global);
+        if (type_it != m_type_checker.getExpressionTypes().end()) {
+            std::shared_ptr<EnumType> enum_type;
+            if (type_it->second->kind == TypeKind::ENUM) {
+                enum_type = std::dynamic_pointer_cast<EnumType>(type_it->second);
+            } else if (type_it->second->kind == TypeKind::GENERIC_INSTANCE) {
+                // LANG-8: unwrap GenericInstanceType to get base EnumType
+                auto gi = std::dynamic_pointer_cast<GenericInstanceType>(type_it->second);
+                if (gi && gi->base_type->kind == TypeKind::ENUM) {
+                    enum_type = std::dynamic_pointer_cast<EnumType>(gi->base_type);
+                }
+            }
+            if (enum_type) {
+                std::string global_name = "Angara_enum_" + enum_type->name + "_" + e.name.lexeme;
+                auto* global = mod->getGlobalVariable(global_name, true);
+                if (global) {
+                    return builder->CreateLoad(objType, global);
+                }
             }
         }
     }
@@ -1810,6 +1820,14 @@ llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {
         cond_type = type_it->second;
         if (cond_type->kind == TypeKind::ENUM) {
             enum_type = std::dynamic_pointer_cast<EnumType>(cond_type);
+        } else if (cond_type->kind == TypeKind::GENERIC_INSTANCE) {
+            // LANG-8: unwrap GenericInstanceType to get base EnumType
+            auto gi = std::dynamic_pointer_cast<GenericInstanceType>(cond_type);
+            if (gi && gi->base_type->kind == TypeKind::ENUM) {
+                enum_type = std::dynamic_pointer_cast<EnumType>(gi->base_type);
+            } else {
+                is_value_type = true;
+            }
         } else {
             is_value_type = true;
         }

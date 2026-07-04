@@ -449,6 +449,38 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
                     return std::make_shared<GenericInstanceType>(class_type, std::move(type_args));
                 }
             }
+
+            // LANG-8: generic enum (e.g., Result<i64, string>)
+            if (base_type->kind == TypeKind::ENUM) {
+                auto enum_type = std::dynamic_pointer_cast<EnumType>(base_type);
+                if (enum_type->is_generic()) {
+                    if (generic->arguments.size() != enum_type->type_params.size()) {
+                        error(generic->name, "Generic type '" + base_name + "' expects " +
+                              std::to_string(enum_type->type_params.size()) +
+                              " type argument(s), but got " +
+                              std::to_string(generic->arguments.size()) + ".", "E411");
+                        return m_type_error;
+                    }
+
+                    std::map<std::string, std::shared_ptr<Type>> type_args;
+                    for (size_t i = 0; i < generic->arguments.size(); ++i) {
+                        auto arg_type = resolveType(generic->arguments[i]);
+                        if (arg_type->kind == TypeKind::ERROR) return m_type_error;
+                        // TS-2: enforce the param's bound, if any.
+                        const std::string& pname = enum_type->type_params[i];
+                        auto bound_it = enum_type->type_param_bounds.find(pname);
+                        if (bound_it != enum_type->type_param_bounds.end() &&
+                            !conformsToTrait(arg_type, bound_it->second)) {
+                            error(generic->name,
+                                  "Type argument '" + arg_type->toString() + "' does not satisfy the bound '" +
+                                  pname + ": " + bound_it->second->toString() + "'.", "E391");
+                        }
+                        type_args[pname] = arg_type;
+                    }
+
+                    return std::make_shared<GenericInstanceType>(enum_type, std::move(type_args));
+                }
+            }
         }
 
         error(generic->name, "Unknown generic type '" + base_name + "'. Only generic types with a '<...>' suffix are valid here.", "E254");

@@ -460,14 +460,22 @@ namespace angara {
     // --- The EnumStmt AST Node ---
 
     // Represents a complete "enum Name { Variant1, Variant2(...) }" statement.
+    // LANG-8: supports generic enums via type_params (e.g., enum Result<T,E> { Ok(T), Err(E) })
     struct EnumStmt final : Stmt {
         const Token name;
         const std::vector<std::shared_ptr<EnumVariant>> variants;
+        const std::vector<Token> type_params;
+        const std::map<std::string, Token> type_param_bounds;
         bool is_exported = false;
 
-        EnumStmt(Token name, std::vector<std::shared_ptr<EnumVariant>> variants)
+        EnumStmt(Token name,
+                 std::vector<std::shared_ptr<EnumVariant>> variants,
+                 std::vector<Token> type_params = {},
+                 std::map<std::string, Token> type_param_bounds = {})
             : name(std::move(name)),
-              variants(std::move(variants)) {}
+              variants(std::move(variants)),
+              type_params(std::move(type_params)),
+              type_param_bounds(std::move(type_param_bounds)) {}
 
         void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const EnumStmt>(self));

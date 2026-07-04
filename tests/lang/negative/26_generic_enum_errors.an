@@ -1,0 +1,25 @@
+// LANG-8: Generic enum negative tests
+// Tests: error cases for generic enums
+
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+
+// Test 1: Wrong number of type arguments (too few)
+// Expected error: E411 — wrong number of type args
+func bad_type_args1() -> Result<i64> {
+    return Result.Ok(42);
+}
+
+// Test 2: Too many type arguments
+// Expected error: E411 — wrong number of type args
+func bad_type_args2() -> Result<i64, string, bool> {
+    return Result.Ok(42);
+}
+
+// Test 3: Using a non-generic type with type arguments
+// Expected error: E254 — unknown generic type
+func bad_non_generic() -> i64<i64> {
+    return 0;
+}

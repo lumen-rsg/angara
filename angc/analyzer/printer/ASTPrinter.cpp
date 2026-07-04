@@ -452,7 +452,17 @@ namespace angara {
     }
 
     void ASTPrinter::visit(std::shared_ptr<const EnumStmt> stmt) {
-        printHeader("EnumStmt", stmt->name.lexeme);
+        std::string header = stmt->name.lexeme;
+        // LANG-8: include type params in debug output
+        if (!stmt->type_params.empty()) {
+            header += "<";
+            for (size_t i = 0; i < stmt->type_params.size(); ++i) {
+                if (i > 0) header += ", ";
+                header += stmt->type_params[i].lexeme;
+            }
+            header += ">";
+        }
+        printHeader("EnumStmt", header);
     }
 
     void ASTPrinter::visit(std::shared_ptr<const UnsafeBlockStmt> stmt) {

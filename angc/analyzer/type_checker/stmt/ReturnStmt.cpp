@@ -189,6 +189,10 @@ bool TypeChecker::check_type_compatibility(
         for (const auto& [name, expected_arg] : expected_gen->type_args) {
             auto it = actual_gen->type_args.find(name);
             if (it == actual_gen->type_args.end()) return false;
+            // LANG-8: allow unbound type params to match anything —
+            // they'll be filled in from context (e.g., Result.Ok(42) infers T
+            // but leaves E unbound; the expected type Result<i64,string> fills E).
+            if (it->second->kind == TypeKind::TYPE_PARAM) continue;
             if (!check_type_compatibility(expected_arg, it->second, nullptr)) return false;
         }
         return true;
@@ -199,6 +203,20 @@ bool TypeChecker::check_type_compatibility(
         auto expected_data = std::dynamic_pointer_cast<DataType>(expected);
         auto actual_gen = std::dynamic_pointer_cast<GenericInstanceType>(actual);
         return sameType(expected_data, actual_gen->base_type);
+    }
+
+    // LANG-8: Generic instance is compatible with its bare base enum type
+    if (expected->kind == TypeKind::ENUM && actual->kind == TypeKind::GENERIC_INSTANCE) {
+        auto expected_enum = std::dynamic_pointer_cast<EnumType>(expected);
+        auto actual_gen = std::dynamic_pointer_cast<GenericInstanceType>(actual);
+        return sameType(expected_enum, actual_gen->base_type);
+    }
+
+    // LANG-8: Bare enum actual is compatible with a generic instance expected type
+    if (expected->kind == TypeKind::GENERIC_INSTANCE && actual->kind == TypeKind::ENUM) {
+        auto expected_gen = std::dynamic_pointer_cast<GenericInstanceType>(expected);
+        auto actual_enum = std::dynamic_pointer_cast<EnumType>(actual);
+        return sameType(expected_gen->base_type, actual_enum);
     }
 
     // v5: ref<T> — implicit conversion from a tracked type to ref<T>.

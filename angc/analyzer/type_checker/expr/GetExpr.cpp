@@ -104,7 +104,30 @@ std::any TypeChecker::visit(const GetExpr& expr) {
                 }
             }
         } else {
-            error(expr.op, "Cannot access properties on generic instance of '" + generic_instance->base_type->toString() + "'.", "E345");
+            // LANG-8: check if base is a generic enum (e.g., Result<i64, string>)
+            auto base_enum = std::dynamic_pointer_cast<EnumType>(generic_instance->base_type);
+            if (base_enum) {
+                auto variant_it = base_enum->variants.find(property_name);
+                if (variant_it == base_enum->variants.end()) {
+                    error(expr.name, "Enum '" + base_enum->name + "' has no variant named '" + property_name + "'.", "E337");
+                } else {
+                    auto variant_ctor = std::dynamic_pointer_cast<FunctionType>(variant_it->second);
+                    if (variant_ctor->param_types.empty()) {
+                        // Parameterless variant: return the enum type (as GenericInstanceType)
+                        property_type = unwrapped_object_type;  // already GenericInstanceType
+                    } else {
+                        // Variant with payload: substitute type params in the constructor signature
+                        std::vector<std::shared_ptr<Type>> sub_params;
+                        for (const auto& pt : variant_ctor->param_types) {
+                            sub_params.push_back(generic_instance->substitute(pt));
+                        }
+                        // The return type should be the GenericInstanceType, not the bare EnumType
+                        property_type = std::make_shared<FunctionType>(sub_params, unwrapped_object_type);
+                    }
+                }
+            } else {
+                error(expr.op, "Cannot access properties on generic instance of '" + generic_instance->base_type->toString() + "'.", "E345");
+            }
         }
     }
     // TS-1: access through a trait/contract interface (or a trait-object view).

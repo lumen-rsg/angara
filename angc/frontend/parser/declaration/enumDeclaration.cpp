@@ -3,6 +3,11 @@ namespace angara {
 
     std::shared_ptr<Stmt> Parser::enumDeclaration() {
         Token name = consume(TokenType::IDENTIFIER, "Expected enum name after 'enum'.", "E159");
+
+        // LANG-8: parse optional type parameters (e.g., enum Result<T,E>)
+        std::map<std::string, Token> type_param_bounds;
+        auto type_params = parseTypeParams(type_param_bounds);
+
         consume(TokenType::LEFT_BRACE, "Expected '{' before enum body.", "E160");
 
         std::vector<std::shared_ptr<EnumVariant>> variants;
@@ -26,7 +31,8 @@ namespace angara {
         }
 
         consume(TokenType::RIGHT_BRACE, "Expected '}' after enum body.", "E163");
-        return std::make_shared<EnumStmt>(std::move(name), std::move(variants));
+        return std::make_shared<EnumStmt>(std::move(name), std::move(variants),
+                                          std::move(type_params), std::move(type_param_bounds));
     }
 
 }

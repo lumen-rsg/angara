@@ -99,6 +99,25 @@ namespace angara {
             check_function_call(expr, check_type, arg_types);
             if (!m_hadError) {
                 result_type = check_type->return_type;
+                // LANG-8: if the return type is a generic enum, promote to
+                // GenericInstanceType so the result carries its type arguments
+                // (e.g., Result.Ok(42) returns Result<i64> not bare Result).
+                if (result_type->kind == TypeKind::ENUM) {
+                    auto et = std::dynamic_pointer_cast<EnumType>(result_type);
+                    if (et->is_generic()) {
+                        std::map<std::string, std::shared_ptr<Type>> enum_args;
+                        for (const auto& tp_name : et->type_params) {
+                            auto it = inferred_args.find(tp_name);
+                            if (it != inferred_args.end()) {
+                                enum_args[tp_name] = it->second;
+                            } else {
+                                // Uninferred param: keep as TypeParameterType (partial inference)
+                                enum_args[tp_name] = std::make_shared<TypeParameterType>(tp_name);
+                            }
+                        }
+                        result_type = std::make_shared<GenericInstanceType>(et, std::move(enum_args));
+                    }
+                }
             }
         }
         else if (callee_type->kind == TypeKind::CLASS) {

@@ -474,10 +474,19 @@ namespace angara {
         std::map<std::string, std::shared_ptr<FunctionType>> variants;
         std::string home_module;  // TS-4: declaring module (for qualified diagnostics)
 
+        // --- GENERIC SUPPORT (LANG-8) ---
+        // Type parameter names for this generic enum (e.g., {"T","E"} for Result<T,E>)
+        std::vector<std::string> type_params;
+        // Resolved bounds, e.g. "T" -> TraitType("Hashable") for `<T: Hashable>`.
+        std::map<std::string, std::shared_ptr<TraitType>> type_param_bounds;
+
         explicit EnumType(std::string name)
             : Type(TypeKind::ENUM), name(std::move(name)) {}
 
         [[nodiscard]] std::string toString() const override { return name; }
+
+        // Check if this enum is generic (has type parameters)
+        [[nodiscard]] bool is_generic() const { return !type_params.empty(); }
     };
 
     // --- FIXED-SIZE ARRAY TYPE (for foreign data) ---
@@ -546,11 +555,35 @@ namespace angara {
             std::stringstream ss;
             // Get the base type name
             ss << base_type->toString() << "<";
+
+            // Collect type-param names in declaration order from the base type
+            std::vector<std::string> param_order;
+            if (auto dt = std::dynamic_pointer_cast<DataType>(base_type))
+                param_order = dt->type_params;
+            else if (auto ct = std::dynamic_pointer_cast<ClassType>(base_type))
+                param_order = ct->type_params;
+            else if (auto et = std::dynamic_pointer_cast<EnumType>(base_type))
+                param_order = et->type_params;
+
             bool first = true;
+            // Emit in declaration order first
+            for (const auto& pname : param_order) {
+                auto it = type_args.find(pname);
+                if (it != type_args.end()) {
+                    if (!first) ss << ", ";
+                    ss << it->second->toString();
+                    first = false;
+                }
+            }
+            // Emit any remaining args not in param_order (shouldn't normally happen)
             for (const auto& [name, type] : type_args) {
-                if (!first) ss << ", ";
-                ss << type->toString();
-                first = false;
+                bool in_order = false;
+                for (const auto& pn : param_order) { if (pn == name) { in_order = true; break; } }
+                if (!in_order) {
+                    if (!first) ss << ", ";
+                    ss << type->toString();
+                    first = false;
+                }
             }
             ss << ">";
             return ss.str();

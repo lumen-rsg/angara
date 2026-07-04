@@ -1,0 +1,89 @@
+// LANG-8: Generic enum test
+// Tests: enum Result<T,E>, enum Option<T>, basic usage patterns
+
+attach io;
+
+enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+
+enum Option<T> {
+    Some(T),
+    None,
+}
+
+// Return generic enum from function — inference from return type context
+func make_ok() -> Result<i64, string> {
+    return Result.Ok(42);
+}
+
+func make_err() -> Result<i64, string> {
+    return Result.Err("error");
+}
+
+func make_some() -> Option<i64> {
+    return Option.Some(100);
+}
+
+func make_none() -> Option<i64> {
+    return Option.None;
+}
+
+// Match on generic enum with payload extraction
+func test_match_ok() -> i64 {
+    let r = make_ok();
+    return match (r) {
+        case Result.Ok(val): val,
+        case Result.Err(msg): -1,
+    };
+}
+
+func test_match_err() -> i64 {
+    let r = make_err();
+    return match (r) {
+        case Result.Ok(val): val,
+        case Result.Err(msg): -1,
+    };
+}
+
+// Option matching
+func test_option_some() -> i64 {
+    let opt = make_some();
+    return match (opt) {
+        case Option.Some(v): v,
+        case Option.None: 0,
+    };
+}
+
+func test_option_none() -> i64 {
+    let opt = make_none();
+    return match (opt) {
+        case Option.Some(v): v,
+        case Option.None: 0,
+    };
+}
+
+// Function taking generic enum as parameter
+func process_result(r as Result<i64, string>) -> string {
+    return match (r) {
+        case Result.Ok(val): "ok: " + string(val),
+        case Result.Err(msg): "err: " + msg,
+    };
+}
+
+// Main entry point
+export func main() -> i64 {
+    io.println(1, "make_ok matched: " + string(test_match_ok()));
+    io.println(1, "make_err matched: " + string(test_match_err()));
+    io.println(1, "test_option_some: " + string(test_option_some()));
+    io.println(1, "test_option_none: " + string(test_option_none()));
+
+    let processed = process_result(Result.Ok(99));
+    io.println(1, "process_result ok: " + processed);
+
+    let processed_err = process_result(Result.Err("bad"));
+    io.println(1, "process_result err: " + processed_err);
+
+    return 0;
+}

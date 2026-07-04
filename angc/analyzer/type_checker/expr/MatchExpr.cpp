@@ -12,7 +12,17 @@ namespace angara {
         }
 
         // Match is allowed on: enums, integers, string, bool, char
+        // LANG-8: also accept GenericInstanceType with EnumType base
         bool is_enum = condition_type->kind == TypeKind::ENUM;
+        std::shared_ptr<GenericInstanceType> generic_enum_instance;
+        if (!is_enum && condition_type->kind == TypeKind::GENERIC_INSTANCE) {
+            auto gi = std::dynamic_pointer_cast<GenericInstanceType>(condition_type);
+            if (gi && gi->base_type->kind == TypeKind::ENUM) {
+                is_enum = true;
+                generic_enum_instance = gi;
+                condition_type = gi->base_type;  // use the base EnumType for variant lookups
+            }
+        }
         bool is_value = isInteger(condition_type) ||
                         condition_type->toString() == "string" ||
                         condition_type->toString() == "bool" ||
@@ -167,6 +177,14 @@ namespace angara {
                     }
 
                     if (!payload_types.empty()) {
+                        // LANG-8: substitute type params through the generic instance
+                        if (generic_enum_instance) {
+                            std::vector<std::shared_ptr<Type>> sub_types;
+                            for (const auto& pt : payload_types) {
+                                sub_types.push_back(generic_enum_instance->substitute(pt));
+                            }
+                            payload_types = std::move(sub_types);
+                        }
                         if (case_item.variables.size() != payload_types.size()) {
                             error(case_item.variables[0],
                                 "Wrong number of bindings for variant. Expected " +

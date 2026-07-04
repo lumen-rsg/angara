@@ -324,7 +324,14 @@ void Formatter::visit(std::shared_ptr<const DataStmt> stmt) {
 void Formatter::visit(std::shared_ptr<const EnumStmt> stmt) {
     std::string prefix;
     if (stmt->is_exported) prefix += "export ";
-    write(prefix + "enum " + stmt->name.lexeme + " {"); newLine();
+    write(prefix + "enum " + stmt->name.lexeme);
+    // LANG-8: print type parameters for generic enums
+    if (!stmt->type_params.empty()) {
+        m_out << "<"; bool first = true;
+        for (auto& tp : stmt->type_params) { if (!first) m_out << ", "; first = false; m_out << tp.lexeme; }
+        m_out << ">";
+    }
+    m_out << " {"; newLine();
     increaseIndent();
     for (auto& v : stmt->variants) {
         write(v->name.lexeme);

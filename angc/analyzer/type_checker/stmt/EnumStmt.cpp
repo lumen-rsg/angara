@@ -5,6 +5,30 @@ namespace angara {
         auto symbol = m_symbols.resolve(stmt.name.lexeme);
         auto enum_type = std::dynamic_pointer_cast<EnumType>(symbol->type);
 
+        // LANG-8: store type parameter names on the EnumType
+        for (const auto& tp : stmt.type_params) {
+            enum_type->type_params.push_back(tp.lexeme);
+        }
+
+        // LANG-8: resolve type-param bounds (<T: Trait>) to their TraitType.
+        for (const auto& [param_name, bound_token] : stmt.type_param_bounds) {
+            auto bound_symbol = m_symbols.resolve(bound_token.lexeme);
+            if (!bound_symbol) {
+                error(bound_token, "Trait '" + bound_token.lexeme + "' used as a bound is not defined.", "E389");
+            } else if (bound_symbol->type->kind != TypeKind::TRAIT) {
+                error(bound_token, "'" + bound_token.lexeme + "' is not a trait and cannot be used as a bound.", "E390");
+            } else {
+                enum_type->type_param_bounds[param_name] =
+                    std::dynamic_pointer_cast<TraitType>(bound_symbol->type);
+            }
+        }
+
+        // LANG-8: install type params so variant payload types can reference them
+        auto saved_type_params = m_active_type_params;
+        for (const auto& tp : stmt.type_params) {
+            m_active_type_params[tp.lexeme] = std::make_shared<TypeParameterType>(tp.lexeme);
+        }
+
         if (stmt.is_exported) {
             m_module_type->exports[stmt.name.lexeme] = enum_type;
         }
@@ -29,6 +53,9 @@ namespace angara {
 
             enum_type->variants[variant_name] = variant_constructor_type;
         }
+
+        // LANG-8: restore saved type params
+        m_active_type_params = saved_type_params;
     }
 
     void TypeChecker::visit(std::shared_ptr<const EnumStmt> stmt) {
