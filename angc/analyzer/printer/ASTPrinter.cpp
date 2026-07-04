@@ -178,7 +178,16 @@ namespace angara {
     std::any ASTPrinter::visit(const CallExpr& expr) {
         printHeader("CallExpr");
         printChild("callee", expr.callee, expr.arguments.empty());
-        printChildren("args", expr.arguments, true);
+        // LANG-11: print named-argument labels if present.
+        for (size_t i = 0; i < expr.arguments.size(); ++i) {
+            bool isLast = (i == expr.arguments.size() - 1);
+            std::string label = "arg";
+            if (i < expr.arg_names.size() && expr.arg_names[i].has_value()) {
+                label = expr.arg_names[i]->lexeme + ":";
+            }
+            std::string header = label + "[" + std::to_string(i) + "]";
+            printChild(header, expr.arguments[i], isLast);
+        }
         return {};
     }
 

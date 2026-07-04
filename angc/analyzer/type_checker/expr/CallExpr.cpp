@@ -47,6 +47,47 @@ namespace angara {
         if (callee_type->kind == TypeKind::FUNCTION) {
             auto func_type = std::dynamic_pointer_cast<FunctionType>(callee_type);
 
+            // LANG-11: resolve named arguments + fill defaults for this call.
+            std::string callee_key;
+            if (auto* ve = dynamic_cast<const VarExpr*>(expr.callee.get())) {
+                callee_key = ve->name.lexeme;
+            } else if (auto* ge = dynamic_cast<const GetExpr*>(expr.callee.get())) {
+                auto oit = m_expression_types.find(ge->object.get());
+                if (oit != m_expression_types.end() && oit->second &&
+                    oit->second->kind == TypeKind::INSTANCE) {
+                    auto inst = std::dynamic_pointer_cast<const InstanceType>(oit->second);
+                    callee_key = inst->class_type->name + "." + ge->name.lexeme;
+                } else {
+                    callee_key = ge->name.lexeme;
+                }
+            }
+            const std::vector<std::shared_ptr<Expr>>* arg_exprs_ptr = nullptr;
+            // LANG-11: check if any argument is actually named (has a label).
+            bool has_named = false;
+            for (const auto& n : expr.arg_names) {
+                if (n.has_value()) { has_named = true; break; }
+            }
+            if (!callee_key.empty() &&
+                (has_named || m_function_defaults.count(callee_key))) {
+                auto resolved = resolveCallArgs(expr, callee_key,
+                                                func_type->param_types.size());
+                if (!resolved.empty()) {
+                    std::vector<std::shared_ptr<Type>> padded_types;
+                    bool all_resolved = true;
+                    for (auto& re : resolved) {
+                        if (re) { re->accept(*this); padded_types.push_back(popType()); }
+                        else { all_resolved = false; break; }
+                    }
+                    if (!m_hadError && all_resolved &&
+                        padded_types.size() == func_type->param_types.size()) {
+                        arg_types = std::move(padded_types);
+                        m_resolved_args[&expr] = std::move(resolved);
+                        auto it = m_resolved_args.find(&expr);
+                        if (it != m_resolved_args.end()) arg_exprs_ptr = &it->second;
+                    }
+                }
+            }
+
             // TS-2: generic function call — infer type args from the concrete
             // arguments, then substitute the param/return types so the call is
             // checked against a concrete signature (and the result type is a
@@ -96,7 +137,7 @@ namespace angara {
                 }
             }
 
-            check_function_call(expr, check_type, arg_types);
+            check_function_call(expr, check_type, arg_types, arg_exprs_ptr);
             if (!m_hadError) {
                 result_type = check_type->return_type;
                 // LANG-8: if the return type is a generic enum, promote to
@@ -239,7 +280,8 @@ namespace angara {
     void TypeChecker::check_function_call(
             const CallExpr& call,
             const std::shared_ptr<FunctionType>& func_type,
-            const std::vector<std::shared_ptr<Type>>& arg_types
+            const std::vector<std::shared_ptr<Type>>& arg_types,
+            const std::vector<std::shared_ptr<Expr>>* arg_exprs
     ) {
         // For foreign functions with callback userdata, skip hidden userdata params
         std::set<size_t> hidden_params(func_type->userdata_param_indices.begin(),
@@ -301,7 +343,10 @@ namespace angara {
                                ? visible_to_param[i] : i;
             const auto& expected_type = func_type->param_types[param_idx];
             const auto& actual_type = arg_types[i];
-            const auto& arg_expr = call.arguments[i];
+            // LANG-11: use resolved arg expressions when provided (for default values).
+            const auto& arg_expr = (arg_exprs && i < arg_exprs->size())
+                                   ? (*arg_exprs)[i]
+                                   : call.arguments[i];
 
             if (auto list_lit = std::dynamic_pointer_cast<const ListExpr>(arg_expr)) {
                 if (list_lit->elements.empty()) {
@@ -319,6 +364,73 @@ namespace angara {
                 return;
             }
         }
+    }
+
+    // LANG-11: resolve named arguments and fill in defaults for a function call.
+    std::vector<std::shared_ptr<Expr>> TypeChecker::resolveCallArgs(
+            const CallExpr& call,
+            const std::string& callee_key,
+            size_t param_count)
+    {
+        auto pn_it = m_function_param_names.find(callee_key);
+        static const std::vector<std::string> empty_names;
+        const auto& param_names = (pn_it != m_function_param_names.end())
+                                  ? pn_it->second : empty_names;
+        auto def_it = m_function_defaults.find(callee_key);
+        static const std::vector<std::shared_ptr<Expr>> empty_defaults;
+        const auto& defaults = (def_it != m_function_defaults.end())
+                               ? def_it->second : empty_defaults;
+
+        std::vector<std::shared_ptr<Expr>> resolved(param_count, nullptr);
+        std::vector<bool> filled(param_count, false);
+
+        // Pass 1: positional arguments.
+        size_t arg_idx = 0;
+        for (; arg_idx < call.arguments.size(); ++arg_idx) {
+            if (arg_idx < call.arg_names.size() && call.arg_names[arg_idx].has_value()) {
+                break;
+            }
+            if (arg_idx >= param_count) break;
+            resolved[arg_idx] = call.arguments[arg_idx];
+            filled[arg_idx] = true;
+        }
+
+        // Pass 2: named arguments.
+        for (; arg_idx < call.arguments.size(); ++arg_idx) {
+            if (arg_idx >= call.arg_names.size() || !call.arg_names[arg_idx].has_value()) {
+                if (arg_idx < param_count) {
+                    resolved[arg_idx] = call.arguments[arg_idx];
+                    filled[arg_idx] = true;
+                }
+                continue;
+            }
+            const std::string& arg_name = call.arg_names[arg_idx]->lexeme;
+            ssize_t param_idx = -1;
+            for (size_t pi = 0; pi < param_names.size(); ++pi) {
+                if (param_names[pi] == arg_name) { param_idx = (ssize_t)pi; break; }
+            }
+            if (param_idx < 0) {
+                error(call.paren, "Named argument '" + arg_name +
+                      "' does not match any parameter name.", "E411");
+                return {};
+            }
+            if (filled[(size_t)param_idx]) {
+                error(call.paren, "Duplicate argument for parameter '" + arg_name + "'.", "E412");
+                return {};
+            }
+            resolved[(size_t)param_idx] = call.arguments[arg_idx];
+            filled[(size_t)param_idx] = true;
+        }
+
+        // Pass 3: fill defaults.
+        for (size_t pi = 0; pi < param_count; ++pi) {
+            if (!filled[pi] && pi < defaults.size() && defaults[pi]) {
+                resolved[pi] = defaults[pi];
+                filled[pi] = true;
+            }
+        }
+
+        return resolved;
     }
 
 }

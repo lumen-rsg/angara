@@ -1,0 +1,63 @@
+attach io;
+
+// Basic default arguments
+func greet(name as string = "World", times as i64 = 1) -> string {
+    return "Hello, " + name;
+}
+
+func add(a as i64 = 0, b as i64 = 0) -> i64 {
+    return a + b;
+}
+
+// Required params before defaulted
+func draw(x as i64, y as i64, color as string = "red") -> string {
+    return color;
+}
+
+// Named arguments with reordering
+func sub(a as i64 = 10, b as i64 = 5) -> i64 {
+    return a - b;
+}
+
+export func main() -> i64 {
+    // Default args — all defaults
+    io.println(1, greet());                    // "Hello, World"
+
+    // Default args — partial override
+    io.println(2, greet("Alice"));            // "Hello, Alice"
+
+    // Named arg — override one default by name
+    io.println(3, greet(times: 2));           // "Hello, World"
+
+    // All defaults
+    io.println(4, string(add()));             // "0"
+
+    // Positional override
+    io.println(5, string(add(5)));            // "5"
+
+    // Named single arg
+    io.println(6, string(add(b: 3)));         // "3"
+
+    // Named args, reordered
+    io.println(7, string(add(b: 3, a: 7)));   // "10"
+
+    // Named args with required + defaulted
+    io.println(8, draw(10, 20));              // "red"
+
+    // All named
+    io.println(9, draw(x: 1, y: 2));         // "red"
+
+    // Named reordered
+    io.println(10, draw(y: 5, x: 3, color: "blue")); // "blue"
+
+    // Positional + named at end
+    io.println(11, draw(4, 5, color: "green")); // "green"
+
+    // Named reorder for sub
+    io.println(12, string(sub(b: 2, a: 20))); // "18"
+
+    // Named for sub with default
+    io.println(13, string(sub(a: 7)));        // "2" (7-5)
+
+    return 0;
+}

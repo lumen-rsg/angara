@@ -102,6 +102,8 @@ module.exports = grammar({
     parameter: ($) => seq(
       field("name", $.identifier),
       optional(seq("as", field("type", $._type))),
+      // LANG-11: default argument value
+      optional(seq("=", field("default_value", $._expression))),
       optional($.variadic),
     ),
 
@@ -394,8 +396,18 @@ module.exports = grammar({
 
     arguments: ($) => seq(
       "(",
-      optional(commaSep1(alias($._expression, $.argument))),
+      optional(commaSep1(choice(
+        alias($.named_argument, $.argument),
+        alias($._expression, $.argument),
+      ))),
       ")",
+    ),
+
+    // LANG-11: named argument at call site (name: value)
+    named_argument: ($) => seq(
+      field("name", $.identifier),
+      ":",
+      field("value", $._expression),
     ),
 
     _expression: ($) => $.binary_expression,
@@ -537,6 +549,8 @@ module.exports = grammar({
     lambda_parameter: ($) => seq(
       field("name", $.identifier),
       optional(seq("as", field("type", $._type))),
+      // LANG-11: default argument value
+      optional(seq("=", field("default_value", $._expression))),
     ),
 
     list_literal: ($) => seq(

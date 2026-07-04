@@ -24,6 +24,33 @@ namespace angara {
             }
         }
 
+        // LANG-11: store parameter names and default expressions.
+        if (!stmt.is_foreign && !stmt.is_intrinsic) {
+            std::string default_key = stmt.name.lexeme;
+            if (stmt.has_this && m_current_class) {
+                default_key = m_current_class->name + "." + stmt.name.lexeme;
+            }
+            // Store parameter names unconditionally.
+            {
+                std::vector<std::string> names;
+                names.reserve(stmt.params.size());
+                for (const auto& p : stmt.params) names.push_back(p.name.lexeme);
+                m_function_param_names[default_key] = std::move(names);
+            }
+            // Store raw default expressions (validated later in body check).
+            bool has_any_default = false;
+            for (const auto& p : stmt.params) {
+                if (p.default_value) { has_any_default = true; break; }
+            }
+            if (has_any_default) {
+                std::vector<std::shared_ptr<Expr>> defaults(stmt.params.size(), nullptr);
+                for (size_t i = 0; i < stmt.params.size(); ++i) {
+                    defaults[i] = stmt.params[i].default_value;
+                }
+                m_function_defaults[default_key] = std::move(defaults);
+            }
+        }
+
         // TS-1/C4: record this function's param-bounds (param index -> bound
         // TraitType) so call sites can box bounded args into trait objects.
         {
@@ -156,6 +183,36 @@ namespace angara {
 
         for (size_t i = 0; i < stmt->params.size(); ++i) {
             m_symbols.declare(stmt->params[i].name, func_type->param_types[i], true);
+        }
+
+        // LANG-11: validate default argument types.
+        {
+            std::string default_key = stmt->name.lexeme;
+            if (stmt->has_this && m_current_class) {
+                default_key = m_current_class->name + "." + stmt->name.lexeme;
+            }
+            auto def_it = m_function_defaults.find(default_key);
+            if (def_it != m_function_defaults.end()) {
+                for (size_t i = 0; i < stmt->params.size() && i < def_it->second.size(); ++i) {
+                    if (def_it->second[i]) {
+                        def_it->second[i]->accept(*this);
+                        auto default_type = popType();
+                        if (!m_hadError && default_type &&
+                            default_type->kind != TypeKind::ERROR &&
+                            i < func_type->param_types.size()) {
+                            if (!check_type_compatibility(func_type->param_types[i], default_type,
+                                    std::dynamic_pointer_cast<const Literal>(def_it->second[i]).get())) {
+                                error(stmt->params[i].name,
+                                      "Default value type mismatch for parameter '" +
+                                      stmt->params[i].name.lexeme + "'. Expected '" +
+                                      displayType(*func_type->param_types[i], *default_type) +
+                                      "', but got '" + displayType(*default_type, *func_type->param_types[i]) + "'.",
+                                      "E410");
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         for (const auto& bodyStmt : (*stmt->body)) {

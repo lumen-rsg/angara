@@ -77,6 +77,8 @@ void Formatter::fmtParams(const std::vector<Parameter>& params, bool has_this) {
         first = false;
         m_out << p.name.lexeme;
         if (p.type) { m_out << " as "; fmtType(p.type); }
+        // LANG-11: print default argument value
+        if (p.default_value) { m_out << " = " << fmtExpr(p.default_value); }
         if (p.is_variadic) m_out << "...";
     }
     m_out << ")";
@@ -403,7 +405,15 @@ std::any Formatter::visit(const UpdateExpr& expr) {
 std::any Formatter::visit(const CallExpr& expr) {
     std::string r = fmtExpr(expr.callee) + "(";
     bool first = true;
-    for (auto& a : expr.arguments) { if (!first) r += ", "; first = false; r += fmtExpr(a); }
+    for (size_t i = 0; i < expr.arguments.size(); ++i) {
+        if (!first) r += ", ";
+        first = false;
+        // LANG-11: print named argument label if present
+        if (i < expr.arg_names.size() && expr.arg_names[i].has_value()) {
+            r += expr.arg_names[i]->lexeme + ": ";
+        }
+        r += fmtExpr(expr.arguments[i]);
+    }
     return r + ")";
 }
 
@@ -501,12 +511,15 @@ std::any Formatter::visit(const LambdaExpr& expr) {
         if (!first) r += ", "; first = false;
         r += expr.param_names[i].lexeme;
         if (i < expr.param_types.size()) {
-            std::ostringstream tmp;
             std::ostringstream saved;
             std::swap(m_out, saved);
             fmtType(expr.param_types[i]);
             r += " as " + m_out.str();
             std::swap(m_out, saved);
+        }
+        // LANG-11: print lambda default value
+        if (i < expr.param_defaults.size() && expr.param_defaults[i]) {
+            r += " = " + fmtExpr(expr.param_defaults[i]);
         }
     }
     r += ")";

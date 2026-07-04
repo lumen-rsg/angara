@@ -216,7 +216,14 @@ void Chaperone::analyzeExpr(Context& ctx,
     // based on the callee's interprocedural summary.
     if (auto* call = dynamic_cast<const CallExpr*>(expr.get())) {
         analyzeExpr(ctx, call->callee, state);
-        for (const auto& arg : call->arguments)
+
+        // LANG-11: use resolved (reordered + defaults-filled) args when available.
+        const auto& resolved_all = ctx.tc.getResolvedArgs();
+        auto rit = resolved_all.find(call);
+        const auto& effective_args = (rit != resolved_all.end())
+                                     ? rit->second : call->arguments;
+
+        for (const auto& arg : effective_args)
             analyzeExpr(ctx, arg, state);
 
         // Interprocedural: determine the callee name.
@@ -244,10 +251,10 @@ void Chaperone::analyzeExpr(Context& ctx,
             // direct index is correct for any arity — no more "single tracked
             // param" shortcut or blanket-Escape fallback.
             const auto& summary = sum_it->second;
-            for (size_t i = 0; i < call->arguments.size() && i < summary.size(); i++) {
+            for (size_t i = 0; i < effective_args.size() && i < summary.size(); i++) {
                 auto behavior = summary[i];
                 if (behavior == ParamBehavior::Borrowed) continue;  // stays Live
-                auto* arg = call->arguments[i].get();
+                auto* arg = effective_args[i].get();
                 if (auto* ve3 = dynamic_cast<const VarExpr*>(arg)) {
                     auto st_it = state.find(ve3->name.lexeme);
                     if (st_it != state.end() && st_it->second == State::Live) {

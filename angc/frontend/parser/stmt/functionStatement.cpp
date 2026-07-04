@@ -27,7 +27,13 @@ namespace angara {
                     std::shared_ptr<ASTType> param_type = type();
                     bool is_variadic = match({TokenType::DOT_DOT_DOT});
 
-                    parameters.push_back({param_name, param_type, is_variadic});
+                    // LANG-11: parse default argument value
+                    std::shared_ptr<Expr> default_value = nullptr;
+                    if (match({TokenType::EQUAL})) {
+                        default_value = expression();
+                    }
+
+                    parameters.push_back({param_name, param_type, is_variadic, default_value});
 
                     if (is_variadic && !check(TokenType::RIGHT_PAREN)) {
                         throw error(peek(), "Variadic parameter '...' must be the last parameter — no further parameters are allowed after it.", "E192");

@@ -70,6 +70,8 @@ namespace angara {
         Token name;
         std::shared_ptr<ASTType> type;
         bool is_variadic = false;
+        // LANG-11: default argument value (nullptr = required, no default)
+        std::shared_ptr<Expr> default_value;
     };
 
     struct ClassMember {

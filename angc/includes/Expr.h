@@ -158,14 +158,18 @@ namespace angara {
 
 // Represents a function call expression: "callee(arguments)"
     struct CallExpr : Expr {
-        CallExpr(std::shared_ptr<Expr> callee, Token paren, std::vector<std::shared_ptr<Expr>> arguments)
-                : callee(std::move(callee)), paren(std::move(paren)), arguments(std::move(arguments)) {}
+        CallExpr(std::shared_ptr<Expr> callee, Token paren, std::vector<std::shared_ptr<Expr>> arguments,
+                 std::vector<std::optional<Token>> arg_names = {})
+                : callee(std::move(callee)), paren(std::move(paren)),
+                  arguments(std::move(arguments)), arg_names(std::move(arg_names)) {}
 
         std::any accept(ExprVisitor &visitor) const override { return visitor.visit(*this); }
 
         const std::shared_ptr<Expr> callee;
         const Token paren; // The '(' token, useful for error reporting
         const std::vector<std::shared_ptr<Expr>> arguments;
+        // LANG-11: per-argument name (nullopt = positional, Token = named arg)
+        const std::vector<std::optional<Token>> arg_names;
     };
 
 
@@ -346,17 +350,21 @@ namespace angara {
         const Token keyword;                           // The 'func' token
         const std::vector<std::shared_ptr<ASTType>> param_types;  // Parameter type annotations
         const std::vector<Token> param_names;          // Parameter name tokens
+        // LANG-11: default values for lambda parameters (nullptr = required)
+        const std::vector<std::shared_ptr<Expr>> param_defaults;
         const std::shared_ptr<ASTType> returnType;     // Optional return type annotation
         const std::vector<std::shared_ptr<Stmt>> body; // Lambda body statements
 
         LambdaExpr(Token keyword,
                    std::vector<Token> param_names,
                    std::vector<std::shared_ptr<ASTType>> param_types,
+                   std::vector<std::shared_ptr<Expr>> param_defaults,
                    std::shared_ptr<ASTType> returnType,
                    std::vector<std::shared_ptr<Stmt>> body)
             : keyword(std::move(keyword)),
               param_types(std::move(param_types)),
               param_names(std::move(param_names)),
+              param_defaults(std::move(param_defaults)),
               returnType(std::move(returnType)),
               body(std::move(body)) {}
 

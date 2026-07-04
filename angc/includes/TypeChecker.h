@@ -71,6 +71,9 @@ namespace angara {
         /// TS-1/C4: arg indices to box into trait objects at a generic-fn call.
         [[nodiscard]] const std::map<const CallExpr*, std::vector<std::pair<size_t, std::shared_ptr<TraitType>>>>& getGenericBoxedArgs() const { return m_generic_boxed_args; }
 
+        // LANG-11: resolved (reordered + defaults-filled) call args, keyed by CallExpr.
+        [[nodiscard]] const std::map<const CallExpr*, std::vector<std::shared_ptr<Expr>>>& getResolvedArgs() const { return m_resolved_args; }
+
         /// Returns the set of native symbols used from imported modules.
         [[nodiscard]] const std::set<UsedNativeSymbol>& getUsedNativeSymbols() const { return m_used_native_symbols; }
 
@@ -198,8 +201,20 @@ namespace angara {
         void check_spawn_call(const CallExpr &call, const std::vector<std::shared_ptr<Type>> &arg_types);
 
         /// Validates a standard function/method call against its signature (arity + argument types).
+        /// @param arg_exprs  Optional: resolved argument expressions (LANG-11 defaults).
+        ///                   When provided, used instead of call.arguments for literal narrowing.
         void check_function_call(const CallExpr &call, const std::shared_ptr<FunctionType> &func_type,
-                                 const std::vector<std::shared_ptr<Type>> &arg_types);
+                                 const std::vector<std::shared_ptr<Type>> &arg_types,
+                                 const std::vector<std::shared_ptr<Expr>>* arg_exprs = nullptr);
+
+        // LANG-11: resolve named arguments + fill defaults. Returns a vector of
+        // expressions in parameter order (size == param_count). Missing args that
+        // have defaults are filled; missing required args return nullptr (caller
+        // reports the error via existing arity checks).
+        std::vector<std::shared_ptr<Expr>> resolveCallArgs(
+            const CallExpr& call,
+            const std::string& callee_key,
+            size_t param_count);
 
         /// Resolves a variable reference, applying type narrowing from `if is` checks if applicable.
         std::shared_ptr<Symbol> resolve_and_narrow(const VarExpr &expr);
@@ -269,6 +284,14 @@ namespace angara {
         // call sites can determine which args to box without a Symbol->FuncStmt
         // back-reference.
         std::map<std::string, std::map<size_t, std::shared_ptr<TraitType>>> m_function_bounds;
+
+        // LANG-11: function_name -> vector of default expressions indexed by param position.
+        // nullptr entries mean no default for that parameter.
+        std::map<std::string, std::vector<std::shared_ptr<Expr>>> m_function_defaults;
+        // LANG-11: function_name -> parameter names (for named argument resolution).
+        std::map<std::string, std::vector<std::string>> m_function_param_names;
+        // LANG-11: resolved (reordered + defaults-filled) args per call site.
+        std::map<const CallExpr*, std::vector<std::shared_ptr<Expr>>> m_resolved_args;
 
         // --- Mapped state (populated during type checking, read by backend) ---
 

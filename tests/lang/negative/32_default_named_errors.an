@@ -1,0 +1,32 @@
+attach io;
+
+// E410: Default value type mismatch
+func bad_default(a as i64 = "hello") -> i64 {
+    return a;
+}
+
+// E411: Named argument does not match any parameter name
+func named_mismatch(x as i64, y as i64) -> i64 {
+    return x + y;
+}
+
+// E412: Duplicate named argument
+func dup_call(a as i64, b as i64) -> i64 {
+    return a + b;
+}
+
+// E413: Positional after named should fail at parse time
+// This function won't be reached — the parsing error happens at the call site below.
+
+export func main() -> i64 {
+    // E411: unknown parameter name
+    let r1 = named_mismatch(z: 5, y: 3);
+
+    // E412: duplicate named arg
+    let r2 = dup_call(a: 1, a: 2);
+
+    // E413: positional after named — parse error
+    let r3 = named_mismatch(x: 1, 2);
+
+    return 0;
+}

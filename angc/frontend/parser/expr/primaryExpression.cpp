@@ -124,6 +124,7 @@ namespace angara {
 
         std::vector<Token> param_names;
         std::vector<std::shared_ptr<ASTType>> param_types;
+        std::vector<std::shared_ptr<Expr>> param_defaults;  // LANG-11
 
         if (!check(TokenType::RIGHT_PAREN)) {
             do {
@@ -132,8 +133,14 @@ namespace angara {
                 if (match({TokenType::AS})) {
                     param_type = type();
                 }
+                // LANG-11: parse default argument value
+                std::shared_ptr<Expr> default_value = nullptr;
+                if (match({TokenType::EQUAL})) {
+                    default_value = expression();
+                }
                 param_names.push_back(std::move(param_name));
                 param_types.push_back(std::move(param_type));
+                param_defaults.push_back(std::move(default_value));
             } while (match({TokenType::COMMA}));
         }
 
@@ -148,8 +155,9 @@ namespace angara {
         auto body = block();
 
         return std::make_shared<LambdaExpr>(keyword, std::move(param_names),
-                                            std::move(param_types), returnType,
-                                            std::move(body));
+                                            std::move(param_types),
+                                            std::move(param_defaults),
+                                            returnType, std::move(body));
     }
 
 }

@@ -728,11 +728,18 @@ llvm::Value* LLVMBackend::cgUpdate(const UpdateExpr& e) {
 llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
     if (!expr.callee) return makeNil();
 
+    // LANG-11: helper to get resolved call args (reordered + defaults-filled).
+    auto getArgs = [&](const CallExpr& call) -> const std::vector<std::shared_ptr<Expr>>& {
+        const auto& resolved = m_type_checker.getResolvedArgs();
+        auto it = resolved.find(&call);
+        return (it != resolved.end()) ? it->second : call.arguments;
+    };
+
     // Handle immediate lambda invocation: (func(...) -> T { ... })(args)
     if (dynamic_cast<const LambdaExpr*>(expr.callee.get())) {
         auto* callee = cg(expr.callee);
         std::vector<llvm::Value*> llvmArgs;
-        for (auto& a : expr.arguments) llvmArgs.push_back(cg(a));
+        for (auto& a : getArgs(expr)) llvmArgs.push_back(cg(a));
         return cgClosureCall(callee, llvmArgs);
     }
 
@@ -745,7 +752,7 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                 if (mf) {
                     std::vector<llvm::Value*> args;
                     args.push_back(loadVar("this"));
-                    for (auto& a : expr.arguments) args.push_back(cg(a));
+                    for (auto& a : getArgs(expr)) args.push_back(cg(a));
                     auto* ft = mf->getFunctionType();
                     while (args.size() < ft->getNumParams()) args.push_back(makeNil());
                     return builder->CreateCall(mf, args);
@@ -769,7 +776,7 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                             if (mf) {
                                 std::vector<llvm::Value*> args;
                                 args.push_back(loadVar("this"));
-                                for (auto& a : expr.arguments) args.push_back(cg(a));
+                                for (auto& a : getArgs(expr)) args.push_back(cg(a));
                                 auto* ft = mf->getFunctionType();
                                 while (args.size() < ft->getNumParams()) args.push_back(makeNil());
                                 return builder->CreateCall(mf, args);
@@ -786,7 +793,7 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                 if (mf) {
                     std::vector<llvm::Value*> args;
                     args.push_back(loadVar("this"));
-                    for (auto& a : expr.arguments) args.push_back(cg(a));
+                    for (auto& a : getArgs(expr)) args.push_back(cg(a));
                     auto* ft = mf->getFunctionType();
                     while (args.size() < ft->getNumParams()) args.push_back(makeNil());
                     return builder->CreateCall(mf, args);
@@ -827,13 +834,13 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                         auto* slot_ptr = builder->CreateGEP(llvm::PointerType::get(*ctx, 0), vtable_ptr,
                             {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), slot_it->second)}, "slot");
                         auto* fn_ptr = builder->CreateLoad(llvm::PointerType::get(*ctx, 0), slot_ptr, "mfn");
-                        std::vector<llvm::Type*> param_tys(expr.arguments.size() + 1, objType);
+                        std::vector<llvm::Type*> param_tys(getArgs(expr).size() + 1, objType);
                         auto* mfn_ty = llvm::FunctionType::get(objType, param_tys, false);
                         auto* embedded_recv = builder->CreateLoad(objType,
                             builder->CreateStructGEP(rt->getTraitObjectType(), to_ptr, 1), "to_recv");
                         std::vector<llvm::Value*> args;
                         args.push_back(embedded_recv);
-                        for (auto& a : expr.arguments) args.push_back(cg(a));
+                        for (auto& a : getArgs(expr)) args.push_back(cg(a));
                         return builder->CreateCall(mfn_ty, fn_ptr, args);
                     }
                 }
@@ -879,7 +886,7 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                             {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), slot_it->second)}, "slot");
                         auto* fn_ptr = builder->CreateLoad(llvm::PointerType::get(*ctx, 0), slot_ptr, "mfn");
                         // Build the method signature: (obj, obj...) -> obj.
-                        std::vector<llvm::Type*> param_tys(expr.arguments.size() + 1, objType);
+                        std::vector<llvm::Type*> param_tys(getArgs(expr).size() + 1, objType);
                         auto* mfn_ty = llvm::FunctionType::get(objType, param_tys, false);
                         // The receiver passed to the method is the concrete
                         // instance embedded in the trait object (field 1), so
@@ -888,7 +895,7 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                             builder->CreateStructGEP(rt->getTraitObjectType(), to_ptr, 1), "to_recv");
                         std::vector<llvm::Value*> args;
                         args.push_back(embedded_recv);
-                        for (auto& a : expr.arguments) args.push_back(cg(a));
+                        for (auto& a : getArgs(expr)) args.push_back(cg(a));
                         return builder->CreateCall(mfn_ty, fn_ptr, args);
                     }
                 }
@@ -958,7 +965,7 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                     if (mf) {
                         std::vector<llvm::Value*> args;
                         args.push_back(loadVar(modName));
-                        for (auto& a : expr.arguments) args.push_back(cg(a));
+                        for (auto& a : getArgs(expr)) args.push_back(cg(a));
                         auto* ft = mf->getFunctionType();
                         while (args.size() < ft->getNumParams()) args.push_back(makeNil());
                         return builder->CreateCall(mf, args);
@@ -986,7 +993,7 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                     llvm::Function* ctor_fn = this->mod->getFunction(cit->second);
                     if (ctor_fn) {
                         std::vector<llvm::Value*> args;
-                        for (auto& a : expr.arguments) args.push_back(cg(a));
+                        for (auto& a : getArgs(expr)) args.push_back(cg(a));
                         auto* ft = ctor_fn->getFunctionType();
                         while (args.size() < ft->getNumParams()) args.push_back(makeNil());
                         return builder->CreateCall(ctor_fn, args);
@@ -997,18 +1004,18 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             if (is_var) {
                 auto* varObj = loadVar(modName);
                 if (fnName == "push" || fnName == "add") {
-                    if (!expr.arguments.empty())
-                        return callRtByName("__ang_list_push", {varObj, cg(expr.arguments[0])});
+                    if (!getArgs(expr).empty())
+                        return callRtByName("__ang_list_push", {varObj, cg(getArgs(expr)[0])});
                     return makeNil();
                 }
                 if (fnName == "get" || fnName == "at") {
-                    if (!expr.arguments.empty())
-                        return callRtByName("__ang_list_get", {varObj, cg(expr.arguments[0])});
+                    if (!getArgs(expr).empty())
+                        return callRtByName("__ang_list_get", {varObj, cg(getArgs(expr)[0])});
                     return makeNil();
                 }
                 if (fnName == "set") {
-                    if (expr.arguments.size() >= 2)
-                        return callRtByName("__ang_list_set", {varObj, cg(expr.arguments[0]), cg(expr.arguments[1])});
+                    if (getArgs(expr).size() >= 2)
+                        return callRtByName("__ang_list_set", {varObj, cg(getArgs(expr)[0]), cg(getArgs(expr)[1])});
                     return makeNil();
                 }
                 if (fnName == "length" || fnName == "len" || fnName == "size" || fnName == "count") {
@@ -1029,22 +1036,22 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                     return callRtByName("__ang_deep_clone", {varObj});
                 }
                 if (fnName == "remove_at") {
-                    if (!expr.arguments.empty())
-                        return callRtByName("__ang_list_remove_at", {varObj, cg(expr.arguments[0])});
+                    if (!getArgs(expr).empty())
+                        return callRtByName("__ang_list_remove_at", {varObj, cg(getArgs(expr)[0])});
                     return makeNil();
                 }
                 if (fnName == "remove") {
-                    if (!expr.arguments.empty()) {
+                    if (!getArgs(expr).empty()) {
                         auto ntype_it = namedTypes.find(sanitize(modName));
                         if (ntype_it != namedTypes.end() && ntype_it->second->kind == TypeKind::RECORD) {
-                            auto* key_obj = cg(expr.arguments[0]);
+                            auto* key_obj = cg(getArgs(expr)[0]);
                             auto* fn_as_cstr = this->mod->getFunction("__ang_api_as_cstr");
                             if (fn_as_cstr) {
                                 auto* key_cstr = builder->CreateCall(fn_as_cstr, {key_obj});
                                 return callRtByName("__ang_record_remove", {varObj, key_cstr});
                             }
                         } else {
-                            return callRtByName("__ang_list_remove", {varObj, cg(expr.arguments[0])});
+                            return callRtByName("__ang_list_remove", {varObj, cg(getArgs(expr)[0])});
                         }
                     }
                     return makeNil();
@@ -1055,22 +1062,22 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             }
             if (modName=="io") {
                 if (fnName=="println"||fnName=="print") {
-                    if (expr.arguments.size() >= 2) {
-                        if (fnName=="println") callRtByName("__ang_io_println", {cg(expr.arguments[0]), cg(expr.arguments[1])});
-                        else callRtByName("__ang_io_print", {cg(expr.arguments[0]), cg(expr.arguments[1])});
-                    } else if (!expr.arguments.empty()) {
-                        if (fnName=="println") callRtByName("__ang_io_println", {cg(expr.arguments[0])});
-                        else callRtByName("__ang_io_print", {cg(expr.arguments[0])});
+                    if (getArgs(expr).size() >= 2) {
+                        if (fnName=="println") callRtByName("__ang_io_println", {cg(getArgs(expr)[0]), cg(getArgs(expr)[1])});
+                        else callRtByName("__ang_io_print", {cg(getArgs(expr)[0]), cg(getArgs(expr)[1])});
+                    } else if (!getArgs(expr).empty()) {
+                        if (fnName=="println") callRtByName("__ang_io_println", {cg(getArgs(expr)[0])});
+                        else callRtByName("__ang_io_print", {cg(getArgs(expr)[0])});
                     }
                     return makeNil();
                 }
                 if (fnName=="write") {
-                    if (expr.arguments.size() >= 2)
-                        callRtByName("__ang_io_write", {cg(expr.arguments[0]), cg(expr.arguments[1])});
+                    if (getArgs(expr).size() >= 2)
+                        callRtByName("__ang_io_write", {cg(getArgs(expr)[0]), cg(getArgs(expr)[1])});
                     return makeNil();
                 }
                 if (fnName=="flush") {
-                    if (!expr.arguments.empty()) callRtByName("__ang_io_flush", {cg(expr.arguments[0])});
+                    if (!getArgs(expr).empty()) callRtByName("__ang_io_flush", {cg(getArgs(expr)[0])});
                     return makeNil();
                 }
                 if (fnName=="read_line") return callRtByName("__ang_io_read_line", {});
@@ -1079,9 +1086,9 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             // Check for variadic foreign function
             auto vfit = m_variadic_foreign_funcs.find(fnName);
             if (vfit != m_variadic_foreign_funcs.end()) {
-                return callVariadicForeignFn(fnName, vfit->second, expr.arguments);
+                return callVariadicForeignFn(fnName, vfit->second, getArgs(expr));
             }
-            return callModuleFn(modName, fnName, expr.arguments);
+            return callModuleFn(modName, fnName, getArgs(expr));
         }
         // Handle chained property access on arbitrary expressions:
         // e.g., this.mtx.lock(), this.mtx.unlock(), some_expr.join()
@@ -1113,7 +1120,7 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             if (super_fn) {
                 std::vector<llvm::Value*> args;
                 args.push_back(loadVar("this"));
-                for (auto& a : expr.arguments) args.push_back(cg(a));
+                for (auto& a : getArgs(expr)) args.push_back(cg(a));
                 auto* ft = super_fn->getFunctionType();
                 while (args.size() < ft->getNumParams()) args.push_back(makeNil());
                 return builder->CreateCall(super_fn, args);
@@ -1126,8 +1133,8 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         std::string fn = var->name.lexeme;
 
         if (fn == "peek8" || fn == "peek16" || fn == "peek32" || fn == "peek64") {
-            if (!expr.arguments.empty()) {
-                auto* addr = getI64(cg(expr.arguments[0]));
+            if (!getArgs(expr).empty()) {
+                auto* addr = getI64(cg(getArgs(expr)[0]));
                 auto* ptr = builder->CreateIntToPtr(addr, llvm::PointerType::get(*ctx, 0));
                 llvm::Type* loadTy = (fn == "peek8")  ? llvm::Type::getInt8Ty(*ctx)
                                    : (fn == "peek16") ? llvm::Type::getInt16Ty(*ctx)
@@ -1140,9 +1147,9 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             return makeI64((int64_t)0);
         }
         if (fn == "poke8" || fn == "poke16" || fn == "poke32" || fn == "poke64") {
-            if (expr.arguments.size() >= 2) {
-                auto* addr = getI64(cg(expr.arguments[0]));
-                auto* val  = getI64(cg(expr.arguments[1]));
+            if (getArgs(expr).size() >= 2) {
+                auto* addr = getI64(cg(getArgs(expr)[0]));
+                auto* val  = getI64(cg(getArgs(expr)[1]));
                 auto* ptr = builder->CreateIntToPtr(addr, llvm::PointerType::get(*ctx, 0));
                 llvm::Type* storeTy = (fn == "poke8")  ? llvm::Type::getInt8Ty(*ctx)
                                     : (fn == "poke16") ? llvm::Type::getInt16Ty(*ctx)
@@ -1171,46 +1178,46 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         }
         // TS-2: builtin hash(x) -> i64. Hashes any value via __ang_obj_hash.
         if (fn == "hash") {
-            if (!expr.arguments.empty()) {
-                return makeI64(callRtByName("__ang_obj_hash", {cg(expr.arguments[0])}));
+            if (!getArgs(expr).empty()) {
+                return makeI64(callRtByName("__ang_obj_hash", {cg(getArgs(expr)[0])}));
             }
             return makeI64((int64_t)0);
         }
 
         if (fn=="string") {
             // LANG-4: type-aware — a char argument renders as the glyph.
-            if (!expr.arguments.empty()) return toStrTyped(expr.arguments[0]);
+            if (!getArgs(expr).empty()) return toStrTyped(getArgs(expr)[0]);
             return makeStr("");
         }
         if (fn=="char") {
             // LANG-4: char(x) — at runtime char is a TAG_I64 integer, so the
             // conversion is just the integer coercion __ang_to_i64 wrapped back
             // into the boxed value (the type checker records the char type).
-            if (!expr.arguments.empty()) return callRtByName("__ang_to_i64",{cg(expr.arguments[0])});
+            if (!getArgs(expr).empty()) return callRtByName("__ang_to_i64",{cg(getArgs(expr)[0])});
             return makeI64((int64_t)0);
         }
         if (fn=="i64" || fn=="int") {
-            if (!expr.arguments.empty()) return callRtByName("__ang_to_i64",{cg(expr.arguments[0])});
+            if (!getArgs(expr).empty()) return callRtByName("__ang_to_i64",{cg(getArgs(expr)[0])});
             return makeI64((int64_t)0);
         }
         if (fn=="f64" || fn=="float") {
-            if (!expr.arguments.empty()) return callRtByName("__ang_to_f64",{cg(expr.arguments[0])});
+            if (!getArgs(expr).empty()) return callRtByName("__ang_to_f64",{cg(getArgs(expr)[0])});
             return makeF64(0.0);
         }
         if (fn=="bool") {
-            if (!expr.arguments.empty()) return callRtByName("__ang_to_bool",{cg(expr.arguments[0])});
+            if (!getArgs(expr).empty()) return callRtByName("__ang_to_bool",{cg(getArgs(expr)[0])});
             return makeBool(false);
         }
 
         // Global println/print — rewrite to __ang_io_println/__ang_io_print with stdout
         if (fn=="println" || fn=="print") {
             const char* rt = (fn=="println") ? "__ang_io_println" : "__ang_io_print";
-            if (!expr.arguments.empty()) {
+            if (!getArgs(expr).empty()) {
                 // Build a string by concatenating all arguments. LANG-4: each
                 // arg is converted type-aware (char args render as glyphs).
                 auto* concat_fn = this->mod->getFunction("__ang_string_concat");
                 llvm::Value* result = nullptr;
-                for (auto& a : expr.arguments) {
+                for (auto& a : getArgs(expr)) {
                     auto* str_val = toStrTyped(a);
                     if (!result) {
                         result = str_val;
@@ -1236,14 +1243,14 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             if (is_callable) {
                 auto* callee = loadVar(fn);
                 std::vector<llvm::Value*> llvmArgs;
-                for (auto& a : expr.arguments) llvmArgs.push_back(cg(a));
+                for (auto& a : getArgs(expr)) llvmArgs.push_back(cg(a));
                 return cgClosureCall(callee, llvmArgs);
             }
         }
 
         if (fn == "Exception") {
             std::vector<llvm::Value*> args;
-            for (auto& a : expr.arguments) args.push_back(cg(a));
+            for (auto& a : getArgs(expr)) args.push_back(cg(a));
             if (args.empty()) args.push_back(makeNil());
             return callRtByName("__ang_exception_new", args);
         }
@@ -1253,9 +1260,9 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         }
 
         if (fn == "spawn") {
-            if (!expr.arguments.empty()) {
-                auto* closure = cg(expr.arguments[0]);
-                int n_args = (int)expr.arguments.size() - 1;
+            if (!getArgs(expr).empty()) {
+                auto* closure = cg(getArgs(expr)[0]);
+                int n_args = (int)getArgs(expr).size() - 1;
                 if (n_args > 0) {
                     // Allocate heap array for the extra arguments
                     auto* malloc_fn = this->mod->getFunction("malloc");
@@ -1267,7 +1274,7 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                         auto* elem_ptr = builder->CreateGEP(arr_type, args_mem,
                             {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
                              llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
-                        builder->CreateStore(cg(expr.arguments[i + 1]), elem_ptr);
+                        builder->CreateStore(cg(getArgs(expr)[i + 1]), elem_ptr);
                     }
                     return callRtByName("__ang_spawn_thread", {
                         closure,
@@ -1289,7 +1296,7 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             llvm::Function* ctor = this->mod->getFunction(cit->second);
             if (ctor) {
                 std::vector<llvm::Value*> args;
-                for (auto& a : expr.arguments) args.push_back(cg(a));
+                for (auto& a : getArgs(expr)) args.push_back(cg(a));
                 auto* ft = ctor->getFunctionType();
                 while (args.size() < ft->getNumParams()) args.push_back(makeNil());
                 return builder->CreateCall(ctor, args);
@@ -1298,7 +1305,7 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         // Check for variadic foreign function
         auto vfit = m_variadic_foreign_funcs.find(fn);
         if (vfit != m_variadic_foreign_funcs.end()) {
-            return callVariadicForeignFn(fn, vfit->second, expr.arguments);
+            return callVariadicForeignFn(fn, vfit->second, getArgs(expr));
         }
         // TS-1: gather param types so callModuleFn can box trait/contract args.
         const std::vector<std::shared_ptr<Type>>* param_types = nullptr;
@@ -1311,7 +1318,7 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         const std::vector<std::pair<size_t, std::shared_ptr<TraitType>>>* boxed_idx = nullptr;
         auto bit = m_type_checker.getGenericBoxedArgs().find(&expr);
         if (bit != m_type_checker.getGenericBoxedArgs().end()) boxed_idx = &bit->second;
-        return callModuleFn(moduleName, fn, expr.arguments, param_types, boxed_idx);
+        return callModuleFn(moduleName, fn, getArgs(expr), param_types, boxed_idx);
     }
     return makeNil();
 }
