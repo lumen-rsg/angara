@@ -189,3 +189,27 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 ---
 
 *To regenerate or extend this audit: the underlying analysis came from six parallel deep-dive passes (GC, type system, codegen/runtime, modules/stdlib, toolchain, frontend) against `build/angc` (LLVM 22.1.7). Empirically verified items were reproduced by compiling and running small programs.*
+
+---
+
+## LANG-7 deferrals (2026-07-05)
+
+- **Nested patterns** — `case Ok(Some(v)):` where a constructor pattern's argument
+  is itself a pattern. Requires a dedicated `Pattern` AST node hierarchy (currently
+  patterns are plain `Expr` nodes, which can't express nesting). The `MatchCase`
+  struct would need `patterns` to hold `Pattern*` instead of `Expr*`, with a
+  visitor for type-checking and codegen dispatch.
+
+- **Or-patterns with per-alternative bindings** — `case Foo(a, b) | Bar(c, d):`
+  where each alternative in the or-group carries its own variable list. Syntax
+  is parsed but the type checker does not yet verify that all alternatives bind
+  the same names with the same types (today only the first alternative's bindings
+  are used). Full support requires per-pattern variable vectors in `MatchCase`
+  and a cross-alternative compatibility check.
+
+- **Pre-existing string-interning bug (unrelated to LANG-7)** — When the same
+  variable name is reused across match expressions (or `let` declarations) and
+  string concatenation (`+`) appears in the match body, results accumulate across
+  expressions. Reproduced with plain `let` (no match), confirming the root cause
+  is in `makeStr`/`__ang_string_concat` or the namedVals alloca lifecycle, not
+  in the pattern-matching codegen. Tracked separately.
