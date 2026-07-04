@@ -49,7 +49,7 @@ export func main() -> i64 {
     io.println_auto(string('\u{E9}'));                     // é (U+00E9)
     io.println_auto(string('\u{20AC}'));                   // € (U+20AC)
     io.println_auto($"u{41} eq 65: {'\u{41}' == 65}");    // true
-    io.println_auto($"u{1F600} eq 128512: {'\u{1F600}' == 128512}"); // true
+    io.println_auto($"u{0x1F600} eq 128512: {'\u{1F600}' == 128512}"); // true
 
     // 7c. LANG-5: Unicode escapes in string literals.
     io.println_auto("\u{41}");                             // A

@@ -32,7 +32,8 @@ namespace angara {
         QUESTION_QUESTION, DOT_DOT, DOT_DOT_DOT, QUESTION_DOT,
 
         // Literals
-        IDENTIFIER, STRING, INTERP_STRING, NUMBER_INT, NUMBER_FLOAT, CHAR,
+        IDENTIFIER, STRING, INTERP_STRING, RAW_STRING, BYTE_STRING,
+        NUMBER_INT, NUMBER_FLOAT, CHAR,
 
         // Keywords
         LET, CONST, IF, ELSE, ORIF,
@@ -59,11 +60,19 @@ namespace angara {
 
     std::string to_string(const TokenType &type);
 
+    // LANG-6: numeric literal type suffixes (e.g., 42u8, 100i32).
+    enum class LiteralSuffix {
+        NONE,
+        I8, I16, I32, I64,
+        U8, U16, U32, U64,
+    };
+
     struct Token {
         TokenType type;
         std::string lexeme;
         int line{};
         int column{};
+        LiteralSuffix suffix = LiteralSuffix::NONE;  // LANG-6
 
         // --- NEW: Source Tracking ---
         // Using shared_ptr to avoid copying the filename string for every token.

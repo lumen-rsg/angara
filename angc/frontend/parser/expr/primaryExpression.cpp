@@ -4,6 +4,7 @@ namespace angara {
     std::shared_ptr<Expr> Parser::primary() {
         if (match({TokenType::FALSE, TokenType::TRUE, TokenType::NIL,
                    TokenType::NUMBER_INT, TokenType::NUMBER_FLOAT, TokenType::STRING,
+                   TokenType::RAW_STRING, TokenType::BYTE_STRING,  // LANG-6
                    TokenType::CHAR})) {  // LANG-4
             return std::make_shared<Literal>(previous());
         }

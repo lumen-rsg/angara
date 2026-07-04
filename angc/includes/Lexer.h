@@ -53,6 +53,14 @@ namespace angara {
         /// Scans a double-quoted string literal, handling escape sequences, and emits a STRING token.
         void string();
 
+        /// LANG-6: Scans a raw string literal (r"...") — no escape processing.
+        /// Emits a RAW_STRING token.
+        void rawString();
+
+        /// LANG-6: Scans a byte string literal (b"...") — escape sequences ARE
+        /// processed. Emits a BYTE_STRING token.
+        void byteString();
+
         /// LANG-4: Scans a single-quoted char literal ('a', '\n', '\x41'), decoding
         /// the same escape sequences as `string()`. Emits a CHAR token whose lexeme
         /// is the resolved code point as a decimal string (so cgLiteral can stoll it).
@@ -75,8 +83,9 @@ namespace angara {
         void lexEscape(char escaped, std::stringstream& out, TokenType diag_type,
                        uint32_t* out_cp = nullptr);
 
-        /// Scans a numeric literal (decimal, hex 0x, binary 0b) with optional underscore separators,
-        /// emitting either NUMBER_INT or NUMBER_FLOAT.
+        /// Scans a numeric literal (decimal, hex 0x, binary 0b, octal 0o) with
+        /// optional underscore separators, exponent notation, and type suffixes.
+        /// Emits NUMBER_INT or NUMBER_FLOAT.
         void number();
 
         /// Scans an identifier or keyword and emits the appropriate token type.

@@ -1,0 +1,21 @@
+// LANG-6: Negative tests — errors for invalid raw strings, octal, exponents, suffixes.
+attach io;
+
+export func main() -> i64 {
+    // ── 1. Raw string with newline ──
+    let bad_raw = r"hello
+world";                                    // E002: unterminated raw string
+
+    // ── 2. Bad octal ──
+    let bad_oct1 = 0o;                     // E019: expected octal digits after '0o'
+    let bad_oct2 = 0o89;                   // E019: expected octal digits (8 is not octal)
+
+    // ── 3. Bad exponent ──
+    let bad_exp = 1e;                      // E021: expected digits after exponent
+
+    // ── 4. Bad numeric suffix ──
+    let bad_sfx1 = 42xyz;                  // E023: invalid numeric suffix 'xyz'
+    let bad_sfx2 = 100u80;                 // E023: invalid numeric suffix 'u80'
+
+    return 0;
+}

@@ -61,6 +61,8 @@ namespace angara {
             case TokenType::IDENTIFIER: return "IDENTIFIER";
             case TokenType::STRING: return "STRING";
             case TokenType::INTERP_STRING: return "INTERP_STRING";
+            case TokenType::RAW_STRING: return "RAW_STRING";       // LANG-6
+            case TokenType::BYTE_STRING: return "BYTE_STRING";     // LANG-6
             case TokenType::NUMBER_INT: return "NUMBER_INT";
             case TokenType::NUMBER_FLOAT: return "NUMBER_FLOAT";
             case TokenType::CHAR: return "CHAR";

@@ -114,14 +114,29 @@ llvm::Value* LLVMBackend::cgLiteral(const Literal& e) {
     if (tok.type == TokenType::TRUE) return makeBool(true);
     if (tok.type == TokenType::FALSE) return makeBool(false);
     if (tok.type == TokenType::NUMBER_INT) {
-        try { return makeI64(std::stoll(tok.lexeme, nullptr, 0)); }
+        const auto& s = tok.lexeme;
+        int base = 0;          // 0 = auto-detect (0x → hex, 0 → octal, else decimal)
+        size_t offset = 0;     // characters to skip past the prefix
+        if (s.size() >= 2 && s[0] == '0') {
+            if (s[1] == 'b' || s[1] == 'B') { base = 2;  offset = 2; }
+            else if (s[1] == 'o' || s[1] == 'O') { base = 8;  offset = 2; }
+            // 0x is handled by base 0 (auto-detect)
+        }
+        try {
+            if (offset > 0)
+                return makeI64(std::stoll(s.substr(offset), nullptr, base));
+            else
+                return makeI64(std::stoll(s, nullptr, 0));
+        }
         catch (const std::exception&) { return makeI64(static_cast<int64_t>(0)); }
     }
     if (tok.type == TokenType::NUMBER_FLOAT) {
         try { return makeF64(std::stod(tok.lexeme)); }
         catch (const std::exception&) { return makeF64(0.0); }
     }
-    if (tok.type == TokenType::STRING) return makeStr(tok.lexeme);
+    if (tok.type == TokenType::STRING)      return makeStr(tok.lexeme);
+    if (tok.type == TokenType::RAW_STRING)  return makeStr(tok.lexeme);   // LANG-6
+    if (tok.type == TokenType::BYTE_STRING) return makeStr(tok.lexeme);   // LANG-6
     // LANG-4: char literal — the lexer stored the resolved code point as a
     // decimal string; emit it as a TAG_I64 integer (char IS a 32-bit int at
     // runtime, per the C/Java model).

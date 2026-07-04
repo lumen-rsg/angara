@@ -78,6 +78,10 @@ namespace angara {
         return c == '0' || c == '1';
     }
 
+    bool isOctalDigit(char c) {
+        return c >= '0' && c <= '7';
+    }
+
     bool isAlpha(char c) {
         return (c >= 'a' && c <= 'z') ||
                (c >= 'A' && c <= 'Z') ||
@@ -565,7 +569,84 @@ namespace angara {
         addToken(TokenType::STRING, value);
     }
 
+    // LANG-6: scans a raw string literal (r"..."). No escape processing —
+    // backslashes, quotes, and every other character are consumed literally.
+    // The only special character is the closing double-quote.
+    // (Like Python's r"...", a raw string cannot contain an unescaped ".)
+    void Lexer::rawString() {
+        std::string body;
+
+        while (peek() != '"' && !isAtEnd()) {
+            if (peek() == '\n') {
+                m_errorHandler.report(
+                    Token(TokenType::RAW_STRING, body, m_line, m_column, m_filename),
+                    "Unterminated raw string literal.", "E002"
+                );
+                return;
+            }
+            body += advance();
+        }
+
+        if (isAtEnd()) {
+            m_errorHandler.report(
+                Token(TokenType::RAW_STRING, body, m_line, m_column, m_filename),
+                "Unterminated raw string literal.", "E007"
+            );
+            return;
+        }
+
+        advance();  // consume closing "
+        addToken(TokenType::RAW_STRING, body);
+    }
+
+    // LANG-6: scans a byte string literal (b"..."). Escape sequences ARE
+    // processed (so b"\x00" works). For now, produces a STRING-type value.
+    // The b prefix is a syntactic marker — the token is BYTE_STRING, but the
+    // type checker treats it identically to STRING. In the future, if a `bytes`
+    // type is added, BYTE_STRING could produce it.
+    void Lexer::byteString() {
+        std::stringstream value;
+
+        while (peek() != '"' && !isAtEnd()) {
+            if (peek() == '\n') {
+                m_errorHandler.report(
+                    Token(TokenType::BYTE_STRING, "", m_line, m_column, m_filename),
+                    "Unterminated byte string literal.", "E002"
+                );
+                return;
+            }
+
+            char c = advance();
+
+            if (c == '\\') {
+                if (isAtEnd()) {
+                    m_errorHandler.report(
+                        Token(TokenType::BYTE_STRING, "", m_line, m_column, m_filename),
+                        "Unterminated byte string literal; ends with '\\'.", "E003"
+                    );
+                    return;
+                }
+                lexEscape(advance(), value, TokenType::BYTE_STRING);
+            } else {
+                value << c;
+            }
+        }
+
+        if (isAtEnd()) {
+            m_errorHandler.report(
+                Token(TokenType::BYTE_STRING, "", m_line, m_column, m_filename),
+                "Unterminated byte string literal.", "E007"
+            );
+            return;
+        }
+
+        advance();  // consume closing "
+        addToken(TokenType::BYTE_STRING, value.str());
+    }
+
     void Lexer::number() {
+        bool is_float = false;
+
         if (m_source[m_start] == '0') {
             char next = peek();
             if (next == 'x' || next == 'X') {
@@ -594,8 +675,7 @@ namespace angara {
                     advance();
                 }
 
-                addToken(TokenType::NUMBER_INT);
-                return;
+                goto suffix_check;
             }
 
             if (next == 'b' || next == 'B') {
@@ -624,11 +704,41 @@ namespace angara {
                     advance();
                 }
 
-                addToken(TokenType::NUMBER_INT);
-                return;
+                goto suffix_check;
+            }
+
+            // LANG-6: octal — 0o... / 0O...
+            if (next == 'o' || next == 'O') {
+                advance();
+
+                if (!isOctalDigit(peek())) {
+                    m_errorHandler.report(
+                        Token(TokenType::NUMBER_INT, "0o", m_line, m_column - 2, m_filename),
+                        "Expected octal digits (0-7) after '0o'.", "E019"
+                    );
+                    return;
+                }
+
+                while (isOctalDigit(peek()) || peek() == '_') {
+                    if (peek() == '_') {
+                        advance();
+                        if (!isOctalDigit(peek())) {
+                            m_errorHandler.report(
+                                Token(TokenType::NUMBER_INT, "_", m_line, m_column - 1, m_filename),
+                                "Numeric separator '_' must be followed by a digit.", "E020"
+                            );
+                            return;
+                        }
+                        continue;
+                    }
+                    advance();
+                }
+
+                goto suffix_check;
             }
         }
 
+        // Decimal integer part
         while (isDigit(peek()) || peek() == '_') {
             if (peek() == '_') {
                 advance();
@@ -644,7 +754,9 @@ namespace angara {
             advance();
         }
 
+        // Fractional part
         if (peek() == '.' && isDigit(peekNext())) {
+            is_float = true;
             advance();
             while (isDigit(peek()) || peek() == '_') {
                 if (peek() == '_') {
@@ -660,9 +772,97 @@ namespace angara {
                 }
                 advance();
             }
-            addToken(TokenType::NUMBER_FLOAT);
-        } else {
-            addToken(TokenType::NUMBER_INT);
+        }
+
+        // LANG-6: exponent — e/E [+-]? [0-9_]+
+        if (peek() == 'e' || peek() == 'E') {
+            is_float = true;
+            advance();  // consume 'e' or 'E'
+            if (peek() == '+' || peek() == '-') {
+                advance();  // consume sign
+            }
+            if (!isDigit(peek())) {
+                m_errorHandler.report(
+                    Token(TokenType::NUMBER_FLOAT,
+                          m_source.substr(m_start, m_current - m_start),
+                          m_line, m_column, m_filename),
+                    "Expected digits after exponent.", "E021"
+                );
+                return;
+            }
+            while (isDigit(peek()) || peek() == '_') {
+                if (peek() == '_') {
+                    advance();
+                    if (!isDigit(peek())) {
+                        m_errorHandler.report(
+                            Token(TokenType::NUMBER_FLOAT, "_", m_line, m_column - 1, m_filename),
+                            "Numeric separator '_' must be followed by a digit.", "E022"
+                        );
+                        return;
+                    }
+                    continue;
+                }
+                advance();
+            }
+        }
+
+    suffix_check:
+        // LANG-6: numeric type suffix (e.g., 42u8, 0xFFi32).
+        // Also strips underscore separators from the lexeme so codegen can
+        // parse the number directly (std::stoll / std::stod don't handle '_').
+        {
+            int number_end = m_current;
+            LiteralSuffix suffix = LiteralSuffix::NONE;
+
+            if (isAlpha(peek())) {
+                // Consume alphanumeric characters to form the candidate suffix.
+                std::string cand;
+                int suffix_start = m_current;
+                while (isAlphaNumeric(peek())) {
+                    cand += advance();
+                }
+
+                if (cand == "i8")        suffix = LiteralSuffix::I8;
+                else if (cand == "i16")  suffix = LiteralSuffix::I16;
+                else if (cand == "i32")  suffix = LiteralSuffix::I32;
+                else if (cand == "i64")  suffix = LiteralSuffix::I64;
+                else if (cand == "u8")   suffix = LiteralSuffix::U8;
+                else if (cand == "u16")  suffix = LiteralSuffix::U16;
+                else if (cand == "u32")  suffix = LiteralSuffix::U32;
+                else if (cand == "u64")  suffix = LiteralSuffix::U64;
+                else {
+                    // Invalid suffix — report error. The characters have already
+                    // been consumed (they won't appear as a separate token).
+                    m_errorHandler.report(
+                        Token(is_float ? TokenType::NUMBER_FLOAT : TokenType::NUMBER_INT,
+                              m_source.substr(m_start, m_current - m_start),
+                              m_line, m_column - static_cast<int>(m_current - suffix_start),
+                              m_filename),
+                        "Invalid numeric suffix '" + cand + "'.", "E023"
+                    );
+                }
+            }
+
+            // Build clean lexeme without underscore separators.
+            std::string raw_num = m_source.substr(m_start, number_end - m_start);
+            std::string clean_num;
+            clean_num.reserve(raw_num.size());
+            for (char ch : raw_num) {
+                if (ch != '_') clean_num += ch;
+            }
+            TokenType emit_type = is_float ? TokenType::NUMBER_FLOAT : TokenType::NUMBER_INT;
+
+            if (suffix != LiteralSuffix::NONE || number_end != m_current) {
+                // Suffix was found (valid or invalid).  Emit the numeric token
+                // with the clean number portion as the lexeme.
+                addToken(emit_type, clean_num);
+                if (suffix != LiteralSuffix::NONE) {
+                    m_tokens.back().suffix = suffix;
+                }
+            } else {
+                // No suffix — emit the token with clean lexeme.
+                addToken(emit_type, clean_num);
+            }
         }
     }
 
@@ -824,6 +1024,26 @@ namespace angara {
             case '\n':
                 m_line++;
                 m_column = 1;
+                break;
+
+            // LANG-6: raw string — r"..."
+            case 'r':
+                if (peek() == '"') {
+                    advance();  // consume opening "
+                    rawString();
+                    break;
+                }
+                identifier();
+                break;
+
+            // LANG-6: byte string — b"..."
+            case 'b':
+                if (peek() == '"') {
+                    advance();  // consume opening "
+                    byteString();
+                    break;
+                }
+                identifier();
                 break;
 
             default:

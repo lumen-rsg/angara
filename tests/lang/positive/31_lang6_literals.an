@@ -1,0 +1,64 @@
+// LANG-6: Raw strings, byte strings, float exponents, numeric suffixes, octal.
+attach io;
+
+export func main() -> i64 {
+    // ── 1. Raw strings (r"...") — backslashes are literal ──
+
+    let raw1 = r"hello\nworld";
+    // raw1 contains literal backslash followed by 'n', not a newline.
+    // The length is 12 (h,e,l,l,o,\,n,w,o,r,l,d).
+    io.println_auto(raw1);
+
+    // Raw string with Windows path — backslashes just work.
+    let path = r"C:\Users\angara\docs";
+    io.println_auto(path);
+
+    // ── 2. Byte strings (b"...") — escapes ARE processed ──
+
+    let b1 = b"hello\x20world";    // \x20 is space
+    io.println_auto(b1);
+
+    let b2 = b"\x48\x69";          // "Hi"
+    io.println_auto(b2);
+
+    // ── 3. Float exponents ──
+
+    let fe1 = 1e10;                // 10000000000.0
+    let fe2 = 3.14e-2;             // 0.0314
+    let fe3 = 1.5E+3;              // 1500.0
+    let fe4 = 2e0;                 // 2.0
+    io.println_auto(string(fe1));
+    io.println_auto(string(fe2));
+    io.println_auto(string(fe3));
+    io.println_auto(string(fe4));
+
+    // ── 4. Numeric suffixes ──
+
+    let su8 as u8 = 42u8;
+    io.println_auto(string(su8));
+
+    let si32 as i32 = 100i32;
+    io.println_auto(string(si32));
+
+    let su16 as u16 = 0xFFu16;     // hex + suffix
+    io.println_auto(string(su16));
+
+    let su64 as u64 = 1_000u64;    // underscore separator + suffix
+    io.println_auto(string(su64));
+
+    let si as i64 = 42i64;         // explicit i64 suffix (same as default)
+    io.println_auto(string(si));
+
+    // ── 5. Octal literals ──
+
+    let oct1 = 0o777;              // 511 decimal
+    io.println_auto(string(oct1));
+
+    let oct2 = 0o10;               // 8 decimal
+    io.println_auto(string(oct2));
+
+    let oct3 = 0o0;                // 0
+    io.println_auto(string(oct3));
+
+    return 0;
+}
