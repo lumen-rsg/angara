@@ -6,8 +6,11 @@ let a = '';
 // 2. Multi-char char literal.
 let b = 'ab';
 
-// 3. Unicode escape — deferred to LANG-5 (E005).
-let c = '\u{41}';
+// 3. Unicode escape errors (LANG-5).
+let c1 = '\u{}';            // E005: empty braces
+let c2 = '\u{110000}';      // E005: exceeds U+10FFFF
+let c3 = '\u{D800}';        // E005: surrogate
+let c4 = '\u{41}x';         // E017: Unicode escape + raw char = multi-char
 
 // 4. char narrows to u8 only via explicit cast or @unsafe (TS-3). Assigning a
 //    char-typed variable to a u8 slot is a narrowing conversion rejected in

@@ -1,0 +1,80 @@
+// LANG-5: Unicode escape sequences (\u{...}, \uXXXX, \UXXXXXXXX).
+//
+// These work in string literals, char literals, and interpolated strings.
+// Three forms accepted:
+//   \uXXXX       — exactly 4 hex digits
+//   \u{XXXXXX}   — 1–6 hex digits in braces (the modern form)
+//   \UXXXXXXXX   — exactly 8 hex digits (C/C++ compat)
+attach io;
+
+export func main() -> i64 {
+    // ── 1. Char literals ──
+
+    // 1a. Braced form.
+    io.println_auto(string('\u{41}'));                     // A
+    io.println_auto(string('\u{1F600}'));                  // 😀
+
+    // 1b. Fixed 4-digit form.
+    io.println_auto(string('\u0041'));                     // A
+    io.println_auto(string('\u0042'));                     // B
+
+    // 1c. Fixed 8-digit form.
+    io.println_auto(string('\U00000041'));                 // A
+    io.println_auto(string('\U00000065'));                 // e
+
+    // 1d. Code point equality (char is a 32-bit unsigned integer).
+    io.println_auto($"eq A: {'\u{41}' == 65}");           // true
+    io.println_auto($"eq smile: {'\u{1F600}' == 128512}");// true
+
+    // ── 2. String literals ──
+
+    // 2a. Basic Unicode in strings.
+    io.println_auto("\u{41}");                             // A
+    io.println_auto("\u{48}\u{69}");                        // Hi
+
+    // 2b. Mixed with regular text.
+    io.println_auto("X\u{41}Y");                           // XAY
+
+    // 2c. ASCII-range Unicode escapes — the decoded string matches.
+    let a1 = "\u{41}";
+    let a2 = "A";
+    io.println_auto($"eq str: {a1 == a2}");               // true
+
+    // 2d. Boundary: max valid code point compiles and runs.
+    let s = "\u{10FFFF}";
+    io.println_auto(s);                                    // (max valid Unicode)
+
+    // ── 3. Interpolated strings ──
+
+    let smile = '\u{1F600}';
+    let letter = '\u{41}';
+
+    // 3a. Unicode chars in interpolation holes.
+    io.println_auto(string(smile));                        // 😀
+    io.println_auto(string(letter));                       // A
+
+    // 3b. Unicode string in interpolation hole.
+    let hi = "\u{48}\u{69}";
+    io.println_auto(hi);                                   // Hi
+
+    // ── 4. Various Unicode code-point ranges ──
+
+    // 4a. Basic Latin (1-byte UTF-8).
+    io.println_auto(string('\u{20}'));                     // (space)
+    io.println_auto(string('\u{7E}'));                     // ~
+
+    // 4b. Latin-1 Supplement (2-byte UTF-8).
+    io.println_auto(string('\u{E9}'));                     // é
+
+    // 4c. Currency / symbols (2-byte UTF-8).
+    io.println_auto(string('\u{20AC}'));                   // €
+
+    // 4d. BMP supplementary (3-byte UTF-8).
+    io.println_auto(string('\u{2603}'));                   // ☃ (snowman)
+
+    // 4e. Non-BMP / emoji (4-byte UTF-8).
+    io.println_auto(string('\u{1F600}'));                  // 😀
+    io.println_auto(string('\u{1F98A}'));                  // 🦊 (fox)
+
+    return 0;
+}

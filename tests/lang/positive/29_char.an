@@ -41,6 +41,21 @@ export func main() -> i64 {
     io.println_auto(string('\\'));                     // \   (escaped backslash)
     io.println_auto(string('\''));                     // '   (escaped quote)
 
+    // 7b. LANG-5: Unicode escapes in char literals.
+    io.println_auto(string('\u{41}'));                     // A (braced)
+    io.println_auto(string('\u0041'));                     // A (4-digit)
+    io.println_auto(string('\U00000041'));                 // A (8-digit)
+    io.println_auto(string('\u{1F600}'));                  // 😀 (emoji)
+    io.println_auto(string('\u{E9}'));                     // é (U+00E9)
+    io.println_auto(string('\u{20AC}'));                   // € (U+20AC)
+    io.println_auto($"u{41} eq 65: {'\u{41}' == 65}");    // true
+    io.println_auto($"u{1F600} eq 128512: {'\u{1F600}' == 128512}"); // true
+
+    // 7c. LANG-5: Unicode escapes in string literals.
+    io.println_auto("\u{41}");                             // A
+    io.println_auto("\u{1F600}");                          // 😀
+    io.println_auto("\u{48}\u{69}");                        // Hi
+
     // 8. list<char> works through the generic collection machinery.
     let chars = ['H', 'i', '!'];
     io.println_auto($"chars[0] = {chars[0]}");         // chars[0] = H

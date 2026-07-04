@@ -167,7 +167,8 @@ namespace angara {
     // \u/\U rejected with E005 — deferred to LANG-5). Appends the decoded
     // byte(s) to `out`. Reports errors via m_errorHandler. The token-type arg
     // makes the diagnostic token read sensibly in either context.
-    void Lexer::lexEscape(char escaped, std::stringstream& out, TokenType diag_type) {
+    void Lexer::lexEscape(char escaped, std::stringstream& out, TokenType diag_type,
+                           uint32_t* out_cp) {
         switch (escaped) {
             case '"':  out << '"'; break;
             case '\'': out << '\''; break;
@@ -219,12 +220,107 @@ namespace angara {
 
             case 'u':
             case 'U': {
-                m_errorHandler.report(
-                    Token(diag_type, "", m_line, m_column, m_filename),
-                    "Unicode escape sequences ('\\u', '\\U') are not yet supported.", "E005"
-                );
-                int limit = (escaped == 'u' ? 4 : 8);
-                for (int i = 0; i < limit; ++i) { if (isxdigit(peek())) advance(); }
+                // LANG-5: Unicode escapes. Three forms:
+                //   \uXXXX       — exactly 4 hex digits
+                //   \u{XXXXXX}   — 1–6 hex digits in braces
+                //   \UXXXXXXXX   — exactly 8 hex digits
+                std::string hex_str;
+                bool valid = true;
+
+                if (escaped == 'u' && peek() == '{') {
+                    // Braced form: \u{XXXXXX}
+                    advance(); // consume '{'
+                    int digits = 0;
+                    while (peek() != '}' && peek() != EOF && peek() != '\n') {
+                        if (isxdigit(peek())) {
+                            hex_str += advance();
+                            digits++;
+                        } else {
+                            m_errorHandler.report(
+                                Token(diag_type, "", m_line, m_column, m_filename),
+                                "Invalid character '" + std::string(1, peek()) +
+                                    "' in Unicode escape sequence '\\u{...}'.", "E005"
+                            );
+                            advance(); // consume bad char for recovery
+                            valid = false;
+                        }
+                    }
+                    if (peek() == '}') {
+                        advance(); // consume '}'
+                    } else {
+                        m_errorHandler.report(
+                            Token(diag_type, "", m_line, m_column, m_filename),
+                            "Unterminated Unicode escape sequence '\\u{...}' — missing '}'.", "E005"
+                        );
+                        valid = false;
+                    }
+                    if (digits == 0 && valid) {
+                        m_errorHandler.report(
+                            Token(diag_type, "", m_line, m_column, m_filename),
+                            "Empty Unicode escape sequence '\\u{}'.", "E005"
+                        );
+                        valid = false;
+                    }
+                } else {
+                    // Fixed-width form: \uXXXX (4) or \UXXXXXXXX (8)
+                    int limit = (escaped == 'u' ? 4 : 8);
+                    for (int i = 0; i < limit; ++i) {
+                        if (isxdigit(peek())) {
+                            hex_str += advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    if (static_cast<int>(hex_str.size()) < limit) {
+                        m_errorHandler.report(
+                            Token(diag_type, "", m_line, m_column, m_filename),
+                            "Incomplete Unicode escape sequence '\\" + std::string(1, escaped) +
+                                "'; expected " + std::to_string(limit) + " hex digits, got " +
+                                std::to_string(hex_str.size()) + ".", "E005"
+                        );
+                        valid = false;
+                    }
+                }
+
+                if (valid) {
+                    unsigned long cp = std::stoul(hex_str, nullptr, 16);
+                    if (cp > 0x10FFFF) {
+                        m_errorHandler.report(
+                            Token(diag_type, "", m_line, m_column, m_filename),
+                            "Invalid Unicode code point U+" + hex_str +
+                                " (exceeds U+10FFFF).", "E005"
+                        );
+                        valid = false;
+                    } else if (cp >= 0xD800 && cp <= 0xDFFF) {
+                        m_errorHandler.report(
+                            Token(diag_type, "", m_line, m_column, m_filename),
+                            "Invalid Unicode code point U+" + hex_str +
+                                " (surrogate range U+D800–U+DFFF).", "E005"
+                        );
+                        valid = false;
+                    }
+
+                    if (valid) {
+                        // UTF-8 encode the code point into `out`.
+                        if (cp <= 0x7F) {
+                            out << static_cast<char>(cp);
+                        } else if (cp <= 0x7FF) {
+                            out << static_cast<char>(0xC0 | (cp >> 6));
+                            out << static_cast<char>(0x80 | (cp & 0x3F));
+                        } else if (cp <= 0xFFFF) {
+                            out << static_cast<char>(0xE0 | (cp >> 12));
+                            out << static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+                            out << static_cast<char>(0x80 | (cp & 0x3F));
+                        } else {
+                            out << static_cast<char>(0xF0 | (cp >> 18));
+                            out << static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+                            out << static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+                            out << static_cast<char>(0x80 | (cp & 0x3F));
+                        }
+
+                        if (out_cp) *out_cp = static_cast<uint32_t>(cp);
+                    }
+                }
                 break;
             }
 
@@ -354,6 +450,9 @@ namespace angara {
     // stoll it like a NUMBER_INT). Errors: E016 empty, E017 multi-char,
     // E018 unterminated. Newline inside is rejected (E018) to keep literals on
     // one source line.
+    //
+    // LANG-5: Unicode escapes (\u{...}, \uXXXX, \UXXXXXXXX) decode to a single
+    // code point even though they produce 1–4 UTF-8 bytes in the decoded stream.
     void Lexer::charLiteral() {
         std::stringstream decoded;
 
@@ -374,6 +473,9 @@ namespace angara {
             return;
         }
 
+        uint32_t unicode_cp = 0;
+        bool is_unicode = false;
+
         char c = advance();
         if (c == '\\') {
             if (isAtEnd()) {
@@ -382,7 +484,13 @@ namespace angara {
                     "Unterminated char literal; ends with '\\'.", "E018");
                 return;
             }
-            lexEscape(advance(), decoded, TokenType::CHAR);
+            lexEscape(advance(), decoded, TokenType::CHAR, &unicode_cp);
+            // If lexEscape set unicode_cp (non-zero), this was a \u/\U escape.
+            // Zero is a valid code point (U+0000 NUL via \u0000), so we also
+            // check that the decoded output looks like UTF-8 (multi-byte).
+            if (unicode_cp != 0 || decoded.str().size() > 1) {
+                is_unicode = true;
+            }
         } else {
             decoded << c;
         }
@@ -390,14 +498,14 @@ namespace angara {
         // Consume to the closing quote. Any extra content before it ('ab',
         // 'a\nb') means the literal has more than one character — track that
         // so we can report E017. (A multi-byte escape like \xNN decodes to a
-        // single byte and does NOT count as multi-char.)
-        std::string chars = decoded.str();
+        // single byte and does NOT count as multi-char; likewise a \u/\U escape
+        // produces 1–4 UTF-8 bytes but is still one character.)
         bool multi = false;
 
         while (peek() != '\'' && !isAtEnd()) {
             if (peek() == '\n') {
                 m_errorHandler.report(
-                    Token(TokenType::CHAR, chars, m_line, m_column, m_filename),
+                    Token(TokenType::CHAR, decoded.str(), m_line, m_column, m_filename),
                     "Unterminated char literal.", "E018");
                 return;
             }
@@ -407,14 +515,16 @@ namespace angara {
 
         if (isAtEnd()) {
             m_errorHandler.report(
-                Token(TokenType::CHAR, chars, m_line, m_column, m_filename),
+                Token(TokenType::CHAR, decoded.str(), m_line, m_column, m_filename),
                 "Unterminated char literal.", "E018");
             return;
         }
 
         advance();  // consume closing '
 
-        if (multi || chars.size() != 1) {
+        std::string chars = decoded.str();
+
+        if (multi || (!is_unicode && chars.size() != 1)) {
             m_errorHandler.report(
                 Token(TokenType::CHAR, chars, m_line, m_column, m_filename),
                 "Char literal must contain exactly one character.", "E017");
@@ -422,8 +532,11 @@ namespace angara {
             return;
         }
 
-        // Code point value: treat the single decoded byte as unsigned.
-        unsigned char cp = static_cast<unsigned char>(chars[0]);
+        // Code point value. For ASCII escapes (\n, \t, \x41, etc.) the single
+        // decoded byte is the code point. For Unicode escapes (\u/\U) use the
+        // raw code point captured by lexEscape — it may be > 0xFF.
+        uint32_t cp = is_unicode ? unicode_cp
+                                 : static_cast<unsigned char>(chars[0]);
         addToken(TokenType::CHAR, std::to_string(static_cast<unsigned long>(cp)));
     }
 

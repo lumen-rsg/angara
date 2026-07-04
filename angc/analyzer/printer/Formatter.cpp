@@ -5,6 +5,7 @@ namespace angara {
 
     // LANG-4: render a CHAR token's decimal-code-point lexeme back as a char
     // literal body, reversing the common escapes for readable output.
+    // LANG-5: for code points > 0xFF, use \\u{XXXXXX} instead of truncated \\xHH.
     static std::string renderCharLexeme(const std::string& lexeme) {
         long cp = 0;
         try { cp = std::stol(lexeme); } catch (...) { return "?"; }
@@ -17,8 +18,14 @@ namespace angara {
             case '\0': return "\\0";
             default:
                 if (cp >= 0x20 && cp < 0x7F) return std::string(1, static_cast<char>(cp));
-                char buf[6];
-                std::snprintf(buf, sizeof(buf), "\\x%02X", static_cast<int>(cp & 0xFF));
+                if (cp >= 0x80 && cp <= 0xFF) {
+                    char buf[6];
+                    std::snprintf(buf, sizeof(buf), "\\x%02lX", cp);
+                    return buf;
+                }
+                // Code point > 0xFF: use Unicode escape.
+                char buf[12];
+                std::snprintf(buf, sizeof(buf), "\\u{%lX}", cp);
                 return buf;
         }
     }

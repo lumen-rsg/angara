@@ -70,7 +70,10 @@ namespace angara {
         /// LANG-4: shared escape-sequence decoder used by `string()` and
         /// `charLiteral()`. `escaped` is the character already consumed after
         /// the backslash. Appends the decoded byte(s) to `out`.
-        void lexEscape(char escaped, std::stringstream& out, TokenType diag_type);
+        /// LANG-5: if `out_cp` is non-null and the escape is `\\u`/`\\U`,
+        /// the raw Unicode code point is stored in `*out_cp`.
+        void lexEscape(char escaped, std::stringstream& out, TokenType diag_type,
+                       uint32_t* out_cp = nullptr);
 
         /// Scans a numeric literal (decimal, hex 0x, binary 0b) with optional underscore separators,
         /// emitting either NUMBER_INT or NUMBER_FLOAT.

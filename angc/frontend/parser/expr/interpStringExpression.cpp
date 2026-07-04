@@ -1,5 +1,7 @@
 #include "Parser.h"
 #include "Lexer.h"
+#include <cctype>
+#include <cstdlib>
 namespace angara {
 
     // LANG-3: parse an interpolated string body into literal + expression segments.
@@ -26,19 +28,81 @@ namespace angara {
             if (c == '\\' && i + 1 < body.size()) {
                 char esc = body[i + 1];
                 switch (esc) {
-                    case 'n':  current_literal += '\n'; break;
-                    case 't':  current_literal += '\t'; break;
-                    case 'r':  current_literal += '\r'; break;
-                    case '\\': current_literal += '\\'; break;
-                    case '"':  current_literal += '"';  break;
-                    case '0':  current_literal += '\0'; break;
-                    case 'b':  current_literal += '\b'; break;
-                    case 'f':  current_literal += '\f'; break;
-                    case 'v':  current_literal += '\v'; break;
-                    case 'a':  current_literal += '\a'; break;
-                    default:   current_literal += esc;  break;
+                    case 'n':  current_literal += '\n'; i += 2; break;
+                    case 't':  current_literal += '\t'; i += 2; break;
+                    case 'r':  current_literal += '\r'; i += 2; break;
+                    case '\\': current_literal += '\\'; i += 2; break;
+                    case '"':  current_literal += '"';  i += 2; break;
+                    case '\'': current_literal += '\''; i += 2; break;
+                    case '0':  current_literal += '\0'; i += 2; break;
+                    case 'b':  current_literal += '\b'; i += 2; break;
+                    case 'f':  current_literal += '\f'; i += 2; break;
+                    case 'v':  current_literal += '\v'; i += 2; break;
+                    case 'a':  current_literal += '\a'; i += 2; break;
+
+                    case 'x': {
+                        // Hex escape: \xNN (up to 2 hex digits).
+                        i += 2; // skip \x
+                        std::string hex;
+                        while (i < body.size() && hex.size() < 2 && isxdigit(body[i])) {
+                            hex += body[i++];
+                        }
+                        if (!hex.empty()) {
+                            current_literal += static_cast<char>(std::stoi(hex, nullptr, 16));
+                        }
+                        break;
+                    }
+
+                    case 'u':
+                    case 'U': {
+                        // LANG-5: Unicode escapes.
+                        //   \uXXXX (4 hex), \u{XXXXXX} (braced), \UXXXXXXXX (8 hex).
+                        i += 2; // skip \u or \U
+                        std::string hex;
+                        if (esc == 'u' && i < body.size() && body[i] == '{') {
+                            i++; // skip '{'
+                            while (i < body.size() && body[i] != '}') {
+                                if (isxdigit(body[i])) hex += body[i++];
+                                else break;
+                            }
+                            if (i < body.size() && body[i] == '}') i++; // skip '}'
+                        } else {
+                            int limit = (esc == 'u' ? 4 : 8);
+                            while (i < body.size() && hex.size() < static_cast<size_t>(limit) && isxdigit(body[i])) {
+                                hex += body[i++];
+                            }
+                        }
+                        if (!hex.empty()) {
+                            unsigned long cp = std::stoul(hex, nullptr, 16);
+                            if (cp <= 0x10FFFF && !(cp >= 0xD800 && cp <= 0xDFFF)) {
+                                // UTF-8 encode.
+                                if (cp <= 0x7F) {
+                                    current_literal += static_cast<char>(cp);
+                                } else if (cp <= 0x7FF) {
+                                    current_literal += static_cast<char>(0xC0 | (cp >> 6));
+                                    current_literal += static_cast<char>(0x80 | (cp & 0x3F));
+                                } else if (cp <= 0xFFFF) {
+                                    current_literal += static_cast<char>(0xE0 | (cp >> 12));
+                                    current_literal += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+                                    current_literal += static_cast<char>(0x80 | (cp & 0x3F));
+                                } else {
+                                    current_literal += static_cast<char>(0xF0 | (cp >> 18));
+                                    current_literal += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+                                    current_literal += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+                                    current_literal += static_cast<char>(0x80 | (cp & 0x3F));
+                                }
+                            }
+                        }
+                        break;
+                    }
+
+                    default:
+                        // Unknown escape — keep the escaped character verbatim
+                        // (matching lexEscape's E006 behaviour).
+                        current_literal += esc;
+                        i += 2;
+                        break;
                 }
-                i += 2;
                 continue;
             }
 
