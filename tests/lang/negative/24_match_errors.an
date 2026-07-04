@@ -1,0 +1,15 @@
+// Negative test for LANG-7 match patterns
+// expect: E402
+
+enum Foo {
+    Bar(i64, string)
+}
+
+export func main() -> i64 {
+    let f = Foo.Bar(1, "hello");
+    let desc = match (f) {
+        case Foo.Bar(x): "one-arg",  // E405: wrong arity (1 vs 2)
+        case _: "other"
+    };
+    return 0;
+}

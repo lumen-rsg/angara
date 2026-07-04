@@ -108,6 +108,11 @@ namespace angara {
         llvm::Value* cgMatch(const MatchExpr& e);
         llvm::Value* cgLambda(const LambdaExpr& e);
 
+        /// Helper for cgMatch: generates guard check + body evaluation for a matched case.
+        void cgBodyWithGuard(const MatchCase& c, llvm::Function* fn,
+                             llvm::BasicBlock* mg, llvm::BasicBlock* next_bb,
+                             std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>>& inc);
+
         /// Calls a closure AngaraObject with the given arguments.
         llvm::Value* cgClosureCall(llvm::Value* callee, const std::vector<llvm::Value*>& args);
 

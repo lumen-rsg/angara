@@ -1,64 +1,101 @@
-// Import the standard I/O module for printing.
+// Angara Match Expression Test — LANG-7 enhanced patterns
 attach io;
 
-// Define a multi-variant enum to serve as the subject of our test.
-// It includes a simple variant, a variant with a single value,
-// and a variant with a record.
-enum WebEvent {
-  PageLoad,
-  KeyPress(string),
-  Click({x: i64, y: i64})
+// --- Enum Definitions ---
+enum Color {
+    Red,
+    Green,
+    Blue
 }
 
-// The main entry point of our test program.
+enum MoveEvent {
+    PageLoad,
+    Move(i64, i64)
+}
+
 export func main() -> i64 {
-  io.println(1, "--- Angara Match Expression Test ---");
+    io.println_auto("--- Angara LANG-7 Match Expression Test ---");
 
-  // 1. Create a list of different enum instances.
-  //    This will allow us to test the match expression against each variant.
-  let events as list<WebEvent> = [
-    WebEvent.KeyPress("H"),
-    WebEvent.Click({x: 1024, y: 768}),
-    WebEvent.PageLoad
-  ];
-
-  // 2. Loop through the events and use `match` to process each one.
-  io.println(1, "\n-> Testing match with destructuring and type consistency...");
-  for (event in events) {
-    // The `match` expression evaluates the `event` and assigns the
-    // resulting string to the `description` variable.
-    let description as string = match (event) {
-      case WebEvent.PageLoad: { "PageLoad: A simple event with no data." },
-
-      // This case destructures the `KeyPress` variant, binding its
-      // string payload to a new constant `key`.
-      case WebEvent.KeyPress(key): { "KeyPress: The user pressed the key '" + key + "'." },
-
-      // This case destructures the `Click` variant, binding its
-      // record payload to a new constant `pos`. We can then access pos.x and pos.y.
-      case WebEvent.Click(pos): {
-        "Click: The user clicked at (" + string(pos["x"]) + ", " + string(pos["y"]) + ")."
-      },
-
-      case _: { "unknown event. skipping..." }
+    // --- 1. Basic enum matching (existing functionality) ---
+    io.println_auto("1. Basic enum matching...");
+    let c = Color.Red;
+    let desc = match (c) {
+        case Color.Red: "red",
+        case Color.Green: "green",
+        case Color.Blue: "blue",
+        case _: "other"
     };
+    io.println_auto(desc);
 
-    // Print the result of the match expression.
-    io.println(1, "  - Matched: " + description);
-  }
+    // --- 2. Multi-payload destructuring ---
+    io.println_auto("2. Multi-payload destructuring...");
+    let mv = MoveEvent.Move(10, 20);
+    let desc2 = match (mv) {
+        case MoveEvent.PageLoad: "pageload",
+        case MoveEvent.Move(a, b): "move",
+        case _: "other"
+    };
+    io.println_auto(desc2);
 
-  // 3. Test the wildcard (default) case.
-  io.println(1, "\n-> Testing match with a wildcard case...");
-  let first_event as WebEvent = events[0]; // This is a KeyPress event
+    // --- 3. Or-patterns ---
+    io.println_auto("3. Or-patterns...");
+    let c2 = Color.Blue;
+    let desc3 = match (c2) {
+        case Color.Red | Color.Green: "warm",
+        case Color.Blue: "cool",
+        case _: "other"
+    };
+    io.println_auto(desc3);
 
-  let short_description as string = match (first_event) {
-    case WebEvent.PageLoad: { "It was a page load." },
-    // A wildcard '_' case catches any variant not explicitly handled above.
-    case _: { "It was some other event." }
-  };
-  io.println(1, "  - Result: " + short_description);
+    // --- 4. Guards ---
+    io.println_auto("4. Guards...");
+    let mv2 = MoveEvent.Move(100, 200);
+    let desc4 = match (mv2) {
+        case MoveEvent.Move(px, py) if px > 50: "large",
+        case MoveEvent.Move(qx, qy): "small",
+        case _: "other"
+    };
+    io.println_auto(desc4);
 
+    // --- 5. Integer literal match ---
+    io.println_auto("5. Integer match...");
+    let n = 42;
+    let desc5 = match (n) {
+        case 1: "one",
+        case 42: "forty-two",
+        case _: "other"
+    };
+    io.println_auto(desc5);
 
-  io.println(1, "\n--- Test Complete ---");
-  return 0;
+    // --- 6. String literal match ---
+    io.println_auto("6. String match...");
+    let s = "hello";
+    let desc6 = match (s) {
+        case "hi": "greeting",
+        case "hello": "hello_world",
+        case _: "unknown"
+    };
+    io.println_auto(desc6);
+
+    // --- 7. Bool literal match ---
+    io.println_auto("7. Bool match...");
+    let bb = true;
+    let desc7 = match (bb) {
+        case true: "yes",
+        case false: "no"
+    };
+    io.println_auto(desc7);
+
+    // --- 8. Or-pattern with guard ---
+    io.println_auto("8. Or-pattern with guard...");
+    let mv3 = MoveEvent.Move(0, 0);
+    let desc8 = match (mv3) {
+        case MoveEvent.Move(rx, ry) if rx == 0: "origin",
+        case MoveEvent.Move(sx, sy): "elsewhere",
+        case _: "other"
+    };
+    io.println_auto(desc8);
+
+    io.println_auto("--- Test Complete ---");
+    return 0;
 }

@@ -42,7 +42,11 @@ void Chaperone::collectExprVarRefs(const std::shared_ptr<Expr>& expr,
     }
     if (auto* me = dynamic_cast<const MatchExpr*>(expr.get())) {
         collectExprVarRefs(me->condition, out);
-        for (const auto& cs : me->cases) if (cs.body) collectExprVarRefs(cs.body, out);
+        for (const auto& cs : me->cases) {
+            for (const auto& pat : cs.patterns) collectExprVarRefs(pat, out);
+            if (cs.guard) collectExprVarRefs(*cs.guard, out);
+            if (cs.body) collectExprVarRefs(cs.body, out);
+        }
         return;
     }
 }
@@ -328,10 +332,12 @@ void Chaperone::analyzeExpr(Context& ctx,
         return;
     }
 
-    // MatchExpr: walk the condition + all case bodies.
+    // MatchExpr: walk the condition + all patterns + all case bodies + guards.
     if (auto* match = dynamic_cast<const MatchExpr*>(expr.get())) {
         analyzeExpr(ctx, match->condition, state);
         for (const auto& cs : match->cases) {
+            for (const auto& pat : cs.patterns) analyzeExpr(ctx, pat, state);
+            if (cs.guard) analyzeExpr(ctx, *cs.guard, state);
             if (cs.body) analyzeExpr(ctx, cs.body, state);
         }
         return;

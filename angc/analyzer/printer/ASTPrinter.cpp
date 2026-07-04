@@ -280,10 +280,29 @@ namespace angara {
             m_childPrefix = m_childPrefix + (isLast ? TREE_EMPTY : TREE_DOWN);
 
             std::cout << m_prefix << CLR_BOLD << CLR_BLUE << "Case" << CLR_RESET;
-            if (c.variable) std::cout << " (bind: " << c.variable->lexeme << ")";
+            if (!c.variables.empty()) {
+                std::cout << " (bind: ";
+                for (size_t vi = 0; vi < c.variables.size(); ++vi) {
+                    if (vi > 0) std::cout << ", ";
+                    std::cout << c.variables[vi].lexeme;
+                }
+                std::cout << ")";
+            }
+            if (c.guard) std::cout << " [guard]";
             std::cout << "\n";
 
-            printChild("pattern", c.pattern, false);
+            if (c.patterns.size() > 1) {
+                // Or-pattern: print each alternative
+                for (size_t pi = 0; pi < c.patterns.size(); ++pi) {
+                    bool lastPat = (pi == c.patterns.size() - 1) && !c.guard;
+                    printChild(pi == 0 ? "or-patterns" : "", c.patterns[pi], lastPat && !c.guard);
+                }
+            } else if (!c.patterns.empty()) {
+                printChild("pattern", c.patterns[0], !c.guard);
+            }
+            if (c.guard) {
+                printChild("guard", *c.guard, true);
+            }
             printChild("body", c.body, true);
 
             m_prefix = oldPrefix;

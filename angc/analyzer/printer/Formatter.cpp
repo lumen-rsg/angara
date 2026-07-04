@@ -435,8 +435,20 @@ std::any Formatter::visit(const DerefExpr& expr) { return expr.op.lexeme + fmtEx
 std::any Formatter::visit(const MatchExpr& expr) {
     std::string r = "match (" + fmtExpr(expr.condition) + ") { ";
     for (auto& c : expr.cases) {
-        r += "case " + fmtExpr(c.pattern);
-        if (c.variable) r += "(" + c.variable->lexeme + ")";
+        r += "case ";
+        for (size_t pi = 0; pi < c.patterns.size(); ++pi) {
+            if (pi > 0) r += " | ";
+            r += fmtExpr(c.patterns[pi]);
+        }
+        if (!c.variables.empty()) {
+            r += "(";
+            for (size_t vi = 0; vi < c.variables.size(); ++vi) {
+                if (vi > 0) r += ", ";
+                r += c.variables[vi].lexeme;
+            }
+            r += ")";
+        }
+        if (c.guard) r += " if " + fmtExpr(*c.guard);
         r += ": " + fmtExpr(c.body) + ", ";
     }
     return r + "}";

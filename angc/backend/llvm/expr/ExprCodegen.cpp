@@ -1801,22 +1801,32 @@ llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {
     auto* mg = llvm::BasicBlock::Create(*ctx,"me",fn);
     std::vector<std::pair<llvm::BasicBlock*,llvm::Value*>> inc;
 
-    // Look up the enum type to find variant indices
+    // Look up the condition type
     auto type_it = m_type_checker.getExpressionTypes().find(e.condition.get());
+    std::shared_ptr<Type> cond_type;
     std::shared_ptr<EnumType> enum_type;
-    if (type_it != m_type_checker.getExpressionTypes().end() && type_it->second->kind == TypeKind::ENUM) {
-        enum_type = std::dynamic_pointer_cast<EnumType>(type_it->second);
+    bool is_value_type = false;
+    if (type_it != m_type_checker.getExpressionTypes().end()) {
+        cond_type = type_it->second;
+        if (cond_type->kind == TypeKind::ENUM) {
+            enum_type = std::dynamic_pointer_cast<EnumType>(cond_type);
+        } else {
+            is_value_type = true;
+        }
     }
 
     for (auto& c : e.cases) {
         auto* match_bb = llvm::BasicBlock::Create(*ctx,"mb",fn);
         auto* next_bb = llvm::BasicBlock::Create(*ctx,"mn",fn);
 
-        // Check for wildcard pattern '_'
+        // Check if any pattern in the or-group is a wildcard
         bool is_wildcard = false;
-        if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(c.pattern)) {
-            if (var_expr->name.lexeme == "_") {
-                is_wildcard = true;
+        for (const auto& pat : c.patterns) {
+            if (auto ve = std::dynamic_pointer_cast<const VarExpr>(pat)) {
+                if (ve->name.lexeme == "_") {
+                    is_wildcard = true;
+                    break;
+                }
             }
         }
 
@@ -1825,99 +1835,167 @@ llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {
             builder->CreateBr(match_bb);
             builder->SetInsertPoint(match_bb);
 
-            // Bind variable if present
-            if (c.variable) {
-                auto* alloca = allocLocal(fn, sanitize(c.variable->lexeme));
-                builder->CreateStore(subj, alloca);
-                namedVals[sanitize(c.variable->lexeme)] = alloca;
+            // Bind variables if present (wildcard with bindings)
+            for (size_t vi = 0; vi < c.variables.size(); ++vi) {
+                auto* alloca = allocLocal(fn, sanitize(c.variables[vi].lexeme));
+                if (enum_type && vi == 0 && c.patterns.size() == 1) {
+                    // For wildcard on enum, bind the whole scrutinee
+                    builder->CreateStore(subj, alloca);
+                } else {
+                    builder->CreateStore(subj, alloca);
+                }
+                namedVals[sanitize(c.variables[vi].lexeme)] = alloca;
             }
 
-            auto* r = cg(c.body);
-            match_bb = builder->GetInsertBlock();
-            builder->CreateBr(mg);
-            inc.push_back({match_bb, r});
+            cgBodyWithGuard(c, fn, mg, next_bb, inc);
             builder->SetInsertPoint(next_bb);
-        } else {
-            // Named variant — extract variant name and index
-            std::string variant_name;
-            if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(c.pattern)) {
-                variant_name = get_expr->name.lexeme;
-            }
+        } else if (is_value_type) {
+            // --- Value type match (int/string/bool/char) ---
+            llvm::Value* matches = nullptr;
 
-            // Find the variant index from declaration order
-            int variant_index = -1;
-            bool has_payload = false;
-            // Look up the enum name prefix to build the qualified key
-            std::string enum_name;
-            if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(c.pattern)) {
-                if (auto lhs = std::dynamic_pointer_cast<const VarExpr>(get_expr->object)) {
-                    enum_name = lhs->name.lexeme;
+            for (size_t pi = 0; pi < c.patterns.size(); ++pi) {
+                const auto& pat = c.patterns[pi];
+                llvm::Value* pat_matches = nullptr;
+
+                if (auto lit = std::dynamic_pointer_cast<const Literal>(pat)) {
+                    // Compare condition value with literal value
+                    if (lit->token.type == TokenType::STRING ||
+                        lit->token.type == TokenType::RAW_STRING ||
+                        lit->token.type == TokenType::BYTE_STRING) {
+                        // String comparison via __ang_equals
+                        auto* lit_val = cgLiteral(*lit);
+                        auto* eq_obj = callRtByName("__ang_equals", {subj, lit_val});
+                        pat_matches = getBool(eq_obj);
+                    } else if (lit->token.type == TokenType::TRUE ||
+                               lit->token.type == TokenType::FALSE) {
+                        auto* subj_bool = getBool(subj);
+                        bool target = (lit->token.type == TokenType::TRUE);
+                        pat_matches = builder->CreateICmpEQ(subj_bool,
+                            llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), target ? 1 : 0));
+                    } else if (lit->token.type == TokenType::NUMBER_INT ||
+                               lit->token.type == TokenType::CHAR) {
+                        // INTEGER or CHAR: extract i64 payload, compare
+                        auto* subj_i64 = getI64(subj);
+                        auto* lit_val = cgLiteral(*lit);
+                        auto* lit_i64 = getI64(lit_val);
+                        pat_matches = builder->CreateICmpEQ(subj_i64, lit_i64);
+                    } else {
+                        // Fallback: use __ang_equals
+                        auto* lit_val = cgLiteral(*lit);
+                        auto* eq_obj = callRtByName("__ang_equals", {subj, lit_val});
+                        pat_matches = getBool(eq_obj);
+                    }
+                }
+
+                // Combine or-patterns: any match succeeds
+                if (pat_matches) {
+                    matches = matches
+                        ? builder->CreateOr(matches, pat_matches)
+                        : pat_matches;
                 }
             }
-            std::string qualified = enum_name + "." + variant_name;
-            auto it = enumVariantIndex.find(qualified);
-            if (it != enumVariantIndex.end()) {
-                variant_index = it->second;
+
+            if (matches) {
+                builder->CreateCondBr(matches, match_bb, next_bb);
+            } else {
+                builder->CreateBr(next_bb);
             }
-            // Check if variant has payload from the enum type
-            if (enum_type) {
-                auto vit = enum_type->variants.find(variant_name);
-                if (vit != enum_type->variants.end()) {
-                    has_payload = !vit->second->param_types.empty();
+
+            builder->SetInsertPoint(match_bb);
+            cgBodyWithGuard(c, fn, mg, next_bb, inc);
+            builder->SetInsertPoint(next_bb);
+        } else if (enum_type) {
+            // --- Enum type match ---
+            llvm::Value* or_matches = nullptr;
+
+            for (size_t pi = 0; pi < c.patterns.size(); ++pi) {
+                const auto& pat = c.patterns[pi];
+
+                // Extract variant name and index
+                std::string variant_name;
+                std::string enum_name;
+                if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(pat)) {
+                    variant_name = get_expr->name.lexeme;
+                    if (auto lhs = std::dynamic_pointer_cast<const VarExpr>(get_expr->object)) {
+                        enum_name = lhs->name.lexeme;
+                    }
+                } else if (auto ve = std::dynamic_pointer_cast<const VarExpr>(pat)) {
+                    // Bare variant name (for enums defined in same module)
+                    variant_name = ve->name.lexeme;
+                } else {
+                    continue; // skip non-variant patterns in enum match
                 }
+
+                std::string qualified = enum_name.empty()
+                    ? variant_name
+                    : enum_name + "." + variant_name;
+
+                auto it = enumVariantIndex.find(qualified);
+                if (it == enumVariantIndex.end()) {
+                    // Try looking up variant directly from enum type
+                    auto vit = enum_type->variants.find(variant_name);
+                    if (vit != enum_type->variants.end()) {
+                        // We don't know the index, skip for now
+                        // (should not happen since codegenEnumDecl populates enumVariantIndex)
+                    }
+                    continue;
+                }
+                int variant_index = it->second;
+
+                // Generate discriminant comparison (same as before)
+                auto* subj_tag = getTag(subj);
+                auto* tag_is_obj = builder->CreateICmpEQ(subj_tag,
+                    llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_OBJ));
+
+                auto* obj_path_bb = llvm::BasicBlock::Create(*ctx,"mop",fn);
+                auto* i64_path_bb = llvm::BasicBlock::Create(*ctx,"mip",fn);
+                auto* cmp_bb = llvm::BasicBlock::Create(*ctx,"mc",fn);
+                builder->CreateCondBr(tag_is_obj, obj_path_bb, i64_path_bb);
+
+                builder->SetInsertPoint(obj_path_bb);
+                auto* tag_field = callRtByName("__ang_record_get",
+                    {subj, builder->CreateGlobalString("__tag")});
+                auto* obj_disc = getI64(tag_field);
+                builder->CreateBr(cmp_bb);
+
+                builder->SetInsertPoint(i64_path_bb);
+                auto* i64_disc = getI64(subj);
+                builder->CreateBr(cmp_bb);
+
+                builder->SetInsertPoint(cmp_bb);
+                auto* disc_phi = builder->CreatePHI(llvm::Type::getInt64Ty(*ctx), 2);
+                disc_phi->addIncoming(obj_disc, obj_path_bb);
+                disc_phi->addIncoming(i64_disc, i64_path_bb);
+
+                auto* target_index = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), variant_index);
+                auto* pat_matches = builder->CreateICmpEQ(disc_phi, target_index);
+
+                or_matches = or_matches
+                    ? builder->CreateOr(or_matches, pat_matches)
+                    : pat_matches;
             }
 
-            // Generate discriminant comparison
-            auto* subj_tag = getTag(subj);
-            auto* tag_is_obj = builder->CreateICmpEQ(subj_tag,
-                llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_OBJ));
+            if (or_matches) {
+                builder->CreateCondBr(or_matches, match_bb, next_bb);
+            } else {
+                builder->CreateBr(next_bb);
+            }
 
-            // For payload-carrying variants (TAG_OBJ): extract __tag from heap record
-            // For simple variants (TAG_I64): compare the i64 payload directly
-            auto* obj_path_bb = llvm::BasicBlock::Create(*ctx,"mop",fn);
-            auto* i64_path_bb = llvm::BasicBlock::Create(*ctx,"mip",fn);
-            auto* cmp_bb = llvm::BasicBlock::Create(*ctx,"mc",fn);
-            builder->CreateCondBr(tag_is_obj, obj_path_bb, i64_path_bb);
-
-            // Object path: extract __tag field from the heap record
-            builder->SetInsertPoint(obj_path_bb);
-            auto* tag_field = callRtByName("__ang_record_get",
-                {subj, builder->CreateGlobalString("__tag")});
-            auto* obj_disc = getI64(tag_field);
-            builder->CreateBr(cmp_bb);
-
-            // i64 path: the payload IS the discriminant
-            builder->SetInsertPoint(i64_path_bb);
-            auto* i64_disc = getI64(subj);
-            builder->CreateBr(cmp_bb);
-
-            // Merge discriminant values
-            builder->SetInsertPoint(cmp_bb);
-            auto* disc_phi = builder->CreatePHI(llvm::Type::getInt64Ty(*ctx), 2);
-            disc_phi->addIncoming(obj_disc, obj_path_bb);
-            disc_phi->addIncoming(i64_disc, i64_path_bb);
-
-            auto* target_index = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), variant_index);
-            auto* matches = builder->CreateICmpEQ(disc_phi, target_index);
-
-            builder->CreateCondBr(matches, match_bb, next_bb);
-
-            // Matched case — bind variable if needed
+            // Matched case — bind payload variables
             builder->SetInsertPoint(match_bb);
 
-            if (c.variable && has_payload) {
-                // Extract the payload field "_0" from the enum record
-                auto* payload_val = callRtByName("__ang_record_get",
-                    {subj, builder->CreateGlobalString("_0")});
-                auto* alloca = allocLocal(fn, sanitize(c.variable->lexeme));
-                builder->CreateStore(payload_val, alloca);
-                namedVals[sanitize(c.variable->lexeme)] = alloca;
+            if (!c.variables.empty()) {
+                for (size_t vi = 0; vi < c.variables.size(); ++vi) {
+                    std::string field_name = "_" + std::to_string(vi);
+                    auto* payload_val = callRtByName("__ang_record_get",
+                        {subj, builder->CreateGlobalString(field_name)});
+                    auto* alloca = allocLocal(fn, sanitize(c.variables[vi].lexeme));
+                    builder->CreateStore(payload_val, alloca);
+                    namedVals[sanitize(c.variables[vi].lexeme)] = alloca;
+                }
             }
 
-            auto* r = cg(c.body);
-            match_bb = builder->GetInsertBlock();
-            builder->CreateBr(mg);
-            inc.push_back({match_bb, r});
+            cgBodyWithGuard(c, fn, mg, next_bb, inc);
             builder->SetInsertPoint(next_bb);
         }
     }
@@ -1929,6 +2007,39 @@ llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {
     auto* phi = builder->CreatePHI(objType, inc.size());
     for (auto& [b,v] : inc) phi->addIncoming(v,b);
     return phi;
+}
+
+// Helper: generate guard check + body for a matched case
+void LLVMBackend::cgBodyWithGuard(
+    const MatchCase& c,
+    llvm::Function* fn,
+    llvm::BasicBlock* mg,
+    llvm::BasicBlock* next_bb,
+    std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>>& inc)
+{
+    if (c.guard) {
+        // Evaluate guard; if false, jump to next_bb (try next case)
+        auto* guard_bb = llvm::BasicBlock::Create(*ctx, "mgd", fn);
+        builder->CreateBr(guard_bb);
+        builder->SetInsertPoint(guard_bb);
+
+        auto* guard_val = cg(*c.guard);
+        auto* guard_true = isTruthy(guard_val);
+
+        auto* body_bb = llvm::BasicBlock::Create(*ctx, "mbd", fn);
+        builder->CreateCondBr(guard_true, body_bb, next_bb);
+
+        builder->SetInsertPoint(body_bb);
+        llvm::Value* r = cg(c.body);
+        llvm::BasicBlock* body_end_bb = builder->GetInsertBlock();
+        builder->CreateBr(mg);
+        inc.push_back({body_end_bb, r});
+    } else {
+        llvm::Value* r = cg(c.body);
+        llvm::BasicBlock* body_end_bb = builder->GetInsertBlock();
+        builder->CreateBr(mg);
+        inc.push_back({body_end_bb, r});
+    }
 }
 
 
