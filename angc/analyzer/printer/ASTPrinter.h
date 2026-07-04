@@ -79,6 +79,7 @@ namespace angara {
         std::any visit(const MatchExpr& expr) override;
         std::any visit(const LambdaExpr& expr) override;
         std::any visit(const RangeExpr& expr) override;
+        std::any visit(const InterpStringExpr& expr) override;
 
         // --- Statement visitors ---
 

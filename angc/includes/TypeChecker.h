@@ -101,6 +101,8 @@ namespace angara {
         std::any visit(const IsExpr &expr) override;
         std::any visit(const CastExpr &expr) override;
         std::any visit(const DerefExpr &expr) override;
+        std::any visit(const RangeExpr& expr) override;
+        std::any visit(const InterpStringExpr& expr) override;
 
         // --- Statement visitors ---
 

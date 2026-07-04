@@ -38,6 +38,8 @@ namespace angara {
     struct DerefExpr;
     struct MatchExpr;
     struct LambdaExpr;
+    struct RangeExpr;
+    struct InterpStringExpr;
 
     // The Visitor interface for expressions
     class ExprVisitor {
@@ -65,6 +67,8 @@ namespace angara {
         virtual std::any visit(const DerefExpr &expr) = 0;
         virtual std::any visit(const MatchExpr& expr) = 0;
         virtual std::any visit(const LambdaExpr& expr) = 0;
+        virtual std::any visit(const RangeExpr& expr) = 0;
+        virtual std::any visit(const InterpStringExpr& expr) = 0;
 
     };
 
@@ -352,6 +356,36 @@ namespace angara {
               param_names(std::move(param_names)),
               returnType(std::move(returnType)),
               body(std::move(body)) {}
+
+        std::any accept(ExprVisitor& visitor) const override {
+            return visitor.visit(*this);
+        }
+    };
+
+    // LANG-1: a range expression `start..end` (exclusive) or `start...end` (inclusive).
+    // The op token distinguishes DOT_DOT (exclusive) from DOT_DOT_DOT (inclusive).
+    struct RangeExpr : Expr {
+        const std::shared_ptr<Expr> left;
+        const Token op;
+        const std::shared_ptr<Expr> right;
+
+        RangeExpr(std::shared_ptr<Expr> left, Token op, std::shared_ptr<Expr> right)
+                : left(std::move(left)), op(std::move(op)), right(std::move(right)) {}
+
+        std::any accept(ExprVisitor& visitor) const override {
+            return visitor.visit(*this);
+        }
+    };
+
+    // LANG-3: an interpolated string $"...{expr}...". Segments alternate between
+    // literal text and parsed expressions: [lit0, expr0, lit1, expr1, ..., litN].
+    // The first and last segments are always literals (possibly empty).
+    struct InterpStringExpr : Expr {
+        // Pairs of (literal_text, optional_expr). A trailing literal has a null expr.
+        const std::vector<std::pair<std::string, std::shared_ptr<Expr>>> segments;
+
+        explicit InterpStringExpr(std::vector<std::pair<std::string, std::shared_ptr<Expr>>> segs)
+                : segments(std::move(segs)) {}
 
         std::any accept(ExprVisitor& visitor) const override {
             return visitor.visit(*this);

@@ -21,7 +21,7 @@
 | Language ergonomics | — | — | 16 | 16 |
 | Runtime / codegen | — | 2 | 4 | 6 |
 | Stdlib / modules | — | 3 | 9 | 12 |
-| Toolchain / DX | — | 1 | 5 | 6 |
+| Toolchain / DX | — | 1 | 6 | 7 |
 
 > **Resolved since this audit (on `v5-chaperone`):** the Chaperone memory model
 > removed the GC entirely (closing BUG-1/BUG-2/GC-1's whole class — see
@@ -99,7 +99,7 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 - [x] **LANG-2** ✅ Fixed — Parser reports ~1 error per declaration after the first (panic-mode flag is set but never reset). `frontend/parser/Parser.cpp:236` _(m_panicMode is now reset at every synchronize() boundary — after SEMICOLON, at declaration/statement keywords, and at EOF — so each declaration reports its own errors independently.)_
 
 ### String & literal gaps
-- [ ] **LANG-3** No **string interpolation** (`$"x = {x}"`) — biggest daily friction; everything is `"x = " + string(x)`.
+- [x] **LANG-3** ✅ Fixed — No **string interpolation** (`$"x = {x}"`). _(Lexer: `$"` enters `interpolatedString()`, which scans the raw body to the closing `"`, tracking `{}` brace depth so a `"` inside an expression hole (a string literal or string-keyed subscript like `{m["a"]}`) doesn't terminate the interpolation — inside a hole a `"` opens a nested string consumed whole. Emits an `INTERP_STRING` token. Parser: `parseInterpolatedString` splits the body into literal/expr segments, processing escapes in literals and re-lexing+re-parsing each `{...}` hole as a full Angara expression; the hole scanner is string-aware so a `}` inside an inner string can't unbalance it. AST: a new `InterpStringExpr` node holds `(literal, optional_expr)` segment pairs. Type-checker: every hole is visited (any type accepted) and the whole node is `string`. Codegen: lowers to a left-fold `__ang_string_concat` chain over `__ang_to_string(<expr>)` for each hole, reusing the existing string runtime. AST printer + formatter print the real segment structure. Verified end-to-end: `$"{name} is {age}"`, `$"{m["a"]}"` (string-keyed subscript in a hole), `$"greet: {"a}b"}"` (brace inside inner string), adjacent holes `{a}{b}`, escapes, floats/bools. 1 positive + 1 negative test in `tests/lang/`.)_
 - [ ] **LANG-4** No `char` type / single-quote char literals (`'a'` is a lex error).
 - [ ] **LANG-5** No `\u{...}` / `\uXXXX` Unicode escapes (explicitly unsupported).
 - [ ] **LANG-6** No raw/byte strings (`r"..."`, `b"..."`); no float exponents (`1e10`); no numeric suffixes (`42u8`); no octal literals.
@@ -170,6 +170,7 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 | - [ ] **TOOL-4** | 🟡 Source | Medium | **Five inconsistent version strings** — compiler `5.1.0` / backend `4.1.0` / spec `v3.1.2` / LSP `3.1.0` / README `3.0.0`. None from a single source. | `main.cpp`; `README.md` |
 | - [ ] **TOOL-5** | 🟡 Source | Low | No profiler; no doc generator; no standalone linter beyond `-Wall`; formatter doesn't print lambda bodies and collapses `match` to one line. | `main.cpp`; `Formatter.cpp:439,406-414` |
 | - [ ] **TOOL-6** | 🟡 Source | Low | `/opt/angara` hardcoded in ~6 places; no `ANGARA_HOME` env var (non-root / per-user installs second-class). | `BuildSystem.h:50`; `main.cpp:238,297,377,445` |
+| - [ ] **TOOL-7** | 🔴 Verified | Medium | **`fmt` and `check` subcommands eat their first argument.** `CLI::run` already strips the subcommand name (`args.erase(args.begin())` at `CLI.cpp:92`) before dispatching, but `handleFmt`/`handleCheck` re-erase `args.begin()` — so the filename is dropped and every invocation fails with `'[fmt|check] requires a .an source file.'`. `angc fmt foo.an` and `angc check foo.an` are completely unusable. (The `fmt`/`check`/`test`/`watch` handlers all redundantly re-erase; `test`/`watch` happen not to need the first positional in the same way, but the pattern is wrong everywhere — fix is to drop the re-erase since the dispatcher already removed the subcommand.) | `angc/src/FmtCommand.cpp:14`; `CLI.cpp:92`; `CompileCommands.cpp:266` (`check`) |
 
 ---
 

@@ -159,6 +159,11 @@ namespace angara {
         /// @return The parsed expression node.
         std::shared_ptr<Expr> expression();
 
+        /// LANG-1: Parses range expressions `start..end` (exclusive) or
+        /// `start...end` (inclusive). Binds looser than ternary, tighter than
+        /// assignment, so `a+1..b-1` parses as `(a+1)..(b-1)`.
+        std::shared_ptr<Expr> range();
+
         /// Parses `or` expressions (logical disjunction).
         /// @return The parsed expression node.
         std::shared_ptr<Expr> logic_or();
@@ -209,6 +214,10 @@ namespace angara {
         /// Parses primary expressions: literals, identifiers, parenthesized expressions, etc.
         /// @return The parsed expression node.
         std::shared_ptr<Expr> primary();
+
+        /// LANG-3: parses an interpolated string token into an InterpStringExpr,
+        /// splitting literal segments and {expression} holes.
+        std::shared_ptr<Expr> parseInterpolatedString(const Token& tok);
 
         // --- Token-stream helpers ---
 

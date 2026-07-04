@@ -425,6 +425,27 @@ namespace angara {
         return {};
     }
 
+    std::any ASTPrinter::visit(const InterpStringExpr& expr) {
+        printHeader("InterpStringExpr");
+        const size_t n = expr.segments.size();
+        for (size_t i = 0; i < n; ++i) {
+            const auto& [lit, sub] = expr.segments[i];
+            bool isLast = (i == n - 1);
+            // Render literal segments as Literal nodes (skipping empties that
+            // are adjacent to an expression hole), and recurse into each
+            // expression hole so its AST is visible underneath.
+            if (!sub) {
+                if (!lit.empty()) {
+                    printChild("lit", std::make_shared<Literal>(
+                        Token(TokenType::STRING, lit, 0, 0, nullptr)), isLast);
+                }
+            } else {
+                printChild("expr", sub, isLast);
+            }
+        }
+        return {};
+    }
+
     void ASTPrinter::visit(std::shared_ptr<const DropStmt> stmt) {
         printHeader("DropStmt: " + stmt->name.lexeme);
     }

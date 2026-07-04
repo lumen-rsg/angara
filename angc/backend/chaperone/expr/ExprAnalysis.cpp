@@ -36,6 +36,10 @@ void Chaperone::collectExprVarRefs(const std::shared_ptr<Expr>& expr,
     if (auto* ce = dynamic_cast<const CastExpr*>(expr.get())) { collectExprVarRefs(ce->object, out); return; }
     if (auto* de = dynamic_cast<const DerefExpr*>(expr.get())) { collectExprVarRefs(de->right, out); return; }
     if (auto* re = dynamic_cast<const RangeExpr*>(expr.get())) { collectExprVarRefs(re->left, out); collectExprVarRefs(re->right, out); return; }
+    if (auto* is = dynamic_cast<const InterpStringExpr*>(expr.get())) {
+        for (const auto& [lit, sub] : is->segments) if (sub) collectExprVarRefs(sub, out);
+        return;
+    }
     if (auto* me = dynamic_cast<const MatchExpr*>(expr.get())) {
         collectExprVarRefs(me->condition, out);
         for (const auto& cs : me->cases) if (cs.body) collectExprVarRefs(cs.body, out);

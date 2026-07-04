@@ -7,6 +7,11 @@ namespace angara {
             return std::make_shared<Literal>(previous());
         }
 
+        // LANG-3: interpolated string $"..."
+        if (match({TokenType::INTERP_STRING})) {
+            return parseInterpolatedString(previous());
+        }
+
         if (match({TokenType::THIS})) {
             return std::make_shared<ThisExpr>(previous());
         }

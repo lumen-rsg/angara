@@ -447,6 +447,16 @@ std::any Formatter::visit(const RangeExpr& expr) {
     return r;
 }
 
+std::any Formatter::visit(const InterpStringExpr& expr) {
+    std::string r = "$\"";
+    for (const auto& [lit, sub] : expr.segments) {
+        r += lit;
+        if (sub) r += "{" + fmtExpr(sub) + "}";
+    }
+    r += "\"";
+    return r;
+}
+
 } // namespace angara
 
 #include "Stmt.h"

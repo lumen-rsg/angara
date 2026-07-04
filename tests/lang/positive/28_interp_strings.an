@@ -1,0 +1,54 @@
+// Test 19: String interpolation (LANG-3)
+attach io;
+
+export func main() -> i64 {
+    // 1. Plain interpolation of integers.
+    let x = 42;
+    io.println_auto($"x = {x}");                       // x = 42
+
+    // 2. Multiple holes + surrounding text.
+    let name = "Ada";
+    let age = 36;
+    io.println_auto($"{name} is {age} years old");     // Ada is 36 years old
+
+    // 3. Expressions inside holes (arithmetic, calls).
+    io.println_auto($"sum = {1 + 2 + 3}");             // sum = 6
+    io.println_auto($"doubled = {string(x * 2)}");     // doubled = 84
+
+    // 4. No holes at all (pure literal via interp syntax).
+    io.println_auto($"hello world");                   // hello world
+
+    // 5. Leading + trailing holes.
+    let n = 7;
+    io.println_auto($"{n}:item");                      // 7:item
+    io.println_auto($"item:{n}");                      // item:7
+    io.println_auto($"{n}");                           // 7
+
+    // 6. Escape sequences inside literal segments.
+    io.println_auto($"line1\nline2");                  // (two lines)
+    io.println_auto($"tab\there");                     // (tab between)
+
+    // 7. Float + boolean interpolation.
+    let pi = 3.14;
+    io.println_auto($"pi ~= {pi}");                    // pi ~= 3.14
+    let flag = true;
+    io.println_auto($"flag={flag}");                   // flag=true
+
+    // 8. String-keyed subscript inside a hole — the '"' must not terminate
+    //    the interpolated string, and the inner string is re-lexed whole.
+    let m = {"a": 1};
+    io.println_auto($"record field: {m["a"]}");        // record field: 1
+
+    // 9. Adjacent holes (no literal between them).
+    let a = 1; let b = 2;
+    io.println_auto($"{a}{b}");                        // 12
+
+    // 10. A '}' inside an inner string literal must not unbalance the hole.
+    io.println_auto($"greet: {"a}b"}");               // greet: a}b
+
+    // 11. Interpolation assigned to a variable, then used.
+    let msg = $"count={x}";
+    io.println_auto(msg);                              // count=42
+
+    return 0;
+}

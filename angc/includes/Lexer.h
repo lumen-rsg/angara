@@ -53,6 +53,11 @@ namespace angara {
         /// Scans a double-quoted string literal, handling escape sequences, and emits a STRING token.
         void string();
 
+        /// LANG-3: Scans an interpolated string ($"...") and emits an INTERP_STRING
+        /// token carrying the raw body (between the quotes). The parser splits it
+        /// into literal/expr segments.
+        void interpolatedString();
+
         /// Scans a triple-quoted (""") multiline string literal and emits a STRING token.
         void multilineString();
 

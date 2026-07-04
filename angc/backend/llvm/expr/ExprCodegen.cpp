@@ -104,6 +104,7 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
     if (auto* p = dynamic_cast<const MatchExpr*>(e.get())) return cgMatch(*p);
     if (auto* p = dynamic_cast<const LambdaExpr*>(e.get())) return cgLambda(*p);
     if (auto* p = dynamic_cast<const RangeExpr*>(e.get())) return cgRange(*p);
+    if (auto* p = dynamic_cast<const InterpStringExpr*>(e.get())) return cgInterpString(*p);
     return makeNil();
 }
 
@@ -2071,6 +2072,38 @@ llvm::Value* LLVMBackend::cgRange(const RangeExpr& e) {
 
     builder->SetInsertPoint(done_bb);
     return list;
+}
+
+// LANG-3: lower an interpolated string to a left-fold concat chain using the
+// existing __ang_to_string + __ang_string_concat runtime functions.
+llvm::Value* LLVMBackend::cgInterpString(const InterpStringExpr& e) {
+    // Start with the first literal segment.
+    llvm::Value* acc = nullptr;
+    for (const auto& [lit, sub_expr] : e.segments) {
+        if (!sub_expr) {
+            // Pure literal segment — concat or initialize.
+            if (lit.empty() && !acc) {
+                // Leading empty literal before an expression — skip.
+                continue;
+            }
+            if (!acc) {
+                acc = makeStr(lit);
+            } else if (!lit.empty()) {
+                acc = callRtByName("__ang_string_concat", {acc, makeStr(lit)});
+            }
+        } else {
+            // Expression hole — convert to string and concat.
+            if (!acc) {
+                // No preceding literal — start with the converted expression.
+                acc = callRtByName("__ang_to_string", {cg(sub_expr)});
+            } else {
+                acc = callRtByName("__ang_string_concat",
+                    {acc, callRtByName("__ang_to_string", {cg(sub_expr)})});
+            }
+        }
+    }
+    // If all segments were empty (e.g. $"") return an empty string.
+    return acc ? acc : makeStr("");
 }
 
 }

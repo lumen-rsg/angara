@@ -1,0 +1,9 @@
+// Negative test 23: unterminated expression hole in interpolated string.
+// The '{' opens a hole that is never closed — must error E400.
+attach io;
+
+export func main() -> i64 {
+    let x = 42;
+    io.println_auto($"value = {x");
+    return 0;
+}

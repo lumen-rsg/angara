@@ -270,6 +270,75 @@ namespace angara {
         addToken(TokenType::STRING, value.str());
     }
 
+    // LANG-3: scans an interpolated string body (after the opening $" has been
+    // consumed). Collects the raw source between the quotes — escape sequences
+    // like \" are respected so they don't terminate the string. The parser
+    // splits the raw body into literal/expr segments later.
+    //
+    // Brace depth is tracked so a `"` inside an expression hole (e.g. a string
+    // literal or string-keyed subscript like `{m["a"]}`) does not terminate the
+    // interpolated string. Inside a hole, `"` opens a nested string that runs
+    // until its own closing `"` (with `\"` respected).
+    void Lexer::interpolatedString() {
+        std::string body;
+        int brace_depth = 0;
+        // A '"' only closes the interpolated string when we're not inside a
+        // hole — inside a hole it opens a nested string literal (handled below).
+        while ((brace_depth > 0 || peek() != '"') && !isAtEnd()) {
+            if (peek() == '\n') {
+                m_errorHandler.report(
+                    Token(TokenType::IDENTIFIER, "", m_line, m_column, m_filename),
+                    "Unterminated interpolated string literal.", "E399");
+                return;
+            }
+            if (peek() == '\\') {
+                // Keep the escape sequence verbatim — the parser will process it.
+                body += advance(); // '\'
+                if (!isAtEnd()) body += advance(); // the escaped char
+                continue;
+            }
+            char c = peek();
+            if (brace_depth > 0) {
+                // Inside a hole: track nested braces and consume nested strings
+                // verbatim so their quotes/braces don't confuse the split.
+                if (c == '{') {
+                    brace_depth++;
+                } else if (c == '}') {
+                    brace_depth--;
+                } else if (c == '"') {
+                    // Consume the nested string literal whole.
+                    body += advance(); // opening "
+                    while (peek() != '"' && !isAtEnd()) {
+                        if (peek() == '\\' && !isAtEnd()) {
+                            body += advance();
+                            if (!isAtEnd()) body += advance();
+                            continue;
+                        }
+                        if (peek() == '\n') break;
+                        body += advance();
+                    }
+                    if (peek() == '"') { body += advance(); } // closing "
+                    continue;
+                }
+                body += advance();
+                continue;
+            }
+            // Outside any hole: '{' opens an expression hole.
+            if (c == '{') {
+                brace_depth++;
+            }
+            body += advance();
+        }
+        if (isAtEnd()) {
+            m_errorHandler.report(
+                Token(TokenType::IDENTIFIER, "", m_line, m_column, m_filename),
+                "Unterminated interpolated string literal.", "E399");
+            return;
+        }
+        advance(); // consume closing "
+        addToken(TokenType::INTERP_STRING, body);
+    }
+
     void Lexer::multilineString() {
         while (!(peek() == '"' && peekNext() == '"' && peekAhead(2) == '"') && !isAtEnd()) {
             if (peek() == '\n') {
@@ -459,6 +528,18 @@ namespace angara {
                 break;
             case '@':
                 addToken(TokenType::AT_SIGN);
+                break;
+
+            // LANG-3: interpolated string — $"..."
+            case '$':
+                if (peek() == '"') {
+                    advance(); // consume opening "
+                    interpolatedString();
+                } else {
+                    m_errorHandler.report(
+                        Token(TokenType::IDENTIFIER, "$", m_line, m_column - 1, m_filename),
+                        "Expected '\"' after '$' for string interpolation.", "E398");
+                }
                 break;
 
             case '!':

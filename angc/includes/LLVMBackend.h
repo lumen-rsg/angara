@@ -101,6 +101,10 @@ namespace angara {
         llvm::Value* cgIs(const IsExpr& e);
         llvm::Value* cgCast(const CastExpr& e);
         llvm::Value* cgDeref(const DerefExpr& e);
+        /// LANG-1: materializes a range as an eager list<i64>.
+        llvm::Value* cgRange(const RangeExpr& e);
+        /// LANG-3: lowers an interpolated string to a concat chain.
+        llvm::Value* cgInterpString(const InterpStringExpr& e);
         llvm::Value* cgMatch(const MatchExpr& e);
         llvm::Value* cgLambda(const LambdaExpr& e);
 
