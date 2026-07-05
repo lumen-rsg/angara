@@ -126,6 +126,21 @@ namespace angara {
                 error(var_target->name, "Cannot assign to 'const' variable '" + symbol->name + "'.", "E320");
                 note(symbol->declaration_token, "'" + symbol->name + "' was declared 'const' here.");
             }
+            // LANG-11: if assigning a lambda with defaults, register them under
+            // the variable name so calls through this variable can use defaults.
+            if (auto* lambda = dynamic_cast<const LambdaExpr*>(expr.value.get())) {
+                bool has_defaults = false;
+                for (const auto& d : lambda->param_defaults) {
+                    if (d) { has_defaults = true; break; }
+                }
+                if (has_defaults) {
+                    std::vector<std::string> names;
+                    names.reserve(lambda->param_names.size());
+                    for (const auto& pn : lambda->param_names) names.push_back(pn.lexeme);
+                    m_function_param_names[var_target->name.lexeme] = std::move(names);
+                    m_function_defaults[var_target->name.lexeme] = lambda->param_defaults;
+                }
+            }
         }
 
         else if (const auto get_target = std::dynamic_pointer_cast<const GetExpr>(expr.target)) {

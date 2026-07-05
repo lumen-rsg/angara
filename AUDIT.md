@@ -28,7 +28,18 @@
 
 | ID | Issue |
 |---|---|
-| LANG-11 | No default arguments; no named arguments. |
+| ~~LANG-11~~ | ~~No default arguments; no named arguments.~~ ✅ Resolved (2026-07-06) |
+
+---
+
+## Known test regressions
+
+These tests fail under the current Chaperone (v5 ownership tracking).  They are **pre-existing** and unrelated to LANG-11.
+
+| Test | Error | Notes |
+|---|---|---|
+| `tests/lang/positive/08_optionals.an` | E501: `s`, `sn` (both `string?`) leak on return | Adding `drop` compiles but segfaults at runtime — likely a Chaperone lowering bug for optional drop sites. |
+| `tests/lang/positive/16_is_downcast.an` | E501: `maybe_name` (`string?`) leaks on return | Same root cause as above. |
 
 ---
 

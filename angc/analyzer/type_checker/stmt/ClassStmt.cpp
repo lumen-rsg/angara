@@ -70,6 +70,27 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
                     error(method_decl->name, "Member '" + method_decl->name.lexeme + "' is already declared in class '" + class_type->name + "'.", "E290");
                 }
                 class_type->methods[method_decl->name.lexeme] = {method_type, method_member->access, method_decl->name, false};
+
+                // LANG-11: store parameter names and default expressions for methods.
+                {
+                    std::string default_key = class_type->name + "." + method_decl->name.lexeme;
+                    std::vector<std::string> names;
+                    names.reserve(method_decl->params.size());
+                    for (const auto& p : method_decl->params) names.push_back(p.name.lexeme);
+                    m_function_param_names[default_key] = std::move(names);
+
+                    bool has_any_default = false;
+                    for (const auto& p : method_decl->params) {
+                        if (p.default_value) { has_any_default = true; break; }
+                    }
+                    if (has_any_default) {
+                        std::vector<std::shared_ptr<Expr>> defaults(method_decl->params.size(), nullptr);
+                        for (size_t i = 0; i < method_decl->params.size(); ++i) {
+                            defaults[i] = method_decl->params[i].default_value;
+                        }
+                        m_function_defaults[default_key] = std::move(defaults);
+                    }
+                }
             }
         }
 

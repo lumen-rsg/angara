@@ -107,6 +107,22 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
         auto initializer_type = popType();
         final_type = initializer_type;
 
+        // LANG-11: if the initializer is a lambda with default args, register
+        // them under the variable name so call resolution can find them.
+        if (auto* lambda = dynamic_cast<const LambdaExpr*>(stmt->initializer.get())) {
+            bool has_defaults = false;
+            for (const auto& d : lambda->param_defaults) {
+                if (d) { has_defaults = true; break; }
+            }
+            if (has_defaults) {
+                std::vector<std::string> names;
+                names.reserve(lambda->param_names.size());
+                for (const auto& pn : lambda->param_names) names.push_back(pn.lexeme);
+                m_function_param_names[stmt->name.lexeme] = std::move(names);
+                m_function_defaults[stmt->name.lexeme] = lambda->param_defaults;
+            }
+        }
+
     } else {
         final_type = resolveType(stmt->typeAnnotation);
     }
