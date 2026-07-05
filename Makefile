@@ -292,6 +292,11 @@ build/modules/mysql.$(SO_EXT): build/obj/modules/data/mysql.o
 	@printf "$(MAGENTA)[MD] $(RESET) %s (MYSQL)\n" "$@"
 	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lmariadb -o $@
 
+build/modules/tls.$(SO_EXT): build/obj/modules/net/tls.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (TLS)\n" "$@"
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lssl -lcrypto -o $@
+
 build/modules/jwt.$(SO_EXT): build/obj/modules/crypto/jwt.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (JWT+JSON)\n" "$@"

@@ -32,6 +32,34 @@ static size_t read_callback(char* buffer, size_t size, size_t nitems, void* user
     return to_send;
 }
 
+/* apply TLS options from a record to a curl handle */
+static void apply_tls_options(CURL* curl_handle, AngaraObject tls_opts) {
+    if (!IS_REC(tls_opts)) return;
+
+    AngaraObject v = ang_api->record_get(tls_opts, "verify");
+    if (ang_is_bool(v)) {
+        curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, ang_as_bool(v) ? 1L : 0L);
+        curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST, ang_as_bool(v) ? 2L : 0L);
+    }
+    ang_api->decref(v);
+
+    v = ang_api->record_get(tls_opts, "ca_bundle");
+    if (IS_STR(v)) curl_easy_setopt(curl_handle, CURLOPT_CAINFO, ang_api->as_cstr(v));
+    ang_api->decref(v);
+
+    v = ang_api->record_get(tls_opts, "client_cert");
+    if (IS_STR(v)) curl_easy_setopt(curl_handle, CURLOPT_SSLCERT, ang_api->as_cstr(v));
+    ang_api->decref(v);
+
+    v = ang_api->record_get(tls_opts, "client_key");
+    if (IS_STR(v)) curl_easy_setopt(curl_handle, CURLOPT_SSLKEY, ang_api->as_cstr(v));
+    ang_api->decref(v);
+
+    v = ang_api->record_get(tls_opts, "client_key_pass");
+    if (IS_STR(v)) curl_easy_setopt(curl_handle, CURLOPT_KEYPASSWD, ang_api->as_cstr(v));
+    ang_api->decref(v);
+}
+
 AngaraObject Angara_http_request(int arg_count, AngaraObject args[]) {
     CURLcode res = CURLE_OK;
     struct curl_slist* headers = NULL;
@@ -53,6 +81,7 @@ AngaraObject Angara_http_request(int arg_count, AngaraObject args[]) {
     AngaraObject method_obj = ang_api->record_get(options, "method");
     AngaraObject headers_obj = ang_api->record_get(options, "headers");
     AngaraObject body_obj = ang_api->record_get(options, "body");
+    AngaraObject tls_obj  = ang_api->record_get(options, "tls");
 
     if (!IS_STR(url_obj)) {
         ang_api->throw_error("http.request options must include 'url' (string).");
@@ -71,6 +100,7 @@ AngaraObject Angara_http_request(int arg_count, AngaraObject args[]) {
     curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_memory_callback);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void*)&chunk);
     curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "angara-http-client/1.0");
+    apply_tls_options(curl_handle, tls_obj);
 
     if (strcmp(method, "POST") == 0) {
         curl_easy_setopt(curl_handle, CURLOPT_POST, 1L);
@@ -110,7 +140,7 @@ AngaraObject Angara_http_request(int arg_count, AngaraObject args[]) {
         ang_api->decref(body_str);
 
         ang_api->decref(url_obj); ang_api->decref(method_obj);
-        ang_api->decref(headers_obj); ang_api->decref(body_obj);
+        ang_api->decref(headers_obj); ang_api->decref(body_obj); ang_api->decref(tls_obj);
         curl_easy_cleanup(curl_handle);
         if (headers) curl_slist_free_all(headers);
         return result_record;
@@ -120,7 +150,7 @@ cleanup:
     curl_easy_cleanup(curl_handle);
     if (headers) curl_slist_free_all(headers);
     ang_api->decref(url_obj); ang_api->decref(method_obj);
-    ang_api->decref(headers_obj); ang_api->decref(body_obj);
+    ang_api->decref(headers_obj); ang_api->decref(body_obj); ang_api->decref(tls_obj);
     free(chunk.buffer);
     return ang_nil();
 }
@@ -144,6 +174,9 @@ static AngaraObject http_simple_request(const char* method, const char* url,
     curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "angara-http-client/1.0");
     curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl_handle, CURLOPT_CONNECTTIMEOUT, 10L);
+    /* enable TLS by default; caller can override via http.request() with tls options */
+    curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST, 2L);
 
     if (strcmp(method, "POST") == 0) {
         curl_easy_setopt(curl_handle, CURLOPT_POST, 1L);
