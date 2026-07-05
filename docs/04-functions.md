@@ -98,10 +98,10 @@ func describe(this) -> string {
 
 ## Variadic Functions
 
-Use `...` before the type annotation to accept a variable number of arguments:
+Use `...` after the type annotation to accept a variable number of arguments:
 
 ```angara
-func sum(count as i64, values ... as i64) -> i64 {
+func sum(count as i64, values as i64 ...) -> i64 {
     // values is accessible as a list
 }
 ```

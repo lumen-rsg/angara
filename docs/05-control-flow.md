@@ -56,6 +56,27 @@ for (item in items) {
 }
 ```
 
+## Range-based for-in
+
+Iterate over a numeric range without allocating a list:
+
+```angara
+for (i in 0..5) {       // exclusive: 0, 1, 2, 3, 4
+    io.println(1, string(i));
+}
+
+for (i in 0...5) {      // inclusive: 0, 1, 2, 3, 4, 5
+    io.println(1, string(i));
+}
+```
+
+Ranges can also be materialized into lists:
+
+```angara
+let xs = 0..3;          // [0, 1, 2]
+let ys = 1...4;         // [1, 2, 3, 4]
+```
+
 ## break and continue
 
 ```angara

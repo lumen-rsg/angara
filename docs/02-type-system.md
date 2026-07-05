@@ -12,6 +12,7 @@ Primitive types, compound types, generics, and user-defined types.
 | `u8`, `u16`, `u32`, `u64`, `uint` | Unsigned integers |
 | `f32`, `f64` | Floating-point numbers |
 | `bool` | Boolean (`true` or `false`) |
+| `char` | Unicode code point (32-bit unsigned) |
 | `string` | UTF-8 string |
 
 ## Compound Types

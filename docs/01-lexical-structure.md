@@ -20,12 +20,13 @@ Angara reserves the following keywords:
 ```
 let const func class data enum
 if orif else while for in
-return break continue throw try catch
+return break continue throw try catch finally
 match case
 attach export foreign intrinsic
-public private inherits signs uses
-true false nil
-typeof
+public private protected inherits signs uses
+true false nil this super
+trait contract union type
+is as static drop from
 ```
 
 ## Literals

@@ -36,6 +36,8 @@ All operators and their precedence.
 | `>` | Greater than | `5 > 3` → `true` |
 | `<=` | Less than or equal | `3 <= 3` → `true` |
 | `>=` | Greater than or equal | `5 >= 5` → `true` |
+| `is` | Type test | `x is string` |
+| `as` | Type cast | `x as i64` |
 
 ## Logical
 
@@ -50,7 +52,7 @@ All operators and their precedence.
 | Operator | Description | Example |
 |----------|-------------|---------|
 | `&` | Bitwise AND | `0xFF & 0x0F` |
-| `\|` | Bitwise OR | `0x0F \|\| 0xF0` |
+| `\|` | Bitwise OR | `0x0F \| 0xF0` |
 | `^` | Bitwise XOR | `0xFF ^ 0x0F` |
 | `~` | Bitwise NOT | `~0x0F` |
 | `<<` | Left shift | `1 << 4` |
@@ -73,6 +75,7 @@ All operators and their precedence.
 | `typeof(x)` | Runtime type name as string | `typeof(42)` → `"i64"` |
 | `len(x)` | Length of strings and lists | `len("hello")` → `5` |
 | `string(x)` | Convert any value to string | `string(3.14)` → `"3.14"` |
+| `char(x)` | Convert integer code point to char | `char(65)` → `'A'` |
 | `i64(x)` | Cast to i64 | `i64(3.7)` → `3` |
 | `f64(x)` | Cast to f64 | `f64(42)` → `42.0` |
 
@@ -83,16 +86,17 @@ From lowest to highest:
 | Priority | Operators | Description |
 |----------|-----------|-------------|
 | 1 (lowest) | `=`, `+=`, `-=`, `*=`, `/=` | Assignment |
-| 2 | `? :` | Ternary |
-| 3 | `\|\|` | Logical OR |
-| 4 | `&&` | Logical AND |
-| 5 | `\|` | Bitwise OR |
-| 6 | `^` | Bitwise XOR |
-| 7 | `&` | Bitwise AND |
-| 8 | `==`, `!=` | Equality |
-| 9 | `<`, `>`, `<=`, `>=` | Comparison |
-| 10 | `+`, `-` | Addition / Subtraction |
-| 11 | `*`, `/`, `%` | Multiplication / Division |
-| 12 | `!`, `-`, `~` | Unary |
-| 13 | `.`, `()`, `[]` | Call / Member / Subscript |
-| 14 (highest) | literals, identifiers, `()` | Primary |
+| 2 | `..`, `...` | Range |
+| 3 | `??` | Nil coalescing |
+| 4 | `? :` | Ternary |
+| 5 | `\|\|` | Logical OR |
+| 6 | `&&` | Logical AND |
+| 7 | `==`, `!=`, `is`, `as` | Equality / Type test / Cast |
+| 8 | `<`, `>`, `<=`, `>=` | Comparison |
+| 9 | `\|`, `^`, `&` | Bitwise OR / XOR / AND |
+| 10 | `<<`, `>>` | Bitwise shift |
+| 11 | `+`, `-` | Addition / Subtraction |
+| 12 | `*`, `/`, `%` | Multiplication / Division |
+| 13 | `!`, `-`, `~`, `++`, `--` | Unary |
+| 14 | `.`, `?.`, `()`, `[]` | Call / Member / Subscript |
+| 15 (highest) | literals, identifiers, `()` | Primary |

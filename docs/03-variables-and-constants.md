@@ -12,6 +12,7 @@ Declared with `let`. Type annotations use `as`:
 let name as string = "Angara";
 let count as i64 = 0;
 let inferred = 42;              // Type inferred as i64
+let letter = 'A';               // char literal
 ```
 
 ## Immutable Constants
