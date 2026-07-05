@@ -302,7 +302,7 @@ build/modules/watch.$(SO_EXT): build/obj/modules/fs/watch.o
 build/modules/compress.$(SO_EXT): build/obj/modules/fs/compress.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (ZSTD)\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lzstd -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lzstd -lbz2 -llzma -o $@
 
 build/modules/adv_string.$(SO_EXT): build/obj/modules/text/adv_string.o
 build/modules/regex.$(SO_EXT): build/obj/modules/text/regex.o
