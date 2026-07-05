@@ -130,7 +130,7 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 
 | ID | Status | Sev | Issue | Location |
 |---|---|---|---|---|
-| - [ ] **LIB-1** | 🟡 Source | High | **No TLS/SSL anywhere.** http relies on libcurl defaults; amqp/mqtt/websocket parse secure schemes but never configure TLS. No cert pinning, no mTLS. | `modules/net/*` |
+| - [x] **LIB-1** | ✅ Fixed | High | ~~No TLS/SSL anywhere.~~ HTTP client now enables TLS verification by default with `{tls = {verify, ca_bundle, client_cert, ...}}` options; new `tls` module wraps OpenSSL for raw TLS sockets (connect + listen); websocket already set `LCCSCF_USE_SSL` for wss://. AMQP/MQTT secure schemes still need TLS configuration (deferred — rabbitmq-c / mosquitto TLS). | `modules/net/http.c`, `modules/net/tls.c` |
 | - [x] **LIB-2** | ✅ Fixed | High | **JWT is insecure.** `verify` doesn't check the `alg` header (alg-confusion); `base64url_decode` writes into a fixed 64-byte stack buffer → stack overflow on crafted input. | `modules/crypto/jwt.c` |
 | - [x] **LIB-3** | ✅ Fixed | High | **Only one real collection (`list`) + `record` (string-keyed map).** `collections.an` is an O(n²) LINQ layer (bubble `SortBy`, linear `Distinct`/`Contains`) — no Map/Set/Queue/Stack/Tree. _(Map/Set added to `modules/collections/collections.an`: `MapNew`/`MapPut`/`MapGet`/`MapHas`/`MapRemove`/`MapSize`/`MapKeys`/`MapValues` and `SetNew`/`SetAdd`/`SetHas`/`SetRemove`/`SetSize`/`SetItems`. Hash-bucketed (16 buckets) over parallel key/value lists, using the new `hash()` builtin + deep `==` (TS-2 Phase 2c), so keys may be any hashable type (scalars, strings, structural objects). The LINQ layer's O(n²) algorithms remain — improving them (or adding Queue/Stack/Tree) is follow-up.)_ | `modules/collections/collections.an` |
 | - [x] **LIB-4** | ✅ Fixed (partial) | Medium | ~~No async I/O / event loop / channels~~ — new `async` module: epoll event loop (`Loop` with `add`/`timer`/`poll`) + thread-safe channels (`Sender`/`Receiver`); futures/promises → see deferrals. | — |
@@ -214,6 +214,17 @@ Everyday conveniences absent today (most are documented but unimplemented — no
   object header. String literals retained `is_unique`, so the in-place concat
   fast path mutated the literal's global buffer. Fixed by implementing the
   function to actually clear bit 8 of the `meta` field.)_
+
+---
+
+## LIB-1 deferrals (2026-07-05)
+
+- **AMQP / MQTT TLS** — The `amqp` and `mqtt` modules parse `amqps://` /
+  `mqtts://` URLs but do not yet configure TLS on the underlying
+  connections.  rabbitmq-c and mosquitto both support TLS; wiring it up
+  requires passing SSL context options to their respective connection
+  functions.  Raw TLS sockets (`tls.connect`) can be used as a workaround
+  with protocol-level AMQP/MQTT framing.
 
 ---
 
