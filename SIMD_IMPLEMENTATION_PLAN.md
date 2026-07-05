@@ -640,7 +640,7 @@ type — assignment copies the reference, not the data.
 | 2.1 | @inline parser | ✅ done |
 | 2.2 | @inline codegen | ✅ done |
 | 2.3 | @inline tests | ✅ done |
-| 3 | Auto-vectorization verification | pending (depends on 1+2) |
+| 3 | Auto-vectorization verification | ✅ done |
 | 4 | SIMD intrinsics | deferred |
 | 5 | Vector types | deferred |
 

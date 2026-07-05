@@ -1,0 +1,69 @@
+// Phase 3: Auto-vectorization verification — f64 dot product benchmark
+// Verifies that loops over unboxed f64[] arrays are auto-vectorized
+// by LLVM into NEON SIMD instructions (ARM64) or SSE/AVX (x86-64).
+//
+// Verification:
+//   1. Compile with --dump-ir and confirm GEP+load (no function calls in loop)
+//   2. Disassemble the object file: objdump -d <file>.o
+//   3. Look for NEON vector instructions: fmul vN.2d, ldp qN, fadd
+//   4. On x86-64, look for: mulpd, addpd, vfmadd213pd
+
+func dot_product(a as f64[], b as f64[]) -> f64 {
+    let sum = 0.0;
+    let i = 0;
+    let n = len(a);
+    while (i < n) {
+        sum = sum + a[i] * b[i];
+        i = i + 1;
+    }
+    return sum;
+}
+
+// Sum reduction — another vectorizable pattern
+func sum_array(buf as f64[]) -> f64 {
+    let sum = 0.0;
+    let i = 0;
+    let n = len(buf);
+    while (i < n) {
+        sum = sum + buf[i];
+        i = i + 1;
+    }
+    return sum;
+}
+
+// SAXPY-style: y[i] = a * x[i] + y[i]
+// (Tests store vectorization, not just load)
+func saxpy(a as f64, x as f64[], y as f64[]) {
+    let i = 0;
+    let n = len(x);
+    while (i < n) {
+        y[i] = a * x[i] + y[i];
+        i = i + 1;
+    }
+}
+
+export func main() -> i64 {
+    // Test dot_product
+    let a as f64[] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let b as f64[] = [8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0];
+    let dp = dot_product(a, b);
+    // Expected: 1*8 + 2*7 + 3*6 + 4*5 + 5*4 + 6*3 + 7*2 + 8*1 = 120
+    if ((dp as i64) != 120) { return 1; }
+
+    // Test sum_array
+    let s = sum_array(a);
+    // Expected: 1+2+3+4+5+6+7+8 = 36
+    if ((s as i64) != 36) { return 2; }
+
+    // Test saxpy
+    let x as f64[] = [1.0, 2.0, 3.0, 4.0];
+    let y as f64[] = [5.0, 6.0, 7.0, 8.0];
+    saxpy(2.0, x, y);
+    // Expected: y = 2*x + y = [7, 10, 13, 16]
+    if ((y[0] as i64) != 7)  { return 3; }
+    if ((y[1] as i64) != 10) { return 4; }
+    if ((y[2] as i64) != 13) { return 5; }
+    if ((y[3] as i64) != 16) { return 6; }
+
+    return 0;
+}

@@ -1957,7 +1957,14 @@ llvm::Value* LLVMBackend::cgCast(const CastExpr& e) {
         auto* null_fin = llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
         return callRtByName("__ang_api_native_instance_new", {data_ptr, null_fin, name_str});
     }
-    // Numeric truncation/extension: for now just return as-is
+    // Numeric conversion: f64 → i64 (fptosi) and i64 → f64 (sitofp)
+    if (isFloat(source) && isInteger(target)) {
+        return callRtByName("__ang_to_i64", {val});
+    }
+    if (isInteger(source) && isFloat(target)) {
+        return callRtByName("__ang_to_f64", {val});
+    }
+    // Same-type numeric: truncation/extension within i64 is a no-op
     // (the value is already stored as i64; the type checker records the narrower type)
     return val;
 }
