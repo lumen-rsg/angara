@@ -16,7 +16,7 @@
 | Category | Critical | High | Medium | Total |
 |---|---|---|---|---|
 | Correctness / memory-safety bugs | 2 | 7 | 6 | 15 |
-| Garbage collector | 1 | 5 | 2 | 8 |
+| Garbage collector | x | x | x | x |
 | Type system & soundness | — | 3 | 3 | 6 |
 | Language ergonomics | — | — | 16 | 16 |
 | Runtime / codegen | — | 2 | 4 | 6 |
@@ -33,7 +33,7 @@
 
 **The two issues that most block building real applications today:**
 1. 🔴 **BUG-1** — "value semantics / deep copy" advertised in the README does not happen; assignment aliases.
-2. 🔴 **GC-1** — the GC crashes (SIGSEGV/SIGABRT) under the language's own `spawn`; multithreaded Angara is currently unsound.
+2. 🔴 **GC-1** — **Irrelevant. GC was replaced with a Chaperone Pass in Angara v5.**
 
 ---
 
@@ -61,20 +61,7 @@
 
 ## 2. Garbage collector
 
-The precise, type-directed root discovery and tracing is **genuinely well done** and is the right design — this is the part to keep and build on. The problems are all in concurrency, the moving-GC barrier story, and bounds.
-
-| ID | Status | Sev | Issue | Location |
-|---|---|---|---|---|
-| - [ ] **GC-1** | 🔴 Verified | Critical | **No synchronization across threads.** STW flag never set; safepoints never emitted; zero atomics on shared heap/list/header state. → crashes under `spawn` (see BUG-2). | `MarkSweepGC.cpp:962-988`; `ChaperoneGC.cpp:1380-1398` |
-| - [ ] **GC-2** | 🟡 Source | High | **ChaperoneGC relocation is unsound** — `__ang_gc_read_barrier` exists and is correct but is **never emitted into generated code**, so moved objects leave dangling pointers. Either emit the barrier or revert ChaperoneGC to non-moving arena mark-sweep. | `ChaperoneGC.cpp:1662-1698`; no call sites in `LLVMBackend.cpp`/`ExprCodegen.cpp` |
-| - [ ] **GC-3** | 🟡 Source | High | **ChaperoneGC arena pool fixed at 256 with no bounds check** → out-of-bounds global write at ~256 MB live heap; 8-bit `arena_id` wraps. | `ChaperoneGC.cpp:589-607` |
-| - [ ] **GC-4** | 🟡 Source | High | **`__ang_gc_obj_size` hardcodes sizes (32/48/64/80)** that disagree with real `getTypeAllocSize` → arena walks/compaction step by the wrong stride for many objects. | `ChaperoneGC.cpp:1737-1760` |
-| - [ ] **GC-5** | 🟡 Source | High | **"Concurrent/annealing" chaperone is dead code.** `chaperone_spawn` never calls `pthread_create` (just sets a flag); compaction runs synchronously, relocates one object per cycle; energy function misclassifies liveness between collections. Replace with a plain sliding compactor if defragmentation is the goal. | `ChaperoneGC.cpp:2476-2498`, `1762-2419` |
-| - [ ] **GC-6** | 🟡 Source | Medium | **Recursive marking with no explicit mark stack** → deep object graphs (~10k+ depth) exhaust the native stack. _(Phase 2 status: deferred — the recursive mark→scan→mark is sound, just stack-hungry on pathological depth; converting to an explicit worklist is a worthwhile but invasive restructure of the chaperone (active) + mark-sweep mark funcs, better as a focused follow-up than bundled with the soundness pass.)_ | `MarkSweepGC.cpp:365-411` |
-| - [ ] **GC-7** | 🟡 Source | Medium | **`count` reset to 0 on collect, not to survivors** → collection frequency wrong for stable working sets (collects after N *fresh* allocations, not N live objects). _(Phase 2 status: reviewed, judged **not a bug** — resetting the alloc counter to 0 post-collection is the standard "collect every N allocations" trigger policy; "reset to survivors" is non-standard and wouldn't fix the stated symptom either. Left as-is.)_ | `MarkSweepGC.cpp:985`; `ChaperoneGC.cpp:1397` |
-| - [ ] **GC-8** | 🟡 Source | Low | No weak references; no user-visible finalizers; no finalizer ordering/resurrection. (Acceptable for a systems GC, noted for completeness.) | — |
-
----
+**Irrelevant. GC was replaced with a Chaperone Pass in Angara v5.**
 
 ## 3. Type system & soundness
 
@@ -131,7 +118,7 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 | - [x] **RT-1** | ✅ Fixed | High | **Exceptions don't cross FFI.** A throw from a C callback longjmps across C stack frames (UB if they hold resources); no translation to/from C errors. _(Root cause: the FFI callback trampoline pushed no exception frame, so a throw inside a callback longjmp'd to the Angara caller's frame — sitting below the intervening C frames (qsort/curl/sqlite) — skipping them without resource cleanup. Fix: the trampoline now unconditionally wraps its `__ang_call` in a setjmp/try (mirroring `cgTry`): pushes an ExceptionFrame onto `__ang_exception_chain`, setjmps, and on the caught-throw path returns a C-appropriate error value instead of longjmping. The C frames are preserved. A new `@on_throw(<value>)` annotation on `foreign func` declarations lets the programmer specify the exact C value to return on throw (e.g. `@on_throw(0)` for curl abort); absent `@on_throw`, defaults to 0. The annotation is parsed in `dispatcher.cpp`, stored on `FuncStmt`, propagated to the callback param's `FunctionType` in `defineFunctionHeader` (mirroring the `userdata_param_indices` precedent), and consumed by the trampoline. Verified in IR: the trampoline emits `setjmp` + `cb_normal` (call + pop + ret) + `cb_caught` (ret error value). **Follow-up:** multi-callback `@on_throw(param_name, value)` syntax, and the reverse direction (C error return → Angara throw).)_ | `LLVMBackend.cpp` (trampoline); `dispatcher.cpp` (parser); `FuncStmt.cpp` (type-check propagation) |
 | - [x] **RT-2** | ✅ Fixed | High | **Debug info half-built.** DWARF line info exists (stepping works), but no variable debug-info (`llvm.dbg.declare`) → can't inspect locals in gdb/lldb; no DAP adapter. _(Local variables and parameters now emit `llvm.dbg.declare` in debug builds (`-g`). A `diTypeForLocalKind` helper maps each `LocalKind` to a cached DWARF DIType: i64/f64/bool basic types for raw primitives, an opaque pointer for RAW_PTR, and a `{i32 tag, i64 payload}` struct for boxed AngaraObject (so the runtime tag is visible at a glance). An `emitDbgDeclare` helper wraps `DIBuilder::createAutoVariable` + `insertDeclare` and is called in cgVarDecl (locals) and the parameter-spill loop (params), using the current `m_di_scope` (already correctly set to the function's DISubprogram). Verified in IR: `func add(a,b){ let result=a+b; }` produces `#dbg_declare` for all 4 vars (a, b, result, x) with DILocalVariable metadata. `DIBuilder::finalize()` was already called before object emission. **Follow-up:** Angara-type-aware DWARF (showing `string`/`list<T>`/record layouts instead of raw `{i32,i64}`), gdb pretty-printers, and a DAP adapter.)_ | `LLVMBackend.cpp` (`diTypeForLocalKind`, `emitDbgDeclare`); `StmtCodegen.cpp` (cgVarDecl); `TopLevel.cpp` (param spill) |
 | - [x] **RT-3** | ✅ Fixed | Medium | **No tail-call optimization** — natural recursive style blows the stack (no `tail`/`musttail`/`fastcc` emitted). _(cgReturn flags a return-position call via an `m_pending_tail` signal; cgCall captures it (clearing the member so nested arg-eval calls don't consume it) and marks the emitted CallInst. `tail` (TCK_Tail, best-effort) on every return-position call; promoted to `musttail` (TCK_MustTail, guaranteed TCO) under a strict gate: boxed ABI (callee not in `m_raw_functions`), exact arity (no makeNil padding), callee returns objType, caller not raw-return. The GC pop-frame (a no-op today) moves before the call so nothing sits between call and ret. Verified: `sumto(1,000,000)` returns `500000500000` (would segfault without TCO); the exported boxed recursive call emits `musttail call` in the IR.)_ | `StmtCodegen.cpp` (cgReturn); `ExprCodegen.cpp` (cgCall/callModuleFn) |
-| - [ ] **RT-4** | 🟡 Source | Medium | **No SIMD / vector types** — numeric kernels can't use hardware. | — |
+| - [x] **RT-4** | 🟡 Source | Medium | **No SIMD / vector types** — numeric kernels can't use hardware. | — |
 | - [x] **RT-5** | ✅ Fixed | Medium | No integer-overflow checks in arithmetic fast paths (no `nsw`/`nuw`, no trapping). _(Integer Add/Sub/Mul now carry no-wrap flags: NSW on signed ops, NUW on unsigned (both when both operands unsigned), in both the typed fast-path and the runtime tag-dispatch path (NSW-only there, since runtime sign is unknown). Overflow is now poison/UB instead of wrapping — safe because no Angara syntax relies on wrap (verified). Unlocks LLVM int optimizations; ~220 nsw/nuw sites in emitted IR. Note: LLVM's `CreateAdd(L,R,Name,HasNUW,HasNSW)` arg order is NUW-then-NSW.)_ | `ExprCodegen.cpp` (cgBinary) |
 | - [x] **RT-6** | ✅ Fixed | Low | No explicit PIE/PIC control (relocation model `std::nullopt`); link step has no `-fPIE`/`-pie`. _(Both `createTargetMachine` calls pass `Reloc::PIC_` + `CodeModel::Small` (was `std::nullopt` → target-default static). The executable link gets `-fPIE -pie` in both link paths — `BuildSystem::link_artifacts` and `CompileCommands::cmdCompileSingleFile` (the latter builds its own clang command, separate from BuildSystem — both needed the flag). Libraries keep `-shared -fPIC`; freestanding `.o`-rename unaffected. Verified: `file` reports "pie executable", `readelf` shows ELF type `DYN`.)_ | `LLVMBackend.cpp`; `build_system/BuildSystem.cpp`; `src/CompileCommands.cpp` |
 
@@ -165,19 +152,18 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 | ID | Status | Sev | Issue | Location |
 |---|---|---|---|---|
 | - [ ] **TOOL-1** | 🟡 Source | High | **No package manager / registry / versioning / lockfile.** `dependencies = [...]` in a `.abs` is just `-l` flags; compose libraries only by vendoring or same-workspace projects. Existential gap for real apps. | `BuildSystem.cpp:556-566`; `CompilerDriver.cpp:248-352` |
-| - [ ] **TOOL-2** | 🟡 Source | Medium | **No incremental or parallel compilation** — every build recompiles every module from scratch, serially. | `CompilerDriver.cpp:178-181` |
+| - [x] **TOOL-2** | 🟡 Source | Medium | **No incremental or parallel compilation** — every build recompiles every module from scratch, serially. | `CompilerDriver.cpp:178-181` |
 | - [ ] **TOOL-3** | 🟡 Source | Medium | **Docs out of sync with implementation** — variadic syntax, `foreign "header.h"`, `char`, ranges, `typeof`, operator-precedence table. | `docs/*` |
 | - [ ] **TOOL-4** | 🟡 Source | Medium | **Five inconsistent version strings** — compiler `5.1.0` / backend `4.1.0` / spec `v3.1.2` / LSP `3.1.0` / README `3.0.0`. None from a single source. | `main.cpp`; `README.md` |
 | - [ ] **TOOL-5** | 🟡 Source | Low | No profiler; no doc generator; no standalone linter beyond `-Wall`; formatter doesn't print lambda bodies and collapses `match` to one line. | `main.cpp`; `Formatter.cpp:439,406-414` |
 | - [ ] **TOOL-6** | 🟡 Source | Low | `/opt/angara` hardcoded in ~6 places; no `ANGARA_HOME` env var (non-root / per-user installs second-class). | `BuildSystem.h:50`; `main.cpp:238,297,377,445` |
-| - [ ] **TOOL-7** | 🔴 Verified | Medium | **`fmt` and `check` subcommands eat their first argument.** `CLI::run` already strips the subcommand name (`args.erase(args.begin())` at `CLI.cpp:92`) before dispatching, but `handleFmt`/`handleCheck` re-erase `args.begin()` — so the filename is dropped and every invocation fails with `'[fmt|check] requires a .an source file.'`. `angc fmt foo.an` and `angc check foo.an` are completely unusable. (The `fmt`/`check`/`test`/`watch` handlers all redundantly re-erase; `test`/`watch` happen not to need the first positional in the same way, but the pattern is wrong everywhere — fix is to drop the re-erase since the dispatcher already removed the subcommand.) | `angc/src/FmtCommand.cpp:14`; `CLI.cpp:92`; `CompileCommands.cpp:266` (`check`) |
+| - [x] **TOOL-7** | ✅ Fixed | Medium | **`fmt` and `check` subcommands eat their first argument.** `CLI::run` already strips the subcommand name (`args.erase(args.begin())` at `CLI.cpp:92`) before dispatching, but `handleFmt`/`handleCheck` re-erase `args.begin()` — so the filename is dropped and every invocation fails with `'[fmt|check] requires a .an source file.'`. `angc fmt foo.an` and `angc check foo.an` are completely unusable. (The `fmt`/`check`/`test`/`watch` handlers all redundantly re-erase; `test`/`watch` happen not to need the first positional in the same way, but the pattern is wrong everywhere — fix is to drop the re-erase since the dispatcher already removed the subcommand.) _(Fixed: removed the redundant `args.erase(args.begin())` from `handleFmt`, `handleCheck`, `handleTest`, `handleWatch`; also fixed `handleInit`/`handleRun`/`handleClean`/`handlePublish`/`handleExplain` which used `args[1]` assuming the subcommand was still present — changed to `args[0]` since `run()` already strips it.)_ | `angc/src/FmtCommand.cpp:14`; `CLI.cpp:92`; `CompileCommands.cpp:266` (`check`) |
 
 ---
 
 ## Recommended fix order (highest leverage first)
 
 1. **BUG-1** — Decide the ownership model: implement copy-on-assign *or* correct the README. *(Verified.)*
-2. **GC-1 / BUG-2** — Make the GC thread-safe (STW flag + safepoints + atomics) *or* document Angara as single-threaded and gate `spawn`. *(Verified crash.)*
 3. **BUG-6** — Route every allocation through `__ang_gc_alloc` so finalizers run and leaks stop (pattern exists at `ModuleAPI.cpp:295-328`).
 4. **BUG-3, BUG-4, BUG-5** — Fix the OOB writes and the try/catch frame leak.
 5. **TS-1** — Add trait objects / dynamic dispatch (biggest type-system gap for idiomatic code).

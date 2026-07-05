@@ -68,7 +68,6 @@ static bool detect_changes(const std::vector<FileSnapshot>& prev,
 }
 
 int angara::CLI::handleWatch(std::vector<std::string> args) {
-    args.erase(args.begin());
     bool run_after = false;
     bool test_after = false;
     for (auto& arg : args) {

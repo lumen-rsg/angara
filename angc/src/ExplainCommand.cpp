@@ -5,11 +5,11 @@
 namespace angara {
 
 int angara::CLI::handleExplain(std::vector<std::string> args) {
-    if (args.size() < 2) {
+    if (args.empty()) {
         std::cerr << CLR_RED << "[ERROR] 'explain' requires an error or warning code (e.g., W003, E377)." << CLR_RESET << "\n";
         return 1;
     }
-    std::string code = args[1];
+    std::string code = args[0];
 
     // Warning explanations
     static const std::map<std::string, std::pair<std::string, std::string>> explanations = {

@@ -273,7 +273,6 @@ int angara::CLI::cmdPathBuild(std::vector<std::string>& args) {
 }
 
 int angara::CLI::handleCheck(std::vector<std::string> args) {
-    args.erase(args.begin());
     CliFlags flags = m_flags = CliFlags{}; parseFlags(args);
     if (args.empty()) {
         std::cerr << CLR_RED << "[ERROR] 'check' requires a .an source file." << CLR_RESET << "\n";

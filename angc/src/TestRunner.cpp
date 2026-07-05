@@ -8,7 +8,6 @@ namespace fs = std::filesystem;
 namespace angara {
 
 int angara::CLI::handleTest(std::vector<std::string> args) {
-    args.erase(args.begin());
     parseFlags(args); CliFlags& flags = m_flags;
 
     // Find test directory

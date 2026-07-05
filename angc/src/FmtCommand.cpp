@@ -11,7 +11,6 @@ namespace fs = std::filesystem;
 namespace angara {
 
 int angara::CLI::handleFmt(std::vector<std::string> args) {
-    args.erase(args.begin());
     bool write_in_place = false;
     bool check_mode = false;
     bool list_mode = false;
