@@ -154,8 +154,8 @@ struct AngaraAPI {
     void*        (*native_instance_data)(AngaraObject obj);  ///< Extract the opaque data pointer
 
     // --- Memory management ---
-    void (*incref)(AngaraObject val);   ///< Increment ref count (heap objects only)
-    void (*decref)(AngaraObject val);   ///< Decrement ref count, free if zero
+    void (*incref)(AngaraObject val);   ///< Pin a heap object (prevents collection; paired with decref)
+    void (*decref)(AngaraObject val);   ///< Unpin a heap object (may become collectable)
 
     // --- Conversions ---
     AngaraObject (*to_string)(AngaraObject val);   ///< Convert any value to its string representation
@@ -165,7 +165,7 @@ struct AngaraAPI {
     bool         (*equals)(AngaraObject a, AngaraObject b); ///< Deep equality check
 
     // --- Error reporting ---
-    void (*throw_error)(const char* msg);   ///< Throw an Angara exception with a message
+    __attribute__((__noreturn__)) void (*throw_error)(const char* msg); ///< Throw an Angara exception (does not return)
 
     // --- Type introspection ---
     int32_t (*obj_type)(AngaraObject obj);  ///< Get heap object type tag (ANG_OBJ_*)
