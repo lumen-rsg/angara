@@ -1,0 +1,27 @@
+// Chaperone positive test — H5: valid interprocedural borrow (no dangling)
+// A function receives both a ref<T> and the tracked referent T. The ref is
+// used before the referent is dropped — safe. The borrow propagation from
+// H5 should NOT produce a false positive here.
+//
+// exit: 42
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+// bar reads through the ref, then drops the referent — correct order, safe.
+func bar(r as ref<Buf>, b as Buf) {
+    let x = r.get();        // read through ref first — safe
+    drop b;                  // now drop the referent after ref's last use
+    return;
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let r as ref<Buf> = b;   // r borrows b
+    bar(r, b);              // bar uses ref then drops b — safe
+    return 42;
+}

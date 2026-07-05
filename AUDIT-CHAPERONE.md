@@ -131,7 +131,7 @@ does nothing. This means:
 | **H2** | [x] 🟢 Source → ✅ Fixed | `ExprAnalysis.cpp:268-272` | **No summary for closure calls.** When a closure is called as `f()`, there is no entry in `ctx.summaries` (closures are LambdaExprs, not FuncStmts). All args are treated as Borrowed — a closure that drops or escapes its argument goes undetected. Fixed by building summaries from lambda body analysis (keyed by FunctionType pointer) and looking them up at call sites via the callee VarExpr's type. |
 | **H3** | [ ] 🟢 Source | `ExprAnalysis.cpp:272` | **@consumes/@escape not implemented.** Documented in `CHAPERONE.md` as escape hatches, mentioned in code comments, but never parsed or checked. All FFI/unknown functions are permanently treated as borrowing — no way to mark a foreign function that takes ownership. |
 | **H4** | [x] 🟢 Source → ✅ Fixed | `Chaperone.cpp:308-313` | **No oscillation detection in fixed-point.** The convergence check is exact map equality. If summaries oscillate (A→B→A→B), the loop exhausts all 8 passes without converging and silently uses the last pass. No diagnostic emitted. With C3 (name collision), oscillation is plausible. |
-| **H5** | [ ] 🟢 Source | `StmtAnalysis.cpp:20` | **Borrow tracking is intraprocedural only.** `ctx.borrows.clear()` at function entry. If a `ref<T>` is passed to another function, the callee doesn't see the borrow relationship and won't flag E509 if it drops the referent. |
+| **H5** | [x] 🟢 Source → ✅ Fixed | `StmtAnalysis.cpp:69-118` | **Borrow tracking is intraprocedural only.** `ctx.borrows.clear()` at function entry. If a `ref<T>` is passed to another function, the callee doesn't see the borrow relationship and won't flag E509 if it drops the referent. Fixed by seeding `ctx.borrows` in `analyzeFunction`: when a function receives both a `ref<T>` param and a tracked `T` param of matching type, a borrow edge `ref → referent` is established so dropping the referent inside the callee flags E509 on subsequent ref reads. |
 
 ### MEDIUM — Conservative but lossy
 
@@ -259,6 +259,11 @@ have their summaries pre-built before the fixed-point loop.
 
 **H4 (Oscillation detection):** [x] Done — W521 warning when summary hashes repeat.
 
+**H5 (Interprocedural borrows):** [x] Done — `analyzeFunction` seeds `ctx.borrows` for `ref<T>` params
+when the function also receives a tracked param of matching type T. Dropping the tracked param
+inside the callee now correctly flags E509 on subsequent ref reads. Tests: 31 (negative: drop referent
+then read ref), 11 (positive: read ref then drop referent).
+
 ### Phase D — Test Coverage
 
 | Test | Covers |
@@ -269,7 +274,7 @@ have their summaries pre-built before the fixed-point loop.
 | Closure body containing `drop` then `use` | C4 |
 | Closure inside try/catch capturing tracked var | H1 |
 | Mutual recursion (A→B→A) | M4 |
-| `ref<T>` passed to another function that drops referent | H5 |
+| `ref<T>` passed to another function that drops referent | H5 | 31 (negative), 11 (positive) |
 
 ---
 
@@ -300,7 +305,7 @@ have their summaries pre-built before the fixed-point loop.
 | **H2** | No summary for closure calls | [x] |
 | **H3** | @consumes/@escape not implemented | [x] |
 | **H4** | No oscillation detection in fixed-point | [x] |
-| **H5** | Borrow tracking intraprocedural only | [ ] |
+| **H5** | Borrow tracking intraprocedural only | [x] |
 | **M1** | W510 only scans then_state keys | [x] |
 | **M2** | Loop body analyzed once (no fixed-point) | [x] |
 | **M3** | join(Escaped, Moved) = Dropped misleading | [x] |

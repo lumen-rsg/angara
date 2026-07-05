@@ -66,6 +66,57 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
         }
     }
 
+    // H5: interprocedural borrow propagation. When a function receives both a
+    // ref<T> and a tracked T, the ref may point to the tracked param. Seed
+    // ctx.borrows so a later drop of the referent inside this function flags
+    // E509 when the ref is subsequently read. Without this, borrow tracking is
+    // purely intraprocedural — a callee that drops a referent won't detect the
+    // dangling ref.
+    //
+    // Try resolved FunctionType first (top-level functions), then fall back to
+    // AST type annotations (methods, where the FunctionType isn't resolvable by
+    // bare name). A ref<T> is represented as GenericType("ref", [T]) in the AST.
+    if (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION) {
+        auto fn_type = std::dynamic_pointer_cast<FunctionType>(sem_sym->type);
+        for (size_t i = 0; i < fn_type->param_types.size() && i < func.params.size(); i++) {
+            auto& pt_i = fn_type->param_types[i];
+            if (!pt_i || pt_i->kind != TypeKind::REF) continue;
+            auto* ref_type = dynamic_cast<const RefType*>(pt_i.get());
+            if (!ref_type || !ref_type->inner_type) continue;
+            for (size_t j = 0; j < fn_type->param_types.size() && j < func.params.size(); j++) {
+                if (i == j) continue;
+                auto& pt_j = fn_type->param_types[j];
+                if (!pt_j || !isTrackedTypeObj(ctx, *pt_j)) continue;
+                // Compare the ref's inner type with the tracked param's type.
+                // Canonical pointer identity (via sameType) is correct — both
+                // resolve to the same ClassType/Datatype declaration.
+                if (sameType(ref_type->inner_type, pt_j)) {
+                    ctx.borrows[func.params[i].name.lexeme] = func.params[j].name.lexeme;
+                    break;  // one match suffices; borrows is a single-valued map
+                }
+            }
+        }
+    } else {
+        // Fallback: read param types from AST annotations (methods).
+        for (size_t i = 0; i < func.params.size(); i++) {
+            auto* ast_type = func.params[i].type.get();
+            if (!ast_type) continue;
+            auto* generic = dynamic_cast<const GenericType*>(ast_type);
+            if (!generic || generic->name.lexeme != "ref" || generic->arguments.size() != 1)
+                continue;
+            std::string inner_name = base_name(generic->arguments[0].get());
+            if (inner_name.empty()) continue;
+            for (size_t j = 0; j < func.params.size(); j++) {
+                if (i == j) continue;
+                std::string tn = base_name(func.params[j].type.get());
+                if (!tn.empty() && ctx.tracked_types.count(tn) && tn == inner_name) {
+                    ctx.borrows[func.params[i].name.lexeme] = func.params[j].name.lexeme;
+                    break;
+                }
+            }
+        }
+    }
+
     bool terminates = false;
     if (func.body) {
         // analyzeBlock takes state by value and returns the threaded map;

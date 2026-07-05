@@ -1,0 +1,29 @@
+// Chaperone negative test — H5: E509 interprocedural dangling borrow
+// A function receives both a ref<T> and the tracked referent T. The callee
+// drops the referent and then reads the ref — the ref dangles. Previously,
+// borrow tracking was intraprocedural only (ctx.borrows cleared at function
+// entry), so the callee never flagged this. Must report E509.
+//
+// expect: E509
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+// bar receives both a ref and the referent — the ref may point to b.
+// Dropping b and then reading r should flag E509.
+func bar(r as ref<Buf>, b as Buf) {
+    drop b;                // drops the referent
+    let x = r.get();       // reading r after b is dropped — dangling ref! E509
+    return;
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let r as ref<Buf> = b;   // r borrows b
+    bar(r, b);              // bar drops b, then reads r — E509 inside bar
+    return 0;
+}
