@@ -132,6 +132,11 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
                                      func_name, mod.get());
     }
 
+    // SIMD-2: @inline annotation — force inlining at every call site
+    if (stmt.is_inline) {
+        fn->addFnAttr(llvm::Attribute::AlwaysInline);
+    }
+
     // Attach DWARF debug info to this function in debug mode
     llvm::DIScope* saved_di_scope = m_di_scope;
     if (m_debug && m_di_builder && m_di_file) {

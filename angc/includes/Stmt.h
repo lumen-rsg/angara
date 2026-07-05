@@ -274,6 +274,8 @@ namespace angara {
 
         bool is_foreign = false;
         bool is_intrinsic = false;
+        // SIMD-2: @inline annotation — forces inlining of this function
+        bool is_inline = false;
         // Stores the header name, e.g., "unistd.h"
         std::vector<Token> foreign_headers;
         // RT-1: @on_throw(<value>) — the C value to return if an Angara callback

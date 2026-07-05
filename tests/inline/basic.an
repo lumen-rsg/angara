@@ -1,0 +1,63 @@
+// SIMD-2: @inline annotation test
+// Verifies that @inline functions are parsed correctly, produce
+// valid executables, and carry the AlwaysInline LLVM attribute.
+//
+// Verification:
+//   1. Compile with --dump-ir and confirm the LLVM IR contains
+//      `alwaysinline` on the annotated functions.
+//   2. Ensure the annotated functions return correct results.
+//   3. Ensure non-annotated functions do NOT carry the attribute.
+
+@inline
+func square(x as i64) -> i64 {
+    return x * x;
+}
+
+@inline
+func cube(x as i64) -> i64 {
+    return x * x * x;
+}
+
+// Non-inlined caller — LLVM will inline square/cube into the loop
+// body, removing call boundaries that would block vectorization.
+func sum_of_squares(n as i64) -> i64 {
+    let sum = 0;
+    let i = 0;
+    while (i < n) {
+        sum = sum + square(i);
+        i = i + 1;
+    }
+    return sum;
+}
+
+func sum_of_cubes(n as i64) -> i64 {
+    let sum = 0;
+    let i = 0;
+    while (i < n) {
+        sum = sum + cube(i);
+        i = i + 1;
+    }
+    return sum;
+}
+
+export func main() -> i64 {
+    // Test square
+    if (square(5) != 25) { return 1; }
+    if (square(0) != 0)  { return 2; }
+    if (square(-3) != 9) { return 3; }
+
+    // Test cube
+    if (cube(3) != 27)  { return 4; }
+    if (cube(0) != 0)   { return 5; }
+    if (cube(-2) != -8) { return 6; }
+
+    // Test sum_of_squares (uses inlined square)
+    // 0^2 + 1^2 + 2^2 + 3^2 + 4^2 = 0 + 1 + 4 + 9 + 16 = 30
+    if (sum_of_squares(5) != 30) { return 7; }
+
+    // Test sum_of_cubes (uses inlined cube)
+    // 0^3 + 1^3 + 2^3 = 0 + 1 + 8 = 9
+    if (sum_of_cubes(3) != 9) { return 8; }
+
+    return 0;
+}

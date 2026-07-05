@@ -4,12 +4,17 @@ namespace angara {
     std::shared_ptr<Stmt> Parser::declaration() {
         try {
             // RT-1: parse @on_throw(<value>) annotation for foreign funcs.
+            // SIMD-2: parse @inline annotation for functions.
             std::optional<int64_t> pending_on_throw;
+            bool pending_inline = false;
             if (check(TokenType::AT_SIGN)) {
                 int saved = m_current;
                 advance(); // consume '@'
                 Token ann = peek();
-                if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "on_throw") {
+                if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "inline") {
+                    advance();
+                    pending_inline = true;
+                } else if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "on_throw") {
                     advance();
                     consume(TokenType::LEFT_PAREN, "Expected '(' after '@on_throw'.", "E393");
                     bool neg = match({TokenType::MINUS});
@@ -18,7 +23,7 @@ namespace angara {
                     int64_t v = std::stoll(val.lexeme);
                     pending_on_throw = neg ? -v : v;
                 } else {
-                    // Not @on_throw — restore and let other handlers deal with it.
+                    // Not a recognized annotation — restore and let other handlers deal with it.
                     m_current = saved;
                 }
             }
@@ -35,6 +40,7 @@ namespace angara {
             if (match({TokenType::FUNC})) {
                 auto func_decl = std::static_pointer_cast<FuncStmt>(function("function"));
                 func_decl->is_exported = is_exported;
+                func_decl->is_inline = pending_inline;
                 return func_decl;
             }
 

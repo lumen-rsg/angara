@@ -637,9 +637,9 @@ type — assignment copies the reference, not the data.
 | 1.1.11 | is/typeof support | pending |
 | 1.1.12 | list ↔ array conversion | pending |
 | 1.1.13 | Tests | pending |
-| 2.1 | @inline parser | pending |
-| 2.2 | @inline codegen | pending |
-| 2.3 | @inline tests | pending |
+| 2.1 | @inline parser | ✅ done |
+| 2.2 | @inline codegen | ✅ done |
+| 2.3 | @inline tests | ✅ done |
 | 3 | Auto-vectorization verification | pending (depends on 1+2) |
 | 4 | SIMD intrinsics | deferred |
 | 5 | Vector types | deferred |
