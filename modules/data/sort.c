@@ -25,6 +25,13 @@ static CmpResult compare(AngaraObject a, AngaraObject b) {
     return CMP_EQ;
 }
 
+static int qsort_compare(const void* va, const void* vb) {
+    AngaraObject a = *(const AngaraObject*)va;
+    AngaraObject b = *(const AngaraObject*)vb;
+    CmpResult r = compare(a, b);
+    return r == CMP_LT ? -1 : (r == CMP_GT ? 1 : 0);
+}
+
 AngaraObject Angara_sort_sorted(int arg_count, AngaraObject* args) {
     if (arg_count != 1 || !IS_LIST(args[0])) {
         ang_api->throw_error("sorted(list) expects a list argument.");
@@ -44,15 +51,7 @@ AngaraObject Angara_sort_sorted(int arg_count, AngaraObject* args) {
     AngaraObject* arr = (AngaraObject*)malloc(len * sizeof(AngaraObject));
     for (size_t i = 0; i < len; i++) arr[i] = ang_api->list_get(args[0], (int64_t)i);
 
-    for (size_t i = 1; i < len; i++) {
-        AngaraObject key = arr[i];
-        size_t j = i;
-        while (j > 0 && compare(arr[j - 1], key) == CMP_GT) {
-            arr[j] = arr[j - 1];
-            j--;
-        }
-        arr[j] = key;
-    }
+    qsort(arr, len, sizeof(AngaraObject), qsort_compare);
 
     AngaraObject result = ang_api->list_new();
     for (size_t i = 0; i < len; i++) {

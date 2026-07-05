@@ -48,7 +48,7 @@ AngaraObject Angara_process_exec(int arg_count, AngaraObject* args) {
     }
 
     int status = pclose(fp);
-    int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    (void)status;  /* exit status available via WIFEXITED/WEXITSTATUS if needed */
 
     if (output_len == 0) {
         free(output);

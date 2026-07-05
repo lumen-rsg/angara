@@ -209,7 +209,28 @@ AngaraObject Angara_WebSocket_get_id(int arg_count, AngaraObject* args) {
     return ang_api->string(((AngaraLwsSession*)native)->id);
 }
 
-AngaraObject Angara_WebSocket_close(int arg_count, AngaraObject* args) { return ang_nil(); }
+AngaraObject Angara_WebSocket_close(int arg_count, AngaraObject* args) {
+    void* native = ang_api->native_instance_data(args[0]);
+    if (!native) return ang_nil();
+    NativeObjectHeader* h = (NativeObjectHeader*)native;
+
+    struct lws* wsi = NULL;
+    if (h->type == NATIVE_TYPE_CLIENT) {
+        AngaraLwsClient* c = (AngaraLwsClient*)native;
+        c->is_connected = false;
+        wsi = c->wsi;
+        c->wsi = NULL;
+        if (c->context) lws_cancel_service(c->context);
+    } else {
+        AngaraLwsSession* s = (AngaraLwsSession*)native;
+        s->is_connected = false;
+        wsi = s->wsi;
+        s->wsi = NULL;
+    }
+    /* trigger a writeable callback so libwebsockets sends the close frame */
+    if (wsi) lws_callback_on_writable(wsi);
+    return ang_nil();
+}
 
 AngaraObject Angara_WebSocket_service(int arg_count, AngaraObject* args) {
     void* native = ang_api->native_instance_data(args[0]);

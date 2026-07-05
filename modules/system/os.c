@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <unistd.h>
 #include <sys/wait.h>
 #include "Angara.h"
 
@@ -18,6 +19,41 @@ AngaraObject Angara_os_getenv(int arg_count, AngaraObject args[]) {
     return ang_api->string(value);
 }
 
+/* split a command string into an argv array (simple whitespace tokeniser).
+   caller must free each element and the outer array. */
+static char** split_cmd(const char* cmd, int* out_argc) {
+    /* make a mutable copy */
+    char* buf = strdup(cmd);
+    if (!buf) { *out_argc = 0; return NULL; }
+
+    int cap = 8, argc = 0;
+    char** argv = (char**)malloc(cap * sizeof(char*));
+    if (!argv) { free(buf); *out_argc = 0; return NULL; }
+
+    char* saveptr = NULL;
+    char* token = strtok_r(buf, " \t\r\n", &saveptr);
+    while (token) {
+        if (argc + 1 >= cap) {
+            cap *= 2;
+            char** na = (char**)realloc(argv, cap * sizeof(char*));
+            if (!na) { free(buf); free(argv); *out_argc = 0; return NULL; }
+            argv = na;
+        }
+        argv[argc++] = strdup(token);
+        token = strtok_r(NULL, " \t\r\n", &saveptr);
+    }
+    argv[argc] = NULL;
+    free(buf);
+    *out_argc = argc;
+    return argv;
+}
+
+static void free_argv(char** argv) {
+    if (!argv) return;
+    for (int i = 0; argv[i]; i++) free(argv[i]);
+    free(argv);
+}
+
 AngaraObject Angara_os_run(int arg_count, AngaraObject args[]) {
     if (arg_count != 1 || !IS_STR(args[0])) {
         ang_api->throw_error("os.run() requires one string argument.");
@@ -25,35 +61,75 @@ AngaraObject Angara_os_run(int arg_count, AngaraObject args[]) {
     }
 
     const char* command = ang_api->as_cstr(args[0]);
-    char full_command[4096];
-    snprintf(full_command, sizeof(full_command), "%s 2>&1", command);
 
-    FILE* pipe = popen(full_command, "r");
-    if (!pipe) {
-        char buf[256];
-        snprintf(buf, 256, "os.run() failed: %s", strerror(errno));
-        ang_api->throw_error(buf);
+    int argc = 0;
+    char** argv = split_cmd(command, &argc);
+    if (!argv || argc == 0) {
+        free_argv(argv);
+        ang_api->throw_error("os.run(): empty command.");
         return ang_nil();
     }
 
-    char buffer[128];
-    AngaraObject stdout_obj = ang_api->string("");
-
-    while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
-        AngaraObject chunk = ang_api->string(buffer);
-        AngaraObject new_stdout = ang_api->string_concat(stdout_obj, chunk);
-        ang_api->decref(stdout_obj);
-        ang_api->decref(chunk);
-        stdout_obj = new_stdout;
+    int pipefd[2];
+    if (pipe(pipefd) < 0) {
+        free_argv(argv);
+        ang_api->throw_error("os.run(): failed to create pipe.");
+        return ang_nil();
     }
 
-    int status = pclose(pipe);
-    int exit_code = WEXITSTATUS(status);
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]); close(pipefd[1]);
+        free_argv(argv);
+        ang_api->throw_error("os.run(): fork failed.");
+        return ang_nil();
+    }
+
+    if (pid == 0) {
+        /* child: redirect stderr→stdout, exec */
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+        close(pipefd[1]);
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+
+    /* parent: read output */
+    close(pipefd[1]);
+    free_argv(argv);
+
+    char* out_buf = NULL;
+    size_t out_len = 0, out_cap = 4096;
+    out_buf = (char*)malloc(out_cap);
+
+    char tmp[4096];
+    ssize_t n;
+    while ((n = read(pipefd[0], tmp, sizeof(tmp))) > 0) {
+        if (out_len + (size_t)n >= out_cap) {
+            out_cap = (out_len + (size_t)n) * 2;
+            char* nb = (char*)realloc(out_buf, out_cap);
+            if (!nb) break;
+            out_buf = nb;
+        }
+        memcpy(out_buf + out_len, tmp, (size_t)n);
+        out_len += (size_t)n;
+    }
+    close(pipefd[0]);
+
+    int status;
+    waitpid(pid, &status, 0);
+    int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 
     AngaraObject result = ang_api->record_new();
-    ang_api->record_set(result, "stdout", stdout_obj);
     ang_api->record_set(result, "exit_code", ang_i64(exit_code));
-    ang_api->decref(stdout_obj);
+
+    if (out_buf && out_len > 0) {
+        ang_api->record_set(result, "stdout", ang_api->string_no_copy(out_buf, out_len));
+    } else {
+        free(out_buf);
+        ang_api->record_set(result, "stdout", ang_api->string(""));
+    }
 
     return result;
 }

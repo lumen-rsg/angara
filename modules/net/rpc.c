@@ -264,8 +264,8 @@ AngaraObject Angara_RpcServer_service(int argc, AngaraObject args[]) {
         int client_fd = accept(srv->listen_fd, (struct sockaddr*)&client_addr, &client_len);
         if (client_fd < 0) break;
         set_nonblocking(client_fd);
+        close(client_fd);  /* service() drains the accept queue; poll_clients() returns fds */
     }
-
 
     return ang_nil();
 }

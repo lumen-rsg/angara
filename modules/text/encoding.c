@@ -226,11 +226,9 @@ AngaraObject Angara_encoding_base32_encode(int arg_count, AngaraObject* args) {
             buf = (buf << 8) | src[i + b];
             n_bytes++;
         }
-        int n_chars = ((n_bytes * 8) + 4) / 5;
-        buf <<= (5 - n_bytes) * 8 + (5 - n_bytes);
-        buf <<= (size_t)(40 - n_bytes * 8);
-        size_t bits = (size_t)n_bytes * 8;
-        buf <<= (40 - bits);
+        /* shift packed bits to the high end of the 40-bit window */
+        buf <<= (40 - n_bytes * 8);
+        int n_chars = (n_bytes * 8 + 4) / 5;  /* ceil(bits/5) */
         for (int c = 0; c < 8; c++) {
             if (c < n_chars) {
                 out[j++] = b32_table[(buf >> (35 - c * 5)) & 0x1F];
