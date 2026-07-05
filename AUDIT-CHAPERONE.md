@@ -137,7 +137,7 @@ does nothing. This means:
 
 | ID | Status | File:Line | Description |
 |----|--------|-----------|-------------|
-| **M1** | [ ] 🟢 Source | `StmtAnalysis.cpp:294-303` | **W510 only scans then_state keys.** If a variable exists only in the else branch and is Live there, no asymmetry warning is emitted. The variable appears Live after merge, potentially producing a confusing E501 later. |
+| **M1** | [x] 🟢 Source → ✅ Fixed | `StmtAnalysis.cpp:384-474` | **W510 only scans then_state keys.** If a variable exists only in the else branch and is Live there, no asymmetry warning is emitted. The variable appears Live after merge, potentially producing a confusing E501 later. Fixed with full lexical scope tracking: `analyzeScopedBlock`/`analyzeScopedStmt` save pre-block state and restore/remove variables declared inside blocks. W510 extended to warn when a variable is Live in one branch but absent from the other. |
 | **M2** | [ ] 🟢 Source | `StmtAnalysis.cpp:315-338` | **Loop body analyzed only once (no fixed-point).** Complex loop-body patterns (e.g., a variable moved on one path through the body but not another) are not caught. The E506 check catches the common case (drop without reassign). |
 | **M3** | [ ] 🟢 Source | `Chaperone.cpp:28-32` | **`join(Escaped, Moved) = Dropped`.** Both are "gone" states but for different reasons. A post-merge `drop` reports "E503: double denaturation" regardless of path, which is safe but the error message may mislead on the Escaped path. |
 | **M4** | [ ] 🟢 Source | test coverage | **No test for mutual recursion.** The fixed-point should handle A→B→A patterns but this is untested. |
@@ -165,6 +165,7 @@ These are sound, verified, and the foundation to extend:
 - **S6 field-ownership moves** — `this.f = tracked` transitions source to Moved.
 - **S7 reassignment leak** — `Live x = new_value` reports E501.
 - **Merge lattice** — correct for Live/Dropped/Escaped/Moved; W510 warns on asymmetry.
+- **M1 lexical scope tracking** — variables declared inside blocks are removed from the state map when the block exits; shadowed variables restore their pre-block state.
 - **E506 loop-body drop** — catches drop-without-reassign inside loops.
 - **Drop cascades (for class/owned-data structs)** — walks field declarations in reverse order.
 - **data copy-on-assign** — scoped to plain data only.
@@ -275,6 +276,8 @@ then read ref), 11 (positive: read ref then drop referent).
 | Closure inside try/catch capturing tracked var | H1 |
 | Mutual recursion (A→B→A) | M4 |
 | `ref<T>` passed to another function that drops referent | H5 | 31 (negative), 11 (positive) |
+| Scoped block cleanup (variable declared in one branch, dropped) | M1 | 12 (positive) |
+| Shadow restore (inner block shadows outer variable) | M1 | 13 (positive) |
 
 ---
 

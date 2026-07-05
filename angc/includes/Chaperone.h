@@ -116,15 +116,34 @@ private:
     /// Analyze a block of statements, threading the state map through.
     /// Returns the state map at the end of the block.
     /// @param terminates  Set to true if the block ends with return/throw/break/continue.
+    /// @param declared_names  If non-null, filled with names of variables declared
+    ///                         inside this block (for scope cleanup).
     static StateMap analyzeBlock(Context& ctx,
+        const std::vector<std::shared_ptr<Stmt>>& statements,
+        StateMap state, bool& terminates,
+        std::set<std::string>* declared_names = nullptr);
+
+    /// Like analyzeBlock but enforces lexical scoping: variables declared inside
+    /// the block are removed from the state map (or restored to their pre-block
+    /// value if they shadow an outer variable) when the block exits.
+    static StateMap analyzeScopedBlock(Context& ctx,
         const std::vector<std::shared_ptr<Stmt>>& statements,
         StateMap state, bool& terminates);
 
-    /// Analyze a single statement. Mutates `state` in place.
-    /// Sets `terminates` if control flow doesn't fall through.
-    static void analyzeStmt(Context& ctx,
+    /// Like analyzeStmt but enforces lexical scoping for a single statement
+    /// (used when a branch/body is a single statement instead of a block).
+    static void analyzeScopedStmt(Context& ctx,
         const std::shared_ptr<Stmt>& stmt,
         StateMap& state, bool& terminates);
+
+    /// Analyze a single statement. Mutates `state` in place.
+    /// Sets `terminates` if control flow doesn't fall through.
+    /// @param declared_names  If non-null, filled with names of variables declared
+    ///                         by this statement (for scope cleanup).
+    static void analyzeStmt(Context& ctx,
+        const std::shared_ptr<Stmt>& stmt,
+        StateMap& state, bool& terminates,
+        std::set<std::string>* declared_names = nullptr);
 
     /// Walk an expression tree and report E502 for any reference to a
     /// variable in the Dropped state (use-after-free). Also transitions

@@ -187,26 +187,79 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
 
 Chaperone::StateMap Chaperone::analyzeBlock(Context& ctx,
     const std::vector<std::shared_ptr<Stmt>>& statements,
-    StateMap state, bool& terminates)
+    StateMap state, bool& terminates,
+    std::set<std::string>* declared_names)
 {
     terminates = false;
     for (const auto& stmt : statements) {
         if (!stmt) continue;
-        analyzeStmt(ctx, stmt, state, terminates);
+        analyzeStmt(ctx, stmt, state, terminates, declared_names);
         if (terminates) break;
     }
     return state;
 }
 
 
+Chaperone::StateMap Chaperone::analyzeScopedBlock(Context& ctx,
+    const std::vector<std::shared_ptr<Stmt>>& statements,
+    StateMap state, bool& terminates)
+{
+    StateMap pre_state = state;
+    std::set<std::string> declared_names;
+    state = analyzeBlock(ctx, statements, state, terminates, &declared_names);
+    // M1: scope cleanup — remove variables declared inside this block,
+    // or restore their pre-block values if they shadow an outer variable.
+    for (const auto& name : declared_names) {
+        auto pre_it = pre_state.find(name);
+        if (pre_it != pre_state.end()) {
+            state[name] = pre_it->second;
+        } else {
+            state.erase(name);
+        }
+    }
+    return state;
+}
+
+
+void Chaperone::analyzeScopedStmt(Context& ctx,
+    const std::shared_ptr<Stmt>& stmt,
+    StateMap& state, bool& terminates)
+{
+    StateMap pre_state = state;
+    std::set<std::string> declared_names;
+    analyzeStmt(ctx, stmt, state, terminates, &declared_names);
+    // M1: scope cleanup — remove variables declared by this statement,
+    // or restore their pre-statement values if they shadow outer variables.
+    for (const auto& name : declared_names) {
+        auto pre_it = pre_state.find(name);
+        if (pre_it != pre_state.end()) {
+            state[name] = pre_it->second;
+        } else {
+            state.erase(name);
+        }
+    }
+}
+
+
 void Chaperone::analyzeStmt(Context& ctx,
-    const std::shared_ptr<Stmt>& stmt, StateMap& state, bool& terminates)
+    const std::shared_ptr<Stmt>& stmt, StateMap& state, bool& terminates,
+    std::set<std::string>* declared_names)
 {
     terminates = false;
     if (!stmt) return;
 
     // --- VarDeclStmt ---
     if (auto* var = dynamic_cast<const VarDeclStmt*>(stmt.get())) {
+        // M1: track this declaration for scope cleanup.
+        if (declared_names) {
+            if (!var->destructure_names.empty()) {
+                for (const auto& dn : var->destructure_names)
+                    declared_names->insert(dn.lexeme);
+            } else {
+                declared_names->insert(var->name.lexeme);
+            }
+        }
+
         // LANG-10: destructuring declaration — each name is a sub-element
         // of a tuple (untracked container). Mark all as Uninit.
         if (!var->destructure_names.empty()) {
@@ -366,15 +419,15 @@ void Chaperone::analyzeStmt(Context& ctx,
 
         if (ifs->thenBranch) {
             if (auto* blk = dynamic_cast<const BlockStmt*>(ifs->thenBranch.get()))
-                then_state = analyzeBlock(ctx, blk->statements, then_state, then_term);
+                then_state = analyzeScopedBlock(ctx, blk->statements, then_state, then_term);
             else
-                analyzeStmt(ctx, ifs->thenBranch, then_state, then_term);
+                analyzeScopedStmt(ctx, ifs->thenBranch, then_state, then_term);
         }
         if (ifs->elseBranch) {
             if (auto* blk = dynamic_cast<const BlockStmt*>(ifs->elseBranch.get()))
-                else_state = analyzeBlock(ctx, blk->statements, else_state, else_term);
+                else_state = analyzeScopedBlock(ctx, blk->statements, else_state, else_term);
             else
-                analyzeStmt(ctx, ifs->elseBranch, else_state, else_term);
+                analyzeScopedStmt(ctx, ifs->elseBranch, else_state, else_term);
         }
 
         if (then_term && else_term) { terminates = true; return; }
@@ -389,14 +442,34 @@ void Chaperone::analyzeStmt(Context& ctx,
         for (const auto& name : all_names) {
             auto it_then = then_state.find(name);
             auto it_else = else_state.find(name);
-            if (it_then != then_state.end() && it_else != else_state.end() &&
-                it_then->second != it_else->second) {
+            bool in_then = it_then != then_state.end();
+            bool in_else = it_else != else_state.end();
+
+            // Case 1: variable exists in both branches with different states.
+            if (in_then && in_else && it_then->second != it_else->second) {
                 if ((it_then->second == State::Live) != (it_else->second == State::Live)) {
                     ctx.eh.warning(ifs->keyword,
                         "🔄 Incomplete fold — `" + name + "` is handled differently on "
                         "the two branches. Add `drop " + name + ";` to the path that's missing it.",
                         "W510");
                 }
+            }
+            // M1: Case 2 — variable exists in only one branch and is Live there.
+            // join_maps would silently promote it to Live in the merged state,
+            // causing a confusing E501 later. Warn about the asymmetry.
+            if (in_then && !in_else && it_then->second == State::Live) {
+                ctx.eh.warning(ifs->keyword,
+                    "🔄 Incomplete fold — `" + name + "` is live on the if-branch but "
+                    "absent from the else-branch. It will appear live after the merge "
+                    "and may leak. Add `drop " + name + ";` on the if-branch.",
+                    "W510");
+            }
+            if (!in_then && in_else && it_else->second == State::Live) {
+                ctx.eh.warning(ifs->keyword,
+                    "🔄 Incomplete fold — `" + name + "` is live on the else-branch but "
+                    "absent from the if-branch. It will appear live after the merge "
+                    "and may leak. Add `drop " + name + ";` on the else-branch.",
+                    "W510");
             }
         }
         state = join_maps(then_state, else_state);
@@ -420,9 +493,9 @@ void Chaperone::analyzeStmt(Context& ctx,
         bool body_term = false;
         if (body) {
             if (auto* blk = dynamic_cast<const BlockStmt*>(body.get()))
-                body_state = analyzeBlock(ctx, blk->statements, body_state, body_term);
+                body_state = analyzeScopedBlock(ctx, blk->statements, body_state, body_term);
             else
-                analyzeStmt(ctx, body, body_state, body_term);
+                analyzeScopedStmt(ctx, body, body_state, body_term);
         }
         // Loop-body drop/move/escape check (E506).
         for (auto& [name, st_pre] : pre) {
@@ -472,7 +545,7 @@ void Chaperone::analyzeStmt(Context& ctx,
     // --- BlockStmt ---
     if (auto* blk = dynamic_cast<const BlockStmt*>(stmt.get())) {
         bool blk_term = false;
-        state = analyzeBlock(ctx, blk->statements, state, blk_term);
+        state = analyzeScopedBlock(ctx, blk->statements, state, blk_term);
         if (blk_term) terminates = true;
         return;
     }
@@ -497,9 +570,9 @@ void Chaperone::analyzeStmt(Context& ctx,
         bool try_term = false;
         if (tryS->tryBlock) {
             if (auto* blk = dynamic_cast<const BlockStmt*>(tryS->tryBlock.get()))
-                try_state = analyzeBlock(ctx, blk->statements, try_state, try_term);
+                try_state = analyzeScopedBlock(ctx, blk->statements, try_state, try_term);
             else
-                analyzeStmt(ctx, tryS->tryBlock, try_state, try_term);
+                analyzeScopedStmt(ctx, tryS->tryBlock, try_state, try_term);
         }
 
         // v5: catch starts from the pre-try state. No auto-unwind —
@@ -522,9 +595,9 @@ void Chaperone::analyzeStmt(Context& ctx,
         bool catch_term = false;
         if (tryS->catchBlock) {
             if (auto* blk = dynamic_cast<const BlockStmt*>(tryS->catchBlock.get()))
-                catch_state = analyzeBlock(ctx, blk->statements, catch_state, catch_term);
+                catch_state = analyzeScopedBlock(ctx, blk->statements, catch_state, catch_term);
             else
-                analyzeStmt(ctx, tryS->catchBlock, catch_state, catch_term);
+                analyzeScopedStmt(ctx, tryS->catchBlock, catch_state, catch_term);
         }
 
         // Merge try + catch paths.
@@ -545,9 +618,9 @@ void Chaperone::analyzeStmt(Context& ctx,
             bool finally_term = false;
             state = merged;
             if (auto* blk = dynamic_cast<const BlockStmt*>(tryS->finallyBlock.get()))
-                state = analyzeBlock(ctx, blk->statements, state, finally_term);
+                state = analyzeScopedBlock(ctx, blk->statements, state, finally_term);
             else
-                analyzeStmt(ctx, tryS->finallyBlock, state, finally_term);
+                analyzeScopedStmt(ctx, tryS->finallyBlock, state, finally_term);
             // Restore the finally-protected set (scoped to this try).
             ctx.finally_protected = protected_snapshot;
             if (try_term && catch_term && finally_term) { terminates = true; return; }
@@ -570,7 +643,7 @@ void Chaperone::analyzeStmt(Context& ctx,
         ctx.in_unsafe = true;
         if (unsafe->block) {
             bool blk_term = false;
-            state = analyzeBlock(ctx, unsafe->block->statements, state, blk_term);
+            state = analyzeScopedBlock(ctx, unsafe->block->statements, state, blk_term);
             if (blk_term) terminates = true;
         }
         ctx.in_unsafe = was_unsafe;

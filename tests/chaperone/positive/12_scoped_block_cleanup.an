@@ -1,0 +1,21 @@
+// Chaperone positive test — scoped block cleanup (M1).
+// A tracked variable declared inside a branch is block-scoped: it goes
+// out of scope when the block exits and must NOT produce an E501 leak
+// at the function boundary.
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let cond as i64 = 1;
+    if (cond > 0) {
+        // then: nothing
+    } else {
+        let b = Buf(42);   // declared only in else branch
+        drop b;            // properly dropped inside the branch
+    }
+    // b is out of scope — no leak here
+    return 0;
+}

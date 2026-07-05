@@ -1,0 +1,22 @@
+// Chaperone positive test — shadow restore (M1).
+// An inner block shadows a non-tracked variable with a tracked one;
+// the outer variable's state must be restored when the inner block exits.
+// The inner tracked variable is properly dropped; after the block, the
+// outer variable returns to its pre-block state (Uninit).
+//
+// exit: 5
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let x = 5;              // outer x: i64 (Uninit — not tracked)
+    {
+        let x = Buf(2);     // inner x shadows outer — tracked, Live
+        drop x;             // drops inner x only
+    }
+    // outer x restored to Uninit — no leak, no double-drop
+    return x;               // returns 5
+}
