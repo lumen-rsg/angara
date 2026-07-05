@@ -1,7 +1,9 @@
-// Chaperone negative test — E503 (double-drop via mutual recursion, M4)
-// func a() calls b(), which calls a() — mutual recursion. The fixed-point
+// Chaperone negative test — E503 (double-drop via forward reference)
+// func a() calls b() — forward reference (b defined after a). The fixed-point
 // must converge and detect that b drops its argument, so dropping after
-// calling b is a double-free.
+// calling a is a double-free.
+// Note: this is forward-reference, not mutual recursion. For true A→B→A
+// mutual recursion, see test 34.
 //
 // expect: E503
 
