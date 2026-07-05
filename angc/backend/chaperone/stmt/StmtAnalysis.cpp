@@ -502,7 +502,13 @@ void Chaperone::analyzeStmt(Context& ctx,
     //   2. Conditional: at if/else merge points inside the body, if a pre-Live
     //      var is destroyed on one branch but not the other (detected via the
     //      loop_pre_live set), the merge would mask it → E506 at the merge point.
-    auto analyze_loop_body = [&](const Token& kw, const std::shared_ptr<Stmt>& body) {
+    // Analyze the loop body and return the exact post-body state.
+    // Callers use the returned state for condition/increment re-analysis
+    // (representing the next iteration's entry state) and explicitly join
+    // with the pre-loop state for code after the loop (which may execute
+    // zero times).  Previously the condition re-analysis used the joined
+    // state, which could mask use-after-free in the condition (LOW1).
+    auto analyze_loop_body = [&](const Token& kw, const std::shared_ptr<Stmt>& body) -> StateMap {
         StateMap pre = state;
 
         // M2: save and populate loop_pre_live for conditional-destruction
@@ -540,26 +546,29 @@ void Chaperone::analyzeStmt(Context& ctx,
                 }
             }
         }
-        state = join_maps(pre, body_state);
+        return body_state;
     };
 
     if (auto* wh = dynamic_cast<const WhileStmt*>(stmt.get())) {
         if (wh->condition) analyzeExpr(ctx, wh->condition, state);   // S2: condition
-        analyze_loop_body(wh->keyword, wh->body);
-        if (wh->condition) analyzeExpr(ctx, wh->condition, state);   // re-evaluated each iter
+        StateMap body_state = analyze_loop_body(wh->keyword, wh->body);
+        if (wh->condition) analyzeExpr(ctx, wh->condition, body_state);  // re-evaluated each iter
+        state = join_maps(state, body_state);  // post-loop: may execute zero times
         return;
     }
     if (auto* fors = dynamic_cast<const ForStmt*>(stmt.get())) {
         if (fors->initializer) { bool t; analyzeStmt(ctx, fors->initializer, state, t); }
         if (fors->condition) analyzeExpr(ctx, fors->condition, state);  // S2: condition
-        analyze_loop_body(fors->keyword, fors->body);
-        if (fors->increment) analyzeExpr(ctx, fors->increment, state);  // S2: increment
-        if (fors->condition) analyzeExpr(ctx, fors->condition, state);  // re-checked each iter
+        StateMap body_state = analyze_loop_body(fors->keyword, fors->body);
+        if (fors->increment) analyzeExpr(ctx, fors->increment, body_state);  // S2: increment
+        if (fors->condition) analyzeExpr(ctx, fors->condition, body_state);  // re-checked each iter
+        state = join_maps(state, body_state);  // post-loop: may execute zero times
         return;
     }
     if (auto* forin = dynamic_cast<const ForInStmt*>(stmt.get())) {
         if (forin->collection) analyzeExpr(ctx, forin->collection, state);  // S2: iterable
-        analyze_loop_body(forin->name, forin->body);
+        StateMap body_state = analyze_loop_body(forin->name, forin->body);
+        state = join_maps(state, body_state);  // post-loop: may execute zero times
         return;
     }
 

@@ -147,7 +147,7 @@ does nothing. This means:
 
 | ID | Status | File:Line | Description |
 |----|--------|-----------|-------------|
-| **LOW1** | [ ] 🟢 Source | `StmtAnalysis.cpp:341-343` | Loop condition re-analysis uses merged post-body state, not the exact state the next iteration would see. |
+| **LOW1** | [x] 🟢 Source → ✅ Fixed | `StmtAnalysis.cpp:492-573` | Loop condition re-analysis uses merged post-body state, not the exact state the next iteration would see. Fixed: `analyze_loop_body` returns exact `body_state`; condition/increment re-analysis uses it directly while post-loop state uses explicit `join_maps`. |
 | **LOW2** | [ ] 🟢 Source | test coverage | No variadic function interprocedural test. |
 | **LOW3** | [ ] 🟢 Source | test coverage | No indirect/function-pointer call test. |
 
@@ -317,7 +317,7 @@ then read ref), 11 (positive: read ref then drop referent).
 | **M3** | join(Escaped, Moved) = Dropped misleading | [x] |
 | **M4** | No test for mutual recursion | [x] ✅ |
 | **M5** | No test for RangeExpr/InterpStringExpr | [x] |
-| **LOW1** | Loop condition re-analysis state mismatch | [ ] |
+| **LOW1** | Loop condition re-analysis state mismatch | [x] |
 | **LOW2** | No variadic function interprocedural test | [ ] |
 | **LOW3** | No indirect call test | [ ] |
 
