@@ -323,7 +323,8 @@ namespace angara {
     // A single case within a match expression, e.g., `case Pattern: body`
     struct MatchCase {
         const std::vector<std::shared_ptr<Expr>> patterns; // or-patterns (at least 1), each is a Literal/VarExpr/GetExpr chain
-        const std::vector<Token> variables;                  // bound payload names (empty = no payload destructuring)
+        const std::vector<Token> variables;                  // bound payload names (merged from all alternatives)
+        const std::vector<std::vector<Token>> alt_variables; // per-alternative variable lists (one per pattern in the or-group)
         const std::optional<std::shared_ptr<Expr>> guard;   // optional `if guard_expr`
         const std::shared_ptr<Expr> body;
     };

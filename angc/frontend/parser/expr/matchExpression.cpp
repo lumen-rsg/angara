@@ -25,6 +25,7 @@ namespace angara {
             // --- Parse or-patterns: case pat1 [| pat2 ...] ---
             std::vector<std::shared_ptr<Expr>> patterns;
             std::vector<Token> variables;
+            std::vector<std::vector<Token>> alt_variables;  // per-alternative bindings
             bool has_wildcard_in_or = false;
 
             // Parse the first pattern atom
@@ -40,17 +41,20 @@ namespace angara {
                 }
 
                 // Payload bindings: (var1, var2, ...)
+                std::vector<Token> first_vars;
                 if (match({TokenType::LEFT_PAREN})) {
                     if (!check(TokenType::RIGHT_PAREN)) {
                         do {
                             Token var = consume(TokenType::IDENTIFIER,
                                 "Expected a variable name to bind the enum variant's payload.", "E224");
-                            variables.push_back(var);
+                            first_vars.push_back(var);
                         } while (match({TokenType::COMMA}));
                     }
                     consume(TokenType::RIGHT_PAREN,
                         "Expected ')' after pattern variable(s).", "E225");
                 }
+                variables = first_vars;
+                alt_variables.push_back(std::move(first_vars));
 
                 if (auto ve = std::dynamic_pointer_cast<const VarExpr>(atom)) {
                     if (ve->name.lexeme == "_") has_wildcard_in_or = true;
@@ -103,6 +107,7 @@ namespace angara {
                             "E400");
                     }
                 }
+                alt_variables.push_back(std::move(alt_vars));
 
                 if (auto ve = std::dynamic_pointer_cast<const VarExpr>(atom)) {
                     if (ve->name.lexeme == "_") has_wildcard_in_or = true;
@@ -137,7 +142,7 @@ namespace angara {
                 body = expression();
             }
 
-            cases.push_back({std::move(patterns), std::move(variables), guard, body});
+            cases.push_back({std::move(patterns), std::move(variables), std::move(alt_variables), guard, body});
 
             if (!check(TokenType::RIGHT_BRACE)) {
                 consume(TokenType::COMMA,

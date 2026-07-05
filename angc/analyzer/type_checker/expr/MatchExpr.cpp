@@ -155,45 +155,77 @@ namespace angara {
             // --- Step 2: Declare bound variables ---
             if (!case_item.variables.empty()) {
                 if (is_enum && enum_type) {
-                    // Determine the payload types from the first constructor pattern
-                    std::vector<std::shared_ptr<Type>> payload_types;
-                    for (const auto& pat : case_item.patterns) {
-                        if (auto ve = std::dynamic_pointer_cast<const VarExpr>(pat)) continue; // skip wildcard
+                    // Determine the payload types for each alternative and
+                    // cross-check that all alternatives agree on the types
+                    // for the same-named bound variables.
+                    std::vector<std::shared_ptr<Type>> resolved_types;
+
+                    for (size_t ai = 0; ai < case_item.patterns.size(); ++ai) {
+                        const auto& pat = case_item.patterns[ai];
+                        const auto& alt_vars = ai < case_item.alt_variables.size()
+                            ? case_item.alt_variables[ai] : case_item.variables;
+
+                        // Skip wildcard patterns
+                        if (auto ve = std::dynamic_pointer_cast<const VarExpr>(pat)) {
+                            if (ve->name.lexeme == "_") continue;
+                        }
+
+                        // Extract variant name from the pattern
+                        std::string vname;
                         if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(pat)) {
-                            std::string vname = get_expr->name.lexeme;
-                            auto vit = enum_type->variants.find(vname);
-                            if (vit != enum_type->variants.end()) {
-                                payload_types = vit->second->param_types;
-                                break;
-                            }
+                            vname = get_expr->name.lexeme;
                         } else if (auto ve2 = std::dynamic_pointer_cast<const VarExpr>(pat)) {
-                            std::string vname = ve2->name.lexeme;
-                            auto vit = enum_type->variants.find(vname);
-                            if (vit != enum_type->variants.end()) {
-                                payload_types = vit->second->param_types;
-                                break;
+                            vname = ve2->name.lexeme;
+                        } else {
+                            continue;
+                        }
+
+                        auto vit = enum_type->variants.find(vname);
+                        if (vit == enum_type->variants.end()) continue;
+
+                        auto alt_types = vit->second->param_types;
+
+                        // Substitute generic type params through the generic instance
+                        if (generic_enum_instance) {
+                            std::vector<std::shared_ptr<Type>> sub_types;
+                            for (const auto& pt : alt_types) {
+                                sub_types.push_back(generic_enum_instance->substitute(pt));
+                            }
+                            alt_types = std::move(sub_types);
+                        }
+
+                        // Check binding count
+                        if (alt_vars.size() != alt_types.size()) {
+                            error(alt_vars.empty() ? case_item.variables[0] : alt_vars[0],
+                                "Wrong number of bindings for variant '" + vname + "'. Expected " +
+                                std::to_string(alt_types.size()) + " but got " +
+                                std::to_string(alt_vars.size()) + ".",
+                                "E405");
+                            continue;
+                        }
+
+                        // First alternative: set the resolved types
+                        if (resolved_types.empty()) {
+                            resolved_types = alt_types;
+                        } else {
+                            // Cross-check: same-named variables must have same types
+                            for (size_t vi = 0; vi < alt_vars.size() && vi < case_item.variables.size(); ++vi) {
+                                if (alt_vars[vi].lexeme != case_item.variables[vi].lexeme) continue;
+                                if (!sameType(resolved_types[vi], alt_types[vi])) {
+                                    error(alt_vars[vi],
+                                        "Or-pattern variable '" + alt_vars[vi].lexeme +
+                                        "' has incompatible types across alternatives: '" +
+                                        resolved_types[vi]->toString() + "' vs '" +
+                                        alt_types[vi]->toString() + "'.",
+                                        "E406");
+                                }
                             }
                         }
                     }
 
-                    if (!payload_types.empty()) {
-                        // LANG-8: substitute type params through the generic instance
-                        if (generic_enum_instance) {
-                            std::vector<std::shared_ptr<Type>> sub_types;
-                            for (const auto& pt : payload_types) {
-                                sub_types.push_back(generic_enum_instance->substitute(pt));
-                            }
-                            payload_types = std::move(sub_types);
-                        }
-                        if (case_item.variables.size() != payload_types.size()) {
-                            error(case_item.variables[0],
-                                "Wrong number of bindings for variant. Expected " +
-                                std::to_string(payload_types.size()) + " but got " +
-                                std::to_string(case_item.variables.size()) + ".",
-                                "E405");
-                        }
-                        for (size_t i = 0; i < case_item.variables.size() && i < payload_types.size(); ++i) {
-                            m_symbols.declare(case_item.variables[i], payload_types[i], true);
+                    if (!resolved_types.empty()) {
+                        for (size_t i = 0; i < case_item.variables.size() && i < resolved_types.size(); ++i) {
+                            m_symbols.declare(case_item.variables[i], resolved_types[i], true);
                         }
                     }
                 } else if (!is_enum) {
