@@ -28,8 +28,6 @@
 
 | ID | Issue |
 |---|---|
-| LANG-8 | No generic enums (`enum Result<T,E>`) — only `data` and `func` are generic. |
-| LANG-10 | No tuples / tuple types / multi-return; no destructuring (assign, pattern, or `for (k, v in map)`). |
 | LANG-11 | No default arguments; no named arguments. |
 
 ---

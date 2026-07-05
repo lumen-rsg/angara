@@ -96,17 +96,19 @@ namespace angara {
             }
         }
         else if (match({TokenType::LEFT_PAREN})) {
-            // LANG-10: tuple type — (T1, T2, ...)
+            // LANG-10: tuple type — (T1, T2, ...) or (T,) for 1-element
             Token paren = previous();
             std::vector<std::shared_ptr<ASTType>> element_types;
+            bool has_trailing_comma = false;
             if (!check(TokenType::RIGHT_PAREN)) {
                 do {
                     if (check(TokenType::RIGHT_PAREN)) break;
                     element_types.push_back(type());
-                } while (match({TokenType::COMMA}));
+                    has_trailing_comma = false;
+                } while (match({TokenType::COMMA}) && (has_trailing_comma = true));
             }
             consume(TokenType::RIGHT_PAREN, "Expected ')' after tuple type elements.", "E112");
-            if (element_types.size() < 2) {
+            if (element_types.size() < 2 && !has_trailing_comma) {
                 throw error(paren, "A tuple type requires at least two element types. Use a bare type for single-element annotations, or add a trailing comma for a 1-element tuple: (T,).", "E113");
             }
             base_type = std::make_shared<TupleTypeExpr>(paren, std::move(element_types));

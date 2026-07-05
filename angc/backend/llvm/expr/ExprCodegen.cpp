@@ -1,6 +1,7 @@
 #include "LLVMBackend.h"
 #include "RuntimeBuilder.h"
 #include <llvm/IR/Intrinsics.h>
+#include <functional>
 
 namespace angara {
 
@@ -806,6 +807,30 @@ llvm::Value* LLVMBackend::maybeBoxTraitObject(llvm::Value* value, const Expr* sr
 
 llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
     auto* v = cg(e.value);
+
+    // LANG-10: destructuring assignment — (a, b) = tuple_expr
+    if (auto* tuple = dynamic_cast<const TupleExpr*>(e.target.get())) {
+        if (e.op.type != TokenType::EQUAL) {
+            // Compound assignment (e.g. +=) with destructuring is not supported.
+            // The parser shouldn't let this through, but guard anyway.
+            return v;
+        }
+        // Store the tuple value in a temporary so we can extract elements.
+        auto* fn = builder->GetInsertBlock()->getParent();
+        auto* tmp_alloca = allocLocal(fn, "__dtuple_tmp");
+        builder->CreateStore(v, tmp_alloca);
+
+        for (size_t i = 0; i < tuple->elements.size(); ++i) {
+            auto* var = dynamic_cast<const VarExpr*>(tuple->elements[i].get());
+            if (!var) continue;
+            auto* idx_val = makeI64(llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i));
+            auto* elem = callRtByName("__ang_list_get", {
+                builder->CreateLoad(objType, tmp_alloca), idx_val
+            });
+            storeVar(var->name.lexeme, elem);
+        }
+        return v;
+    }
 
     // LANG-15: compound assignment (e.g. a += b).  When the operator is not plain
     // '=', synthesise a Binary expression (target OP value) and run it through
@@ -2299,7 +2324,9 @@ llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {
     auto type_it = m_type_checker.getExpressionTypes().find(e.condition.get());
     std::shared_ptr<Type> cond_type;
     std::shared_ptr<EnumType> enum_type;
+    std::shared_ptr<TupleType> tuple_type;  // LANG-10
     bool is_value_type = false;
+    bool is_tuple_type = false;             // LANG-10
     if (type_it != m_type_checker.getExpressionTypes().end()) {
         cond_type = type_it->second;
         if (cond_type->kind == TypeKind::ENUM) {
@@ -2312,6 +2339,10 @@ llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {
             } else {
                 is_value_type = true;
             }
+        } else if (cond_type->kind == TypeKind::TUPLE) {
+            // LANG-10: tuple match
+            tuple_type = std::dynamic_pointer_cast<TupleType>(cond_type);
+            is_tuple_type = true;
         } else {
             is_value_type = true;
         }
@@ -2404,6 +2435,111 @@ llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {
             }
 
             builder->SetInsertPoint(match_bb);
+            cgBodyWithGuard(c, fn, mg, next_bb, inc);
+            builder->SetInsertPoint(next_bb);
+        } else if (is_tuple_type && tuple_type) {
+            // LANG-10: tuple pattern match — extract elements and compare
+            llvm::Value* all_match = nullptr;
+
+            for (size_t pi = 0; pi < c.patterns.size(); ++pi) {
+                const auto& pat = c.patterns[pi];
+                auto tup_pat = std::dynamic_pointer_cast<const TupleExpr>(pat);
+                if (!tup_pat) continue;
+
+                llvm::Value* pat_all = nullptr;
+                for (size_t ei = 0; ei < tup_pat->elements.size() && ei < tuple_type->element_types.size(); ++ei) {
+                    const auto& sub_pat = tup_pat->elements[ei];
+
+                    // Extract element from scrutinee tuple
+                    auto* idx_val = makeI64(llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), ei));
+                    auto* elem_val = callRtByName("__ang_list_get", {subj, idx_val});
+
+                    llvm::Value* elem_match = nullptr;
+
+                    if (auto sub_ve = std::dynamic_pointer_cast<const VarExpr>(sub_pat)) {
+                        if (sub_ve->name.lexeme == "_") {
+                            // Wildcard always matches
+                            elem_match = llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 1);
+                        }
+                        // Variable binding — always matches (type checked already)
+                        // The binding will be handled after the comparison
+                        if (!elem_match) {
+                            elem_match = llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), 1);
+                        }
+                    } else if (auto sub_lit = std::dynamic_pointer_cast<const Literal>(sub_pat)) {
+                        // Literal comparison
+                        if (sub_lit->token.type == TokenType::STRING ||
+                            sub_lit->token.type == TokenType::RAW_STRING ||
+                            sub_lit->token.type == TokenType::BYTE_STRING) {
+                            auto* lit_val = cgLiteral(*sub_lit);
+                            auto* eq_obj = callRtByName("__ang_equals", {elem_val, lit_val});
+                            elem_match = getBool(eq_obj);
+                        } else if (sub_lit->token.type == TokenType::TRUE ||
+                                   sub_lit->token.type == TokenType::FALSE) {
+                            auto* elem_bool = getBool(elem_val);
+                            bool target = (sub_lit->token.type == TokenType::TRUE);
+                            elem_match = builder->CreateICmpEQ(elem_bool,
+                                llvm::ConstantInt::get(llvm::Type::getInt1Ty(*ctx), target ? 1 : 0));
+                        } else if (sub_lit->token.type == TokenType::NUMBER_INT ||
+                                   sub_lit->token.type == TokenType::CHAR) {
+                            auto* elem_i64 = getI64(elem_val);
+                            auto* lit_val = cgLiteral(*sub_lit);
+                            auto* lit_i64 = getI64(lit_val);
+                            elem_match = builder->CreateICmpEQ(elem_i64, lit_i64);
+                        } else {
+                            auto* lit_val = cgLiteral(*sub_lit);
+                            auto* eq_obj = callRtByName("__ang_equals", {elem_val, lit_val});
+                            elem_match = getBool(eq_obj);
+                        }
+                    }
+
+                    if (elem_match) {
+                        pat_all = pat_all
+                            ? builder->CreateAnd(pat_all, elem_match)
+                            : elem_match;
+                    }
+                }
+
+                // Combine or-patterns
+                if (pat_all) {
+                    all_match = all_match
+                        ? builder->CreateOr(all_match, pat_all)
+                        : pat_all;
+                }
+            }
+
+            if (all_match) {
+                builder->CreateCondBr(all_match, match_bb, next_bb);
+            } else {
+                builder->CreateBr(next_bb);
+            }
+
+            // Matched case — bind variables from tuple elements
+            builder->SetInsertPoint(match_bb);
+            if (!c.variables.empty() && !c.patterns.empty()) {
+                auto first_tup = std::dynamic_pointer_cast<const TupleExpr>(c.patterns[0]);
+                if (first_tup) {
+                    // Recursively bind variables by walking the pattern tree
+                    std::function<void(const std::shared_ptr<const Expr>&, llvm::Value*, size_t)> bindTupleVars;
+                    bindTupleVars = [&](const std::shared_ptr<const Expr>& pat, llvm::Value* val, size_t depth) {
+                        if (auto* ve = dynamic_cast<const VarExpr*>(pat.get())) {
+                            if (ve->name.lexeme != "_") {
+                                auto* alloca = allocLocal(fn, sanitize(ve->name.lexeme));
+                                builder->CreateStore(val, alloca);
+                                namedVals[sanitize(ve->name.lexeme)] = alloca;
+                            }
+                        } else if (auto* tp = dynamic_cast<const TupleExpr*>(pat.get())) {
+                            for (size_t i = 0; i < tp->elements.size(); ++i) {
+                                auto* idx = makeI64(llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i));
+                                auto* sub_val = callRtByName("__ang_list_get", {val, idx});
+                                bindTupleVars(tp->elements[i], sub_val, depth + 1);
+                            }
+                        }
+                    };
+                    bindTupleVars(first_tup, subj, 0);
+                }
+            }
+
             cgBodyWithGuard(c, fn, mg, next_bb, inc);
             builder->SetInsertPoint(next_bb);
         } else if (enum_type) {

@@ -8,7 +8,25 @@ namespace angara {
     //   - Literal: 42, "hello", true, 'a'
     //   - Constructor: Name
     //   - Nested constructor: Name(pat1, pat2, ...)
+    //   - LANG-10: Tuple pattern: (pat1, pat2, ...)
     std::shared_ptr<Expr> Parser::parseMatchPattern() {
+        // LANG-10: tuple pattern — (pat1, pat2, ...)
+        if (peek().type == TokenType::LEFT_PAREN) {
+            Token paren = advance();
+            std::vector<std::shared_ptr<Expr>> elements;
+            if (!check(TokenType::RIGHT_PAREN)) {
+                do {
+                    if (check(TokenType::RIGHT_PAREN)) break;
+                    elements.push_back(parseMatchPattern());
+                } while (match({TokenType::COMMA}));
+            }
+            consume(TokenType::RIGHT_PAREN, "Expected ')' after tuple pattern.", "E225");
+            if (elements.empty()) {
+                throw error(paren, "Empty tuple pattern '()' is not allowed.", "E411");
+            }
+            return std::make_shared<TupleExpr>(paren, std::move(elements));
+        }
+
         // Wildcard
         if (peek().type == TokenType::IDENTIFIER && peek().lexeme == "_") {
             return std::make_shared<VarExpr>(advance());
@@ -85,6 +103,19 @@ namespace angara {
         if (auto* np = dynamic_cast<const NestedPattern*>(pat.get())) {
             for (auto& b : np->bindings) out.push_back(b);
             for (auto& sp : np->subpatterns) collectBindings(sp, out);
+        }
+        // LANG-10: tuple patterns — collect bindings from element sub-patterns.
+        // A VarExpr element that is not '_' is a variable binding.
+        if (auto* tp = dynamic_cast<const TupleExpr*>(pat.get())) {
+            for (auto& el : tp->elements) {
+                if (auto* ve = dynamic_cast<const VarExpr*>(el.get())) {
+                    if (ve->name.lexeme != "_") {
+                        out.push_back(ve->name);
+                    }
+                } else {
+                    collectBindings(el, out);
+                }
+            }
         }
     }
 

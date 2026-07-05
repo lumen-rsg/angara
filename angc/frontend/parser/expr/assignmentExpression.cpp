@@ -13,13 +13,34 @@ namespace angara {
             Token op = previous();
             std::shared_ptr<Expr> value = assignment();
 
+            // LANG-10: destructuring assignment — (a, b) = expr
+            if (auto* tuple = dynamic_cast<TupleExpr*>(expr.get())) {
+                // Validate all elements are simple variable names
+                for (const auto& elem : tuple->elements) {
+                    if (!dynamic_cast<VarExpr*>(elem.get())) {
+                        throw error(op, "Destructuring assignment targets must be simple variable names.", "E214");
+                    }
+                }
+                // Check for duplicate names
+                for (size_t i = 0; i < tuple->elements.size(); ++i) {
+                    auto* vi = static_cast<VarExpr*>(tuple->elements[i].get());
+                    for (size_t j = i + 1; j < tuple->elements.size(); ++j) {
+                        auto* vj = static_cast<VarExpr*>(tuple->elements[j].get());
+                        if (vi->name.lexeme == vj->name.lexeme) {
+                            throw error(vi->name, "Duplicate variable name '" + vi->name.lexeme + "' in destructuring assignment.", "E214");
+                        }
+                    }
+                }
+                return std::make_shared<AssignExpr>(std::move(expr), op, std::move(value));
+            }
+
             if (dynamic_cast<VarExpr *>(expr.get()) ||
                 dynamic_cast<GetExpr *>(expr.get()) ||
                 dynamic_cast<SubscriptExpr *>(expr.get())) {
                 return std::make_shared<AssignExpr>(std::move(expr), op, std::move(value));
                 }
 
-            error(op, "Cannot assign to this expression. Only variables ('x'), field accesses ('obj.field'), and subscripts ('arr[i]') can be assigned to.", "E214");
+            error(op, "Cannot assign to this expression. Only variables ('x'), field accesses ('obj.field'), subscripts ('arr[i]'), and tuple destructuring ('(a, b)') can be assigned to.", "E214");
                    }
 
         return expr;

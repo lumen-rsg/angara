@@ -22,7 +22,26 @@ namespace angara {
             if (!check(TokenType::RIGHT_PAREN)) {
                 do {
                     if (check(TokenType::RIGHT_PAREN)) break;
-                    Token param_name = consume(TokenType::IDENTIFIER, "Expected parameter name.", "E190");
+
+                    // LANG-10: destructured parameter — (a, b) as (T1, T2)
+                    std::vector<Token> destructure_names;
+                    Token param_name;
+                    if (match({TokenType::LEFT_PAREN})) {
+                        do {
+                            if (check(TokenType::RIGHT_PAREN)) break;
+                            destructure_names.push_back(
+                                consume(TokenType::IDENTIFIER, "Expected variable name in destructured parameter.", "E190"));
+                        } while (match({TokenType::COMMA}));
+                        consume(TokenType::RIGHT_PAREN, "Expected ')' after destructured parameter names.", "E413");
+                        if (destructure_names.empty()) {
+                            throw error(previous(), "Destructured parameter must contain at least one variable name.", "E414");
+                        }
+                        // Use the first name as the primary parameter name for symbol purposes
+                        param_name = destructure_names[0];
+                    } else {
+                        param_name = consume(TokenType::IDENTIFIER, "Expected parameter name.", "E190");
+                    }
+
                     consume(TokenType::AS, "Expected 'as' followed by a type after parameter name.", "E191");
                     std::shared_ptr<ASTType> param_type = type();
                     bool is_variadic = match({TokenType::DOT_DOT_DOT});
@@ -33,7 +52,7 @@ namespace angara {
                         default_value = expression();
                     }
 
-                    parameters.push_back({param_name, param_type, is_variadic, default_value});
+                    parameters.push_back({param_name, param_type, is_variadic, default_value, std::move(destructure_names)});
 
                     if (is_variadic && !check(TokenType::RIGHT_PAREN)) {
                         throw error(peek(), "Variadic parameter '...' must be the last parameter — no further parameters are allowed after it.", "E192");

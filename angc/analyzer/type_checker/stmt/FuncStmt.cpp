@@ -182,7 +182,36 @@ namespace angara {
         }
 
         for (size_t i = 0; i < stmt->params.size(); ++i) {
-            m_symbols.declare(stmt->params[i].name, func_type->param_types[i], true);
+            const auto& param = stmt->params[i];
+            if (!param.destructure_names.empty()) {
+                // LANG-10: destructured parameter — declare each name with its element type
+                auto param_type = func_type->param_types[i];
+                if (param_type->kind != TypeKind::TUPLE) {
+                    error(param.name,
+                        "Destructured parameter '" + param.name.lexeme +
+                        "' requires a tuple type after 'as', but got '" +
+                        param_type->toString() + "'.",
+                        "E415");
+                    continue;
+                }
+                auto tuple_type = std::dynamic_pointer_cast<TupleType>(param_type);
+                if (tuple_type->element_types.size() != param.destructure_names.size()) {
+                    error(param.name,
+                        "Destructured parameter arity mismatch. The tuple type '" +
+                        param_type->toString() + "' has " +
+                        std::to_string(tuple_type->element_types.size()) +
+                        " element(s), but " +
+                        std::to_string(param.destructure_names.size()) +
+                        " name(s) were given.",
+                        "E416");
+                    continue;
+                }
+                for (size_t j = 0; j < param.destructure_names.size(); ++j) {
+                    m_symbols.declare(param.destructure_names[j], tuple_type->element_types[j], true);
+                }
+            } else {
+                m_symbols.declare(param.name, func_type->param_types[i], true);
+            }
         }
 
         // LANG-11: validate default argument types.

@@ -205,6 +205,35 @@ void Chaperone::analyzeExpr(Context& ctx,
             return;
         }
 
+        // --- Target is a tuple destructure ((a, b) = ...): per-element ownership ---
+        if (auto* tup = dynamic_cast<const TupleExpr*>(asgn->target.get())) {
+            // Walk each element of the tuple (each should be a VarExpr).
+            for (const auto& elem : tup->elements) {
+                if (auto* ve = dynamic_cast<const VarExpr*>(elem.get())) {
+                    auto tit = state.find(ve->name.lexeme);
+                    if (tit == state.end()) continue;
+                    // S7: overwriting a Live tracked variable leaks the old allocation.
+                    if (tit->second == State::Live) {
+                        diag(ctx, ve->name,
+                            "🧬 Unfolded molecule — `" + ve->name.lexeme + "` held a live "
+                            "allocation that is overwritten by this destructuring assignment "
+                            "without being dropped. Add `drop " + ve->name.lexeme + ";` first.",
+                            "E501");
+                    }
+                    // Non-move assignment on a variable that was previously holding a
+                    // tracked allocation: the target now holds a new allocation → Live.
+                    // (Uninit targets are non-tracked declarations — skip them.)
+                    if (tit->second != State::Uninit) {
+                        tit->second = State::Live;
+                    }
+                }
+            }
+            if (rhs_is_move_source) {
+                state[move_src] = State::Moved;
+            }
+            return;
+        }
+
         // --- Target is a field (this.f = ...): S6 field ownership move ---
         // External field writes are already blocked by the type checker (private
         // fields, E336), so this only fires inside methods/constructors. The

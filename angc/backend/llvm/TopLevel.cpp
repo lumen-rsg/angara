@@ -198,6 +198,43 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
         idx++;
     }
 
+    // LANG-10: destructured parameters — extract elements from tuple arguments
+    for (size_t pi = 0; pi < stmt.params.size(); ++pi) {
+        const auto& param = stmt.params[pi];
+        if (param.destructure_names.empty()) continue;
+
+        // The primary parameter holds the tuple value in its alloca.
+        auto primary_pname = sanitize(param.name.lexeme);
+        auto it = namedVals.find(primary_pname);
+        if (it == namedVals.end()) continue;
+        auto* tuple_alloca = it->second;
+
+        // Resolve the tuple type
+        auto param_type = (sem_fn_type && pi < sem_fn_type->param_types.size())
+            ? sem_fn_type->param_types[pi] : nullptr;
+        auto tuple_type = (param_type && param_type->kind == TypeKind::TUPLE)
+            ? std::dynamic_pointer_cast<TupleType>(param_type) : nullptr;
+
+        for (size_t di = 0; di < param.destructure_names.size(); ++di) {
+            auto dname = sanitize(param.destructure_names[di].lexeme);
+            auto* idx_val = makeI64(llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), di));
+            auto* elem = callRtByName("__ang_list_get", {
+                builder->CreateLoad(objType, tuple_alloca), idx_val
+            });
+
+            auto* alloca = allocLocal(fn, dname);
+            namedVals[dname] = alloca;
+            namedKinds[dname] = LocalKind::BOXED;
+            if (tuple_type && di < tuple_type->element_types.size()) {
+                namedTypes[dname] = tuple_type->element_types[di];
+            }
+            emitDbgDeclare(alloca, dname,
+                param.destructure_names[di].line,
+                param.destructure_names[di].column, LocalKind::BOXED);
+            builder->CreateStore(elem, alloca);
+        }
+    }
+
     // Track whether we're inside a raw-signature function
     auto saved_raw_ret = m_current_raw_return_kind;
     m_current_raw_return_kind = is_raw ? raw_info.return_kind : std::optional<LocalKind>{};

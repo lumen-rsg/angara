@@ -5,6 +5,57 @@ namespace angara {
         expr.value->accept(*this);
         const auto rhs_type = popType();
 
+        // LANG-10: destructuring assignment — (a, b) = tuple_expr
+        if (const auto tuple_target = std::dynamic_pointer_cast<const TupleExpr>(expr.target)) {
+            if (rhs_type->kind != TypeKind::TUPLE) {
+                error(expr.op, "Cannot destructure a value of type '" + rhs_type->toString() +
+                               "' — destructuring assignment requires a tuple type on the right-hand side.", "E385");
+                pushAndSave(&expr, m_type_error);
+                return {};
+            }
+            auto tuple_type = std::dynamic_pointer_cast<TupleType>(rhs_type);
+            if (tuple_type->element_types.size() != tuple_target->elements.size()) {
+                error(expr.op, "Destructuring arity mismatch. The tuple type has " +
+                               std::to_string(tuple_type->element_types.size()) +
+                               " element(s), but " +
+                               std::to_string(tuple_target->elements.size()) +
+                               " variable(s) were given.", "E386");
+                pushAndSave(&expr, m_type_error);
+                return {};
+            }
+            for (size_t i = 0; i < tuple_target->elements.size(); ++i) {
+                auto var_expr = std::dynamic_pointer_cast<const VarExpr>(tuple_target->elements[i]);
+                if (!var_expr) {
+                    error(expr.op, "Destructuring assignment targets must be simple variable names.", "E385");
+                    pushAndSave(&expr, m_type_error);
+                    return {};
+                }
+                // Resolve the variable's declared type
+                auto symbol = m_symbols.resolve(var_expr->name.lexeme);
+                if (!symbol) {
+                    error(var_expr->name, "Variable '" + var_expr->name.lexeme + "' is not declared.", "E387");
+                    pushAndSave(&expr, m_type_error);
+                    return {};
+                }
+                if (symbol->is_const) {
+                    error(var_expr->name, "Cannot assign to 'const' variable '" + symbol->name + "' in destructuring.", "E320");
+                    note(symbol->declaration_token, "'" + symbol->name + "' was declared 'const' here.");
+                }
+                // Check that the tuple element type is compatible with the variable's declared type
+                auto var_declared_type = symbol->type;
+                auto element_type = tuple_type->element_types[i];
+                if (var_declared_type && element_type &&
+                    !check_type_compatibility(var_declared_type, element_type)) {
+                    error(var_expr->name, "Type mismatch in destructuring position " +
+                                          std::to_string(i) + ". Cannot assign element of type '" +
+                                          element_type->toString() + "' to variable '" +
+                                          var_expr->name.lexeme + "' of type '" +
+                                          var_declared_type->toString() + "'.", "E319");
+                }
+            }
+            pushAndSave(&expr, rhs_type);
+            return {};
+        }
 
         if (const auto subscript_target = std::dynamic_pointer_cast<const SubscriptExpr>(expr.target)) {
             subscript_target->object->accept(*this);

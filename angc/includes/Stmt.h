@@ -75,6 +75,8 @@ namespace angara {
         bool is_variadic = false;
         // LANG-11: default argument value (nullptr = required, no default)
         std::shared_ptr<Expr> default_value;
+        // LANG-10: destructured parameter names (e.g. func foo((a, b) as (i64, string)))
+        std::vector<Token> destructure_names;
     };
 
     struct ClassMember {
