@@ -341,8 +341,31 @@ then read ref), 11 (positive: read ref then drop referent).
 > recursion), it reports and the programmer opts out via `@unsafe`/`@manual`.
 > **Stay a verifier. Do not clone Rust.**
 
-This audit adds one corollary: **The verifier must be able to see every
-allocation.** Currently it sees only class/owned-data allocations. The
-remaining 13 heap-allocated subtypes are in a blind spot. Phase A fixes the
-runtime so they can be freed; Phase B optionally brings them into the
-verifier's field of view.
+This audit began with two goals: (1) fix the runtime so every allocation has
+a path to `free` (Phase A), and (2) extend the Chaperone's field of view so
+it can verify cleanup of all heap-allocated types, not just class/owned-data
+(Phase B).  Both are now complete.
+
+---
+## Closing Summary (2026-07-05)
+
+All 30 items across seven categories are resolved:
+
+| Category | Count | Result |
+|----------|-------|--------|
+| L1–L15 | 15 | `__ang_gc_finalize` dispatches on `ObjHeader.type`, frees all interior buffers; cgDrop cascade extended to all heap-allocated field types |
+| C1–C4 | 4 | Critical analysis gaps fixed (RangeExpr, InterpStringExpr, method name collision, closure body analysis) |
+| H1–H5 | 5 | High-priority gaps fixed (TryStmt capture, closure summaries, @consumes/@escape, oscillation detection, interprocedural borrows) |
+| M1–M5 | 5 | Medium items resolved (scope tracking, loop conditional destruction, error messages, mutual recursion + expression tests) |
+| LOW1–LOW3 | 3 | Test coverage filled (loop condition precision, variadic interprocedural, indirect calls) |
+| Phase A | — | Runtime finalization for all 13 built-in types |
+| Phase B | — | Built-in types tracked as `Live`; W521 warnings for leaks; E501 errors for class/owned-data |
+| Phase C | — | All control-flow gaps fixed |
+| Phase D | — | 52 Chaperone tests + 2 LSP tests — all passing |
+
+**The Chaperone now sees every heap allocation.** Class, owned data, string,
+list, record, vector, raw array, closure, bound method, trait object,
+exception, thread, mutex, and native instance — all enter the `Live` state
+and are subject to drop tracking, use-after-free detection, and leak
+diagnostics. Built-in type leaks emit W521 warnings (compilation succeeds);
+class and owned-data leaks remain E501 errors (compilation halts).
