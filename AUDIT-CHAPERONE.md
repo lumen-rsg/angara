@@ -220,17 +220,25 @@ cgDrop cascade extended to all heap-allocated field types (L14, L15).
 Currently it ignores them. With Phase A's finalizer in place, enabling
 tracking would let the Chaperone detect leaks of strings, lists, etc.
 
+**Current state (partial):** Phase A already provides the runtime cleanup
+path (`__ang_gc_finalize` frees interior buffers). The DropStmt handler
+already allows `drop` on any heap-allocated type (including local variables
+after the fix in commit `7efe829`). Double-drop (E503) and use-after-free
+(E502/E507) detection both work for built-in types — they transition through
+Dropped/Moved/Escaped states. **The only gap is E501 leak detection:**
+built-in types are `Uninit`, not `Live`, so the Chaperone never warns when
+you forget to drop them.
+
 **Approach:** Extend `collectTrackedTypes` / `isTrackedTypeObj` to optionally
-include built-in types. This could be gated on a new `owned string` / `owned list`
-syntax as described in `CHAPERONE.md` decision #11, or applied universally
-in a new "strict" mode.
+include built-in types so they enter the `Live` state. This could be gated
+on a new `owned string` / `owned list` syntax as described in `CHAPERONE.md`
+decision #11, or applied universally in a new "strict" mode.
 
 **Files:** `Chaperone.cpp` (collectTrackedTypes, isTrackedTypeObj),
-`StmtAnalysis.cpp` (DropStmt handler to allow non-class/owned-data drops),
-`StmtCodegen.cpp` (cgDrop to handle non-class structs),
-`TypeChecker.cpp` (allow `drop` on any type).
+`StmtAnalysis.cpp` (DropStmt handler, VarDeclStmt handler),
+`StmtCodegen.cpp` (cgDrop already handles non-class structs).
 
-**Status:** [ ] Not started
+**Status:** [ ] Partial — drop/double-drop/use-after-free work; E501 leak detection not yet implemented
 
 ### Phase C — Fix Control-Flow Gaps
 
