@@ -1,4 +1,5 @@
 #include "LSPServer.h"
+#include "CLI.h"
 #include "Lexer.h"
 #include "Parser.h"
 #include "TypeChecker.h"
@@ -775,7 +776,7 @@ JSON LSPServer::handleInitialize(const JSON& params) {
     caps["documentSymbolProvider"] = true;
 
     result["capabilities"] = caps;
-    result["serverInfo"] = JSON_OBJ{{"name", "angc-lsp"}, {"version", "3.1.0"}};
+    result["serverInfo"] = JSON_OBJ{{"name", "angc-lsp"}, {"version", ANGC_VERSION}};
     return result;
 }
 

@@ -1,4 +1,5 @@
 #include "REPL.h"
+#include "CLI.h"
 #include "Lexer.h"
 #include "Parser.h"
 #include "TypeChecker.h"
@@ -174,7 +175,7 @@ int REPL::run() {
     llvm::InitializeAllAsmParsers();
     llvm::InitializeAllAsmPrinters();
 
-    std::cout << "\033[1;35mAngara REPL v3.1\033[0m\n";
+    std::cout << "\033[1;35mAngara REPL v" << ANGC_VERSION << "\033[0m\n";
     std::cout << "Type \033[1m:quit\033[0m or \033[1m:q\033[0m to exit.\n\n";
 
     while (true) {

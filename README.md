@@ -10,7 +10,7 @@ Designed for clarity, safety, and pragmatic interoperability with C.
 
 [![Continuous Build and Release](https://github.com/lumen-rsg/angara/actions/workflows/main.yml/badge.svg)](https://github.com/lumen-rsg/angara/actions/workflows/main.yml)
 [![Docs](https://img.shields.io/badge/docs-Language%20Guide-blue.svg)](https://github.com/lumen-rsg/angara/wiki)
-[![Version](https://img.shields.io/badge/version-3.0.0-orange.svg)](https://github.com/lumen-rsg/angara)
+[![Version](https://img.shields.io/badge/version-5.1.0-orange.svg)](https://github.com/lumen-rsg/angara)
 
 [Getting Started](#getting-started) ·
 [Examples](#code-showcase) ·
