@@ -1370,8 +1370,11 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             // If modName is a variable whose type is a native class, use the
             // class's home module name so the mangled symbol matches the .so
             // export (e.g. "Loop" → Angara_Loop_set_timeout, not ang_loop_set_timeout).
+            // Also prepend `self` (the receiver) to the argument list, since
+            // native class methods expect it as args[0].
             std::string resolved_mod = modName;
             auto nt_it = namedTypes.find(modName);
+            bool is_native_method = false;
             if (nt_it != namedTypes.end() && nt_it->second) {
                 auto& t = nt_it->second;
                 std::shared_ptr<ClassType> cls;
@@ -1382,8 +1385,35 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                     cls = std::dynamic_pointer_cast<ClassType>(t);
                 }
                 if (cls && cls->is_native) {
-                    resolved_mod = cls->name;  // use class name, not variable name
+                    resolved_mod = cls->name;
+                    is_native_method = true;
                 }
+            }
+            if (is_native_method) {
+                // Prepend self to the args for native method calling convention
+                std::vector<llvm::Value*> llvmArgs;
+                llvmArgs.push_back(loadVar(modName));  // self
+                for (auto& a : getArgs(expr)) llvmArgs.push_back(cg(a));
+                auto cnt = (unsigned)llvmArgs.size();
+                std::string native_name = "Angara_" + resolved_mod + "_" + fnName;
+                auto* native_ft = llvm::FunctionType::get(objType,
+                    {llvm::Type::getInt32Ty(*ctx), llvm::PointerType::get(*ctx, 0)}, false);
+                llvm::Function* native_f = llvm::Function::Create(native_ft, llvm::Function::ExternalLinkage, native_name, this->mod.get());
+                std::vector<llvm::Value*> call_args;
+                call_args.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), cnt));
+                if (cnt > 0) {
+                    auto* aa = builder->CreateAlloca(llvm::ArrayType::get(objType, cnt));
+                    for (unsigned i = 0; i < cnt; i++) {
+                        auto* ep = builder->CreateGEP(llvm::ArrayType::get(objType, cnt), aa,
+                            {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
+                             llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
+                        builder->CreateStore(llvmArgs[i], ep);
+                    }
+                    call_args.push_back(builder->CreateBitCast(aa, llvm::PointerType::get(*ctx, 0)));
+                } else {
+                    call_args.push_back(llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)));
+                }
+                return builder->CreateCall(native_f, call_args);
             }
             return callModuleFn(resolved_mod, fnName, getArgs(expr));
         }

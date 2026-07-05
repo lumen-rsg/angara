@@ -211,7 +211,7 @@ static void finalize_server(void* data) {
     free(srv);
 }
 
-AngaraObject Angara_http_server(int arg_count, AngaraObject* args) {
+AngaraObject Angara_http_server_server(int arg_count, AngaraObject* args) {
     int port = 8080;
     if (arg_count >= 1 && ang_is_i64(args[0])) port = (int)ang_as_i64(args[0]);
 
@@ -605,11 +605,11 @@ static const AngaraMethodDef SERVER_METHODS[] = {
 static const AngaraClassDef SERVER_CLASS = { "HttpServer", NULL, SERVER_METHODS };
 
 static const AngaraFuncDef HTTP_EXPORTS[] = {
-    {"server", Angara_http_server, "i?->HttpServer", &SERVER_CLASS},
+    {"server", Angara_http_server_server, "i?->HttpServer", &SERVER_CLASS},
     ANGARA_FUNC_END
 };
 
-ANGARA_MODULE_INIT(http) {
+ANGARA_MODULE_INIT(http_server) {
     ang_api = api;
     *def_count = (sizeof(HTTP_EXPORTS) / sizeof(AngaraFuncDef)) - 1;
     return HTTP_EXPORTS;
