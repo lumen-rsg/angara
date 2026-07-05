@@ -130,7 +130,7 @@ does nothing. This means:
 | **H1** | [x] 🟢 Source → ✅ Fixed | `Chaperone.cpp:108-153` | **TryStmt missing from collectVarRefs.** Closures defined inside try/catch/finally have invisible captures — E505 never fires for variables they reference. |
 | **H2** | [ ] 🟢 Source | `ExprAnalysis.cpp:268-272` | **No summary for closure calls.** When a closure is called as `f()`, there is no entry in `ctx.summaries` (closures are LambdaExprs, not FuncStmts). All args are treated as Borrowed — a closure that drops or escapes its argument goes undetected. |
 | **H3** | [ ] 🟢 Source | `ExprAnalysis.cpp:272` | **@consumes/@escape not implemented.** Documented in `CHAPERONE.md` as escape hatches, mentioned in code comments, but never parsed or checked. All FFI/unknown functions are permanently treated as borrowing — no way to mark a foreign function that takes ownership. |
-| **H4** | [ ] 🟢 Source | `Chaperone.cpp:308-313` | **No oscillation detection in fixed-point.** The convergence check is exact map equality. If summaries oscillate (A→B→A→B), the loop exhausts all 8 passes without converging and silently uses the last pass. No diagnostic emitted. With C3 (name collision), oscillation is plausible. |
+| **H4** | [x] 🟢 Source → ✅ Fixed | `Chaperone.cpp:308-313` | **No oscillation detection in fixed-point.** The convergence check is exact map equality. If summaries oscillate (A→B→A→B), the loop exhausts all 8 passes without converging and silently uses the last pass. No diagnostic emitted. With C3 (name collision), oscillation is plausible. |
 | **H5** | [ ] 🟢 Source | `StmtAnalysis.cpp:20` | **Borrow tracking is intraprocedural only.** `ctx.borrows.clear()` at function entry. If a `ref<T>` is passed to another function, the callee doesn't see the borrow relationship and won't flag E509 if it drops the referent. |
 
 ### MEDIUM — Conservative but lossy
@@ -299,9 +299,9 @@ potential oscillation.
 | **H1** | TryStmt missing from collectVarRefs | [x] |
 | **H2** | No summary for closure calls | [ ] |
 | **H3** | @consumes/@escape not implemented | [ ] |
-| **H4** | No oscillation detection in fixed-point | [ ] |
+| **H4** | No oscillation detection in fixed-point | [x] |
 | **H5** | Borrow tracking intraprocedural only | [ ] |
-| **M1** | W510 only scans then_state keys | [ ] |
+| **M1** | W510 only scans then_state keys | [x] |
 | **M2** | Loop body analyzed once (no fixed-point) | [ ] |
 | **M3** | join(Escaped, Moved) = Dropped misleading | [ ] |
 | **M4** | No test for mutual recursion | [ ] |

@@ -318,13 +318,39 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
     // final pass, to avoid duplicates. A pass cap guards against divergence
     // (the design doc's convergence-fallback); on non-convergence the last
     // pass's summaries stand and we still report.
+    //
+    // H4: detect oscillation. If the summary map repeats a state we've seen
+    // before (not counting the immediate previous pass, which is convergence),
+    // the fixed-point is oscillating and we break with a warning.
     const int MAX_PASSES = 8;
     ctx.suppress_diag = true;
+    std::vector<size_t> seen_hashes;  // H4: track summary hashes for oscillation
     for (int pass = 0; pass < MAX_PASSES; pass++) {
         auto before = ctx.summaries;  // snapshot
         for (const auto& fi : functions)
             analyzeFunction(ctx, *fi.func, fi.summary_key);
         if (ctx.summaries == before) break;  // converged
+
+        // H4: check for oscillation (a cycle longer than period 1).
+        size_t h = 0;
+        for (const auto& [k, v] : ctx.summaries) {
+            h ^= std::hash<std::string>{}(k);
+            for (auto pb : v) h = (h << 1) ^ static_cast<size_t>(pb);
+        }
+        auto osc_it = std::find(seen_hashes.begin(), seen_hashes.end(), h);
+        if (osc_it != seen_hashes.end() && (seen_hashes.size() < 2 || osc_it != seen_hashes.end() - 1)) {
+            // Same hash as a non-immediately-previous pass — oscillation detected.
+            ctx.suppress_diag = false;
+            diag(ctx, functions[0].func->name,
+                "⚠️ Interprocedural fixed-point is oscillating — summaries did not "
+                "converge. The last pass's summaries are used; results may be "
+                "imprecise. Consider simplifying ownership patterns or adding "
+                "@consumes / @escape annotations.",
+                "W521");
+            ctx.suppress_diag = true;
+            break;
+        }
+        seen_hashes.push_back(h);
     }
     ctx.suppress_diag = false;
     // Final diagnostic pass with the converged summaries.

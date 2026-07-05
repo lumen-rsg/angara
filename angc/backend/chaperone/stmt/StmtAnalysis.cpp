@@ -292,10 +292,16 @@ void Chaperone::analyzeStmt(Context& ctx,
         if (else_term) { state = then_state; return; }
 
         // Both fall through — merge with asymmetry detection.
-        for (auto& [name, st_then] : then_state) {
-            auto it2 = else_state.find(name);
-            if (it2 != else_state.end() && st_then != it2->second) {
-                if ((st_then == State::Live) != (it2->second == State::Live)) {
+        // M1: scan both then_state and else_state keys for Live asymmetry.
+        std::set<std::string> all_names;
+        for (const auto& [name, _] : then_state) all_names.insert(name);
+        for (const auto& [name, _] : else_state) all_names.insert(name);
+        for (const auto& name : all_names) {
+            auto it_then = then_state.find(name);
+            auto it_else = else_state.find(name);
+            if (it_then != then_state.end() && it_else != else_state.end() &&
+                it_then->second != it_else->second) {
+                if ((it_then->second == State::Live) != (it_else->second == State::Live)) {
                     ctx.eh.warning(ifs->keyword,
                         "🔄 Incomplete fold — `" + name + "` is handled differently on "
                         "the two branches. Add `drop " + name + ";` to the path that's missing it.",
