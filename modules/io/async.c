@@ -287,18 +287,35 @@ AngaraObject Angara_Loop_clear(int arg_count, AngaraObject* args) {
 /* ---- run / stop ---- */
 
 AngaraObject Angara_Loop_run(int arg_count, AngaraObject* args) {
-    /* loop.run() — blocks, dispatches callbacks, returns when stop() is called */
-    (void)arg_count; (void)args;
+    /* loop.run(timeout_ms?) — blocks, dispatches callbacks.
+       If timeout_ms is provided, returns after that many milliseconds.
+       Otherwise blocks until loop.stop() is called. */
     LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
     if (!l || l->epfd < 0) return ang_nil();
+
+    int has_timeout = 0;
+    int64_t timeout_ms = -1;
+    if (arg_count >= 2 && ang_is_i64(args[1])) {
+        timeout_ms = ang_as_i64(args[1]);
+        has_timeout = 1;
+    }
 
     l->running = 1;
 
     while (l->running) {
+        int epoll_timeout = -1;
+        if (has_timeout) epoll_timeout = (int)timeout_ms;
+
         struct epoll_event events[64];
-        int n = epoll_wait(l->epfd, events, 64, -1);
+        int n = epoll_wait(l->epfd, events, 64, epoll_timeout);
         if (n < 0) {
             if (errno == EINTR) continue;
+            break;
+        }
+
+        /* timeout elapsed */
+        if (n == 0 && has_timeout) {
+            l->running = 0;
             break;
         }
 
@@ -633,7 +650,7 @@ static const AngaraMethodDef LOOP_METHODS[] = {
     {"set_timeout",  (AngaraMethodFn)Angara_Loop_set_timeout,  "ia->i"},
     {"set_interval", (AngaraMethodFn)Angara_Loop_set_interval, "ia->i"},
     {"clear",        (AngaraMethodFn)Angara_Loop_clear,        "i->n"},
-    {"run",          (AngaraMethodFn)Angara_Loop_run,          "->n"},
+    {"run",          (AngaraMethodFn)Angara_Loop_run,          "i?->n"},
     {"stop",         (AngaraMethodFn)Angara_Loop_stop,         "->n"},
     {"poll",         (AngaraMethodFn)Angara_Loop_poll,         "i?->l<{}>"},
     {"close",        (AngaraMethodFn)Angara_Loop_close,        "->n"},
