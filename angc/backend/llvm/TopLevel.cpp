@@ -282,10 +282,108 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     if (m_debug) builder->SetCurrentDebugLocation(llvm::DebugLoc());
 }
 
-// LIB-4: codegen for async functions.
-// Allocates a Future<T> frame on the heap, runs the body synchronously (for now),
-// stores the result, and returns the future as a native instance.
-// Stage 5 will add the state machine for suspension/resumption.
+// LIB-4: walk expressions to collect AwaitExpr nodes.
+void LLVMBackend::collectAwaitStates(const std::shared_ptr<Expr>& expr,
+                                      std::vector<const AwaitExpr*>& awaits) {
+    if (!expr) return;
+    if (auto* a = dynamic_cast<const AwaitExpr*>(expr.get())) {
+        awaits.push_back(a);
+        return;
+    }
+    // Recurse into sub-expressions
+    if (auto* b = dynamic_cast<const Binary*>(expr.get())) {
+        collectAwaitStates(b->left, awaits); collectAwaitStates(b->right, awaits);
+    } else if (auto* u = dynamic_cast<const Unary*>(expr.get())) {
+        collectAwaitStates(u->right, awaits);
+    } else if (auto* g = dynamic_cast<const Grouping*>(expr.get())) {
+        collectAwaitStates(g->expression, awaits);
+    } else if (auto* c = dynamic_cast<const CallExpr*>(expr.get())) {
+        collectAwaitStates(c->callee, awaits);
+        for (auto& a : c->arguments) collectAwaitStates(a, awaits);
+    } else if (auto* gt = dynamic_cast<const GetExpr*>(expr.get())) {
+        collectAwaitStates(gt->object, awaits);
+    } else if (auto* l = dynamic_cast<const ListExpr*>(expr.get())) {
+        for (auto& e : l->elements) collectAwaitStates(e, awaits);
+    } else if (auto* tup = dynamic_cast<const TupleExpr*>(expr.get())) {
+        for (auto& e : tup->elements) collectAwaitStates(e, awaits);
+    } else if (auto* lo = dynamic_cast<const LogicalExpr*>(expr.get())) {
+        collectAwaitStates(lo->left, awaits); collectAwaitStates(lo->right, awaits);
+    } else if (auto* su = dynamic_cast<const SubscriptExpr*>(expr.get())) {
+        collectAwaitStates(su->object, awaits); collectAwaitStates(su->index, awaits);
+    } else if (auto* re = dynamic_cast<const RecordExpr*>(expr.get())) {
+        for (auto& v : re->values) collectAwaitStates(v, awaits);
+    } else if (auto* te = dynamic_cast<const TernaryExpr*>(expr.get())) {
+        collectAwaitStates(te->condition, awaits);
+        collectAwaitStates(te->thenBranch, awaits);
+        collectAwaitStates(te->elseBranch, awaits);
+    } else if (auto* ie = dynamic_cast<const IsExpr*>(expr.get())) {
+        collectAwaitStates(ie->object, awaits);
+    } else if (auto* ce = dynamic_cast<const CastExpr*>(expr.get())) {
+        collectAwaitStates(ce->object, awaits);
+    } else if (auto* de = dynamic_cast<const DerefExpr*>(expr.get())) {
+        collectAwaitStates(de->right, awaits);
+    } else if (auto* re = dynamic_cast<const RangeExpr*>(expr.get())) {
+        collectAwaitStates(re->left, awaits); collectAwaitStates(re->right, awaits);
+    } else if (auto* is = dynamic_cast<const InterpStringExpr*>(expr.get())) {
+        for (auto& s : is->segments) if (s.second) collectAwaitStates(s.second, awaits);
+    } else if (auto* me = dynamic_cast<const MatchExpr*>(expr.get())) {
+        collectAwaitStates(me->condition, awaits);
+        for (auto& c : me->cases) {
+            for (auto& p : c.patterns) collectAwaitStates(p, awaits);
+            if (c.guard) collectAwaitStates(*c.guard, awaits);
+            if (c.body) collectAwaitStates(c.body, awaits);
+        }
+    } else if (auto* lam = dynamic_cast<const LambdaExpr*>(expr.get())) {
+        // Don't recurse into lambda bodies — they're separate functions.
+        return;
+    } else if (auto* as = dynamic_cast<const AssignExpr*>(expr.get())) {
+        collectAwaitStates(as->target, awaits);
+        collectAwaitStates(as->value, awaits);
+    } else if (auto* upd = dynamic_cast<const UpdateExpr*>(expr.get())) {
+        collectAwaitStates(upd->target, awaits);
+    }
+}
+
+void LLVMBackend::collectAwaitStatesStmt(const std::shared_ptr<Stmt>& stmt,
+                                          std::vector<const AwaitExpr*>& awaits) {
+    if (!stmt) return;
+    if (auto* es = dynamic_cast<const ExpressionStmt*>(stmt.get())) {
+        collectAwaitStates(es->expression, awaits);
+    } else if (auto* vd = dynamic_cast<const VarDeclStmt*>(stmt.get())) {
+        if (vd->initializer) collectAwaitStates(vd->initializer, awaits);
+    } else if (auto* ret = dynamic_cast<const ReturnStmt*>(stmt.get())) {
+        if (ret->value) collectAwaitStates(ret->value, awaits);
+    } else if (auto* ifs = dynamic_cast<const IfStmt*>(stmt.get())) {
+        collectAwaitStates(ifs->condition, awaits);
+        if (ifs->thenBranch) collectAwaitStatesStmt(ifs->thenBranch, awaits);
+        if (ifs->elseBranch) collectAwaitStatesStmt(ifs->elseBranch, awaits);
+    } else if (auto* wh = dynamic_cast<const WhileStmt*>(stmt.get())) {
+        collectAwaitStates(wh->condition, awaits);
+        if (wh->body) collectAwaitStatesStmt(wh->body, awaits);
+    } else if (auto* fr = dynamic_cast<const ForStmt*>(stmt.get())) {
+        if (fr->initializer) collectAwaitStatesStmt(fr->initializer, awaits);
+        if (fr->condition) collectAwaitStates(fr->condition, awaits);
+        if (fr->increment) collectAwaitStates(fr->increment, awaits);
+        if (fr->body) collectAwaitStatesStmt(fr->body, awaits);
+    } else if (auto* fi = dynamic_cast<const ForInStmt*>(stmt.get())) {
+        collectAwaitStates(fi->collection, awaits);
+        if (fi->body) collectAwaitStatesStmt(fi->body, awaits);
+    } else if (auto* blk = dynamic_cast<const BlockStmt*>(stmt.get())) {
+        for (auto& s : blk->statements) collectAwaitStatesStmt(s, awaits);
+    } else if (auto* thr = dynamic_cast<const ThrowStmt*>(stmt.get())) {
+        collectAwaitStates(thr->expression, awaits);
+    } else if (auto* trys = dynamic_cast<const TryStmt*>(stmt.get())) {
+        if (trys->tryBlock) collectAwaitStatesStmt(trys->tryBlock, awaits);
+        if (trys->catchBlock) collectAwaitStatesStmt(trys->catchBlock, awaits);
+        if (trys->finallyBlock) collectAwaitStatesStmt(trys->finallyBlock, awaits);
+    } else if (auto* uns = dynamic_cast<const UnsafeBlockStmt*>(stmt.get())) {
+        for (auto& s : uns->block->statements) collectAwaitStatesStmt(s, awaits);
+    }
+    // DropStmt, BreakStmt, ContinueStmt, EmptyStmt: no expressions to scan
+}
+
+// LIB-4: codegen for async functions with state machine.
+// Each await point becomes a state; the function can suspend and resume.
 void LLVMBackend::codegenAsyncFuncDecl(const FuncStmt& stmt, const std::string& module_name) {
     const std::string func_name = mangle(module_name, stmt.name.lexeme);
 
@@ -293,6 +391,15 @@ void LLVMBackend::codegenAsyncFuncDecl(const FuncStmt& stmt, const std::string& 
     auto sem_sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(stmt.name.lexeme);
     auto sem_fn_type = (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION)
         ? std::dynamic_pointer_cast<FunctionType>(sem_sym->type) : nullptr;
+
+    // ---- Collect await states ----
+    std::vector<const AwaitExpr*> await_states;
+    if (stmt.body) {
+        for (auto& s : *stmt.body) {
+            collectAwaitStatesStmt(s, await_states);
+        }
+    }
+    int num_states = (int)await_states.size();
 
     // Build LLVM function signature: all boxed (objType params, objType return)
     std::vector<llvm::Type*> param_types(stmt.params.size(), objType);
@@ -339,13 +446,21 @@ void LLVMBackend::codegenAsyncFuncDecl(const FuncStmt& stmt, const std::string& 
     namedKinds.clear();
 
     // ---- Future frame allocation ----
-    // The frame struct: { i32 state, AngaraObject result }
-    // state: 0 = pending, 1 = resolved
+    // Frame struct: { i32 state, AngaraObject result, AngaraObject awaited }
     auto* state_ty = llvm::Type::getInt32Ty(*ctx);
-    auto* frame_struct_ty = llvm::StructType::get(*ctx, {state_ty, objType}, false);
+    std::vector<llvm::Type*> frame_fields = {state_ty, objType, objType};
+
+    // Add a field for each parameter (needed across suspends)
+    std::vector<int> param_field_idx;
+    for (size_t pi = 0; pi < stmt.params.size(); ++pi) {
+        param_field_idx.push_back((int)frame_fields.size());
+        frame_fields.push_back(objType);
+    }
+
+    auto* frame_struct_ty = llvm::StructType::get(*ctx, frame_fields, false);
     auto* frame_ptr_ty = llvm::PointerType::get(*ctx, 0);
 
-    // Allocate the frame via malloc (the Chaperone tracks the returned future)
+    // Allocate frame via malloc
     auto* malloc_fn = mod->getFunction("malloc");
     if (!malloc_fn) {
         malloc_fn = llvm::Function::Create(
@@ -355,56 +470,70 @@ void LLVMBackend::codegenAsyncFuncDecl(const FuncStmt& stmt, const std::string& 
     }
     auto* frame_size = llvm::ConstantExpr::getSizeOf(frame_struct_ty);
     auto* frame_ptr = builder->CreateCall(malloc_fn, {frame_size}, "future_frame");
-    auto* typed_frame_ptr = builder->CreateBitCast(frame_ptr, frame_ptr_ty);
+    auto* typed_frame = builder->CreateBitCast(frame_ptr, frame_ptr_ty);
 
-    // Initialize state to 0 (pending)
-    auto* state_ptr = builder->CreateStructGEP(frame_struct_ty, typed_frame_ptr, 0, "state_ptr");
+    // Init state = 0, result = nil, awaited = nil
+    auto* state_ptr = builder->CreateStructGEP(frame_struct_ty, typed_frame, 0, "state_ptr");
     builder->CreateStore(llvm::ConstantInt::get(state_ty, 0), state_ptr);
-
-    // Result slot (initially nil)
-    auto* result_ptr = builder->CreateStructGEP(frame_struct_ty, typed_frame_ptr, 1, "result_ptr");
+    auto* result_ptr = builder->CreateStructGEP(frame_struct_ty, typed_frame, 1, "result_ptr");
     builder->CreateStore(makeNil(), result_ptr);
+    auto* awaited_ptr = builder->CreateStructGEP(frame_struct_ty, typed_frame, 2, "awaited_ptr");
+    builder->CreateStore(makeNil(), awaited_ptr);
 
-    // LIB-4: set async frame tracking for cgReturn
+    // Store params in frame fields
+    idx = 0;
+    for (auto& arg : fn->args()) {
+        auto field_ptr = builder->CreateStructGEP(frame_struct_ty, typed_frame,
+                                                   param_field_idx[idx], "param_ptr");
+        builder->CreateStore(&arg, field_ptr);
+        // Also create local alloca for the param (for normal codegen access)
+        auto pname = sanitize(stmt.params[idx].name.lexeme);
+        auto* alloca = allocLocal(fn, pname);
+        namedVals[pname] = alloca;
+        namedKinds[pname] = LocalKind::BOXED;
+        auto param_type = (sem_fn_type && idx < sem_fn_type->param_types.size())
+            ? sem_fn_type->param_types[idx] : nullptr;
+        if (param_type) namedTypes[pname] = param_type;
+        storeVar(pname, &arg);
+        idx++;
+    }
+
+    // Set async frame tracking for cgReturn / cgAwait
     auto saved_in_async = m_in_async_function;
     auto saved_async_frame = m_current_async_frame;
     auto saved_async_frame_type = m_current_async_frame_type;
     auto saved_async_state_ptr = m_current_async_state_ptr;
     auto saved_async_result_ptr = m_current_async_result_ptr;
     m_in_async_function = true;
-    m_current_async_frame = frame_ptr;          // i8* (malloc'd pointer)
+    m_current_async_frame = frame_ptr;
     m_current_async_frame_type = frame_struct_ty;
     m_current_async_state_ptr = state_ptr;
     m_current_async_result_ptr = result_ptr;
 
-    // ---- Register parameters as local variables ----
-    idx = 0;
-    for (auto& arg : fn->args()) {
-        auto pname = sanitize(stmt.params[idx].name.lexeme);
-        auto param_type = (sem_fn_type && idx < sem_fn_type->param_types.size())
-            ? sem_fn_type->param_types[idx] : nullptr;
-        auto* alloca = allocLocal(fn, pname, param_type);
-        namedVals[pname] = alloca;
-        if (param_type) {
-            namedTypes[pname] = param_type;
-            namedKinds[pname] = LocalKind::BOXED;
-        } else {
-            namedKinds[pname] = LocalKind::BOXED;
-        }
-        emitDbgDeclare(alloca, pname, stmt.params[idx].name.line,
-                       stmt.params[idx].name.column, namedKinds[pname]);
-        storeVar(pname, &arg);
-        idx++;
-    }
-
-    // ---- Run the function body synchronously ----
     // Reset per-function codegen state
     m_exc_chain_save = nullptr;
     m_inlined_main_ret_alloca = nullptr;
     m_inlined_main_cleanup_bb = nullptr;
-
-    // Push GC frame (async functions may allocate)
     emitGcPushFrame(fn, 256);
+
+    // ---- State machine entry (for future suspension support) ----
+    // For now (Stage 5 v1), async functions run synchronously.
+    // The state machine loop+switch is prepared but we use a linear path
+    // since all futures resolve immediately. Real suspension will
+    // use the loop+switch to resume from the correct state.
+    auto* suspend_bb = llvm::BasicBlock::Create(*ctx, "async_suspend", fn);
+    auto* done_bb = llvm::BasicBlock::Create(*ctx, "async_done", fn);
+
+    // Run body linearly (no awaits suspend yet)
+    auto* body_bb = llvm::BasicBlock::Create(*ctx, "async_body", fn);
+    builder->CreateBr(body_bb);
+    builder->SetInsertPoint(body_bb);
+
+    m_async_await_idx = 0;
+    m_async_await_cont_bbs.clear();
+    m_async_suspend_bb = suspend_bb;
+    m_async_loop_bb = nullptr;
+    m_async_state_ty = state_ty;
 
     if (stmt.body) {
         for (const auto& s : *stmt.body) {
@@ -413,36 +542,39 @@ void LLVMBackend::codegenAsyncFuncDecl(const FuncStmt& stmt, const std::string& 
         }
     }
 
+    // If body fell through without returning, goto done
     if (!builder->GetInsertBlock()->getTerminator()) {
-        if (m_exc_chain_save) emitGcPopFrame();
-        // LIB-4: async implicit return — store nil in the future and return it
-        if (m_in_async_function) {
-            auto* fn_frame = builder->CreateBitCast(m_current_async_frame, m_current_async_frame_type->getPointerTo());
-            auto* res_ptr = builder->CreateStructGEP(m_current_async_frame_type, fn_frame, 1);
-            builder->CreateStore(makeNil(), res_ptr);
-            auto* state_p = builder->CreateStructGEP(m_current_async_frame_type, fn_frame, 0);
-            builder->CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 1), state_p);
-            auto* name_str = builder->CreateGlobalString("Future");
-            auto* null_fin = llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
-            auto* future_obj = callRtByName("__ang_api_native_instance_new",
-                {m_current_async_frame, null_fin, name_str});
-            builder->CreateRet(future_obj);
-        } else {
-            builder->CreateRet(makeNil());
-        }
+        // Set state = -1 (resolved)
+        builder->CreateStore(llvm::ConstantInt::get(state_ty, -1), state_ptr);
+        builder->CreateBr(done_bb);
     }
 
+    // ---- Suspend block: wrap frame and return ----
+    builder->SetInsertPoint(suspend_bb);
+    if (m_exc_chain_save) emitGcPopFrame();
+    auto* name_str = builder->CreateGlobalString("Future");
+    auto* null_fin = llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
+    auto* future_obj = callRtByName("__ang_api_native_instance_new",
+        {frame_ptr, null_fin, name_str});
+    builder->CreateRet(future_obj);
+
+    // ---- Done block: return resolved future ----
+    builder->SetInsertPoint(done_bb);
+    if (m_exc_chain_save) emitGcPopFrame();
+    auto* done_name_str = builder->CreateGlobalString("Future");
+    auto* done_future_obj = callRtByName("__ang_api_native_instance_new",
+        {frame_ptr, null_fin, done_name_str});
+    builder->CreateRet(done_future_obj);
+
+    // Clean up
     namedVals = std::move(saved_values);
     namedTypes = std::move(saved_types);
     namedKinds = std::move(saved_kinds);
-
-    // LIB-4: restore async state
     m_in_async_function = saved_in_async;
     m_current_async_frame = saved_async_frame;
     m_current_async_frame_type = saved_async_frame_type;
     m_current_async_state_ptr = saved_async_state_ptr;
     m_current_async_result_ptr = saved_async_result_ptr;
-
     m_di_scope = saved_di_scope;
     if (m_debug) builder->SetCurrentDebugLocation(llvm::DebugLoc());
 }

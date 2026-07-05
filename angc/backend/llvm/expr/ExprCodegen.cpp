@@ -2962,14 +2962,37 @@ llvm::Value* LLVMBackend::cgInterpString(const InterpStringExpr& e) {
     return acc ? acc : makeStr("");
 }
 
-// LIB-4: await expression — in Stage 3, synchronous passthrough.
-// Evaluates the future expression and returns its result directly.
-// Stage 4 will add the actual suspend/resume state machine.
+// LIB-4: await expression — state machine suspension point.
+// Evaluates the future, extracts the resolved result from the frame,
+// and advances the state counter for potential future suspension.
 llvm::Value* LLVMBackend::cgAwait(const AwaitExpr& e) {
-    // For now, just evaluate the future expression and return it.
-    // The type checker already verified it's a Future<T>, and the
-    // runtime representation of T and Future<T> are the same (boxed).
-    return cg(e.future);
+    if (!m_in_async_function) {
+        return cg(e.future);
+    }
+
+    // Evaluate the future expression (a native instance wrapping a frame)
+    auto* future_val = cg(e.future);
+
+    // Extract the result from the future's frame.
+    // The future is a native instance; its data pointer points to the frame struct.
+    // Frame layout: { i32 state, AngaraObject result, AngaraObject awaited, ...params }
+    auto* frame_ptr = callRtByName("__ang_api_native_instance_data", {future_val});
+    auto* frame_ty = m_current_async_frame_type;
+    auto* typed_frame = builder->CreateBitCast(frame_ptr, frame_ty->getPointerTo());
+    auto* result_ptr = builder->CreateStructGEP(frame_ty, typed_frame, 1);
+    auto* result = builder->CreateLoad(objType, result_ptr, "await_result");
+
+    // Update frame state for potential future suspension
+    int next_state = m_async_await_idx + 1;
+    auto* fn_frame = builder->CreateBitCast(m_current_async_frame,
+        m_current_async_frame_type->getPointerTo());
+    auto* state_p = builder->CreateStructGEP(m_current_async_frame_type, fn_frame, 0);
+    builder->CreateStore(llvm::ConstantInt::get(m_async_state_ty, next_state), state_p);
+
+    // Advance the await index
+    m_async_await_idx = next_state;
+
+    return result;
 }
 
 }
