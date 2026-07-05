@@ -496,25 +496,38 @@ std::any Formatter::visit(const CastExpr& expr) {
 std::any Formatter::visit(const DerefExpr& expr) { return expr.op.lexeme + fmtExpr(expr.right); }
 
 std::any Formatter::visit(const MatchExpr& expr) {
-    std::string r = "match (" + fmtExpr(expr.condition) + ") { ";
+    std::ostringstream saved;
+    std::swap(m_out, saved);
+    bool saved_line_start = m_at_line_start;
+
+    write("match (" + fmtExpr(expr.condition) + ") {");
+    newLine();
+    increaseIndent();
     for (auto& c : expr.cases) {
-        r += "case ";
+        std::string case_str = "case ";
         for (size_t pi = 0; pi < c.patterns.size(); ++pi) {
-            if (pi > 0) r += " | ";
-            r += fmtExpr(c.patterns[pi]);
+            if (pi > 0) case_str += " | ";
+            case_str += fmtExpr(c.patterns[pi]);
         }
         if (!c.variables.empty()) {
-            r += "(";
+            case_str += "(";
             for (size_t vi = 0; vi < c.variables.size(); ++vi) {
-                if (vi > 0) r += ", ";
-                r += c.variables[vi].lexeme;
+                if (vi > 0) case_str += ", ";
+                case_str += c.variables[vi].lexeme;
             }
-            r += ")";
+            case_str += ")";
         }
-        if (c.guard) r += " if " + fmtExpr(*c.guard);
-        r += ": " + fmtExpr(c.body) + ", ";
+        if (c.guard) case_str += " if " + fmtExpr(*c.guard);
+        case_str += ": " + fmtExpr(c.body) + ",";
+        writeLine(case_str);
     }
-    return r + "}";
+    decreaseIndent();
+    writeLine("}");
+
+    std::string result = m_out.str();
+    std::swap(m_out, saved);
+    m_at_line_start = saved_line_start;
+    return result;
 }
 
 std::any Formatter::visit(const LambdaExpr& expr) {
@@ -543,7 +556,23 @@ std::any Formatter::visit(const LambdaExpr& expr) {
         r += " -> " + m_out.str();
         std::swap(m_out, saved);
     }
-    r += " { ... }";
+    if (!expr.body.empty()) {
+        std::ostringstream saved;
+        std::swap(m_out, saved);
+        bool saved_line_start = m_at_line_start;
+        m_out << " {";
+        newLine();
+        increaseIndent();
+        for (auto& s : expr.body) fmtStmt(s);
+        decreaseIndent();
+        write("}");
+        std::string body_str = m_out.str();
+        std::swap(m_out, saved);
+        m_at_line_start = saved_line_start;
+        r += body_str;
+    } else {
+        r += " {}";
+    }
     return r;
 }
 
