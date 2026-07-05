@@ -133,7 +133,7 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 | - [ ] **LIB-1** | 🟡 Source | High | **No TLS/SSL anywhere.** http relies on libcurl defaults; amqp/mqtt/websocket parse secure schemes but never configure TLS. No cert pinning, no mTLS. | `modules/net/*` |
 | - [x] **LIB-2** | ✅ Fixed | High | **JWT is insecure.** `verify` doesn't check the `alg` header (alg-confusion); `base64url_decode` writes into a fixed 64-byte stack buffer → stack overflow on crafted input. | `modules/crypto/jwt.c` |
 | - [x] **LIB-3** | ✅ Fixed | High | **Only one real collection (`list`) + `record` (string-keyed map).** `collections.an` is an O(n²) LINQ layer (bubble `SortBy`, linear `Distinct`/`Contains`) — no Map/Set/Queue/Stack/Tree. _(Map/Set added to `modules/collections/collections.an`: `MapNew`/`MapPut`/`MapGet`/`MapHas`/`MapRemove`/`MapSize`/`MapKeys`/`MapValues` and `SetNew`/`SetAdd`/`SetHas`/`SetRemove`/`SetSize`/`SetItems`. Hash-bucketed (16 buckets) over parallel key/value lists, using the new `hash()` builtin + deep `==` (TS-2 Phase 2c), so keys may be any hashable type (scalars, strings, structural objects). The LINQ layer's O(n²) algorithms remain — improving them (or adding Queue/Stack/Tree) is follow-up.)_ | `modules/collections/collections.an` |
-| - [ ] **LIB-4** | 🟡 Source | Medium | No **async I/O / event loop / futures / channels** — only raw pthreads (and those race the GC). Servers fake async with threads. | — |
+| - [x] **LIB-4** | ✅ Fixed (partial) | Medium | ~~No async I/O / event loop / channels~~ — new `async` module: epoll event loop (`Loop` with `add`/`timer`/`poll`) + thread-safe channels (`Sender`/`Receiver`); futures/promises → see deferrals. | — |
 | - [x] **LIB-5** | ✅ Fixed | Medium | **IPv4-only** sockets (`AF_INET` hardcoded); no IPv6. | `modules/net/net.c` |
 | - [ ] **LIB-6** | 🟡 Source | Medium | **No HTTP server** (websocket server is a no-op-`close` PoC). | `modules/net/websocket.c` |
 | - [x] **LIB-7** | ✅ Fixed (partial) | Medium | Module C-API sharp edges: ~~`incref`/`decref` documented as refcounting~~ → now says pin/unpin; ~~`throw_error` not `noreturn`~~ → now `__attribute__((__noreturn__))`; native calls don't auto-validate arg types → see deferrals. | `angc/includes/Angara.h:155-156,166`; `ModuleAPI.cpp` |
@@ -214,6 +214,15 @@ Everyday conveniences absent today (most are documented but unimplemented — no
   object header. String literals retained `is_unique`, so the in-place concat
   fast path mutated the literal's global buffer. Fixed by implementing the
   function to actually clear bit 8 of the `meta` field.)_
+
+---
+
+## LIB-4 deferrals (2026-07-05)
+
+- **Futures / promises / async-await** — The `async` module provides an epoll
+  event loop and channels, but true futures/promises with `await` syntax
+  require language-level support (generator resumption, task scheduling).
+  This is deferred to a dedicated language feature.
 
 ---
 
