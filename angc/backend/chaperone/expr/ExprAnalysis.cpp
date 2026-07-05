@@ -349,6 +349,22 @@ void Chaperone::analyzeExpr(Context& ctx,
         return;
     }
 
+    // RangeExpr (a..b): walk both sides. (C1 — previously unhandled.)
+    if (auto* range = dynamic_cast<const RangeExpr*>(expr.get())) {
+        analyzeExpr(ctx, range->left, state);
+        analyzeExpr(ctx, range->right, state);
+        return;
+    }
+
+    // InterpStringExpr ("hello {name}"): walk each interpolation segment.
+    // (C2 — previously unhandled.)
+    if (auto* interp = dynamic_cast<const InterpStringExpr*>(expr.get())) {
+        for (const auto& [lit, sub] : interp->segments) {
+            if (sub) analyzeExpr(ctx, sub, state);
+        }
+        return;
+    }
+
     // MatchExpr: walk the condition + all patterns + all case bodies + guards.
     if (auto* match = dynamic_cast<const MatchExpr*>(expr.get())) {
         analyzeExpr(ctx, match->condition, state);

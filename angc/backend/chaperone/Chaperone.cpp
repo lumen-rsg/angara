@@ -151,6 +151,14 @@ void Chaperone::collectVarRefs(const std::shared_ptr<Stmt>& stmt,
         return;
     }
     if (auto* dr = dynamic_cast<const DropStmt*>(stmt.get())) { out.insert(dr->name.lexeme); return; }
+    // H1: TryStmt was previously unhandled — closures inside try/catch/finally
+    // had invisible captures. Recurse into try body, catch body, and finally body.
+    if (auto* tr = dynamic_cast<const TryStmt*>(stmt.get())) {
+        collectVarRefs(tr->tryBlock, out);
+        if (tr->catchBlock) collectVarRefs(tr->catchBlock, out);
+        if (tr->finallyBlock) collectVarRefs(tr->finallyBlock, out);
+        return;
+    }
 }
 
 // ============================================================================
