@@ -290,6 +290,7 @@ build/modules/net.$(SO_EXT): build/obj/modules/net/net.o
 build/modules/io.$(SO_EXT): build/obj/modules/io/io.o
 build/modules/term.$(SO_EXT): build/obj/modules/io/term.o
 build/modules/color.$(SO_EXT): build/obj/modules/io/color.o
+build/modules/async.$(SO_EXT): build/obj/modules/io/async.o
 build/modules/os.$(SO_EXT): build/obj/modules/system/os.o
 build/modules/env.$(SO_EXT): build/obj/modules/system/env.o
 build/modules/process.$(SO_EXT): build/obj/modules/system/process.o
@@ -317,6 +318,7 @@ build/modules/args.$(SO_EXT): build/obj/modules/data/args.o
 build/modules/assert.$(SO_EXT): build/obj/modules/testing/assert.o
 
 build/modules/io.$(SO_EXT) build/modules/term.$(SO_EXT) build/modules/color.$(SO_EXT) \
+build/modules/async.$(SO_EXT) \
 build/modules/log.$(SO_EXT) \
 build/modules/os.$(SO_EXT) build/modules/env.$(SO_EXT) build/modules/process.$(SO_EXT) \
 build/modules/unistd.$(SO_EXT) build/modules/fs.$(SO_EXT) build/modules/path.$(SO_EXT) \
