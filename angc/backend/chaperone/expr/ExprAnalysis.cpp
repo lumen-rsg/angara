@@ -227,18 +227,30 @@ void Chaperone::analyzeExpr(Context& ctx,
             analyzeExpr(ctx, arg, state);
 
         // Interprocedural: determine the callee name.
-        // For method calls (o.m()), summaries are keyed by the bare method
-        // name (m), so try that; a top-level fn call uses the variable name.
+        // For method calls (o.m()), look up the object's type to build a
+        // class-qualified key (e.g., "Buf.init") — C3 prevents name collisions
+        // between same-named methods in different classes.
         std::string callee_name;
         std::string method_name;  // fallback for method calls
         if (auto* ve = dynamic_cast<const VarExpr*>(call->callee.get())) {
             callee_name = ve->name.lexeme;
         } else if (auto* get = dynamic_cast<const GetExpr*>(call->callee.get())) {
-            method_name = get->name.lexeme;  // e.g. "set"
-            if (auto* ve2 = dynamic_cast<const VarExpr*>(get->object.get()))
-                callee_name = ve2->name.lexeme + "." + get->name.lexeme;  // "o.set"
-            else
-                callee_name = method_name;
+            method_name = get->name.lexeme;  // e.g. "init"
+            // Resolve the object's type to get the class name.
+            if (auto* ve2 = dynamic_cast<const VarExpr*>(get->object.get())) {
+                auto tit = ctx.tc.getExpressionTypes().find(get->object.get());
+                if (tit != ctx.tc.getExpressionTypes().end() && tit->second) {
+                    // Drill through INSTANCE → CLASS to get the class name.
+                    const Type* t = tit->second.get();
+                    if (t->kind == TypeKind::INSTANCE) {
+                        auto inst = dynamic_cast<const InstanceType*>(t);
+                        if (inst && inst->class_type)
+                            callee_name = inst->class_type->name + "." + method_name;
+                    }
+                }
+            }
+            if (callee_name.empty())
+                callee_name = method_name;  // fallback: bare method name
         }
 
         // Look up the summary. For method calls, prefer the bare method name.

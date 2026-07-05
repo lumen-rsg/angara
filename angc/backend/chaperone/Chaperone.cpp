@@ -290,16 +290,23 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
     // Collect every analyzable function (top-level + class methods) into a
     // flat list. The same FuncStmt can be analyzed multiple times across the
     // fixed-point; we hold raw pointers (the program vector owns the storage).
-    std::vector<const FuncStmt*> functions;
+    // C3: store a qualified summary key alongside each function so method
+    // summaries don't collide (e.g., "Buf.init" vs "Conn.init").
+    struct FuncInfo {
+        const FuncStmt* func;
+        std::string summary_key;  // qualified: "funcName" or "ClassName.methodName"
+    };
+    std::vector<FuncInfo> functions;
     for (const auto& stmt : program) {
         if (!stmt) continue;
         if (auto* func = dynamic_cast<const FuncStmt*>(stmt.get())) {
-            if (func->body) functions.push_back(func);
+            if (func->body) functions.push_back({func, func->name.lexeme});
         } else if (auto* cls = dynamic_cast<const ClassStmt*>(stmt.get())) {
             for (const auto& member : cls->members) {
                 if (auto* mm = dynamic_cast<const MethodMember*>(member.get())) {
                     if (mm->declaration && mm->declaration->body)
-                        functions.push_back(mm->declaration.get());
+                        functions.push_back({mm->declaration.get(),
+                            cls->name.lexeme + "." + mm->declaration->name.lexeme});
                 }
             }
         }
@@ -315,14 +322,14 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
     ctx.suppress_diag = true;
     for (int pass = 0; pass < MAX_PASSES; pass++) {
         auto before = ctx.summaries;  // snapshot
-        for (const auto* fn : functions)
-            analyzeFunction(ctx, *fn);
+        for (const auto& fi : functions)
+            analyzeFunction(ctx, *fi.func, fi.summary_key);
         if (ctx.summaries == before) break;  // converged
     }
     ctx.suppress_diag = false;
     // Final diagnostic pass with the converged summaries.
-    for (const auto* fn : functions)
-        analyzeFunction(ctx, *fn);
+    for (const auto& fi : functions)
+        analyzeFunction(ctx, *fi.func, fi.summary_key);
 
     return eh.errorCount() == 0;
 }

@@ -103,7 +103,11 @@ private:
         const std::vector<std::shared_ptr<Stmt>>& program);
 
     // --- Phase 2: Per-function data-flow analysis ---
-    static void analyzeFunction(Context& ctx, const struct FuncStmt& func);
+    /// @param summary_key  Qualified key for summary storage (e.g., "funcName"
+    ///                      or "ClassName.methodName"). C3: prevents collision
+    ///                      between same-named methods in different classes.
+    static void analyzeFunction(Context& ctx, const struct FuncStmt& func,
+                                const std::string& summary_key);
 
     /// Analyze a block of statements, threading the state map through.
     /// Returns the state map at the end of the block.

@@ -14,7 +14,8 @@ namespace angara {
 // Per-function data-flow analysis
 // ============================================================================
 
-void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
+void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
+                                 const std::string& summary_key) {
     ctx.current_function = func.name.lexeme;
     StateMap state;
     ctx.borrows.clear();   // S3: borrow map is per-function (reset each pass)
@@ -105,7 +106,7 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func) {
                 summary[i] = ParamBehavior::Borrowed;
         }
     }
-    ctx.summaries[func.name.lexeme] = std::move(summary);
+    ctx.summaries[summary_key] = std::move(summary);
 
     ctx.current_function.clear();
 }

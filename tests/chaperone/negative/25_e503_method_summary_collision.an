@@ -1,0 +1,47 @@
+// Chaperone negative test — C3: method summary name collision
+// Two classes both define a method named `handle`. Class A's `handle` drops
+// its argument; Class B's `handle` borrows it. Without class-qualified
+// summary keys, the summaries collide and one class's behavior silently
+// overrides the other. With C3 fixed, both summaries coexist and the
+// correct behavior is applied per call site.
+//
+// This test verifies that A.handle correctly drops its arg: calling
+// `a.handle(x)` should transition x to Dropped, so a subsequent `drop x`
+// is E503 (double-free).
+//
+// expect: E503
+
+class A {
+    let v as i64;
+    func init(this) { this.v = 0; }
+    public:
+    // A.handle takes ownership and drops its argument (summary: Dropped)
+    func handle(this, x as Buf) {
+        drop x;
+    }
+}
+
+class B {
+    let v as i64;
+    func init(this) { this.v = 0; }
+    public:
+    // B.handle borrows its argument (summary: Borrowed)
+    func handle(this, x as Buf) -> i64 {
+        return x.get();
+    }
+}
+
+class Buf {
+    let v as i64;
+    func init(this, val as i64) { this.v = val; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let a = A();
+    let x = Buf(42);
+    a.handle(x);   // A.handle drops x — x is now Dropped
+    drop x;        // E503: double-drop (x was already dropped by A.handle)
+    return 0;
+}
