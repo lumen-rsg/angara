@@ -124,16 +124,17 @@ void Formatter::fmtType(const std::shared_ptr<ASTType>& type) {
 
 void Formatter::fmtAccess(AccessLevel access) {
     if (access == AccessLevel::PUBLIC) writeLine("public:");
+    else if (access == AccessLevel::PROTECTED) writeLine("protected:");
     else if (access == AccessLevel::PRIVATE) writeLine("private:");
 }
 
 void Formatter::fmtMembers(const std::vector<std::shared_ptr<ClassMember>>& members) {
     for (auto& member : members) {
         if (auto* field = dynamic_cast<const FieldMember*>(member.get())) {
-            if (field->access == AccessLevel::PUBLIC || field->access == AccessLevel::PRIVATE) fmtAccess(field->access);
+            if (field->access == AccessLevel::PUBLIC || field->access == AccessLevel::PROTECTED || field->access == AccessLevel::PRIVATE) fmtAccess(field->access);
             fmtStmt(field->declaration);
         } else if (auto* method = dynamic_cast<const MethodMember*>(member.get())) {
-            if (method->access == AccessLevel::PUBLIC || method->access == AccessLevel::PRIVATE) fmtAccess(method->access);
+            if (method->access == AccessLevel::PUBLIC || method->access == AccessLevel::PROTECTED || method->access == AccessLevel::PRIVATE) fmtAccess(method->access);
             fmtStmt(method->declaration);
         }
     }

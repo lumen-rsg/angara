@@ -34,8 +34,13 @@ std::shared_ptr<Stmt> Parser::classDeclaration() {
                 current_access = AccessLevel::PUBLIC;
                 continue;
             }
+            if (match({TokenType::PROTECTED})) {
+                consume(TokenType::COLON, "Expected ':' after 'protected' access specifier.", "E156");
+                current_access = AccessLevel::PROTECTED;
+                continue;
+            }
             if (match({TokenType::PRIVATE})) {
-                consume(TokenType::COLON, "Expected ':' after 'private' access specifier.", "E156");
+                consume(TokenType::COLON, "Expected ':' after 'private' access specifier.", "E157");
                 current_access = AccessLevel::PRIVATE;
                 continue;
             }
@@ -52,11 +57,11 @@ std::shared_ptr<Stmt> Parser::classDeclaration() {
                 method_decl->is_static = is_static;
                 members.push_back(std::make_shared<MethodMember>(method_decl, current_access));
             } else {
-                throw error(peek(), "Expected a member declaration ('let', 'const', 'func') or access specifier ('public:', 'private:') in class body.", "E157");
+                throw error(peek(), "Expected a member declaration ('let', 'const', 'func') or access specifier ('public:', 'protected:', 'private:') in class body.", "E158");
             }
         }
 
-        consume(TokenType::RIGHT_BRACE, "Expected '}' after class body.", "E158");
+        consume(TokenType::RIGHT_BRACE, "Expected '}' after class body.", "E159");
 
         return std::make_shared<ClassStmt>(std::move(name), std::move(superclass), std::move(contracts), std::move(traits), std::move(members));
     }

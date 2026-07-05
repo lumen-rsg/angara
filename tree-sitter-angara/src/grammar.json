@@ -918,6 +918,10 @@
             },
             {
               "type": "STRING",
+              "value": "protected"
+            },
+            {
+              "type": "STRING",
               "value": "private"
             }
           ]

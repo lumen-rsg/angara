@@ -101,13 +101,13 @@ namespace angara {
         m_childPrefix = m_childPrefix + (isLast ? TREE_EMPTY : TREE_DOWN);
 
         if (auto field = std::dynamic_pointer_cast<FieldMember>(member)) {
-            std::string access = (field->access == AccessLevel::PUBLIC) ? "public" : "private";
+            std::string access = (field->access == AccessLevel::PUBLIC) ? "public" : (field->access == AccessLevel::PROTECTED) ? "protected" : "private";
 
             std::cout << m_prefix << CLR_BOLD << CLR_CYAN << "FieldMember" << CLR_RESET << " " << CLR_YELLOW << access << CLR_RESET << "\n";
             printChild("", field->declaration, true);
 
         } else if (auto method = std::dynamic_pointer_cast<MethodMember>(member)) {
-            std::string access = (method->access == AccessLevel::PUBLIC) ? "public" : "private";
+            std::string access = (method->access == AccessLevel::PUBLIC) ? "public" : (method->access == AccessLevel::PROTECTED) ? "protected" : "private";
 
             std::cout << m_prefix << CLR_BOLD << CLR_CYAN << "MethodMember" << CLR_RESET << " " << CLR_YELLOW << access << CLR_RESET << "\n";
             printChild("", method->declaration, true);

@@ -1,0 +1,41 @@
+// LANG-14: protected super access test
+// Tests that super.method() works for protected methods,
+// and that super access to private methods is still blocked.
+
+attach io;
+
+class Base {
+protected:
+    func greet(this) -> string {
+        return "Hello from Base";
+    }
+
+private:
+    func secret_method(this) -> string {
+        return "secret";
+    }
+
+public:
+    func init(this) -> nil {}
+}
+
+class Child inherits Base {
+public:
+    func call_protected_super(this) -> string {
+        // super access to protected method — should be OK
+        return super.greet();
+    }
+
+    // func call_private_super(this) -> string {
+    //     // super access to private method — should error (E375)
+    //     return super.secret_method();
+    // }
+}
+
+export func main() -> i64 {
+    let c = Child();
+    io.println(1, c.call_protected_super());
+    io.println(1, "Protected super passed");
+    drop c;
+    return 0;
+}

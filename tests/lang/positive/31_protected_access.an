@@ -1,0 +1,66 @@
+// LANG-14: protected access level — positive test
+// Tests that:
+//  - protected fields are accessible from subclasses via `this`
+//  - protected methods are accessible from subclasses via `this`
+//  - protected members accessed through subclass methods work
+//  - public members remain accessible from anywhere
+
+attach io;
+
+class Animal {
+public:
+    let kind as i64;
+
+protected:
+    let name as string;
+    let age as i64;
+
+    func get_name(this) -> string {
+        return this.name;
+    }
+
+private:
+    let secret as i64;
+
+public:
+    func init(this, kind as i64, name as string, age as i64, secret as i64) -> nil {
+        this.kind = kind;
+        this.name = name;
+        this.age = age;
+        this.secret = secret;
+    }
+}
+
+class Dog inherits Animal {
+public:
+    func bark(this) -> string {
+        // Access protected field from subclass — OK
+        return this.name;
+    }
+
+    func get_age_from_subclass(this) -> i64 {
+        // Access protected field from subclass — OK
+        return this.age;
+    }
+
+    func call_protected_method(this) -> string {
+        // Access protected method from subclass — OK
+        return this.get_name();
+    }
+}
+
+export func main() -> i64 {
+    let d = Dog(1, "Rex", 5, 42);
+
+    // public field — OK from anywhere
+    io.println(1, string(d.kind));
+
+    // Subclass methods that access protected members — OK
+    io.println(1, d.bark());
+    io.println(1, string(d.get_age_from_subclass()));
+    io.println(1, d.call_protected_method());
+
+    io.println(1, "Protected access passed");
+    drop d;
+    return 0;
+}

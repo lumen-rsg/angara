@@ -6,6 +6,7 @@
 namespace angara {
     enum class AccessLevel {
         PUBLIC,
+        PROTECTED,
         PRIVATE
     };
 }

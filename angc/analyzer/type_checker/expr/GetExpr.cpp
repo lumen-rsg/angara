@@ -174,8 +174,28 @@ std::any TypeChecker::visit(const GetExpr& expr) {
             for(const auto& [name, member] : instance_type->class_type->methods) candidates.push_back(name);
             find_and_report_suggestion(expr.name, candidates);
         } else {
-            if (prop_info->access == AccessLevel::PRIVATE && (m_current_class == nullptr || m_current_class->name != instance_type->class_type->name)) {
-                error(expr.name, "Property '" + property_name + "' is private and cannot be accessed from outside the class.", "E336");
+            if (prop_info->access == AccessLevel::PRIVATE) {
+                if (m_current_class == nullptr || m_current_class->name != instance_type->class_type->name) {
+                    error(expr.name, "Property '" + property_name + "' is private and cannot be accessed from outside the class.", "E336");
+                } else {
+                    property_type = prop_info->type;
+                }
+            } else if (prop_info->access == AccessLevel::PROTECTED) {
+                bool allowed = false;
+                if (m_current_class != nullptr) {
+                    // Allow access from the same class or any subclass.
+                    for (auto cur = m_current_class; cur; cur = cur->superclass) {
+                        if (cur->name == instance_type->class_type->name) {
+                            allowed = true;
+                            break;
+                        }
+                    }
+                }
+                if (!allowed) {
+                    error(expr.name, "Property '" + property_name + "' is protected and cannot be accessed from outside the class hierarchy.", "E336");
+                } else {
+                    property_type = prop_info->type;
+                }
             } else {
                 property_type = prop_info->type;
             }

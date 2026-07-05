@@ -162,7 +162,7 @@ module.exports = grammar({
     ),
 
     access_specifier: ($) => seq(
-      choice("public", "private"),
+      choice("public", "protected", "private"),
       ":",
     ),
 

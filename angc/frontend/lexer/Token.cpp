@@ -94,6 +94,7 @@ namespace angara {
             case TokenType::USES: return "USES";
             case TokenType::STATIC: return "STATIC";
             case TokenType::PRIVATE: return "PRIVATE";
+            case TokenType::PROTECTED: return "PROTECTED";
             case TokenType::PUBLIC: return "PUBLIC";
             case TokenType::EXPORT: return "EXPORT";
             case TokenType::CONTRACT: return "CONTRACT";

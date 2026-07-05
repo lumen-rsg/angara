@@ -1,0 +1,40 @@
+// LANG-14: protected access level — negative test
+// Tests that protected members are NOT accessible from outside the class hierarchy.
+
+attach io;
+
+class Base {
+protected:
+    let secret as string;
+
+    func hidden(this) -> string {
+        return this.secret;
+    }
+
+public:
+    func init(this, s as string) -> nil {
+        this.secret = s;
+    }
+}
+
+class Derived inherits Base {
+public:
+    func reveal(this) -> string {
+        // Access protected field from subclass — OK (not an error)
+        return this.secret;
+    }
+}
+
+export func main() -> i64 {
+    let b = Base("top-secret");
+    let d = Derived("also-secret");
+
+    // These should be compile errors: accessing protected members from outside
+    io.println(1, b.secret);       // E336: protected field
+    io.println(1, b.hidden());     // E336: protected method
+
+    io.println(1, d.reveal());
+    drop b;
+    drop d;
+    return 0;
+}
