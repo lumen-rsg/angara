@@ -136,11 +136,11 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 | - [ ] **LIB-4** | 🟡 Source | Medium | No **async I/O / event loop / futures / channels** — only raw pthreads (and those race the GC). Servers fake async with threads. | — |
 | - [x] **LIB-5** | ✅ Fixed | Medium | **IPv4-only** sockets (`AF_INET` hardcoded); no IPv6. | `modules/net/net.c` |
 | - [ ] **LIB-6** | 🟡 Source | Medium | **No HTTP server** (websocket server is a no-op-`close` PoC). | `modules/net/websocket.c` |
-| - [x] **LIB-7** | ✅ Fixed (partial) | Medium | Module C-API sharp edges: ~~`incref`/`decref` documented as refcounting~~ → now says pin/unpin; ~~`throw_error` not `noreturn`~~ → now `__attribute__((__noreturn__))`; native calls still don't auto-validate arg types (deferred — needs compiler-side dispatcher changes). | `angc/includes/Angara.h:155-156,166`; `ModuleAPI.cpp` |
+| - [x] **LIB-7** | ✅ Fixed (partial) | Medium | Module C-API sharp edges: ~~`incref`/`decref` documented as refcounting~~ → now says pin/unpin; ~~`throw_error` not `noreturn`~~ → now `__attribute__((__noreturn__))`; native calls don't auto-validate arg types → see deferrals. | `angc/includes/Angara.h:155-156,166`; `ModuleAPI.cpp` |
 | - [ ] **LIB-8** | 🟡 Source | Medium | DB drivers: sqlite only (+ its finalizer never runs due to BUG-6). No Postgres/MySQL/Redis, no connection pooling, no explicit transaction API. | `modules/data/sqlite.c` |
 | - [x] **LIB-9** | ✅ Fixed | Medium | Module quality bugs: `net/rpc.c` server leaks accepted fds; `net/websocket.c::close` is a no-op; `system/process.c::run` drops the computed `exit_code`; `data/sort.c` is O(n²) insertion sort; `text/encoding.c::base32_encode` buggy shift logic; `system/os.c::run` is a shell-injection sink. | respective files |
-| - [x] **LIB-10** | ✅ Fixed (partial) | Low | ~~No logging module~~ → new `log` module with debug/info/warn/error + timestamps; ~~no string formatting~~ → new `adv_string.format()` with `{}` placeholders; ~~`adv_string` is byte-wise (corrupts multibyte UTF-8)~~ → get/substring/chars/reverse/is_alpha/is_alnum/to_uppercase/to_lowercase/levenshtein now operate on Unicode code points; no real CLI/arg parser (subcommands/help); no YAML/protobuf/msgpack; no big integers. | — |
-| - [x] **LIB-11** | ✅ Fixed (partial) | Low | ~~No file watching~~ → new `watch` module (Linux inotify); ~~no zstd~~ → new `compress` module (zstd compress/decompress); ~~date/time is UTC-only~~ → added `format_local`, `date_parts_local`, `timezone_offset`, `timezone_name`; no bzip2/xz exposure (headers not available); no kqueue (macOS/BSD). | — |
+| - [x] **LIB-10** | ✅ Fixed (partial) | Low | ~~No logging module~~ → new `log` module with debug/info/warn/error + timestamps; ~~no string formatting~~ → new `adv_string.format()` with `{}` placeholders; ~~`adv_string` is byte-wise~~ → get/substring/chars/reverse/is_alpha/is_alnum/to_uppercase/to_lowercase/levenshtein now operate on Unicode code points; remaining items → see deferrals. | — |
+| - [x] **LIB-11** | ✅ Fixed (partial) | Low | ~~No file watching~~ → new `watch` module (Linux inotify); ~~no zstd~~ → new `compress` module (zstd compress/decompress); ~~date/time is UTC-only~~ → added `format_local`, `date_parts_local`, `timezone_offset`, `timezone_name`; remaining items → see deferrals. | — |
 | - [x] **LIB-12** | ✅ Fixed | Low | `testing/assert.c` is minimal (throw-on-fail only, no runner/fixtures). | `modules/testing/assert.c` |
 
 ---
@@ -214,3 +214,39 @@ Everyday conveniences absent today (most are documented but unimplemented — no
   object header. String literals retained `is_unique`, so the in-place concat
   fast path mutated the literal's global buffer. Fixed by implementing the
   function to actually clear bit 8 of the `meta` field.)_
+
+---
+
+## LIB-7 deferrals (2026-07-05)
+
+- **Native-call arg-type validation** — The module dispatcher does not validate
+  that arguments passed from Angara code match the declared type-string before
+  invoking the C function. A mismatch (e.g. passing an i64 where a string is
+  expected) reaches the native handler unchecked, where it may crash or
+  misinterpret the value. This needs compiler-side changes in the module-loader
+  dispatch logic to emit runtime type guards from the DSL type-strings.
+
+---
+
+## LIB-10 deferrals (2026-07-05)
+
+- **CLI / arg parser** — No built-in argument parser with subcommand support,
+  help generation, or flag validation. The `data/args.c` module is minimal
+  (positional-only). A full CLI framework (like Python's `argparse`) is needed.
+
+- **YAML / protobuf / msgpack** — Only JSON is available for data interchange.
+  YAML, Protocol Buffers, and MessagePack serialisation are missing.
+
+- **Big integers** — `i64` is the only integer type. Arbitrary-precision
+  integers are needed for cryptography, finance, and ID handling beyond 2⁶³.
+
+---
+
+## LIB-11 deferrals (2026-07-05)
+
+- **bzip2 / xz compression** — Only zstd is exposed. bzip2 and xz/lzma
+  headers were not present on the build host; exposing them requires the
+  development packages and `-lbz2` / `-llzma` link flags.
+
+- **kqueue (macOS / BSD)** — The `watch` module uses Linux inotify. A kqueue
+  backend is needed for macOS and BSD portability.
