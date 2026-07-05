@@ -296,6 +296,14 @@ build/modules/process.$(SO_EXT): build/obj/modules/system/process.o
 build/modules/unistd.$(SO_EXT): build/obj/modules/system/unistd.o
 build/modules/fs.$(SO_EXT): build/obj/modules/fs/fs.o
 build/modules/path.$(SO_EXT): build/obj/modules/fs/path.o
+build/modules/watch.$(SO_EXT): build/obj/modules/fs/watch.o
+
+# compress needs -lzstd
+build/modules/compress.$(SO_EXT): build/obj/modules/fs/compress.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (ZSTD)\n" "$@"
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lzstd -o $@
+
 build/modules/adv_string.$(SO_EXT): build/obj/modules/text/adv_string.o
 build/modules/regex.$(SO_EXT): build/obj/modules/text/regex.o
 build/modules/encoding.$(SO_EXT): build/obj/modules/text/encoding.o
@@ -312,6 +320,7 @@ build/modules/io.$(SO_EXT) build/modules/term.$(SO_EXT) build/modules/color.$(SO
 build/modules/log.$(SO_EXT) \
 build/modules/os.$(SO_EXT) build/modules/env.$(SO_EXT) build/modules/process.$(SO_EXT) \
 build/modules/unistd.$(SO_EXT) build/modules/fs.$(SO_EXT) build/modules/path.$(SO_EXT) \
+build/modules/watch.$(SO_EXT) \
 build/modules/adv_string.$(SO_EXT) build/modules/regex.$(SO_EXT) build/modules/encoding.$(SO_EXT) \
 build/modules/hash.$(SO_EXT) build/modules/uuid.$(SO_EXT) build/modules/random.$(SO_EXT) \
 build/modules/csv.$(SO_EXT) build/modules/config.$(SO_EXT) build/modules/sort.$(SO_EXT) \
