@@ -1,0 +1,23 @@
+// Chaperone positive test — RangeExpr with tracked variables (C1, M5)
+// Two tracked `Buf` instances are used in a range expression via method calls
+// while both are still Live. The RangeExpr handler (C1) walks both the left
+// and right sub-expressions; this verifies no false positive E502/E507 on
+// correctly-live tracked variables used as range bounds.
+//
+// exit: 0
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let lo = Buf(1);
+    let hi = Buf(10);
+    let r = lo.get()..hi.get();   // both lo and hi are Live — no diagnostic
+    drop lo;
+    drop hi;
+    return 0;
+}

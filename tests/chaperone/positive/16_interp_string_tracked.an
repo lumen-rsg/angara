@@ -1,0 +1,20 @@
+// Chaperone positive test — InterpStringExpr with tracked variable (C2, M5)
+// A tracked `Buf` instance is used inside an interpolated string ($"...{b}...")
+// while it is still Live. The InterpStringExpr handler (C2) walks every
+// interpolation segment's sub-expression; this verifies no false positive
+// E502/E507 on a correctly-live tracked variable embedded in a string
+// interpolation.
+//
+// exit: 0
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let s = $"buf is {b}";   // b is Live — no diagnostic
+    drop b;
+    return 0;
+}

@@ -141,7 +141,7 @@ does nothing. This means:
 | **M2** | [x] 🟢 Source → ✅ Fixed | `StmtAnalysis.cpp:490-530` | **Loop body analyzed once — conditional destruction now caught at if/else merge points.** When a variable Live before the loop is destroyed (dropped/moved/escaped) on one branch of an if/else inside the loop but not the other, the merged state previously masked it via `join(Dropped, Live) = Live`. Now the `loop_pre_live` set tracks which vars were Live pre-loop, and any branch asymmetry involving them triggers E506 directly at the merge point. Complements the existing unconditional E506 check. |
 | **M3** | [x] 🟢 Source | `Chaperone.cpp:28-32` | **`join(Escaped, Moved) = Dropped`.** Both are "gone" states but for different reasons. The E503 message for the `Dropped` state was changed from "Double denaturation" to "Cannot drop" to avoid misleading on the Escaped path — the body already lists all three reasons (dropped/moved/escaped). Resolution: improved error message in `StmtAnalysis.cpp:348-352`. |
 | **M4** | [x] 🟢 Source → ✅ Verified | test coverage | **No test for mutual recursion.** The fixed-point should handle A→B→A patterns but this is untested. → Added `negative/34_e503_mutual_recursion_cycle.an`: true A→B→A cycle where `a` calls `b` and `b` calls `a` back, then drops. Fixed-point converges and detects E503 in `main`. |
-| **M5** | [ ] 🟢 Source | test coverage | **No test for RangeExpr or InterpStringExpr in tracked contexts** (C1, C2). |
+| **M5** | [x] 🟢 Source → ✅ Verified | test coverage | **No test for RangeExpr or InterpStringExpr in tracked contexts** (C1, C2). → Added positive tests 15 (RangeExpr) and 16 (InterpStringExpr) — clean compilation of tracked variables in range expressions and interpolated strings with no false positives. |
 
 ### LOW — Cosmetic / documentation
 
@@ -269,8 +269,8 @@ then read ref), 11 (positive: read ref then drop referent).
 
 | Test | Covers |
 |------|--------|
-| RangeExpr with tracked var | C1 |
-| InterpStringExpr with tracked var | C2 |
+| RangeExpr with tracked var | C1 | 15 (positive), 28 (negative) |
+| InterpStringExpr with tracked var | C2 | 16 (positive), 23 (negative) |
 | Two classes with same-named method, one drops one borrows | C3 |
 | Closure body containing `drop` then `use` | C4 |
 | Closure inside try/catch capturing tracked var | H1 |
