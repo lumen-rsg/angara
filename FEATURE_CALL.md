@@ -1,7 +1,7 @@
 # FEATURE: `ang_api->call()` — invoke Angara closures from native C code
 
 **Created:** 2026-07-05
-**Status:** ⬜ not started
+**Status:** ✅ done
 **Unblocks:** LIB-1 (TLS), callback-based async (libuv), websocket events,
              proper HTTP middleware, test runners, and all push-based APIs.
 
@@ -133,3 +133,14 @@ struct AngaraAPI {
 3. ModuleAPI.cpp          — wire into vtable
 4. tests/lang/            — .an test: pass closure to native, call it, check result
 ```
+
+## Implementation (2026-07-05)
+
+1. **`angc/backend/llvm/rt/ModuleAPI.cpp`** — added `__ang_api_call(fn, argc, argv)`
+   wrapper that calls the existing `__ang_call` dispatcher.  Placed in vtable slot 27
+   (between `throw_error` and `obj_type`).  Vtable count increased 27 → 28.
+
+2. **`angc/includes/Angara.h`** — added `AngaraObject (*call)(AngaraObject fn, int argc, AngaraObject* argv)`
+   to `struct AngaraAPI` between `throw_error` and `obj_type`.
+
+3. **Commit:** `dde00ed`
