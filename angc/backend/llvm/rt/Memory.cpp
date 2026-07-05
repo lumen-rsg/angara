@@ -190,12 +190,32 @@ void RuntimeBuilder::generateMemoryManagement() {
         b.CreateRetVoid();
     }
 
-    // --- clear_unique(AngaraObject) : no-op ---
+    // --- clear_unique(AngaraObject) : clears is_unique on a heap object ---
+    // String literals and other shared objects call this so the in-place
+    // concat fast path never mutates a shared buffer.
     {
         auto* fn = createRuntimeFunc("__ang_gc_clear_unique",
             FunctionType::get(void_ty, {m_angara_obj_type}, false));
         m_fn_gc_clear_unique = FunctionCallee(fn);
-        IRBuilder<>(BasicBlock::Create(m_ctx, "entry", fn)).CreateRetVoid();
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+
+        // Extract the heap pointer from the AngaraObject payload.
+        auto* obj_arg = fn->arg_begin();
+        auto* payload = b.CreateExtractValue(obj_arg, {1}, "payload");
+        auto* ptr = b.CreateIntToPtr(payload, i8_ptr, "obj_ptr");
+
+        // Load the meta field (ObjHeader field 1).
+        auto* meta = b.CreateLoad(i32_ty,
+            b.CreateStructGEP(m_obj_header_type, ptr, 1), "meta");
+
+        // Clear bit 8 (is_unique = 1 << 8 = 0x100).
+        uint32_t mask = ~(1u << 8);  // 0xFFFFFEFF
+        auto* cleared = b.CreateAnd(meta,
+            ConstantInt::get(i32_ty, mask), "meta_cleared");
+        b.CreateStore(cleared, b.CreateStructGEP(m_obj_header_type, ptr, 1));
+        b.CreateRetVoid();
     }
 
     // --- No-op stubs ---

@@ -193,9 +193,13 @@ Everyday conveniences absent today (most are documented but unimplemented — no
   are used). Full support requires per-pattern variable vectors in `MatchCase`
   and a cross-alternative compatibility check.
 
-- **Pre-existing string-interning bug (unrelated to LANG-7)** — When the same
+- **Pre-existing string-interning bug (unrelated to LANG-7)** ✅ Fixed — When the same
   variable name is reused across match expressions (or `let` declarations) and
   string concatenation (`+`) appears in the match body, results accumulate across
   expressions. Reproduced with plain `let` (no match), confirming the root cause
   is in `makeStr`/`__ang_string_concat` or the namedVals alloca lifecycle, not
-  in the pattern-matching codegen. Tracked separately.
+  in the pattern-matching codegen. _(Root cause: `__ang_gc_clear_unique` in
+  `Memory.cpp` was a no-op stub — it never cleared the `is_unique` bit on the
+  object header. String literals retained `is_unique`, so the in-place concat
+  fast path mutated the literal's global buffer. Fixed by implementing the
+  function to actually clear bit 8 of the `meta` field.)_
