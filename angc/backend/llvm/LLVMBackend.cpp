@@ -56,6 +56,21 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
     rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding);
     rt->generateRuntime();
     objType = rt->getAngaraObjType();
+
+    // v5: Built-in heap-allocated types that need cascade finalization when
+    // they appear as fields of a class/data.  These are types whose runtime
+    // values are TAG_OBJ (heap pointer in payload).  When the parent is
+    // dropped, we extract the field's heap pointer and call finalize+free.
+    m_heap_types = {
+        "string", "list", "record", "exception",
+        "raw_array", "vector",
+        "thread", "mutex",
+        "native_instance",
+        // trait_object and bound_method are accessed via type name in
+        // toString(); trait_object returns the trait name, bound_method is
+        // a function type — the cascade will be handled for these through
+        // the tracked_types path when they wrap class instances.
+    };
 }
 
 llvm::DIFile* LLVMBackend::getOrCreateDIFile(const std::string& filename) {

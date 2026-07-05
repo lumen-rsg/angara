@@ -5,6 +5,7 @@
 #include "ErrorHandler.h"
 #include "Token.h"
 #include "ASTTypes.h"
+#include "SymbolTable.h"
 
 #include <functional>
 
@@ -91,10 +92,31 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
     // Phase 4: build the positional function summary for interprocedural
     // analysis. summary[i] aligns to func.params[i] (call-arg positions —
     // `this` is not in params). Untracked params default to Borrowed so the
-    // indices line up at the call site (arg i → summary[i]). A Moved param
-    // means ownership transferred (e.g. into a field) → Escaped.
+    // indices line up at the call site (arg i → summary[i]).
+    //
+    // For foreign functions, annotations (@consumes / @escape) are the only
+    // source of summary data. For regular functions, annotations override
+    // inference — if @consumes(0) is set, param 0 is Dropped regardless of
+    // what the body analysis found.
     FunctionSummary summary(func.params.size(), ParamBehavior::Borrowed);
+
+    // Apply @consumes / @escape annotations (takes precedence over inference).
+    for (int idx : func.consumes_params) {
+        if (idx >= 0 && static_cast<size_t>(idx) < func.params.size())
+            summary[idx] = ParamBehavior::Dropped;
+    }
+    for (int idx : func.escape_params) {
+        if (idx >= 0 && static_cast<size_t>(idx) < func.params.size())
+            summary[idx] = ParamBehavior::Escaped;
+    }
+
+    // For regular functions (with bodies), fill in remaining params from
+    // the data-flow state. Annotations take precedence over inference.
     for (size_t i = 0; i < func.params.size(); i++) {
+        // Skip params that already have annotation-based behavior.
+        if (func.consumes_params.count(static_cast<int>(i)) ||
+            func.escape_params.count(static_cast<int>(i)))
+            continue;
         if (!param_tracked[i]) continue;
         auto st_it = state.find(func.params[i].name.lexeme);
         if (st_it != state.end()) {
@@ -200,12 +222,29 @@ void Chaperone::analyzeStmt(Context& ctx,
     if (auto* drop = dynamic_cast<const DropStmt*>(stmt.get())) {
         auto it = state.find(drop->name.lexeme);
         if (it == state.end() || it->second == State::Uninit) {
-            diag(ctx, drop->name,
-                "⚠️ Cannot drop `" + drop->name.lexeme + "` — not a tracked allocation.",
-                "E503");
+            // Variable not tracked — check if it's a built-in heap-allocated
+            // type (string, list, record, etc.) that we can still drop.
+            bool is_heap_var = false;
+            if (it == state.end()) {
+                auto sym = const_cast<SymbolTable&>(
+                    ctx.tc.getSymbolTable()).resolve(drop->name.lexeme);
+                if (sym && sym->type) {
+                    is_heap_var = isHeapAllocatedType(ctx, *sym->type);
+                }
+            }
+            if (is_heap_var) {
+                // Register and drop it — the codegen will emit finalize+free
+                // which cleans up interior buffers via __ang_gc_finalize.
+                state[drop->name.lexeme] = State::Dropped;
+            } else {
+                diag(ctx, drop->name,
+                    "⚠️ Cannot drop `" + drop->name.lexeme + "` — not a tracked allocation.",
+                    "E503");
+            }
         } else if (it->second == State::Dropped) {
             diag(ctx, drop->name,
-                "⚠️ Double denaturation — `" + drop->name.lexeme + "` was already dropped.",
+                "⚠️ Double denaturation — `" + drop->name.lexeme + "` was already dropped, "
+                "moved, or escaped. It's no longer live and cannot be dropped again.",
                 "E503");
         } else if (it->second == State::Escaped) {
             diag(ctx, drop->name,
@@ -319,6 +358,11 @@ void Chaperone::analyzeStmt(Context& ctx,
     // increment, and the for-in iterable — are also analyzed, since a
     // use-after-free in them is a real bug (S2). Previously only the body
     // was walked, so `drop b; while (b.get() > 0) {}` compiled silently.
+    //
+    // M2: E506 now also catches variables moved or escaped inside the loop
+    // body (not just explicitly dropped). A variable that transitions from
+    // Live to Moved/Escaped inside the body won't be Live on the next
+    // iteration, which is equivalent to a double-free.
     auto analyze_loop_body = [&](const Token& kw, const std::shared_ptr<Stmt>& body) {
         StateMap pre = state;
         StateMap body_state = state;
@@ -329,14 +373,17 @@ void Chaperone::analyzeStmt(Context& ctx,
             else
                 analyzeStmt(ctx, body, body_state, body_term);
         }
-        // Loop-body drop check.
+        // Loop-body drop/move/escape check (E506).
         for (auto& [name, st_pre] : pre) {
             if (st_pre == State::Live) {
                 auto it2 = body_state.find(name);
-                if (it2 != body_state.end() && it2->second == State::Dropped) {
+                if (it2 != body_state.end() && it2->second != State::Live) {
+                    const char* reason = "dropped";
+                    if (it2->second == State::Moved) reason = "moved";
+                    else if (it2->second == State::Escaped) reason = "escaped";
                     diag(ctx, kw,
-                        "🔄 `" + name + "` is dropped inside the loop but allocated "
-                        "before it — double-free on iteration 2+.",
+                        "🔄 `" + name + "` is " + reason + " inside the loop but "
+                        "allocated before it — it won't be available on iteration 2+.",
                         "E506");
                 }
             }

@@ -28,7 +28,10 @@ void Chaperone::diag(Context& ctx, const Token& tok,
 Chaperone::State Chaperone::join(State a, State b) {
     if (a == b) return a;
     if (a == State::Live || b == State::Live) return State::Live;
-    return State::Dropped;  // Conservative for Dropped≠Escaped, Dropped≠Uninit, etc.
+    // Both are "gone" states (Dropped/Escaped/Moved/Uninit in some combination).
+    // Conservatively return Dropped — the variable is not available. The
+    // diagnostic in the DropStmt handler covers all "gone" reasons (M3).
+    return State::Dropped;
 }
 
 Chaperone::StateMap Chaperone::join_maps(const StateMap& a, const StateMap& b) {
@@ -84,6 +87,44 @@ bool Chaperone::isTrackedTypeObj(Context& ctx, const Type& type) {
     if (t->kind == TypeKind::CLASS || t->kind == TypeKind::INSTANCE) return true;
     if (t->kind == TypeKind::DATA) return ctx.tracked_types.count(t->toString()) > 0;
     return false;
+}
+
+bool Chaperone::isHeapAllocatedType(Context& ctx, const Type& type) {
+    // Tracked types are always heap-allocated.
+    if (isTrackedTypeObj(ctx, type)) return true;
+
+    // Unwrap optionals for the built-in check.
+    const Type* t = &type;
+    if (t->kind == TypeKind::OPTIONAL) {
+        auto ot = dynamic_cast<const OptionalType*>(t);
+        if (!ot || !ot->wrapped_type) return false;
+        t = ot->wrapped_type.get();
+    }
+    if (t->kind == TypeKind::REF) return false;
+
+    // Built-in heap-allocated types (each corresponds to an OBJ_* tag).
+    switch (t->kind) {
+        case TypeKind::LIST:
+        case TypeKind::RECORD:
+        case TypeKind::EXCEPTION:
+        case TypeKind::THREAD:
+        case TypeKind::MUTEX:
+        case TypeKind::TRAIT_OBJECT:
+        case TypeKind::RAW_ARRAY:
+        case TypeKind::VECTOR:
+            return true;
+        case TypeKind::PRIMITIVE:
+            // string is the only heap-allocated primitive (PRIMITIVE kind,
+            // name "string").
+            return t->toString() == "string";
+        case TypeKind::FUNCTION:
+            // Closures and bound methods are FUNCTION-kind heap objects.
+            // Regular function references are not — but they can't be `drop`ped
+            // anyway (they're never Live in the Chaperone state).
+            return true;
+        default:
+            return false;
+    }
 }
 
 bool Chaperone::isTrackedVar(Context& ctx, const VarDeclStmt& var) {
@@ -309,6 +350,28 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
                             cls->name.lexeme + "." + mm->declaration->name.lexeme});
                 }
             }
+        }
+    }
+
+    // Build summaries for functions with @consumes / @escape annotations
+    // (typically foreign functions without bodies). These summaries are
+    // static — they don't change across fixed-point iterations — so we
+    // insert them once before the loop.
+    for (const auto& stmt : program) {
+        if (!stmt) continue;
+        if (auto* func = dynamic_cast<const FuncStmt*>(stmt.get())) {
+            if (func->consumes_params.empty() && func->escape_params.empty())
+                continue;
+            FunctionSummary summary(func->params.size(), ParamBehavior::Borrowed);
+            for (int idx : func->consumes_params) {
+                if (idx >= 0 && static_cast<size_t>(idx) < func->params.size())
+                    summary[idx] = ParamBehavior::Dropped;
+            }
+            for (int idx : func->escape_params) {
+                if (idx >= 0 && static_cast<size_t>(idx) < func->params.size())
+                    summary[idx] = ParamBehavior::Escaped;
+            }
+            ctx.summaries[func->name.lexeme] = std::move(summary);
         }
     }
 

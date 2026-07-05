@@ -219,8 +219,209 @@ void RuntimeBuilder::generateMemoryManagement() {
         IRBuilder<>(BasicBlock::Create(m_ctx, "entry", fn)).CreateRetVoid();
     }
 
-    // --- finalize: no-op for now (Stage 2 will free internal buffers via __ang_gc_free) ---
-    stub_void_ptr("__ang_gc_finalize",  m_fn_gc_finalize);
+    // ========================================================================
+    // __ang_gc_finalize(i8* obj) -> void
+    // Recursively frees interior pointers of built-in heap types.
+    // Called before __ang_gc_free in cgDrop so that strdup'd chars buffers,
+    // list element arrays, record entry arrays, etc. are freed rather than
+    // leaked.  The parent struct itself is freed by the subsequent __ang_gc_free.
+    // ========================================================================
+    {
+        auto* fn = createRuntimeFunc("__ang_gc_finalize",
+            FunctionType::get(void_ty, {i8_ptr}, false));
+        m_fn_gc_finalize = FunctionCallee(fn);
+
+        auto* obj_arg = fn->arg_begin();
+
+        // --- basic blocks ---
+        auto* entry_bb     = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* done_bb      = BasicBlock::Create(m_ctx, "done", fn);
+
+        // Per-type basic blocks
+        auto* string_bb    = BasicBlock::Create(m_ctx, "finalize_string", fn);
+        auto* list_bb      = BasicBlock::Create(m_ctx, "finalize_list", fn);
+        auto* record_bb    = BasicBlock::Create(m_ctx, "finalize_record", fn);
+        auto* closure_bb   = BasicBlock::Create(m_ctx, "finalize_closure", fn);
+        auto* raw_array_bb = BasicBlock::Create(m_ctx, "finalize_raw_array", fn);
+        auto* thread_bb    = BasicBlock::Create(m_ctx, "finalize_thread", fn);
+        auto* native_bb    = BasicBlock::Create(m_ctx, "finalize_native", fn);
+
+        auto* free_chars_bb   = BasicBlock::Create(m_ctx, "free_chars", fn);
+        auto* free_elems_bb   = BasicBlock::Create(m_ctx, "free_elems", fn);
+        auto* rec_loop_check  = BasicBlock::Create(m_ctx, "rec_loop_check", fn);
+        auto* rec_free_key    = BasicBlock::Create(m_ctx, "rec_free_key", fn);
+        auto* free_entries_bb = BasicBlock::Create(m_ctx, "free_entries", fn);
+        auto* free_env_bb     = BasicBlock::Create(m_ctx, "free_env", fn);
+        auto* free_buf_bb     = BasicBlock::Create(m_ctx, "free_buf", fn);
+        auto* free_args_bb    = BasicBlock::Create(m_ctx, "free_args", fn);
+        auto* nat_finalize_bb = BasicBlock::Create(m_ctx, "nat_finalize", fn);
+        auto* free_name_bb    = BasicBlock::Create(m_ctx, "free_name", fn);
+
+        auto* free_fn = m_module.getFunction("free");
+
+        // --- entry: load type tag and switch ---
+        {
+            IRBuilder<> b(entry_bb);
+            auto* header_ptr = b.CreateBitCast(obj_arg,
+                PointerType::get(m_ctx, 0), "header_ptr");
+            auto* type_val = b.CreateLoad(Type::getInt32Ty(m_ctx),
+                b.CreateStructGEP(m_obj_header_type, header_ptr, 0), "type");
+            auto* sw = b.CreateSwitch(type_val, done_bb, 7);
+            sw->addCase(ConstantInt::get(Type::getInt32Ty(m_ctx), OBJ_STRING),       string_bb);
+            sw->addCase(ConstantInt::get(Type::getInt32Ty(m_ctx), OBJ_LIST),         list_bb);
+            sw->addCase(ConstantInt::get(Type::getInt32Ty(m_ctx), OBJ_RECORD),       record_bb);
+            sw->addCase(ConstantInt::get(Type::getInt32Ty(m_ctx), OBJ_CLOSURE),      closure_bb);
+            sw->addCase(ConstantInt::get(Type::getInt32Ty(m_ctx), OBJ_RAW_ARRAY),    raw_array_bb);
+            sw->addCase(ConstantInt::get(Type::getInt32Ty(m_ctx), OBJ_THREAD),       thread_bb);
+            sw->addCase(ConstantInt::get(Type::getInt32Ty(m_ctx), OBJ_NATIVE_INSTANCE), native_bb);
+        }
+
+        // --- OBJ_STRING: free(chars) ---
+        {
+            IRBuilder<> b(string_bb);
+            auto* str_ptr = b.CreateBitCast(obj_arg,
+                PointerType::get(m_ctx, 0), "str_ptr");
+            auto* chars = b.CreateLoad(PointerType::get(m_ctx, 0),
+                b.CreateStructGEP(m_string_type, str_ptr, 3), "chars");
+            auto* not_null = b.CreateIsNotNull(chars);
+            b.CreateCondBr(not_null, free_chars_bb, done_bb);
+
+            IRBuilder<> b2(free_chars_bb);
+            b2.CreateCall(free_fn, {chars});
+            b2.CreateBr(done_bb);
+        }
+
+        // --- OBJ_LIST: free(elements) ---
+        {
+            IRBuilder<> b(list_bb);
+            auto* list_ptr = b.CreateBitCast(obj_arg,
+                PointerType::get(m_ctx, 0), "list_ptr");
+            auto* elems = b.CreateLoad(PointerType::get(m_ctx, 0),
+                b.CreateStructGEP(m_list_type, list_ptr, 3), "elems");
+            auto* not_null = b.CreateIsNotNull(elems);
+            b.CreateCondBr(not_null, free_elems_bb, done_bb);
+
+            IRBuilder<> b2(free_elems_bb);
+            b2.CreateCall(free_fn, {elems});
+            b2.CreateBr(done_bb);
+        }
+
+        // --- OBJ_RECORD: for each entry free(key), then free(entries) ---
+        {
+            IRBuilder<> b(record_bb);
+            auto* rec_ptr = b.CreateBitCast(obj_arg,
+                PointerType::get(m_ctx, 0), "rec_ptr");
+            auto* entries = b.CreateLoad(PointerType::get(m_ctx, 0),
+                b.CreateStructGEP(m_record_type, rec_ptr, 3), "entries");
+            auto* count = b.CreateLoad(Type::getInt64Ty(m_ctx),
+                b.CreateStructGEP(m_record_type, rec_ptr, 1), "count");
+            auto* has_entries = b.CreateIsNotNull(entries);
+            b.CreateCondBr(has_entries, rec_loop_check, done_bb);
+
+            // Loop: free each key
+            IRBuilder<> blc(rec_loop_check);
+            auto* phi = blc.CreatePHI(Type::getInt64Ty(m_ctx), 2, "i");
+            phi->addIncoming(ConstantInt::get(Type::getInt64Ty(m_ctx), 0), record_bb);
+            auto* done_cond = blc.CreateICmpEQ(phi, count);
+            blc.CreateCondBr(done_cond, free_entries_bb, rec_free_key);
+
+            IRBuilder<> blf(rec_free_key);
+            auto* entries_typed = blf.CreateBitCast(entries,
+                PointerType::get(m_ctx, 0), "entries_typed");
+            auto* entry_ptr = blf.CreateGEP(m_record_entry_type, entries_typed, {phi});
+            auto* key = blf.CreateLoad(PointerType::get(m_ctx, 0),
+                blf.CreateStructGEP(m_record_entry_type, entry_ptr, 0), "key");
+            blf.CreateCall(free_fn, {key});
+            auto* next_i = blf.CreateAdd(phi, ConstantInt::get(Type::getInt64Ty(m_ctx), 1));
+            phi->addIncoming(next_i, rec_free_key);
+            blf.CreateBr(rec_loop_check);
+
+            IRBuilder<> bfe(free_entries_bb);
+            bfe.CreateCall(free_fn, {entries});
+            bfe.CreateBr(done_bb);
+        }
+
+        // --- OBJ_CLOSURE: free(env) ---
+        {
+            IRBuilder<> b(closure_bb);
+            auto* clo_ptr = b.CreateBitCast(obj_arg,
+                PointerType::get(m_ctx, 0), "clo_ptr");
+            auto* env = b.CreateLoad(PointerType::get(m_ctx, 0),
+                b.CreateStructGEP(m_closure_type, clo_ptr, 4), "env");
+            auto* not_null = b.CreateIsNotNull(env);
+            b.CreateCondBr(not_null, free_env_bb, done_bb);
+
+            IRBuilder<> b2(free_env_bb);
+            b2.CreateCall(free_fn, {env});
+            b2.CreateBr(done_bb);
+        }
+
+        // --- OBJ_RAW_ARRAY: free(buf) ---
+        {
+            IRBuilder<> b(raw_array_bb);
+            auto* ra_ptr = b.CreateBitCast(obj_arg,
+                PointerType::get(m_ctx, 0), "ra_ptr");
+            auto* buf = b.CreateLoad(PointerType::get(m_ctx, 0),
+                b.CreateStructGEP(m_raw_array_type, ra_ptr, 4), "buf");
+            auto* not_null = b.CreateIsNotNull(buf);
+            b.CreateCondBr(not_null, free_buf_bb, done_bb);
+
+            IRBuilder<> b2(free_buf_bb);
+            b2.CreateCall(free_fn, {buf});
+            b2.CreateBr(done_bb);
+        }
+
+        // --- OBJ_THREAD: free(args) ---
+        {
+            IRBuilder<> b(thread_bb);
+            auto* thr_ptr = b.CreateBitCast(obj_arg,
+                PointerType::get(m_ctx, 0), "thr_ptr");
+            auto* args = b.CreateLoad(PointerType::get(m_ctx, 0),
+                b.CreateStructGEP(m_thread_type, thr_ptr, 4), "args");
+            auto* not_null = b.CreateIsNotNull(args);
+            b.CreateCondBr(not_null, free_args_bb, done_bb);
+
+            IRBuilder<> b2(free_args_bb);
+            b2.CreateCall(free_fn, {args});
+            b2.CreateBr(done_bb);
+        }
+
+        // --- OBJ_NATIVE_INSTANCE: if finalize!=null call finalize(data); free(name) ---
+        {
+            IRBuilder<> b(native_bb);
+            auto* nat_ptr = b.CreateBitCast(obj_arg,
+                PointerType::get(m_ctx, 0), "nat_ptr");
+            // field 1: data, field 2: finalize callback, field 3: name
+            auto* data_val = b.CreateLoad(PointerType::get(m_ctx, 0),
+                b.CreateStructGEP(m_native_instance_type, nat_ptr, 1), "data");
+            auto* fini_val = b.CreateLoad(PointerType::get(m_ctx, 0),
+                b.CreateStructGEP(m_native_instance_type, nat_ptr, 2), "finalize");
+            auto* name_val = b.CreateLoad(PointerType::get(m_ctx, 0),
+                b.CreateStructGEP(m_native_instance_type, nat_ptr, 3), "name");
+            auto* has_fini = b.CreateIsNotNull(fini_val);
+            b.CreateCondBr(has_fini, nat_finalize_bb, free_name_bb);
+
+            // Call the finalizer callback: void (*finalize)(void*)
+            {
+                IRBuilder<> b2(nat_finalize_bb);
+                auto* finalize_ty = FunctionType::get(void_ty, {PointerType::get(m_ctx, 0)}, false);
+                b2.CreateCall(finalize_ty, fini_val, {data_val});
+                b2.CreateBr(free_name_bb);
+            }
+
+            IRBuilder<> b3(free_name_bb);
+            auto* has_name = b3.CreateIsNotNull(name_val);
+            auto* free_name_bb2 = BasicBlock::Create(m_ctx, "free_name_val", fn);
+            b3.CreateCondBr(has_name, free_name_bb2, done_bb);
+
+            IRBuilder<> b4(free_name_bb2);
+            b4.CreateCall(free_fn, {name_val});
+            b4.CreateBr(done_bb);
+        }
+
+        // --- done ---
+        IRBuilder<>(done_bb).CreateRetVoid();
+    }
 
     // --- obj_size: return 0 (unused without compaction) ---
     {

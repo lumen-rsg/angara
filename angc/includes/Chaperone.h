@@ -156,6 +156,9 @@ private:
     static bool isTrackedVar(Context& ctx, const struct VarDeclStmt& var);
     /// Whether a VarExpr is a ref<T> (a non-owning borrow), via the type checker.
     static bool isRefVarExpr(Context& ctx, const struct VarExpr& ve);
+    /// Whether a resolved Type object is a heap-allocated type (tracked or
+    /// built-in) — used to allow `drop` on any heap value, not just tracked ones.
+    static bool isHeapAllocatedType(Context& ctx, const struct Type& type);
 };
 
 } // namespace angara

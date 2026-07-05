@@ -1,0 +1,24 @@
+// Chaperone negative test — E502 (use-after-free in RangeExpr, M5)
+// A tracked variable is dropped, then used in a range expression via a
+// method call (e.g., lo.get()..hi.get()). The RangeExpr handler (C1) walks
+// both left and right sides, so the use-after-free on the GetExpr objects
+// should be caught when they reference dropped tracked variables.
+//
+// expect: E502
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let lo = Buf(1);
+    let hi = Buf(10);
+    drop lo;
+    // Use-after-free: lo is used (via lo.get()) after being dropped
+    let r = lo.get()..hi.get();
+    drop hi;
+    return 0;
+}

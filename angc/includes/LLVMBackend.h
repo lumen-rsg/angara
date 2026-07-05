@@ -399,6 +399,13 @@ namespace angara {
         // v5: Set of tracked type names (owned + class) for drop cascades.
         std::set<std::string> m_tracked_types;
 
+        // v5: Built-in heap-allocated type names that need cascade finalization.
+        // These are types whose values are TAG_OBJ and have interior buffers
+        // (string, list, record, etc.) or are simply heap-allocated structs
+        // that need freeing when a parent class/data is dropped.
+        // Populated in the LLVMBackend constructor.
+        std::set<std::string> m_heap_types;
+
         void emitGcPushFrame(llvm::Function* fn, int slot_count);
         void emitGcPopFrame();
         llvm::Value* emitGcThreadSetup();

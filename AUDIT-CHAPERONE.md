@@ -208,7 +208,10 @@ types as `Live` if declared with `owned` syntax (Phase B).
 **Files:** `angc/backend/llvm/rt/Memory.cpp` (implement `__ang_gc_finalize`),
 `angc/backend/llvm/stmt/StmtCodegen.cpp` (cgDrop already emits the call).
 
-**Status:** [ ] Not started
+**Status:** [x] Complete — `__ang_gc_finalize` dispatches on ObjHeader.type and frees
+interior buffers (chars, elements, entries, env, buf, args, name, finalizer).
+cgDrop cascade extended to all heap-allocated field types (L14, L15).
+`drop` now allowed on any heap-allocated type (not just tracked types).
 
 ### Phase B — Track Built-in Types (optional, for verification)
 
@@ -230,34 +233,26 @@ in a new "strict" mode.
 
 ### Phase C — Fix Control-Flow Gaps
 
-**C1 (RangeExpr):** Add `case RangeExpr` to `analyzeExpr` in `ExprAnalysis.cpp`,
-mirroring the `Binary` handler (walk left and right).
+**C1 (RangeExpr):** [x] Done — `case RangeExpr` added to `analyzeExpr` in `ExprAnalysis.cpp`.
 
-**C2 (InterpStringExpr):** Add `case InterpStringExpr` to `analyzeExpr`,
-walking each interpolation segment.
+**C2 (InterpStringExpr):** [x] Done — `case InterpStringExpr` added to `analyzeExpr`.
 
-**C3 (Method summary name collision):** Key summaries by qualified name:
-`ctx.summaries[className + "." + methodName]` for methods,
-`ctx.summaries[funcName]` for top-level functions. The call-site lookup
-already constructs `"class.method"` names (`ExprAnalysis.cpp:245-248`) —
-the build side just needs to match.
+**C3 (Method summary name collision):** [x] Done — summaries keyed by qualified name
+`"ClassName.methodName"`.
 
-**C4 (Closure body analysis):** In the `LambdaExpr` handler, after marking
-captures as Escaped, call `analyzeStmt`/`analyzeBlock` on the lambda's body.
-This requires threading the Chaperone context through to expression analysis
-(it currently only has access via the `Context&` parameter, which is fine).
+**C4 (Closure body analysis):** [x] Done — LambdaExpr handler walks closure body.
 
-**H1 (TryStmt in collectVarRefs):** Add `case TryStmt` to `collectVarRefs`
-in `Chaperone.cpp`, recursing into try/catch/finally bodies.
+**H1 (TryStmt in collectVarRefs):** [x] Done — `case TryStmt` added to `collectVarRefs`.
 
-**H2 (Closure call summaries):** Build summaries for LambdaExprs during the
-fixed-point pass. This requires giving closures identity (the variable they're
-bound to) and keying summaries by that identity.
+**H2 (Closure call summaries):** [ ] Deferred — requires tracking closure variable
+bindings and building summaries from lambda bodies. Non-trivial design needed.
 
-**H4 (Oscillation detection):** Track the hash of previous summary states
-across passes. If the same state repeats (oscillation), break and emit a
-warning. This can be done after C3 is fixed, as C3 is the primary cause of
-potential oscillation.
+**H3 (@consumes/@escape):** [x] Done — Parser recognizes `@consumes(i, j)` and
+`@escape(i, j)` annotations on function declarations. Summary building uses
+annotations (takes precedence over inference). Annotated foreign functions
+have their summaries pre-built before the fixed-point loop.
+
+**H4 (Oscillation detection):** [x] Done — W521 warning when summary hashes repeat.
 
 ### Phase D — Test Coverage
 
@@ -277,35 +272,35 @@ potential oscillation.
 
 | ID | Description | Status |
 |----|-------------|--------|
-| **L1** | string allocations leak | [ ] |
-| **L2** | string concat (copy path) leaks | [ ] |
-| **L3** | list allocations leak | [ ] |
-| **L4** | record allocations leak | [ ] |
-| **L5** | exception objects leak | [ ] |
-| **L6** | closure objects leak | [ ] |
-| **L7** | bound_method objects leak | [ ] |
-| **L8** | trait_object objects leak | [ ] |
-| **L9** | raw_array objects leak | [ ] |
-| **L10** | vector objects leak | [ ] |
-| **L11** | thread struct leak | [ ] |
-| **L12** | mutex struct leak | [ ] |
-| **L13** | native_instance leak | [ ] |
-| **L14** | class field sub-buffers leak | [ ] |
-| **L15** | nested owned field sub-buffers leak | [ ] |
+| **L1** | string allocations leak | [x] |
+| **L2** | string concat (copy path) leaks | [x] |
+| **L3** | list allocations leak | [x] |
+| **L4** | record allocations leak | [x] |
+| **L5** | exception objects leak | [x] |
+| **L6** | closure objects leak | [x] |
+| **L7** | bound_method objects leak | [x] |
+| **L8** | trait_object objects leak | [x] |
+| **L9** | raw_array objects leak | [x] |
+| **L10** | vector objects leak | [x] |
+| **L11** | thread struct leak | [x] |
+| **L12** | mutex struct leak | [x] |
+| **L13** | native_instance leak | [x] |
+| **L14** | class field sub-buffers leak | [x] |
+| **L15** | nested owned field sub-buffers leak | [x] |
 | **C1** | RangeExpr not analyzed | [x] |
 | **C2** | InterpStringExpr not analyzed | [x] |
 | **C3** | Method summary name collision | [x] |
 | **C4** | Closure bodies never analyzed | [x] |
 | **H1** | TryStmt missing from collectVarRefs | [x] |
 | **H2** | No summary for closure calls | [ ] |
-| **H3** | @consumes/@escape not implemented | [ ] |
+| **H3** | @consumes/@escape not implemented | [x] |
 | **H4** | No oscillation detection in fixed-point | [x] |
 | **H5** | Borrow tracking intraprocedural only | [ ] |
 | **M1** | W510 only scans then_state keys | [x] |
-| **M2** | Loop body analyzed once (no fixed-point) | [ ] |
-| **M3** | join(Escaped, Moved) = Dropped misleading | [ ] |
-| **M4** | No test for mutual recursion | [ ] |
-| **M5** | No test for RangeExpr/InterpStringExpr | [ ] |
+| **M2** | Loop body analyzed once (no fixed-point) | [x] |
+| **M3** | join(Escaped, Moved) = Dropped misleading | [x] |
+| **M4** | No test for mutual recursion | [x] |
+| **M5** | No test for RangeExpr/InterpStringExpr | [x] |
 | **LOW1** | Loop condition re-analysis state mismatch | [ ] |
 | **LOW2** | No variadic function interprocedural test | [ ] |
 | **LOW3** | No indirect call test | [ ] |

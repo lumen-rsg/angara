@@ -493,9 +493,11 @@ void LLVMBackend::cgDrop(const DropStmt& s) {
     auto* ptr_i64 = builder->CreateBitCast(payload, llvm::Type::getInt64Ty(*ctx));
     auto* obj_ptr = builder->CreateIntToPtr(ptr_i64, llvm::PointerType::get(*ctx, 0));
 
-    // v5: Drop cascade — for each tracked field, load it via __ang_record_get
-    // and drop it before freeing the parent. Fields are emitted at compile time
-    // based on the type declaration; ref<T> fields are NOT cascaded (non-owning).
+    // v5: Drop cascade — for each tracked or heap-allocated field, load it via
+    // __ang_record_get and drop it before freeing the parent. Fields are emitted
+    // at compile time based on the type declaration; ref<T> fields are NOT
+    // cascaded (non-owning).  Built-in heap types (string, list, record, etc.)
+    // are included so their interior buffers are freed via __ang_gc_finalize.
     auto type_it = namedTypes.find(s.name.lexeme);
     if (type_it != namedTypes.end() && type_it->second) {
         auto& type = type_it->second;
@@ -511,11 +513,19 @@ void LLVMBackend::cgDrop(const DropStmt& s) {
                 {f_obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
         };
 
+        // Helper: returns true if a field type is heap-allocated and needs
+        // cascade (finalize + free) when the parent is dropped.
+        auto is_heap_field = [&](const std::shared_ptr<Type>& t) -> bool {
+            if (!t) return false;
+            auto name = t->toString();
+            return m_tracked_types.count(name) || m_heap_types.count(name);
+        };
+
         if (type->kind == TypeKind::DATA) {
             auto dt = std::dynamic_pointer_cast<DataType>(type);
             if (dt) {
                 for (auto& [fname, finfo] : dt->fields) {
-                    if (finfo.type && m_tracked_types.count(finfo.type->toString()))
+                    if (is_heap_field(finfo.type))
                         drop_field(fname);
                 }
             }
@@ -527,7 +537,7 @@ void LLVMBackend::cgDrop(const DropStmt& s) {
                 ct = std::dynamic_pointer_cast<ClassType>(type);
             if (ct) {
                 for (auto& [fname, finfo] : ct->fields) {
-                    if (finfo.type && m_tracked_types.count(finfo.type->toString()))
+                    if (is_heap_field(finfo.type))
                         drop_field(fname);
                 }
             }

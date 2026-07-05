@@ -5,9 +5,26 @@ namespace angara {
         try {
             // RT-1: parse @on_throw(<value>) annotation for foreign funcs.
             // SIMD-2: parse @inline annotation for functions.
+            // v5: parse @consumes / @escape annotations for ownership semantics.
             std::optional<int64_t> pending_on_throw;
             bool pending_inline = false;
-            if (check(TokenType::AT_SIGN)) {
+            std::set<int> pending_consumes;
+            std::set<int> pending_escapes;
+
+            // Helper: parse comma-separated integer list inside parens, e.g. "(0, 2)"
+            auto parse_param_index_list = [&](std::set<int>& out) {
+                consume(TokenType::LEFT_PAREN, "Expected '(' after annotation.", "E393");
+                if (!check(TokenType::RIGHT_PAREN)) {
+                    do {
+                        Token val = consume(TokenType::NUMBER_INT,
+                            "Expected integer parameter index.", "E394");
+                        out.insert(std::stoi(val.lexeme));
+                    } while (match({TokenType::COMMA}));
+                }
+                consume(TokenType::RIGHT_PAREN, "Expected ')' after parameter list.", "E395");
+            };
+
+            while (check(TokenType::AT_SIGN)) {
                 int saved = m_current;
                 advance(); // consume '@'
                 Token ann = peek();
@@ -22,9 +39,16 @@ namespace angara {
                     consume(TokenType::RIGHT_PAREN, "Expected ')' after @on_throw value.", "E395");
                     int64_t v = std::stoll(val.lexeme);
                     pending_on_throw = neg ? -v : v;
+                } else if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "consumes") {
+                    advance();
+                    parse_param_index_list(pending_consumes);
+                } else if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "escape") {
+                    advance();
+                    parse_param_index_list(pending_escapes);
                 } else {
-                    // Not a recognized annotation — restore and let other handlers deal with it.
+                    // Not a recognized annotation — restore and break out.
                     m_current = saved;
+                    break;
                 }
             }
 
@@ -41,6 +65,8 @@ namespace angara {
                 auto func_decl = std::static_pointer_cast<FuncStmt>(function("function"));
                 func_decl->is_exported = is_exported;
                 func_decl->is_inline = pending_inline;
+                func_decl->consumes_params = std::move(pending_consumes);
+                func_decl->escape_params = std::move(pending_escapes);
                 return func_decl;
             }
 
@@ -66,6 +92,8 @@ namespace angara {
                     if (pending_on_throw) {
                         func_decl->on_throw_value = pending_on_throw;
                     }
+                    func_decl->consumes_params = std::move(pending_consumes);
+                    func_decl->escape_params = std::move(pending_escapes);
                     return func_decl;
                 }
 

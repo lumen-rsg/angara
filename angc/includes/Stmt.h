@@ -6,6 +6,7 @@
 
 #include <vector>
 #include <map>
+#include <set>
 #include <memory>
 #include <optional>
 #include <cstdint>
@@ -281,6 +282,12 @@ namespace angara {
         // RT-1: @on_throw(<value>) — the C value to return if an Angara callback
         // passed to this foreign func throws. Applied to the first callback param.
         std::optional<int64_t> on_throw_value;
+
+        // v5: @consumes(i, j, ...) — param indices consumed (dropped) by this function.
+        // Used for foreign functions that take ownership of arguments.
+        std::set<int> consumes_params;
+        // v5: @escape(i, j, ...) — param indices whose ownership escapes this function.
+        std::set<int> escape_params;
 
         // --- GENERIC SUPPORT ---
         // Type parameter names (e.g., {"T"} for `func identity<T>(x as T) -> T`)
