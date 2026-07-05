@@ -151,9 +151,11 @@ struct AngaraAPI {
 
 ### Known issue
 
-Runtime testing is currently blocked by a **pre-existing compiler bug**
+~~Runtime testing is currently blocked by a **pre-existing compiler bug**
 ("Circular dependency detected in module graph") that affects all native
-module loading from `build/modules/`.  This bug is present on the clean
-`stable` branch before any of our session's changes.  Once resolved (or
-once `sudo make install_libraries` puts modules in `/opt/angara/modules/`),
-the test at `tests/lang/positive/31_call_api.an` should exercise the feature.
+module loading from `build/modules/`.~~  **Fixed in `ee37f61`** — the bug
+was a reverse-edge overwrite in `DependencyGraph::addModule()`.  The
+`31_call_api.an` test now compiles successfully.
+
+To run the test: `sudo make install_libraries` (or symlink modules into
+`/opt/angara/modules/`), then `angc tests/lang/positive/31_call_api.an`.
