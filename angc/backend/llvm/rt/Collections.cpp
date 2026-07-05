@@ -405,6 +405,151 @@ void RuntimeBuilder::generateListOps() {
     }
 }
 
+void RuntimeBuilder::generateRawArrayOps() {
+    auto* i8_ty = Type::getInt8Ty(m_ctx);
+    auto* i32_ty = Type::getInt32Ty(m_ctx);
+    auto* i64_ty = Type::getInt64Ty(m_ctx);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
+    auto* obj_ty = m_angara_obj_type;
+
+    auto* malloc_fn = m_module.getFunction("malloc");
+    auto* realloc_fn = m_module.getFunction("realloc");
+
+    auto pack_obj = [&](IRBuilder<>& b, Value* raw_ptr) -> Value* {
+        auto* ptr_i8 = b.CreateBitCast(raw_ptr, i8_ptr);
+        auto* ptr_i64 = b.CreatePtrToInt(ptr_i8, i64_ty);
+        Value* result = UndefValue::get(obj_ty);
+        result = b.CreateInsertValue(result, ConstantInt::get(i32_ty, TAG_OBJ), {0});
+        result = b.CreateInsertValue(result, ptr_i64, {1});
+        return result;
+    };
+
+    // --- __ang_raw_array_new(elem_size: i64, initial_cap: i64) -> obj ---
+    {
+        auto* fn_ty = FunctionType::get(obj_ty, {i64_ty, i64_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_raw_array_new", fn_ty);
+        m_fn_raw_array_new = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+        auto* elem_size = fn->arg_begin();
+        auto* initial_cap = fn->arg_begin() + 1;
+
+        // clamp initial_cap to at least 0
+        auto* safe_cap = b.CreateSelect(
+            b.CreateICmpSLT(initial_cap, ConstantInt::get(i64_ty, 0)),
+            ConstantInt::get(i64_ty, 0), initial_cap, "safe_cap");
+
+        // overflow-checked multiply
+        auto* umul_fn = Intrinsic::getOrInsertDeclaration(&m_module,
+            Intrinsic::umul_with_overflow, {i64_ty});
+        auto* mul_res = b.CreateCall(umul_fn, {safe_cap, elem_size}, "mul_ovf");
+        auto* buf_total = b.CreateExtractValue(mul_res, {0}, "buf_total");
+        auto* overflow = b.CreateExtractValue(mul_res, {1}, "overflow");
+        auto* safe_buf = b.CreateSelect(overflow,
+            ConstantInt::get(i64_ty, 0), buf_total, "safe_buf");
+        auto* final_cap = b.CreateSelect(overflow,
+            ConstantInt::get(i64_ty, 0), safe_cap, "final_cap");
+
+        auto* arr_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_raw_array_type));
+        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* arr_ptr = b.CreateCall(gc_alloc_fn,
+            {arr_size, ConstantInt::get(i32_ty, OBJ_RAW_ARRAY)}, "arr_mem");
+
+        b.CreateStore(ConstantInt::get(i64_ty, 0),
+                      b.CreateStructGEP(m_raw_array_type, arr_ptr, 1));     // count = 0
+        b.CreateStore(final_cap,
+                      b.CreateStructGEP(m_raw_array_type, arr_ptr, 2));     // capacity
+        b.CreateStore(elem_size,
+                      b.CreateStructGEP(m_raw_array_type, arr_ptr, 3));             // elem_size
+        // element buffer
+        auto* buf_mem = b.CreateCall(malloc_fn, {safe_buf});
+        b.CreateStore(b.CreateBitCast(buf_mem, PointerType::get(m_ctx, 0)),
+                      b.CreateStructGEP(m_raw_array_type, arr_ptr, 4));
+
+        b.CreateRet(pack_obj(b, arr_ptr));
+    }
+
+    // --- __ang_raw_array_push(array: obj, raw_value: i64) -> void ---
+    {
+        auto* fn_ty = FunctionType::get(Type::getVoidTy(m_ctx), {obj_ty, i64_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_raw_array_push", fn_ty);
+        m_fn_raw_array_push = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        auto* grow_bb = BasicBlock::Create(m_ctx, "grow", fn);
+        auto* store_bb = BasicBlock::Create(m_ctx, "store", fn);
+
+        IRBuilder<> b(entry);
+        auto* arr_arg = fn->arg_begin();
+        auto* val_arg = fn->arg_begin() + 1;
+
+        auto* payload = b.CreateExtractValue(arr_arg, {1});
+        auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
+        auto* arr_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
+
+        auto* count_addr = b.CreateStructGEP(m_raw_array_type, arr_ptr, 1);
+        auto* cap_addr   = b.CreateStructGEP(m_raw_array_type, arr_ptr, 2);
+        auto* esize_addr = b.CreateStructGEP(m_raw_array_type, arr_ptr, 3);
+        auto* buf_addr   = b.CreateStructGEP(m_raw_array_type, arr_ptr, 4);
+
+        auto* count = b.CreateLoad(i64_ty, count_addr, "count");
+        auto* cap   = b.CreateLoad(i64_ty, cap_addr, "cap");
+        auto* esize64 = b.CreateLoad(i64_ty, esize_addr, "esize64");
+
+        auto* need_grow = b.CreateICmpEQ(count, cap, "need_grow");
+        b.CreateCondBr(need_grow, grow_bb, store_bb);
+
+        IRBuilder<> bg(grow_bb);
+        auto* new_cap1 = bg.CreateAdd(count, ConstantInt::get(i64_ty, 1));
+        auto* doubled = bg.CreateShl(cap, 1);
+        auto* is_sm = bg.CreateICmpSLT(doubled, new_cap1);
+        auto* new_cap = bg.CreateSelect(is_sm, new_cap1, doubled, "new_cap");
+        auto* alloc_size = bg.CreateMul(new_cap, esize64);
+        auto* old_buf = bg.CreateLoad(PointerType::get(m_ctx, 0), buf_addr);
+        auto* old_raw = bg.CreateBitCast(old_buf, i8_ptr);
+        auto* new_raw = bg.CreateCall(realloc_fn, {old_raw, alloc_size}, "new_raw");
+        bg.CreateStore(bg.CreateBitCast(new_raw, PointerType::get(m_ctx, 0)), buf_addr);
+        bg.CreateStore(new_cap, cap_addr);
+        bg.CreateBr(store_bb);
+
+        IRBuilder<> bs(store_bb);
+        auto* cur_count = bs.CreateLoad(i64_ty, count_addr, "cur_count");
+        auto* cur_buf = bs.CreateLoad(PointerType::get(m_ctx, 0), buf_addr, "cur_buf");
+        // Store the raw value at buf[count] using memcpy sized by elem_size.
+        // This works for 1,2,4,8 byte elements and is endianness-safe.
+        auto* buf_i8 = bs.CreateBitCast(cur_buf, i8_ptr);
+        auto* offset = bs.CreateMul(cur_count, esize64, "byte_offset");
+        auto* dst = bs.CreateGEP(i8_ty, buf_i8, {offset}, "dst");
+        // Stack-allocate a temporary i64, store the value there, then memcpy.
+        auto* val_ptr = bs.CreateAlloca(i64_ty);
+        bs.CreateStore(val_arg, val_ptr);
+        auto* val_i8 = bs.CreateBitCast(val_ptr, i8_ptr);
+        bs.CreateMemCpy(dst, Align(1), val_i8, Align(1), esize64);
+        bs.CreateStore(bs.CreateAdd(cur_count, ConstantInt::get(i64_ty, 1)), count_addr);
+        bs.CreateRetVoid();
+    }
+
+    // --- __ang_raw_array_len(array: obj) -> i64 ---
+    {
+        auto* fn_ty = FunctionType::get(i64_ty, {obj_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_raw_array_len", fn_ty);
+        m_fn_raw_array_len = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+        auto* arr_arg = fn->arg_begin();
+
+        auto* payload = b.CreateExtractValue(arr_arg, {1});
+        auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
+        auto* arr_ptr = b.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
+        auto* count = b.CreateLoad(i64_ty,
+            b.CreateStructGEP(m_raw_array_type, arr_ptr, 1), "count");
+        b.CreateRet(count);
+    }
+}
+
 void RuntimeBuilder::generateRecordOps() {
     auto* i8_ty = Type::getInt8Ty(m_ctx);
     auto* i32_ty = Type::getInt32Ty(m_ctx);

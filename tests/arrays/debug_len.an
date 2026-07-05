@@ -1,0 +1,13 @@
+// Debug: test raw array creation and len
+func main() {
+    let arr as f64[] = [1.0, 2.0, 3.0];
+    let n = len(arr);
+    println("len after creation: ", n);
+
+    arr.push(4.0);
+    let n2 = len(arr);
+    println("len after push: ", n2);
+
+    println("arr[0] = ", arr[0]);
+    println("arr[3] = ", arr[3]);
+}

@@ -81,12 +81,18 @@ namespace angara {
                 base_type = std::make_shared<SimpleType>(type_name_token);
             }
 
-            // Check for fixed-size array: i8[256]
+            // Check for array types: i8[256] (fixed-size) or f64[] (unboxed dynamic)
             if (match({TokenType::LEFT_BRACKET})) {
-                Token size_token = consume(TokenType::NUMBER_INT, "Expected array size after '['.", "E109");
-                consume(TokenType::RIGHT_BRACKET, "Expected ']' after array size.", "E110");
-                int arr_size = std::stoi(size_token.lexeme);
-                base_type = std::make_shared<FixedArrayTypeExpr>(base_type, arr_size);
+                Token bracket = previous();
+                if (match({TokenType::RIGHT_BRACKET})) {
+                    // SIMD-1: empty brackets → unboxed dynamic raw array
+                    base_type = std::make_shared<RawArrayTypeExpr>(bracket, base_type);
+                } else {
+                    Token size_token = consume(TokenType::NUMBER_INT, "Expected array size after '['.", "E109");
+                    consume(TokenType::RIGHT_BRACKET, "Expected ']' after array size.", "E110");
+                    int arr_size = std::stoi(size_token.lexeme);
+                    base_type = std::make_shared<FixedArrayTypeExpr>(base_type, arr_size);
+                }
             }
         }
         else if (match({TokenType::LEFT_PAREN})) {

@@ -1,0 +1,12 @@
+// Minimal debug: empty raw array
+func main() {
+    let arr as f64[] = [];
+    let n = len(arr);
+    println("empty len = ", n);
+
+    arr.push(1.0);
+    let n2 = len(arr);
+    println("after push len = ", n2);
+
+    println("arr[0] = ", arr[0]);
+}

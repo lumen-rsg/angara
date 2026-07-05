@@ -263,6 +263,24 @@ std::any TypeChecker::visit(const GetExpr& expr) {
             error(expr.name, "Type 'list' has no property or method named '" + property_name + "'. Available: push, remove_at, remove, deep_clone, length.", "E339");
         }
     }
+    // SIMD-1: unboxed dynamic array — same methods as list<T> (push, len)
+    else if (unwrapped_object_type->kind == TypeKind::RAW_ARRAY) {
+        auto raw_arr_type = std::dynamic_pointer_cast<RawArrayType>(unwrapped_object_type);
+        if (property_name == "push") {
+            property_type = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{raw_arr_type->element_type},
+                m_type_nil
+            );
+        } else if (property_name == "length" || property_name == "len" || property_name == "size" || property_name == "count") {
+            property_type = std::make_shared<FunctionType>(
+                std::vector<std::shared_ptr<Type>>{},
+                m_type_i64
+            );
+        }
+        else {
+            error(expr.name, "Type '" + unwrapped_object_type->toString() + "' has no property or method named '" + property_name + "'. Available: push, length.", "E340");
+        }
+    }
     else if (unwrapped_object_type->kind == TypeKind::RECORD) {
         if (property_name == "remove") {
             property_type = std::make_shared<FunctionType>(

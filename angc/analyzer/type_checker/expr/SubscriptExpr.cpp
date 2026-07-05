@@ -79,6 +79,15 @@ namespace angara {
                 result_type = m_type_any;
             }
         }
+        // SIMD-1: unboxed dynamic array — subscript returns the element type
+        else if (collection_type->kind == TypeKind::RAW_ARRAY) {
+            auto raw_arr_type = std::dynamic_pointer_cast<RawArrayType>(collection_type);
+            if (!isInteger(index_type)) {
+                error(expr.bracket, "Raw array index must be an integer, but got '" + index_type->toString() + "'.", "E354");
+            } else {
+                result_type = raw_arr_type->element_type;
+            }
+        }
         else if (collection_type->toString() == "string") {
             if (!isInteger(index_type)) {
                 error(expr.bracket, "String index must be an integer, but got '" + index_type->toString() + "'.", "E350");

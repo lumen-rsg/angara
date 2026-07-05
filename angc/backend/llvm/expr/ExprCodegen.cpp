@@ -753,6 +753,37 @@ llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
                 return v;
             }
         }
+
+        // SIMD-1: unboxed dynamic array — emit direct GEP + store
+        if (type_it != m_type_checker.getExpressionTypes().end() &&
+            type_it->second->kind == TypeKind::RAW_ARRAY) {
+            auto raw_arr_type = std::dynamic_pointer_cast<RawArrayType>(type_it->second);
+            if (raw_arr_type && raw_arr_type->element_type) {
+                auto elem_kind = localKindForType(raw_arr_type->element_type);
+                if (elem_kind != LocalKind::BOXED) {
+                    auto* elem_llvm_ty = llvmTypeForLocalKind(elem_kind);
+                    auto* i64_ty = llvm::Type::getInt64Ty(*ctx);
+
+                    auto* idx_obj = cg(sub->index);
+                    auto* idx_val = getI64(idx_obj);
+
+                    auto* payload = builder->CreateExtractValue(obj, {1}, "arr_payload");
+                    auto* arr_ptr = builder->CreateIntToPtr(payload,
+                        llvm::PointerType::get(*ctx, 0), "arr_ptr");
+
+                    auto* buf_ptr = builder->CreateLoad(llvm::PointerType::get(*ctx, 0),
+                        builder->CreateStructGEP(rt->getRawArrayType(), arr_ptr, 4), "buf_ptr");
+
+                    auto* elem_ptr = builder->CreateGEP(elem_llvm_ty, buf_ptr, {idx_val}, "elem_ptr");
+
+                    // Unbox the value and store directly
+                    auto* raw_val = unboxToRaw(v, elem_kind);
+                    builder->CreateStore(raw_val, elem_ptr);
+                    return v;
+                }
+            }
+        }
+
         callRtByName("__ang_list_set", {obj, cg(sub->index), v});
         return v;
     }
@@ -1053,8 +1084,16 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             if (is_var) {
                 auto* varObj = loadVar(modName);
                 if (fnName == "push" || fnName == "add") {
-                    if (!getArgs(expr).empty())
+                    if (!getArgs(expr).empty()) {
+                        // SIMD-1: raw arrays — unbox and push via runtime
+                        auto ntype_it2 = namedTypes.find(sanitize(modName));
+                        if (ntype_it2 != namedTypes.end() && ntype_it2->second &&
+                            ntype_it2->second->kind == TypeKind::RAW_ARRAY) {
+                            auto* val = cg(getArgs(expr)[0]);
+                            return callRtByName("__ang_raw_array_push", {varObj, getI64(val)});
+                        }
                         return callRtByName("__ang_list_push", {varObj, cg(getArgs(expr)[0])});
+                    }
                     return makeNil();
                 }
                 if (fnName == "get" || fnName == "at") {
@@ -1068,6 +1107,19 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                     return makeNil();
                 }
                 if (fnName == "length" || fnName == "len" || fnName == "size" || fnName == "count") {
+                    // SIMD-1: raw arrays get inline len() via GEP+load
+                    {
+                        auto ntype_it = namedTypes.find(sanitize(modName));
+                        if (ntype_it != namedTypes.end() && ntype_it->second &&
+                            ntype_it->second->kind == TypeKind::RAW_ARRAY) {
+                            auto* payload = builder->CreateExtractValue(varObj, {1}, "arr_payload");
+                            auto* arr_ptr = builder->CreateIntToPtr(payload,
+                                llvm::PointerType::get(*ctx, 0), "arr_ptr");
+                            auto* count = builder->CreateLoad(llvm::Type::getInt64Ty(*ctx),
+                                builder->CreateStructGEP(rt->getRawArrayType(), arr_ptr, 1), "count");
+                            return makeI64(count);
+                        }
+                    }
                     return callRtByName("__ang_len", {varObj});
                 }
                 if (fnName == "lock") {
@@ -1593,6 +1645,35 @@ llvm::Value* LLVMBackend::cgGet(const GetExpr& e) {
 }
 
 llvm::Value* LLVMBackend::cgList(const ListExpr& e) {
+    // SIMD-1: if this list literal has a raw array type (e.g., expected f64[]),
+    // create an unboxed raw array instead of a boxed list.
+    auto lt = m_type_checker.getExpressionTypes().find(&e);
+    if (lt != m_type_checker.getExpressionTypes().end() && lt->second &&
+        lt->second->kind == TypeKind::RAW_ARRAY) {
+        auto raw_arr_type = std::dynamic_pointer_cast<RawArrayType>(lt->second);
+        if (raw_arr_type && raw_arr_type->element_type) {
+            auto elem_kind = localKindForType(raw_arr_type->element_type);
+            if (elem_kind != LocalKind::BOXED) {
+                auto elem_size = (int64_t)getIntBitWidth(raw_arr_type->element_type) / 8;
+                if (elem_size == 0) elem_size = 8;  // f64 default
+                auto count = (int64_t)e.elements.size();
+
+                auto* arr = callRtByName("__ang_raw_array_new", {
+                    llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), elem_size),
+                    llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), count)
+                });
+                for (auto& el : e.elements) {
+                    auto* v = cg(el);
+                    // Pass the raw i64 payload (bits) — __ang_raw_array_push uses
+                    // memcpy with elem_size to store the right number of bytes.
+                    auto* raw_bits = getI64(v);
+                    callRtByName("__ang_raw_array_push", {arr, raw_bits});
+                }
+                return arr;
+            }
+        }
+    }
+
     auto* l = callRtByName("__ang_list_new",{});
     // TS-1: if this list's element type is a trait/contract, box each element
     // into a trait object as it's pushed (so list<Drawable> holds trait objects).
@@ -1600,7 +1681,6 @@ llvm::Value* LLVMBackend::cgList(const ListExpr& e) {
     // assigned to a typed slot); fall back to the list's own inferred element.
     std::shared_ptr<Type> elem_type = m_expected_list_elem_type;
     if (!elem_type) {
-        auto lt = m_type_checker.getExpressionTypes().find(&e);
         if (lt != m_type_checker.getExpressionTypes().end() && lt->second &&
             lt->second->kind == TypeKind::LIST) {
             elem_type = std::dynamic_pointer_cast<ListType>(lt->second)->element_type;
@@ -1697,6 +1777,43 @@ llvm::Value* LLVMBackend::cgSubscript(const SubscriptExpr& e) {
         }
         // Fallback: treat as list get
     }
+
+    // SIMD-1: unboxed dynamic array — emit direct GEP + load instead of
+    // __ang_list_get. This produces straight-line pointer arithmetic over
+    // contiguous memory that LLVM's auto-vectorizer can optimize.
+    if (type_it != m_type_checker.getExpressionTypes().end() &&
+        type_it->second->kind == TypeKind::RAW_ARRAY) {
+        auto raw_arr_type = std::dynamic_pointer_cast<RawArrayType>(type_it->second);
+        if (!raw_arr_type || !raw_arr_type->element_type) goto fallback_list;
+
+        auto elem_kind = localKindForType(raw_arr_type->element_type);
+        if (elem_kind == LocalKind::BOXED) goto fallback_list;  // unsupported element type
+
+        auto* elem_llvm_ty = llvmTypeForLocalKind(elem_kind);
+
+        // Unbox index: extract i64 payload
+        auto* idx_obj = cg(e.index);
+        auto* idx_val = getI64(idx_obj);
+
+        // Unbox array: extract heap pointer from AngaraObject payload
+        auto* payload = builder->CreateExtractValue(obj, {1}, "arr_payload");
+        auto* arr_ptr = builder->CreateIntToPtr(payload,
+            llvm::PointerType::get(*ctx, 0), "arr_ptr");
+
+        // Load the element buffer pointer (field 4 of AngaraRawArray)
+        auto* buf_ptr = builder->CreateLoad(llvm::PointerType::get(*ctx, 0),
+            builder->CreateStructGEP(rt->getRawArrayType(), arr_ptr, 4), "buf_ptr");
+
+        // GEP into the typed buffer: &buf[idx]
+        auto* elem_ptr = builder->CreateGEP(elem_llvm_ty, buf_ptr, {idx_val}, "elem_ptr");
+
+        // Load the raw element value
+        auto* raw_val = builder->CreateLoad(elem_llvm_ty, elem_ptr, "elem_val");
+
+        // Box back into AngaraObject
+        return boxRaw(raw_val, elem_kind);
+    }
+    fallback_list:
     return callRtByName("__ang_list_get", {obj, cg(e.index)});
 }
 

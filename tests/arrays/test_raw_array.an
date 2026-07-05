@@ -1,0 +1,44 @@
+// SIMD-1: basic raw array test
+// Build: ../build/angc test_raw_array.an --dump-ir
+// Run: ./test_raw_array
+
+func main() {
+    // Test 1: create a raw array literal
+    let arr as f64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
+
+    // Test 2: read elements (should use GEP + load, not __ang_list_get)
+    let first = arr[0];
+    let third = arr[2];
+    println("arr[0] = ", first);
+    println("arr[2] = ", third);
+
+    // Test 3: len() (should use GEP + load count field)
+    let n = len(arr);
+    println("len = ", n);
+
+    // Test 4: write elements (should use GEP + store)
+    arr[1] = 99.0;
+    println("arr[1] = ", arr[1]);
+
+    // Test 5: push
+    arr.push(42.0);
+    println("after push: len = ", len(arr));
+    println("arr[5] = ", arr[5]);
+
+    // Test 6: integer raw array
+    let iarr as i64[] = [10, 20, 30, 40];
+    println("iarr[0] = ", iarr[0]);
+    println("iarr[3] = ", iarr[3]);
+    iarr[1] = 999;
+    println("iarr[1] = ", iarr[1]);
+    println("iarr len = ", len(iarr));
+
+    // Test 7: sum over raw array (future: should auto-vectorize)
+    let sum = 0.0;
+    let i = 0;
+    while (i < len(arr)) {
+        sum = sum + arr[i];
+        i = i + 1;
+    }
+    println("sum = ", sum);
+}

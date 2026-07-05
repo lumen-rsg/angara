@@ -107,6 +107,9 @@ void Formatter::fmtType(const std::shared_ptr<ASTType>& type) {
         fmtType(t->base_type); m_out << "?";
     } else if (auto* t = dynamic_cast<const FixedArrayTypeExpr*>(type.get())) {
         fmtType(t->element_type); m_out << "[" << t->size << "]";
+    } else if (auto* t = dynamic_cast<const RawArrayTypeExpr*>(type.get())) {
+        // SIMD-1: unboxed dynamic array
+        fmtType(t->element_type); m_out << "[]";
     } else if (auto* t = dynamic_cast<const PointerTypeExpr*>(type.get())) {
         if (t->byval) m_out << "^";
         for (int i = 0; i < t->depth; i++) m_out << "*";

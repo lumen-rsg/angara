@@ -520,6 +520,33 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         return std::make_shared<FixedArrayType>(elem_type, fixed_arr->size);
     }
 
+    // SIMD-1: unboxed dynamic array (e.g., f64[], i64[])
+    if (auto raw_arr = std::dynamic_pointer_cast<const RawArrayTypeExpr>(ast_type)) {
+        auto elem_type = resolveType(raw_arr->element_type);
+        if (elem_type->kind == TypeKind::ERROR) return m_type_error;
+        // Only primitive elements are supported for raw arrays (Phase 1).
+        // Reject list<T>, record, etc. — they can't be stored unboxed.
+        if (elem_type->kind != TypeKind::PRIMITIVE &&
+            elem_type->kind != TypeKind::TYPE_PARAM) {
+            // Allow TYPE_PARAM through (it will be resolved later in generics);
+            // reject everything else that can't be stored contiguously.
+            if (elem_type->kind == TypeKind::LIST ||
+                elem_type->kind == TypeKind::RECORD ||
+                elem_type->kind == TypeKind::FUNCTION ||
+                elem_type->kind == TypeKind::CLASS ||
+                elem_type->kind == TypeKind::TRAIT ||
+                elem_type->kind == TypeKind::INSTANCE ||
+                elem_type->kind == TypeKind::DATA ||
+                elem_type->kind == TypeKind::ENUM ||
+                elem_type->kind == TypeKind::TUPLE ||
+                elem_type->kind == TypeKind::RAW_ARRAY) {
+                error(raw_arr->bracket, "Raw arrays only support primitive element types (i8-u64, f32-f64). Use list<T> for complex types.", "E114");
+                return m_type_error;
+            }
+        }
+        return std::make_shared<RawArrayType>(elem_type);
+    }
+
     if (auto ptr_expr = std::dynamic_pointer_cast<const PointerTypeExpr>(ast_type)) {
         auto pointee = resolveType(ptr_expr->pointee_type);
         if (pointee->kind == TypeKind::ERROR) return m_type_error;

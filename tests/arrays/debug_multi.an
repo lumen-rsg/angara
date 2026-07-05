@@ -1,0 +1,12 @@
+// Isolate the failing case
+func main() {
+    let arr as f64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
+    println("len(arr) = ", len(arr));
+
+    arr.push(42.0);
+    println("after push, len(arr) = ", len(arr));
+
+    let iarr as i64[] = [10, 20, 30, 40];
+    println("len(iarr) = ", len(iarr));
+    println("iarr[0] = ", iarr[0]);
+}

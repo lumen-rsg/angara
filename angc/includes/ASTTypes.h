@@ -18,6 +18,7 @@ namespace angara {
     struct RecordTypeExpr;
     struct OptionalTypeNode;
     struct FixedArrayTypeExpr;
+    struct RawArrayTypeExpr;     // SIMD-1: unboxed dynamic array (e.g., f64[])
     struct PointerTypeExpr;
     struct OwnedTypeNode;
     struct TupleTypeExpr;  // LANG-10
@@ -33,6 +34,7 @@ namespace angara {
         virtual void visit(const RecordTypeExpr& type) = 0;
         virtual void visit(const OptionalTypeNode& type) = 0;
         virtual void visit(const FixedArrayTypeExpr& type) = 0;
+        virtual void visit(const RawArrayTypeExpr& type) = 0;  // SIMD-1
         virtual void visit(const PointerTypeExpr& type) = 0;
         virtual void visit(const OwnedTypeNode& type) = 0;
         virtual void visit(const TupleTypeExpr& type) = 0;  // LANG-10
@@ -123,6 +125,20 @@ namespace angara {
 
         FixedArrayTypeExpr(std::shared_ptr<ASTType> elem, int n)
             : element_type(std::move(elem)), size(n) {}
+
+        void accept(ASTTypeVisitor& visitor) const override {
+            visitor.visit(*this);
+        }
+    };
+
+    // SIMD-1: Represents an unboxed dynamic array type like f64[], i64[]
+    // Empty brackets (no size) distinguish this from FixedArrayTypeExpr.
+    struct RawArrayTypeExpr : ASTType {
+        const Token bracket;  // the '[' token (for error reporting)
+        const std::shared_ptr<ASTType> element_type;
+
+        RawArrayTypeExpr(Token bracket, std::shared_ptr<ASTType> elem)
+            : bracket(std::move(bracket)), element_type(std::move(elem)) {}
 
         void accept(ASTTypeVisitor& visitor) const override {
             visitor.visit(*this);

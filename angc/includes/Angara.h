@@ -61,6 +61,8 @@ typedef struct AngaraObject {
 #define ANG_OBJ_DATA_INSTANCE  10
 #define ANG_OBJ_ENUM_INSTANCE  11
 #define ANG_OBJ_BOUND_METHOD   12
+#define ANG_OBJ_TRAIT_OBJECT   13  // TS-1: trait/contract interface view
+#define ANG_OBJ_RAW_ARRAY      14  // SIMD-1: unboxed dynamic array (f64[], i64[], ...)
 
 // =============================================================================
 // §2  Inline Constructors (zero overhead — no runtime call)

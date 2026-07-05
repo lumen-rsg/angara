@@ -38,6 +38,7 @@ namespace angara {
         VOID,    // C void type (only valid in FFI pointer context or as return type)
         TRAIT_OBJECT, // TS-1: a value viewed through a trait/contract interface (erased impl)
         TUPLE,   // LANG-10: heterogeneous fixed-arity tuple (e.g., (i64, string))
+        RAW_ARRAY, // SIMD-1: unboxed dynamic array (e.g., f64[], i64[]) — contiguous raw storage
         ERROR // A special type to prevent cascading error messages
     };
 
@@ -524,6 +525,22 @@ namespace angara {
         }
     };
 
+    // --- UNBOXED DYNAMIC ARRAY TYPE (SIMD-1) ---
+    // Represents f64[], i64[], etc. — contiguous raw-value storage on the heap.
+    // Unlike list<T> (boxed AngaraObject[] elements), a raw array stores elements
+    // as raw primitives (double, int64_t, etc.) directly. Subscript access lowers
+    // to GEP+load/store — no function call, no tag dispatch — enabling LLVM
+    // auto-vectorization. The runtime representation is AngaraRawArray, a sibling
+    // of AngaraList with a typed element buffer instead of AngaraObject[].
+    struct RawArrayType : Type {
+        const std::shared_ptr<Type> element_type;
+        explicit RawArrayType(std::shared_ptr<Type> elem)
+            : Type(TypeKind::RAW_ARRAY), element_type(std::move(elem)) {}
+        [[nodiscard]] std::string toString() const override {
+            return element_type->toString() + "[]";
+        }
+    };
+
     // FFI pointer type (e.g., *i8, *void, **char) — raw C pointer, stored as i64
     struct PointerType : Type {
         std::shared_ptr<Type> pointee_type;
@@ -679,6 +696,10 @@ namespace angara {
                     auto a = std::dynamic_pointer_cast<FixedArrayType>(type);
                     return std::make_shared<FixedArrayType>(substitute(a->element_type), a->size);
                 }
+                case TypeKind::RAW_ARRAY: {
+                    auto a = std::dynamic_pointer_cast<RawArrayType>(type);
+                    return std::make_shared<RawArrayType>(substitute(a->element_type));
+                }
                 default:
                     // Primitives, nominal types, etc. carry no type params.
                     return type;
@@ -809,6 +830,11 @@ namespace angara {
                 auto lb = std::dynamic_pointer_cast<FixedArrayType>(b);
                 return la && lb && la->size == lb->size && sameType(la->element_type, lb->element_type);
             }
+            case TypeKind::RAW_ARRAY: {
+                auto la = std::dynamic_pointer_cast<RawArrayType>(a);
+                auto lb = std::dynamic_pointer_cast<RawArrayType>(b);
+                return la && lb && sameType(la->element_type, lb->element_type);
+            }
         }
         return false;
     }
@@ -904,6 +930,10 @@ namespace angara {
             case TypeKind::FIXED_ARRAY: {
                 auto a = std::dynamic_pointer_cast<FixedArrayType>(type);
                 return std::make_shared<FixedArrayType>(substituteTypeArgs(a->element_type, args), a->size);
+            }
+            case TypeKind::RAW_ARRAY: {
+                auto a = std::dynamic_pointer_cast<RawArrayType>(type);
+                return std::make_shared<RawArrayType>(substituteTypeArgs(a->element_type, args));
             }
             default:
                 return type;

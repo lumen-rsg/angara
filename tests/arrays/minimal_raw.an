@@ -1,0 +1,4 @@
+// Minimal test
+func main() {
+    let arr as f64[] = [1.0, 2.0, 3.0];
+}

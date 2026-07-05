@@ -1,0 +1,19 @@
+// Exact reproduction attempt
+func main() {
+    let arr as f64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
+
+    let first = arr[0];
+    let third = arr[2];
+    println("arr[0] = ", first);
+    println("arr[2] = ", third);
+
+    let n = len(arr);
+    println("len = ", n);
+
+    arr[1] = 99.0;
+    println("arr[1] = ", arr[1]);
+
+    arr.push(42.0);
+    println("after push: len = ", len(arr));
+    println("arr[5] = ", arr[5]);
+}

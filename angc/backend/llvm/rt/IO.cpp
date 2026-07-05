@@ -38,6 +38,7 @@ void RuntimeBuilder::generateMiscOps() {
         auto* not_obj_bb = BasicBlock::Create(m_ctx, "not_obj", fn);
         auto* obj_is_string_bb = BasicBlock::Create(m_ctx, "obj_is_string", fn);
         auto* obj_is_list_bb = BasicBlock::Create(m_ctx, "obj_is_list", fn);
+        auto* obj_is_raw_array_bb = BasicBlock::Create(m_ctx, "obj_is_raw_array", fn);  // SIMD-1
         auto* default_bb = BasicBlock::Create(m_ctx, "default", fn);
 
         auto* is_obj = b.CreateICmpEQ(tag, ConstantInt::get(i32_ty, TAG_OBJ));
@@ -48,9 +49,10 @@ void RuntimeBuilder::generateMiscOps() {
         auto* ptr_i64 = bo.CreateBitCast(payload, i64_ty);
         auto* obj_ptr = bo.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
         auto* obj_type = bo.CreateLoad(i32_ty, bo.CreateStructGEP(m_obj_header_type, obj_ptr, 0));
-        auto* sw = bo.CreateSwitch(obj_type, default_bb, 2);
+        auto* sw = bo.CreateSwitch(obj_type, default_bb, 3);
         sw->addCase(ConstantInt::get(i32_ty, OBJ_STRING), obj_is_string_bb);
         sw->addCase(ConstantInt::get(i32_ty, OBJ_LIST), obj_is_list_bb);
+        sw->addCase(ConstantInt::get(i32_ty, OBJ_RAW_ARRAY), obj_is_raw_array_bb);  // SIMD-1
 
         IRBuilder<> bs(obj_is_string_bb);
         auto* str_ptr = bs.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
@@ -67,6 +69,15 @@ void RuntimeBuilder::generateMiscOps() {
         result2 = bl.CreateInsertValue(result2, ConstantInt::get(i32_ty, TAG_I64), {0});
         result2 = bl.CreateInsertValue(result2, count, {1});
         bl.CreateRet(result2);
+
+        // SIMD-1: raw array — read count field (same layout as list, field 1)
+        IRBuilder<> bra(obj_is_raw_array_bb);
+        auto* ra_ptr = bra.CreateIntToPtr(ptr_i64, PointerType::get(m_ctx, 0));
+        auto* ra_count = bra.CreateLoad(i64_ty, bra.CreateStructGEP(m_raw_array_type, ra_ptr, 1), "ra_count");
+        Value* result3 = UndefValue::get(obj_ty);
+        result3 = bra.CreateInsertValue(result3, ConstantInt::get(i32_ty, TAG_I64), {0});
+        result3 = bra.CreateInsertValue(result3, ra_count, {1});
+        bra.CreateRet(result3);
 
         IRBuilder<> bn(not_obj_bb);
         Value* zero_val = UndefValue::get(obj_ty);

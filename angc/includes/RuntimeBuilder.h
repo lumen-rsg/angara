@@ -36,6 +36,7 @@ static constexpr int OBJ_DATA_INSTANCE   = 10;
 static constexpr int OBJ_ENUM_INSTANCE   = 11;
 static constexpr int OBJ_BOUND_METHOD    = 12;
 static constexpr int OBJ_TRAIT_OBJECT    = 13;  // TS-1: value viewed through a trait/contract
+static constexpr int OBJ_RAW_ARRAY       = 14;  // SIMD-1: unboxed dynamic array (f64[], i64[], ...)
 
 /// Generates all runtime types and functions as LLVM IR directly into the module.
 /// This eliminates the need for an external runtime library — the runtime is
@@ -82,8 +83,10 @@ public:
     llvm::StructType* getMutexType()      const { return m_mutex_type; }
     /// Returns the AngaraBoundMethod struct type.
     llvm::StructType* getBoundMethodType() const { return m_bound_method_type; }
-    /// TS-1: Returns the AngaraTraitObject struct type.
-    llvm::StructType* getTraitObjectType() const { return m_trait_object_type; }
+        /// TS-1: Returns the AngaraTraitObject struct type.
+        llvm::StructType* getTraitObjectType() const { return m_trait_object_type; }
+        /// SIMD-1: Returns the AngaraRawArray struct type.
+        llvm::StructType* getRawArrayType() const { return m_raw_array_type; }
 
     // --- Runtime function accessors ---
 
@@ -94,9 +97,13 @@ public:
     llvm::FunctionCallee getFuncListNew()         const { return m_fn_list_new; }
     llvm::FunctionCallee getFuncListNewWithElem() const { return m_fn_list_new_with_elements; }
     llvm::FunctionCallee getFuncListPush()        const { return m_fn_list_push; }
-    llvm::FunctionCallee getFuncListGet()         const { return m_fn_list_get; }
-    llvm::FunctionCallee getFuncListSet()         const { return m_fn_list_set; }
-    llvm::FunctionCallee getFuncRecordNew()       const { return m_fn_record_new; }
+        llvm::FunctionCallee getFuncListGet()         const { return m_fn_list_get; }
+        llvm::FunctionCallee getFuncListSet()         const { return m_fn_list_set; }
+        // SIMD-1: unboxed dynamic array operations
+        llvm::FunctionCallee getFuncRawArrayNew()     const { return m_fn_raw_array_new; }
+        llvm::FunctionCallee getFuncRawArrayPush()    const { return m_fn_raw_array_push; }
+        llvm::FunctionCallee getFuncRawArrayLen()     const { return m_fn_raw_array_len; }
+        llvm::FunctionCallee getFuncRecordNew()       const { return m_fn_record_new; }
     llvm::FunctionCallee getFuncRecordGet()       const { return m_fn_record_get; }
     llvm::FunctionCallee getFuncRecordSet()       const { return m_fn_record_set; }
     llvm::FunctionCallee getFuncEquals()          const { return m_fn_equals; }
@@ -180,8 +187,10 @@ private:
     void generateMemoryManagement();
     /// Generates string allocation, concatenation, repetition, and to_string.
     void generateStringOps();
-    /// Generates list allocation, push, get, and set operations.
-    void generateListOps();
+        /// Generates list allocation, push, get, and set operations.
+        void generateListOps();
+        /// SIMD-1: Generates unboxed dynamic array allocation, push, and len.
+        void generateRawArrayOps();
     /// Generates record allocation, get, and set operations.
     void generateRecordOps();
     /// Generates type conversion functions (to_i64, to_f64, to_bool, typeof).
@@ -233,8 +242,9 @@ private:
     llvm::StructType* m_thread_type = nullptr;
     llvm::StructType* m_mutex_type = nullptr;
     llvm::StructType* m_bound_method_type = nullptr;
-    llvm::StructType* m_trait_object_type = nullptr;  // TS-1
-    llvm::StructType* m_native_instance_type = nullptr;
+        llvm::StructType* m_trait_object_type = nullptr;  // TS-1
+        llvm::StructType* m_raw_array_type = nullptr;      // SIMD-1
+        llvm::StructType* m_native_instance_type = nullptr;
 
     llvm::FunctionCallee m_fn_string_from_c;
     llvm::FunctionCallee m_fn_string_concat;
@@ -244,9 +254,13 @@ private:
     llvm::FunctionCallee m_fn_list_new;
     llvm::FunctionCallee m_fn_list_new_with_elements;
     llvm::FunctionCallee m_fn_list_push;
-    llvm::FunctionCallee m_fn_list_get;
-    llvm::FunctionCallee m_fn_list_set;
-    llvm::FunctionCallee m_fn_record_new;
+        llvm::FunctionCallee m_fn_list_get;
+        llvm::FunctionCallee m_fn_list_set;
+        // SIMD-1: unboxed dynamic array runtime functions
+        llvm::FunctionCallee m_fn_raw_array_new;
+        llvm::FunctionCallee m_fn_raw_array_push;
+        llvm::FunctionCallee m_fn_raw_array_len;
+        llvm::FunctionCallee m_fn_record_new;
     llvm::FunctionCallee m_fn_record_get;
     llvm::FunctionCallee m_fn_record_set;
     llvm::FunctionCallee m_fn_equals;

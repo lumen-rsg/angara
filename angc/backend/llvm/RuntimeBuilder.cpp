@@ -29,6 +29,7 @@ void RuntimeBuilder::generateRuntime() {
     generateEquality();
     generateObjectHash();
     generateListOps();
+    generateRawArrayOps();  // SIMD-1
     generateRecordOps();
     generateConversions();
     generateDeepClone();
@@ -134,6 +135,17 @@ void RuntimeBuilder::generateTypes() {
         m_angara_obj_type,            // receiver: the concrete instance
         PointerType::get(m_ctx, 0)    // vtable_ptr: -> [n x ptr] function pointers
     }, "AngaraTraitObject");
+
+    // SIMD-1: unboxed dynamic array — same shape as AngaraList but the element
+    // buffer is raw typed (not AngaraObject[]).  elem_size records sizeof(T) so
+    // the runtime functions can GEP correctly for any element type.
+    m_raw_array_type = StructType::create(m_ctx, {
+        m_obj_header_type,              // field 0: header
+        Type::getInt64Ty(m_ctx),        // field 1: count
+        Type::getInt64Ty(m_ctx),        // field 2: capacity
+        Type::getInt64Ty(m_ctx),        // field 3: elem_size (sizeof(T))
+        PointerType::get(m_ctx, 0)      // field 4: ptr → raw T[] elements
+    }, "AngaraRawArray");
 
     m_native_instance_type = StructType::create(m_ctx, {
         m_obj_header_type,
