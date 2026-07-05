@@ -121,7 +121,8 @@ TEST(integer_with_underscores) {
     auto tokens = scan("1_000_000");
     ASSERT_EQ(tokens.size(), 2u);
     ASSERT_EQ(tokens[0].type, TokenType::NUMBER_INT);
-    ASSERT_EQ(tokens[0].lexeme, "1_000_000");
+    // LANG-6: underscore separators are stripped from the lexeme
+    ASSERT_EQ(tokens[0].lexeme, "1000000");
 }
 
 TEST(string_literal) {
@@ -387,14 +388,16 @@ TEST(hex_with_underscores) {
     auto tokens = scan("0xFF_FF");
     ASSERT_EQ(tokens.size(), 2u);
     ASSERT_EQ(tokens[0].type, TokenType::NUMBER_INT);
-    ASSERT_EQ(tokens[0].lexeme, "0xFF_FF");
+    // LANG-6: underscore separators are stripped from the lexeme
+    ASSERT_EQ(tokens[0].lexeme, "0xFFFF");
 }
 
 TEST(binary_with_underscores) {
     auto tokens = scan("0b1010_1100");
     ASSERT_EQ(tokens.size(), 2u);
     ASSERT_EQ(tokens[0].type, TokenType::NUMBER_INT);
-    ASSERT_EQ(tokens[0].lexeme, "0b1010_1100");
+    // LANG-6: underscore separators are stripped from the lexeme
+    ASSERT_EQ(tokens[0].lexeme, "0b10101100");
 }
 
 TEST(float_with_many_decimals) {
@@ -518,6 +521,156 @@ TEST(operator_disambiguation) {
     ASSERT_EQ(tokens[3].type, TokenType::GREATER);
     ASSERT_EQ(tokens[4].type, TokenType::GREATER_EQUAL);
     ASSERT_EQ(tokens[5].type, TokenType::RSHIFT);
+}
+
+// ── LANG-6: Octal literals ──
+
+TEST(octal_literal) {
+    auto tokens = scan("0o777");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::NUMBER_INT);
+    ASSERT_EQ(tokens[0].lexeme, "0o777");
+}
+
+TEST(octal_literal_small) {
+    auto tokens = scan("0o10");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::NUMBER_INT);
+    ASSERT_EQ(tokens[0].lexeme, "0o10");
+}
+
+TEST(octal_literal_zero) {
+    auto tokens = scan("0o0");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::NUMBER_INT);
+    ASSERT_EQ(tokens[0].lexeme, "0o0");
+}
+
+TEST(octal_with_underscores) {
+    auto tokens = scan("0o7_7_7");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::NUMBER_INT);
+    // LANG-6: underscore separators are stripped from the lexeme
+    ASSERT_EQ(tokens[0].lexeme, "0o777");
+}
+
+// ── LANG-6: Float exponents ──
+
+TEST(float_exponent_e) {
+    auto tokens = scan("1e10");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::NUMBER_FLOAT);
+    ASSERT_EQ(tokens[0].lexeme, "1e10");
+}
+
+TEST(float_exponent_negative) {
+    auto tokens = scan("3.14e-2");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::NUMBER_FLOAT);
+    ASSERT_EQ(tokens[0].lexeme, "3.14e-2");
+}
+
+TEST(float_exponent_uppercase) {
+    auto tokens = scan("1.5E+3");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::NUMBER_FLOAT);
+    ASSERT_EQ(tokens[0].lexeme, "1.5E+3");
+}
+
+TEST(float_exponent_integer_base) {
+    // Exponent without fractional part: 2e0 is a float.
+    auto tokens = scan("2e0");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::NUMBER_FLOAT);
+    ASSERT_EQ(tokens[0].lexeme, "2e0");
+}
+
+// ── LANG-6: Numeric suffixes ──
+
+TEST(numeric_suffix_u8) {
+    auto tokens = scan("42u8");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::NUMBER_INT);
+    ASSERT_EQ(tokens[0].lexeme, "42");
+    ASSERT_EQ(tokens[0].suffix, LiteralSuffix::U8);
+}
+
+TEST(numeric_suffix_i32) {
+    auto tokens = scan("100i32");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::NUMBER_INT);
+    ASSERT_EQ(tokens[0].lexeme, "100");
+    ASSERT_EQ(tokens[0].suffix, LiteralSuffix::I32);
+}
+
+TEST(numeric_suffix_hex) {
+    auto tokens = scan("0xFFu16");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::NUMBER_INT);
+    ASSERT_EQ(tokens[0].lexeme, "0xFF");
+    ASSERT_EQ(tokens[0].suffix, LiteralSuffix::U16);
+}
+
+TEST(numeric_suffix_with_underscores) {
+    auto tokens = scan("1_000u64");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::NUMBER_INT);
+    ASSERT_EQ(tokens[0].lexeme, "1000");
+    ASSERT_EQ(tokens[0].suffix, LiteralSuffix::U64);
+}
+
+TEST(numeric_suffix_i64) {
+    auto tokens = scan("42i64");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::NUMBER_INT);
+    ASSERT_EQ(tokens[0].lexeme, "42");
+    ASSERT_EQ(tokens[0].suffix, LiteralSuffix::I64);
+}
+
+// ── LANG-6: Raw strings ──
+
+TEST(raw_string) {
+    auto tokens = scan("r\"hello\\nworld\"");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::RAW_STRING);
+    // Backslash-n is stored literally, not as a newline
+    ASSERT_EQ(tokens[0].lexeme, "hello\\nworld");
+}
+
+TEST(raw_string_windows_path) {
+    auto tokens = scan("r\"C:\\Users\\angara\\docs\"");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::RAW_STRING);
+    ASSERT_EQ(tokens[0].lexeme, "C:\\Users\\angara\\docs");
+}
+
+TEST(raw_string_empty) {
+    auto tokens = scan("r\"\"");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::RAW_STRING);
+}
+
+// ── LANG-6: Byte strings ──
+
+TEST(byte_string) {
+    auto tokens = scan("b\"hello\\x20world\"");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::BYTE_STRING);
+    // \x20 is a space — escape is processed
+    ASSERT_EQ(tokens[0].lexeme, "hello world");
+}
+
+TEST(byte_string_hex_escapes) {
+    auto tokens = scan("b\"\\x48\\x69\"");  // "Hi"
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::BYTE_STRING);
+    ASSERT_EQ(tokens[0].lexeme, "Hi");
+}
+
+TEST(byte_string_empty) {
+    auto tokens = scan("b\"\"");
+    ASSERT_EQ(tokens.size(), 2u);
+    ASSERT_EQ(tokens[0].type, TokenType::BYTE_STRING);
 }
 
 // MAIN() is defined in test_main.cpp

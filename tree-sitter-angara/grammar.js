@@ -513,6 +513,11 @@ module.exports = grammar({
       $.number,
       $.float,
       $.string,
+      $.raw_string,       // LANG-6
+      $.byte_string,      // LANG-6
+      $.interp_string,    // LANG-3
+      $.multiline_string,
+      $.char,             // LANG-4
       $.bool,
       $.nil,
       "this",
@@ -599,7 +604,11 @@ module.exports = grammar({
       $.dotted_pattern,
       $.identifier,
       $.number,
+      $.float,
       $.string,
+      $.raw_string,
+      $.byte_string,
+      $.char,
       $.bool,
       $.nil,
     ),
@@ -611,8 +620,18 @@ module.exports = grammar({
 
     // ── Literals ───────────────────────────────────────────
 
-    number: ($) => /\d[\d_]*/,
-    float: ($) => /\d[\d_]*\.\d[\d_]*([eE][+-]?\d+)?/,
+    // LANG-6: integer literals with optional base prefix (0x/0b/0o),
+    // underscore separators, and type suffix (i8/u8/etc.).
+    number: ($) => token(
+      /(0[xX][0-9a-fA-F][0-9a-fA-F_]*|0[bB][01][01_]*|0[oO][0-7][0-7_]*|[0-9][0-9_]*)(i8|i16|i32|i64|u8|u16|u32|u64)?/,
+    ),
+
+    // LANG-6: decimal float with optional exponent (1e10, 3.14e-2).
+    // Also matches plain decimal floats (3.14, 1_000.5).
+    float: ($) => token(
+      /[0-9][0-9_]*(\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?|[eE][+-]?[0-9][0-9_]*)/,
+    ),
+
     string: ($) => seq(
       "\"",
       repeat(choice(
@@ -621,6 +640,22 @@ module.exports = grammar({
       )),
       "\"",
     ),
+
+    // LANG-6: raw string — no escape processing
+    raw_string: ($) => token(/r"[^"\n]*"/),
+
+    // LANG-6: byte string — with escape processing, b prefix
+    byte_string: ($) => token(/b"([^"\\]|\\.)*"/),
+
+    // LANG-3: interpolated string — $"..."
+    interp_string: ($) => token(/\$"([^"\\]|\\.)*"/),
+
+    // multiline string — """..."""
+    multiline_string: ($) => token(/"""([^"]|"[^"]|""[^"])*"""/),
+
+    // LANG-4: char literal — 'x', '\n', '\x41', '\u{...}'
+    char: ($) => token(/'([^'\\]|\\.)'/),
+
     escape_sequence: ($) => token.immediate(seq("\\", /./)),
     bool: ($) => choice("true", "false"),
     nil: ($) => "nil",

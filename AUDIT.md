@@ -28,7 +28,6 @@
 
 | ID | Issue |
 |---|---|
-| LANG-6 | No raw/byte strings (`r"..."`, `b"..."`), float exponents (`1e10`), numeric suffixes (`42u8`), octal literals. |
 | LANG-8 | No generic enums (`enum Result<T,E>`) — only `data` and `func` are generic. |
 | LANG-10 | No tuples / tuple types / multi-return; no destructuring (assign, pattern, or `for (k, v in map)`). |
 | LANG-11 | No default arguments; no named arguments. |
