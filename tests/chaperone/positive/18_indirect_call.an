@@ -1,0 +1,32 @@
+// Chaperone positive test — indirect call through function pointer (LOW3).
+// f is a variable holding a function pointer to borrow(), which does not drop
+// its argument. The Chaperone cannot statically resolve indirect calls, so it
+// treats them as Borrowed (conservative). The caller remains responsible for
+// dropping the argument — no false positive here since borrow() genuinely
+// borrows.
+//
+// Note: if the indirect callee actually consumes (drops) its argument, the
+// Chaperone will NOT detect the subsequent double-free at the call site.
+// This is a known limitation — indirect calls are treated as Unknown/Borrowed.
+// Use @unsafe to suppress false positives when calling through function
+// pointers that are known to consume.
+//
+// exit: 0
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+// Regular function: borrows tracked param (does not drop).
+func borrow(b as Buf) -> nil {
+    // b is borrowed, not dropped
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let f = borrow;      // f: function(Buf) -> nil
+    f(b);                // indirect call — Chaperone treats as Borrowed
+    drop b;              // ok: b genuinely only borrowed
+    return 0;
+}
