@@ -552,6 +552,8 @@ LLVMBackend::LocalKind LLVMBackend::ffiKindForType(const std::shared_ptr<Type>& 
     }
     // Pointer types (*T, *void) marshal as a C pointer.
     if (type->kind == TypeKind::POINTER) return LocalKind::RAW_PTR;
+    // SIMD-4: unboxed dynamic arrays pass as raw element pointer (e.g., f64[] → double*)
+    if (type->kind == TypeKind::RAW_ARRAY) return LocalKind::RAW_PTR;
     return LocalKind::BOXED;
 }
 
@@ -560,6 +562,8 @@ LLVMBackend::LocalKind LLVMBackend::ffiKindForType(const std::shared_ptr<Type>& 
 bool LLVMBackend::isFFIMarshallable(const std::shared_ptr<Type>& type) {
     if (!type) return false;
     if (type->kind == TypeKind::POINTER) return true;
+    // SIMD-4: unboxed dynamic arrays are marshallable as element pointers
+    if (type->kind == TypeKind::RAW_ARRAY) return true;
     if (type->kind == TypeKind::PRIMITIVE) {
         const auto& n = type->toString();
         return n == "string" || n == "bool" || isInteger(type) || isFloat(type);
@@ -623,6 +627,11 @@ llvm::Type* LLVMBackend::resolveCFieldType(const std::shared_ptr<Type>& type) {
     if (type->kind == TypeKind::FIXED_ARRAY) {
         auto arr = std::dynamic_pointer_cast<FixedArrayType>(type);
         return llvm::ArrayType::get(resolveCFieldType(arr->element_type), arr->size);
+    }
+    // SIMD-4: unboxed dynamic array → pointer to element type (e.g., f64[] → double*)
+    if (type->kind == TypeKind::RAW_ARRAY) {
+        auto raw_arr = std::dynamic_pointer_cast<RawArrayType>(type);
+        return llvm::PointerType::get(resolveCFieldType(raw_arr->element_type), 0);
     }
     if (type->kind == TypeKind::DATA) {
         auto dt = std::dynamic_pointer_cast<DataType>(type);
@@ -724,6 +733,16 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
         }
         // Pointer is stored as NativeInstance — extract the raw data pointer
         return callRtByName("__ang_api_native_instance_data", {obj});
+    }
+    // SIMD-4: unboxed dynamic array → raw element buffer pointer
+    // AngaraRawArray = { ObjHeader, i64 count, i64 capacity, i64 elem_size, ptr buf }
+    // The boxed payload is ptrtoint(heap_ptr), so unbox to get the struct pointer,
+    // then GEP to field 4 (the element buffer pointer).
+    if (type->kind == TypeKind::RAW_ARRAY) {
+        auto* arr_ptr = builder->CreateIntToPtr(getI64(obj), llvm::PointerType::get(*ctx, 0));
+        auto* buf_ptr = builder->CreateLoad(llvm::PointerType::get(*ctx, 0),
+            builder->CreateStructGEP(rt->getRawArrayType(), arr_ptr, 4), "raw_buf");
+        return buf_ptr;
     }
     if (type->kind == TypeKind::FUNCTION) {
         // Angara closure → C function pointer via trampoline + context

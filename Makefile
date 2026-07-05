@@ -243,6 +243,11 @@ else
 	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lm -o $@
 endif
 
+build/modules/simd.$(SO_EXT): build/obj/modules/simd/simd.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
+
 build/modules/sys.$(SO_EXT): build/obj/modules/system/sys.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"

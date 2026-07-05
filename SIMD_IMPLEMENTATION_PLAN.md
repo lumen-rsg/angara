@@ -641,7 +641,7 @@ type — assignment copies the reference, not the data.
 | 2.2 | @inline codegen | ✅ done |
 | 2.3 | @inline tests | ✅ done |
 | 3 | Auto-vectorization verification | ✅ done |
-| 4 | SIMD intrinsics | deferred |
+| 4 | SIMD intrinsics | ✅ done |
 | 5 | Vector types | deferred |
 
 ---

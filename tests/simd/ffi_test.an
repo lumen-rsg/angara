@@ -1,0 +1,56 @@
+// Phase 4: SIMD intrinsics via FFI — verification test
+// =============================================================================
+// Tests manually vectorized NEON/SSE functions (modules/simd/simd.c) called
+// via `foreign func` with f64[] parameters.
+//
+// Build & run:
+//   1. clang -c -o simd.o modules/simd/simd.c
+//   2. angc tests/simd/ffi_test.an -l simd.o -o test_simd
+//   3. ./test_simd
+//
+// Verification:
+//   - objdump -d simd.o | grep fmla   → NEON FMA instructions
+//   - objdump -d simd.o | grep fadd   → NEON vector add
+//   - objdump -d simd.o | grep fmul   → NEON vector multiply
+// =============================================================================
+
+foreign func simd_f64x4_dot(n as i64, a as f64[], b as f64[]) -> f64;
+foreign func simd_f64x4_add(n as i64, a as f64[], b as f64[], out as f64[]);
+foreign func simd_f64x4_mul(n as i64, a as f64[], b as f64[], out as f64[]);
+foreign func simd_f64x4_fma(n as i64, a as f64, x as f64[], y as f64[]);
+
+export func main() -> i64 {
+    let n = 8;
+    let a as f64[] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let b as f64[] = [8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0];
+
+    // ── dot product ──────────────────────────────────────────────────────
+    // 1*8 + 2*7 + 3*6 + 4*5 + 5*4 + 6*3 + 7*2 + 8*1 = 120
+    let dp = simd_f64x4_dot(n, a, b);
+    if ((dp as i64) != 120) { return 1; }
+
+    // ── element-wise add ─────────────────────────────────────────────────
+    let add_out as f64[] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    simd_f64x4_add(n, a, b, add_out);
+    if ((add_out[0] as i64) != 9) { return 2; }
+    if ((add_out[3] as i64) != 9) { return 3; }
+    if ((add_out[7] as i64) != 9) { return 4; }
+
+    // ── element-wise multiply ────────────────────────────────────────────
+    let mul_out as f64[] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    simd_f64x4_mul(n, a, b, mul_out);
+    if ((mul_out[0] as i64) != 8)  { return 5; }
+    if ((mul_out[1] as i64) != 14) { return 6; }
+    if ((mul_out[7] as i64) != 8)  { return 7; }
+
+    // ── fused multiply-add (SAXPY) ───────────────────────────────────────
+    let x as f64[] = [1.0, 2.0, 3.0, 4.0];
+    let y as f64[] = [5.0, 6.0, 7.0, 8.0];
+    simd_f64x4_fma(4, 2.0, x, y);
+    if ((y[0] as i64) != 7)  { return 8; }
+    if ((y[1] as i64) != 10) { return 9; }
+    if ((y[2] as i64) != 13) { return 10; }
+    if ((y[3] as i64) != 16) { return 11; }
+
+    return 0;
+}
