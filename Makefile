@@ -309,6 +309,7 @@ build/modules/args.$(SO_EXT): build/obj/modules/data/args.o
 build/modules/assert.$(SO_EXT): build/obj/modules/testing/assert.o
 
 build/modules/io.$(SO_EXT) build/modules/term.$(SO_EXT) build/modules/color.$(SO_EXT) \
+build/modules/log.$(SO_EXT) \
 build/modules/os.$(SO_EXT) build/modules/env.$(SO_EXT) build/modules/process.$(SO_EXT) \
 build/modules/unistd.$(SO_EXT) build/modules/fs.$(SO_EXT) build/modules/path.$(SO_EXT) \
 build/modules/adv_string.$(SO_EXT) build/modules/regex.$(SO_EXT) build/modules/encoding.$(SO_EXT) \
