@@ -1,24 +1,18 @@
 // Chaperone negative test — E502 via InterpStringExpr (C2)
-// InterpStringExpr was previously unhandled in analyzeExpr, so a dropped/moved
-// tracked variable in `"hello {name}"` would go undetected. Must fire E502.
-//
-// Note: the type checker requires string interpolation segments to be
-// convertible to string. We use a class with a method that returns something
-// the type checker accepts in an interpolation slot. We test that the
-// Chaperone walks the interpolation expression and catches use-after-free.
+// InterpStringExpr was previously unhandled in analyzeExpr, so a dropped
+// tracked variable in an interpolated string ($"...{x}...") would go
+// undetected. Must fire E502 when the variable is used after drop.
 //
 // expect: E502
 
 class Buf {
     let v as i64;
     func init(this, x as i64) { this.v = x; }
-    public:
-    func get(this) -> i64 { return this.v; }
 }
 
 export func main() -> i64 {
     let b = Buf(42);
     drop b;
-    let s = "value is {b.get()}";  // b.get() used after b was dropped
+    let s = $"buf is {b}";  // b used after drop in interpolated string
     return 0;
 }
