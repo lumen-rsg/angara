@@ -265,6 +265,11 @@ namespace angara {
         std::string mangle(const std::string& module, const std::string& name);
         /// Produces a mangled method name: __ang_<class>_<method>.
         std::string mangleMethod(const std::string& class_name, const std::string& method);
+        /// LANG-13: resolves a method name to its mangled LLVM function for a
+        /// given type (walks the class chain via methodLookup). Returns empty
+        /// string if the type is not a class/instance or the method is not found.
+        std::string resolveMethodForType(const std::shared_ptr<Type>& type,
+                                         const std::string& method_name);
         /// Replaces non-alphanumeric characters with underscores.
         std::string sanitize(const std::string& name);
 

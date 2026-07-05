@@ -105,8 +105,32 @@ namespace angara {
                 } else if (left_type->toString() == "string" && right_type->toString() == "string") {
                     result_type = m_type_bool;
                 } else {
-                    error(expr.op, "Operator '" + expr.op.lexeme + "' requires numeric or string operands, but got '" +
-                                   left_type->toString() + "' and '" + right_type->toString() + "'.", "E355");
+                    // LANG-13: check for user-defined opCmp method on the left type.
+                    // Extract the ClassType from INSTANCE or CLASS.
+                    std::shared_ptr<ClassType> cls;
+                    if (left_type->kind == TypeKind::INSTANCE) {
+                        auto inst = std::dynamic_pointer_cast<InstanceType>(left_type);
+                        if (inst) cls = inst->class_type;
+                    } else if (left_type->kind == TypeKind::CLASS) {
+                        cls = std::dynamic_pointer_cast<ClassType>(left_type);
+                    }
+                    if (cls) {
+                        const auto* op_info = cls->findProperty("opCmp");
+                        if (op_info && op_info->type->kind == TypeKind::FUNCTION) {
+                            auto ft = std::dynamic_pointer_cast<FunctionType>(op_info->type);
+                            if (ft && ft->param_types.size() == 1 && ft->return_type->toString() == "i64") {
+                                result_type = m_type_bool;
+                            } else {
+                                error(expr.op, "Method 'opCmp' must have signature 'func opCmp(self, other) -> i64' "
+                                       "(1 parameter, returns i64).", "E420");
+                            }
+                        }
+                    }
+                    if (!result_type || result_type->kind == TypeKind::ERROR) {
+                        error(expr.op, "Operator '" + expr.op.lexeme + "' requires numeric or string operands, or a type "
+                                       "with an 'opCmp' method, but got '" +
+                                       left_type->toString() + "' and '" + right_type->toString() + "'.", "E355");
+                    }
                 }
                 break;
 
@@ -142,9 +166,32 @@ namespace angara {
                     (isNumeric(left_type) && isNumeric(right_type)))
                 {
                     result_type = m_type_bool;
-                } else {
-                    error(expr.op, "Cannot compare types '" +
-                                   left_type->toString() + "' and '" + right_type->toString() + "'.", "E357");
+                }
+                // LANG-13: check for user-defined opEquals method on the left type.
+                else {
+                    std::shared_ptr<ClassType> cls;
+                    if (left_type->kind == TypeKind::INSTANCE) {
+                        auto inst = std::dynamic_pointer_cast<InstanceType>(left_type);
+                        if (inst) cls = inst->class_type;
+                    } else if (left_type->kind == TypeKind::CLASS) {
+                        cls = std::dynamic_pointer_cast<ClassType>(left_type);
+                    }
+                    if (cls) {
+                        const auto* op_info = cls->findProperty("opEquals");
+                        if (op_info && op_info->type->kind == TypeKind::FUNCTION) {
+                            auto ft = std::dynamic_pointer_cast<FunctionType>(op_info->type);
+                            if (ft && ft->param_types.size() == 1 && ft->return_type->toString() == "bool") {
+                                result_type = m_type_bool;
+                            } else {
+                                error(expr.op, "Method 'opEquals' must have signature 'func opEquals(self, other) -> bool' "
+                                       "(1 parameter, returns bool).", "E421");
+                            }
+                        }
+                    }
+                    if (!result_type || result_type->kind == TypeKind::ERROR) {
+                        error(expr.op, "Cannot compare types '" +
+                                       left_type->toString() + "' and '" + right_type->toString() + "'.", "E357");
+                    }
                 }
                 break;
             }

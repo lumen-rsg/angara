@@ -113,7 +113,7 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 - [ ] **LANG-10** No **tuples** / tuple types / multi-return; no destructuring (assign, pattern, or `for (k, v in map)`).
 - [ ] **LANG-11** No **default arguments**; no **named arguments**.
 - [x] **LANG-12** ✅ Fixed — No **type aliases** (`type UserId = i64`).
-- [ ] **LANG-13** No **operator overloading** (`==`/`<` for user types).
+- [x] **LANG-13** ✅ Fixed — No **operator overloading** (`==`/`<` for user types). _(Magic methods `opEquals` and `opCmp` on classes: `func opEquals(self, other) -> bool` maps to `==`/`!=`; `func opCmp(self, other) -> i64` maps to `<`/`<=`/`>`/`>=`. Type checker resolves the operator to a method call when the left type has the method; codegen dispatches via `methodLookup` (same chain as regular method calls). Without `opEquals`, `==` falls through to the existing `__ang_equals` runtime (pointer identity). Without `opCmp`, `<` is the existing error E355. New error codes E420/E421 for wrong operator-method signatures. 2 new tests in `tests/lang/`.)_
 - [ ] **LANG-14** No `protected` access level (only `public`/`private`).
 
 ### Operator / syntax nits

@@ -1,0 +1,37 @@
+// LANG-13 negative: operator overloading error cases
+attach io;
+
+// Class with opCmp that has wrong return type (should be i64)
+class BadCmp {
+  public:
+    let v as i64;
+
+  public:
+    func init(this, v as i64) -> nil {
+      this.v = v;
+    }
+
+    func opCmp(this, other as BadCmp) -> bool {  // E420: should return i64
+      return true;
+    }
+}
+
+// Class without opCmp — < should still error (E355)
+class NoCmp {
+  public:
+    let v as i64;
+
+  public:
+    func init(this, v as i64) -> nil {
+      this.v = v;
+    }
+}
+
+export func main() -> i64 {
+    let c = BadCmp(1);
+    let d = BadCmp(2);
+    io.println(1, string(c < d));    // E420: opCmp wrong return type
+
+    drop c; drop d;
+    return 0;
+}

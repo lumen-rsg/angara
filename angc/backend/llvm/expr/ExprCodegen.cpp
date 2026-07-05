@@ -440,6 +440,30 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
         case TokenType::LESS_EQUAL:
         case TokenType::GREATER:
         case TokenType::GREATER_EQUAL: {
+            // LANG-13: check for user-defined opCmp method on the left type.
+            {
+                auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+                if (lt != m_type_checker.getExpressionTypes().end()) {
+                    std::string mname = resolveMethodForType(lt->second, "opCmp");
+                    if (!mname.empty()) {
+                        llvm::Function* mf = mod->getFunction(mname);
+                        if (mf) {
+                            auto* cmp_result = builder->CreateCall(mf, {l, r});
+                            auto* cmp_val = getI64(cmp_result);
+                            auto* zero = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0);
+                            llvm::Value* bool_val;
+                            switch (e.op.type) {
+                                case TokenType::LESS:        bool_val = builder->CreateICmpSLT(cmp_val, zero); break;
+                                case TokenType::LESS_EQUAL:  bool_val = builder->CreateICmpSLE(cmp_val, zero); break;
+                                case TokenType::GREATER:     bool_val = builder->CreateICmpSGT(cmp_val, zero); break;
+                                case TokenType::GREATER_EQUAL: bool_val = builder->CreateICmpSGE(cmp_val, zero); break;
+                                default: bool_val = builder->CreateICmpSLT(cmp_val, zero); break;
+                            }
+                            return makeBool(bool_val);
+                        }
+                    }
+                }
+            }
             // Check if both operands are strings (compile-time type info)
             {
                 auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
@@ -536,8 +560,33 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             phi->addIncoming(fresult,fcmpBB); phi->addIncoming(iresult,icmpBB);
             return phi;
         }
-        case TokenType::EQUAL_EQUAL: return callRtByName("__ang_equals",{l,r});
-        case TokenType::BANG_EQUAL: { auto* eq=callRtByName("__ang_equals",{l,r}); return makeBool(builder->CreateNot(getBool(eq))); }
+        // LANG-13: check for user-defined opEquals method on the left type.
+        case TokenType::EQUAL_EQUAL: {
+            auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+            if (lt != m_type_checker.getExpressionTypes().end()) {
+                std::string mname = resolveMethodForType(lt->second, "opEquals");
+                if (!mname.empty()) {
+                    llvm::Function* mf = mod->getFunction(mname);
+                    if (mf) return builder->CreateCall(mf, {l, r});
+                }
+            }
+            return callRtByName("__ang_equals",{l,r});
+        }
+        case TokenType::BANG_EQUAL: {
+            auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+            if (lt != m_type_checker.getExpressionTypes().end()) {
+                std::string mname = resolveMethodForType(lt->second, "opEquals");
+                if (!mname.empty()) {
+                    llvm::Function* mf = mod->getFunction(mname);
+                    if (mf) {
+                        auto* eq = builder->CreateCall(mf, {l, r});
+                        return makeBool(builder->CreateNot(getBool(eq)));
+                    }
+                }
+            }
+            auto* eq=callRtByName("__ang_equals",{l,r});
+            return makeBool(builder->CreateNot(getBool(eq)));
+        }
         default: return makeNil();
     }
 }

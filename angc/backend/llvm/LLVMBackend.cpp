@@ -445,6 +445,32 @@ void LLVMBackend::storeVar(const std::string& n, llvm::Value* v) {
 
 std::string LLVMBackend::mangle(const std::string& m, const std::string& n) { return "__ang_"+m+"_"+sanitize(n); }
 std::string LLVMBackend::mangleMethod(const std::string& c, const std::string& m) { return "__ang_"+sanitize(c)+"_"+sanitize(m); }
+
+// LANG-13: resolve a method name to its mangled LLVM function for a given type.
+// Walks the class chain via methodLookup, falling back to unqualified lookup.
+std::string LLVMBackend::resolveMethodForType(const std::shared_ptr<Type>& type,
+                                               const std::string& method_name) {
+    if (!type) return "";
+    std::shared_ptr<ClassType> cls;
+    if (type->kind == TypeKind::INSTANCE) {
+        auto inst = std::dynamic_pointer_cast<InstanceType>(type);
+        if (inst) cls = inst->class_type;
+    } else if (type->kind == TypeKind::CLASS) {
+        cls = std::dynamic_pointer_cast<ClassType>(type);
+    }
+    if (!cls) return "";
+    // Walk the class chain looking for a qualified key: ClassName.methodName
+    auto current = cls;
+    while (current) {
+        auto qit = methodLookup.find(current->name + "." + method_name);
+        if (qit != methodLookup.end()) return qit->second;
+        current = current->superclass;
+    }
+    // Fallback to unqualified lookup (method defined in any class)
+    auto mit = methodLookup.find(method_name);
+    if (mit != methodLookup.end()) return mit->second;
+    return "";
+}
 std::string LLVMBackend::sanitize(const std::string& n) { std::string r; for(char c:n) r+=(std::isalnum(c)||c=='_')?c:'_'; return r; }
 
 bool LLVMBackend::isSizedIntType(const std::shared_ptr<Type>& type) {
