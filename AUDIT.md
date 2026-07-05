@@ -134,14 +134,14 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 | - [x] **LIB-2** | ✅ Fixed | High | **JWT is insecure.** `verify` doesn't check the `alg` header (alg-confusion); `base64url_decode` writes into a fixed 64-byte stack buffer → stack overflow on crafted input. | `modules/crypto/jwt.c` |
 | - [x] **LIB-3** | ✅ Fixed | High | **Only one real collection (`list`) + `record` (string-keyed map).** `collections.an` is an O(n²) LINQ layer (bubble `SortBy`, linear `Distinct`/`Contains`) — no Map/Set/Queue/Stack/Tree. _(Map/Set added to `modules/collections/collections.an`: `MapNew`/`MapPut`/`MapGet`/`MapHas`/`MapRemove`/`MapSize`/`MapKeys`/`MapValues` and `SetNew`/`SetAdd`/`SetHas`/`SetRemove`/`SetSize`/`SetItems`. Hash-bucketed (16 buckets) over parallel key/value lists, using the new `hash()` builtin + deep `==` (TS-2 Phase 2c), so keys may be any hashable type (scalars, strings, structural objects). The LINQ layer's O(n²) algorithms remain — improving them (or adding Queue/Stack/Tree) is follow-up.)_ | `modules/collections/collections.an` |
 | - [ ] **LIB-4** | 🟡 Source | Medium | No **async I/O / event loop / futures / channels** — only raw pthreads (and those race the GC). Servers fake async with threads. | — |
-| - [ ] **LIB-5** | 🟡 Source | Medium | **IPv4-only** sockets (`AF_INET` hardcoded); no IPv6. | `modules/net/net.c` |
+| - [x] **LIB-5** | ✅ Fixed | Medium | **IPv4-only** sockets (`AF_INET` hardcoded); no IPv6. | `modules/net/net.c` |
 | - [ ] **LIB-6** | 🟡 Source | Medium | **No HTTP server** (websocket server is a no-op-`close` PoC). | `modules/net/websocket.c` |
-| - [ ] **LIB-7** | 🟡 Source | Medium | Module C-API sharp edges: `incref`/`decref` documented as refcounting but actually pin/unpin one bit; `throw_error` not `noreturn` (modules must `return ang_nil()` after); native calls don't auto-validate arg types. | `angc/includes/Angara.h:155-156,166`; `ModuleAPI.cpp` |
+| - [x] **LIB-7** | ✅ Fixed (partial) | Medium | Module C-API sharp edges: ~~`incref`/`decref` documented as refcounting~~ → now says pin/unpin; ~~`throw_error` not `noreturn`~~ → now `__attribute__((__noreturn__))`; native calls still don't auto-validate arg types (deferred — needs compiler-side dispatcher changes). | `angc/includes/Angara.h:155-156,166`; `ModuleAPI.cpp` |
 | - [ ] **LIB-8** | 🟡 Source | Medium | DB drivers: sqlite only (+ its finalizer never runs due to BUG-6). No Postgres/MySQL/Redis, no connection pooling, no explicit transaction API. | `modules/data/sqlite.c` |
 | - [x] **LIB-9** | ✅ Fixed | Medium | Module quality bugs: `net/rpc.c` server leaks accepted fds; `net/websocket.c::close` is a no-op; `system/process.c::run` drops the computed `exit_code`; `data/sort.c` is O(n²) insertion sort; `text/encoding.c::base32_encode` buggy shift logic; `system/os.c::run` is a shell-injection sink. | respective files |
 | - [ ] **LIB-10** | 🟡 Source | Low | No logging module; no string formatting (`sprintf`); no real CLI/arg parser (subcommands/help); no YAML/protobuf/msgpack; no big integers; `adv_string` is byte-wise (corrupts multibyte UTF-8). | — |
 | - [ ] **LIB-11** | 🟡 Source | Low | No file watching (inotify/kqueue); no zstd/bzip2/xz exposure; date/time is UTC-only (no timezone DB). | — |
-| - [ ] **LIB-12** | 🟡 Source | Low | `testing/assert.c` is minimal (throw-on-fail only, no runner/fixtures). | `modules/testing/assert.c` |
+| - [x] **LIB-12** | ✅ Fixed | Low | `testing/assert.c` is minimal (throw-on-fail only, no runner/fixtures). | `modules/testing/assert.c` |
 
 ---
 
