@@ -1,4 +1,5 @@
 #include "../../includes/BuildSystem.h"
+#include "CLI.h"
 #include "CompilerDriver.h"
 #include "Colors.h"
 #include "StringUtils.h"
@@ -15,8 +16,8 @@ namespace fs = std::filesystem;
 namespace angara {
 
     BuildSystem::BuildSystem()
-        : m_native_lib_path(m_angara_home + "/modules"),
-          m_std_lib_path(m_angara_home + "/src/modules")
+        : m_native_lib_path(angara_home() + "/modules"),
+          m_std_lib_path(angara_home() + "/src/modules")
     {}
 
     static constexpr const char* SO_EXT = ANGARA_SO_EXT;

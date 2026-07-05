@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -9,6 +10,13 @@ namespace angara {
 inline constexpr const char* ANGC_VERSION    = "5.1.0";
 inline constexpr const char* BACKEND_VERSION = "4.1.0";
 inline constexpr const char* ANGARA_SPEC     = "v3.1.2";
+
+/// Returns the Angara installation directory.
+/// Checks $ANGARA_HOME first; falls back to /opt/angara.
+inline std::string angara_home() {
+    const char* env = std::getenv("ANGARA_HOME");
+    return env ? std::string(env) : "/opt/angara";
+}
 
 /// Parsed CLI flags (target triple, output, warnings, etc.).
 struct CliFlags {

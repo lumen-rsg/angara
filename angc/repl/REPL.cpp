@@ -109,11 +109,11 @@ void REPL::processInput(const std::string& input) {
     CompilerDriver driver;
     driver.set_check_only(false);
 
-    std::string native_mod_path = "/opt/angara/modules";
+    std::string native_mod_path = angara_home() + "/modules";
     if (std::filesystem::exists("build/modules")) {
         native_mod_path = std::filesystem::absolute("build/modules").string();
     }
-    driver.set_paths("/opt/angara/src/modules", native_mod_path);
+    driver.set_paths(angara_home() + "/src/modules", native_mod_path);
 
     std::string base_name = "repl_" + std::to_string(m_line_count);
     TypeChecker typeChecker(driver, errorHandler, base_name);

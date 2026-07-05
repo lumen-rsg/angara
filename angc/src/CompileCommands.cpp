@@ -45,11 +45,11 @@ int angara::CLI::cmdCheck(const std::string& file) {
     if (m_flags.werror) driver.set_warnings_as_errors(true);
     for (const auto& w : m_flags.suppress_warnings) driver.suppress_warning(w);
 
-    std::string native_mod_path = "/opt/angara/modules";
+    std::string native_mod_path = angara_home() + "/modules";
     if (fs::exists("build/modules")) {
         native_mod_path = fs::absolute("build/modules").string();
     }
-    driver.set_paths("/opt/angara/src/modules", native_mod_path);
+    driver.set_paths(angara_home() + "/src/modules", native_mod_path);
 
     angara::ProjectConfig config;
     config.name = base_name;
@@ -132,11 +132,11 @@ int angara::CLI::cmdCompileSingleFile(const std::string& source_file) {
     // so incremental caching works.
     driver.set_build_dir(".angara/build/obj");
 
-    std::string native_mod_path = "/opt/angara/modules";
+    std::string native_mod_path = angara_home() + "/modules";
     if (fs::exists("build/modules")) {
         native_mod_path = fs::absolute("build/modules").string();
     }
-    driver.set_paths("/opt/angara/src/modules", native_mod_path);
+    driver.set_paths(angara_home() + "/src/modules", native_mod_path);
 
     if (!m_flags.error_format.empty()) driver.set_error_format(m_flags.error_format);
 
@@ -199,7 +199,7 @@ int angara::CLI::cmdCompileSingleFile(const std::string& source_file) {
     for (const auto& lib : libs) {
         std::string mod_path;
         std::string local_mod = (fs::path("build/modules") / (lib + ANGARA_NATIVE_EXT)).string();
-        std::string installed_mod = "/opt/angara/modules/" + lib + ANGARA_NATIVE_EXT;
+        std::string installed_mod = angara_home() + "/modules/" + lib + ANGARA_NATIVE_EXT;
         if (fs::exists(local_mod)) {
             mod_path = fs::absolute(local_mod).string();
         } else if (fs::exists(installed_mod)) {
@@ -222,7 +222,7 @@ int angara::CLI::cmdCompileSingleFile(const std::string& source_file) {
         // relocation model). Freestanding/nostdlib builds stay non-PIE.
         cmd_link << " -fPIE -pie";
         cmd_link << " -pthread -lm -Wno-return-type";
-        cmd_link << " -Wl,-rpath,/opt/angara/modules";
+        cmd_link << " -Wl,-rpath," << angara_home() << "/modules";
     }
 
     this->verbose("Link command: " + cmd_link.str());

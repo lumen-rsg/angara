@@ -445,7 +445,7 @@ void LSPServer::analyzeDocument(const std::string& uri) {
             driver.set_check_only(true);
             driver.set_quiet(true);
 
-            std::string native_mod_path = "/opt/angara/modules";
+            std::string native_mod_path = angara_home() + "/modules";
             if (!m_workspace_root.empty()) {
                 auto p = fs::path(m_workspace_root) / "build/modules";
                 if (fs::exists(p)) {
@@ -454,7 +454,7 @@ void LSPServer::analyzeDocument(const std::string& uri) {
             } else if (fs::exists("build/modules")) {
                 native_mod_path = fs::absolute("build/modules").string();
             }
-            driver.set_paths("/opt/angara/src/modules", native_mod_path);
+            driver.set_paths(angara_home() + "/src/modules", native_mod_path);
 
             std::string base_name = CompilerDriver::get_base_name(doc.path);
             TypeChecker typeChecker(driver, errorHandler, base_name);

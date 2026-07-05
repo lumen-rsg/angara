@@ -6,7 +6,7 @@
 namespace fs = std::filesystem;
 namespace angara {
 void list_modules() {
-    const std::string mod_path = "/opt/angara/modules";
+    const std::string mod_path = angara_home() + "/modules";
     std::cout << CLR_BOLD << "Installed Native Modules:" << CLR_RESET << "\n";
     std::cout << CLR_GRAY << "  Path: " << mod_path << CLR_RESET << "\n\n";
 

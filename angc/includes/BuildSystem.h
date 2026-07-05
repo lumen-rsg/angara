@@ -53,7 +53,6 @@ namespace angara {
         void set_force_rebuild(bool v) { m_force_rebuild = v; }
 
     private:
-        const std::string m_angara_home = "/opt/angara";
         const std::string m_native_lib_path;
         const std::string m_std_lib_path;
 
