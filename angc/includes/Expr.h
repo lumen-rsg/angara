@@ -21,6 +21,7 @@ namespace angara {
     struct Grouping;
     struct Literal;
     struct Unary;
+    struct NestedPattern;  // nested constructor pattern in match expressions
     struct VarExpr;
     struct AssignExpr;
     struct UpdateExpr;
@@ -71,6 +72,7 @@ namespace angara {
         virtual std::any visit(const RangeExpr& expr) = 0;
         virtual std::any visit(const InterpStringExpr& expr) = 0;
         virtual std::any visit(const TupleExpr& expr) = 0;  // LANG-10
+        virtual std::any visit(const NestedPattern& expr) = 0;  // nested constructor pattern in match
 
     };
 
@@ -316,6 +318,31 @@ namespace angara {
                 : op(std::move(op)), right(std::move(right)) {}
 
         std::any accept(ExprVisitor &visitor) const override {
+            return visitor.visit(*this);
+        }
+    };
+
+    // A nested constructor pattern: Variant(subpattern1, subpattern2, ...)
+    // Used in match expressions for deep destructuring, e.g.:
+    //   case Ok(Some(v)): ...
+    // The `constructor` is the outer variant (e.g. GetExpr for Result.Ok).
+    // `subpatterns` are the nested patterns (may themselves be NestedPattern,
+    // VarExpr, Literal, or GetExpr for leaf constructor patterns).
+    // `bindings` are the variable names bound at this level (for leaf
+    // constructor patterns that also name bindings, like Circle(r)).
+    struct NestedPattern : Expr {
+        const std::shared_ptr<Expr> constructor;
+        const std::vector<std::shared_ptr<Expr>> subpatterns;
+        const std::vector<Token> bindings;  // variable names bound at this level
+
+        NestedPattern(std::shared_ptr<Expr> constructor,
+                      std::vector<std::shared_ptr<Expr>> subpatterns,
+                      std::vector<Token> bindings)
+            : constructor(std::move(constructor)),
+              subpatterns(std::move(subpatterns)),
+              bindings(std::move(bindings)) {}
+
+        std::any accept(ExprVisitor& visitor) const override {
             return visitor.visit(*this);
         }
     };

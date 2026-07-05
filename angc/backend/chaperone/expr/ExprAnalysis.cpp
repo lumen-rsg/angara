@@ -50,6 +50,11 @@ void Chaperone::collectExprVarRefs(const std::shared_ptr<Expr>& expr,
         }
         return;
     }
+    if (auto* np = dynamic_cast<const NestedPattern*>(expr.get())) {
+        collectExprVarRefs(np->constructor, out);
+        for (const auto& sp : np->subpatterns) collectExprVarRefs(sp, out);
+        return;
+    }
 }
 
 
@@ -419,7 +424,11 @@ void Chaperone::analyzeExpr(Context& ctx,
     if (auto* match = dynamic_cast<const MatchExpr*>(expr.get())) {
         analyzeExpr(ctx, match->condition, state);
         for (const auto& cs : match->cases) {
-            for (const auto& pat : cs.patterns) analyzeExpr(ctx, pat, state);
+            for (const auto& pat : cs.patterns) {
+                // Skip NestedPattern for now — handled recursively inside
+                if (dynamic_cast<const NestedPattern*>(pat.get())) continue;
+                analyzeExpr(ctx, pat, state);
+            }
             if (cs.guard) analyzeExpr(ctx, *cs.guard, state);
             if (cs.body) analyzeExpr(ctx, cs.body, state);
         }

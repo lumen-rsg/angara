@@ -576,6 +576,16 @@ std::any Formatter::visit(const LambdaExpr& expr) {
     return r;
 }
 
+std::any Formatter::visit(const NestedPattern& expr) {
+    std::string r = fmtExpr(expr.constructor) + "(";
+    for (size_t i = 0; i < expr.subpatterns.size(); ++i) {
+        if (i > 0) r += ", ";
+        r += fmtExpr(expr.subpatterns[i]);
+    }
+    r += ")";
+    return r;
+}
+
 std::any Formatter::visit(const RangeExpr& expr) {
     std::string r = fmtExpr(expr.left);
     r += (expr.op.type == TokenType::DOT_DOT_DOT) ? "..." : "..";

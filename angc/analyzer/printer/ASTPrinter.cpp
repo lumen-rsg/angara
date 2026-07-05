@@ -546,6 +546,13 @@ namespace angara {
         return {};
     }
 
+    std::any ASTPrinter::visit(const NestedPattern& expr) {
+        printHeader("NestedPattern", "bindings: " + std::to_string(expr.bindings.size()));
+        printChild("constructor", expr.constructor, expr.subpatterns.empty());
+        printChildren("subpatterns", expr.subpatterns, true);
+        return {};
+    }
+
     void ASTPrinter::visit(std::shared_ptr<const DropStmt> stmt) {
         printHeader("DropStmt: " + stmt->name.lexeme);
     }

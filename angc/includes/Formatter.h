@@ -66,6 +66,7 @@ namespace angara {
         std::any visit(const RangeExpr& expr) override;
         std::any visit(const InterpStringExpr& expr) override;
         std::any visit(const TupleExpr& expr) override;  // LANG-10
+        std::any visit(const NestedPattern& expr) override;
 
     private:
         std::ostringstream m_out;

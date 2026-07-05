@@ -253,6 +253,10 @@ namespace angara {
         /// @return The token at the current cursor position.
         Token peek() const;
 
+        /// Returns the token after the current one without consuming anything.
+        /// @return The token at position current+1, or an EOF token if at end.
+        Token peekNext() const;
+
         /// Returns the most recently consumed token.
         /// @return The token immediately before the current cursor position.
         Token previous() const;

@@ -16,4 +16,12 @@ namespace angara {
         return {};
     }
 
+    std::any TypeChecker::visit(const NestedPattern& expr) {
+        // NestedConstructorPatterns only appear inside match expressions;
+        // they are handled directly by visit(MatchExpr).  If one appears
+        // outside a match (malformed AST), treat it as an error.
+        pushAndSave(&expr, m_type_error);
+        return {};
+    }
+
 }

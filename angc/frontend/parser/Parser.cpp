@@ -253,6 +253,12 @@ namespace angara {
         return m_tokens[m_current - 1];
     }
 
+    Token Parser::peekNext() const {
+        if (m_current + 1 >= static_cast<int>(m_tokens.size()))
+            return Token{TokenType::EOF_TOKEN, "", 0, 0};
+        return m_tokens[m_current + 1];
+    }
+
     Parser::ParseError Parser::error(const Token &token, const std::string &message, const std::string &code) {
         if (m_panicMode) {
             return ParseError("");

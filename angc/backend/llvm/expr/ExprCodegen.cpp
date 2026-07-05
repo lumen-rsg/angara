@@ -2357,12 +2357,17 @@ llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {
                 // Extract variant name and index
                 std::string variant_name;
                 std::string enum_name;
-                if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(pat)) {
+                // For nested patterns, the outer constructor holds the variant
+                const std::shared_ptr<Expr>* pat_ptr = &pat;
+                if (auto np = std::dynamic_pointer_cast<const NestedPattern>(pat)) {
+                    pat_ptr = &np->constructor;
+                }
+                if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(*pat_ptr)) {
                     variant_name = get_expr->name.lexeme;
                     if (auto lhs = std::dynamic_pointer_cast<const VarExpr>(get_expr->object)) {
                         enum_name = lhs->name.lexeme;
                     }
-                } else if (auto ve = std::dynamic_pointer_cast<const VarExpr>(pat)) {
+                } else if (auto ve = std::dynamic_pointer_cast<const VarExpr>(*pat_ptr)) {
                     // Bare variant name (for enums defined in same module)
                     variant_name = ve->name.lexeme;
                 } else {
@@ -2428,13 +2433,67 @@ llvm::Value* LLVMBackend::cgMatch(const MatchExpr& e) {
             builder->SetInsertPoint(match_bb);
 
             if (!c.variables.empty()) {
-                for (size_t vi = 0; vi < c.variables.size(); ++vi) {
-                    std::string field_name = "_" + std::to_string(vi);
-                    auto* payload_val = callRtByName("__ang_record_get",
-                        {subj, builder->CreateGlobalString(field_name)});
-                    auto* alloca = allocLocal(fn, sanitize(c.variables[vi].lexeme));
-                    builder->CreateStore(payload_val, alloca);
-                    namedVals[sanitize(c.variables[vi].lexeme)] = alloca;
+                // Check if any pattern is a nested pattern
+                bool has_nested = false;
+                for (const auto& pat : c.patterns) {
+                    if (dynamic_cast<const NestedPattern*>(pat.get())) {
+                        has_nested = true;
+                        break;
+                    }
+                }
+
+                if (has_nested) {
+                    // Nested pattern: recursively extract payload through the
+                    // nested enum layers, then bind the leaf variables.
+                    for (const auto& pat : c.patterns) {
+                        if (auto* np = dynamic_cast<const NestedPattern*>(pat.get())) {
+                            // Walk the nested pattern, extracting payload at each level
+                            llvm::Value* cur_subj = subj;
+                            const NestedPattern* cur_np = np;
+                            while (cur_np && !cur_np->subpatterns.empty()) {
+                                // Extract the first payload field from the current subject
+                                auto* payload_val = callRtByName("__ang_record_get",
+                                    {cur_subj, builder->CreateGlobalString("_0")});
+                                cur_subj = payload_val;
+
+                                // Move to the next nested level
+                                auto& next = cur_np->subpatterns.back();
+                                cur_np = dynamic_cast<const NestedPattern*>(next.get());
+                            }
+                            // After extraction, cur_subj holds the innermost payload.
+                            // If the leaf is a single variable, bind it directly.
+                            // Otherwise, extract fields from the innermost enum.
+                            bool leaf_is_single_var = cur_np == nullptr &&
+                                c.variables.size() == 1;
+                            if (leaf_is_single_var) {
+                                // Bind the single variable directly to cur_subj
+                                auto* alloca = allocLocal(fn, sanitize(c.variables[0].lexeme));
+                                builder->CreateStore(cur_subj, alloca);
+                                namedVals[sanitize(c.variables[0].lexeme)] = alloca;
+                            } else {
+                                // Bind variables from the innermost record fields
+                                for (size_t vi = 0; vi < c.variables.size(); ++vi) {
+                                    std::string field_name = "_" + std::to_string(vi);
+                                    auto* payload_val = callRtByName("__ang_record_get",
+                                        {cur_subj, builder->CreateGlobalString(field_name)});
+                                    auto* alloca = allocLocal(fn, sanitize(c.variables[vi].lexeme));
+                                    builder->CreateStore(payload_val, alloca);
+                                    namedVals[sanitize(c.variables[vi].lexeme)] = alloca;
+                                }
+                            }
+                            break;  // use first nested pattern
+                        }
+                    }
+                } else {
+                    // Flat pattern: bind variables directly from scrutinee
+                    for (size_t vi = 0; vi < c.variables.size(); ++vi) {
+                        std::string field_name = "_" + std::to_string(vi);
+                        auto* payload_val = callRtByName("__ang_record_get",
+                            {subj, builder->CreateGlobalString(field_name)});
+                        auto* alloca = allocLocal(fn, sanitize(c.variables[vi].lexeme));
+                        builder->CreateStore(payload_val, alloca);
+                        namedVals[sanitize(c.variables[vi].lexeme)] = alloca;
+                    }
                 }
             }
 

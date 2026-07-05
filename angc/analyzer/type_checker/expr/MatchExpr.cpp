@@ -115,6 +115,42 @@ namespace angara {
                     continue;
                 }
 
+                // Nested constructor pattern (e.g., Ok(Some(v)))
+                if (auto nested = std::dynamic_pointer_cast<const NestedPattern>(pat)) {
+                    // Resolve the outer constructor
+                    nested->constructor->accept(*this);
+                    auto outer_type = popType();
+
+                    std::string variant_name = "[unknown]";
+                    if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(nested->constructor)) {
+                        variant_name = get_expr->name.lexeme;
+                    } else if (auto ve = std::dynamic_pointer_cast<const VarExpr>(nested->constructor)) {
+                        variant_name = ve->name.lexeme;
+                    }
+
+                    if (outer_type->kind == TypeKind::FUNCTION) {
+                        auto func_type = std::dynamic_pointer_cast<FunctionType>(outer_type);
+                        if (enum_type && !sameType(func_type->return_type, enum_type)) {
+                            error(expr.keyword,
+                                "Variant '" + variant_name + "' does not belong to enum '" +
+                                enum_type->name + "'.",
+                                "E367");
+                        } else {
+                            covered_variants.insert(variant_name);
+                        }
+                    } else if (outer_type->kind == TypeKind::ENUM) {
+                        if (enum_type && sameType(outer_type, enum_type)) {
+                            covered_variants.insert(variant_name);
+                        }
+                    } else if (outer_type->kind != TypeKind::ERROR) {
+                        error(expr.keyword,
+                            "Invalid pattern in match case. Expected an enum variant, literal, or '_'.",
+                            "E407");
+                    }
+                    // Sub-patterns are handled in Step 2 (variable declaration)
+                    continue;
+                }
+
                 // Constructor pattern (for enum matches)
                 pat->accept(*this);
                 auto pattern_type = popType();
@@ -170,17 +206,80 @@ namespace angara {
                             if (ve->name.lexeme == "_") continue;
                         }
 
-                        // Extract variant name from the pattern
+                        // For nested patterns, descend to the innermost constructor
+                        // pattern (the last NestedPattern), not into its sub-patterns.
+                        const std::shared_ptr<Expr>* inner_pat = &pat;
+                        const NestedPattern* last_nested = nullptr;
+                        if (auto np = std::dynamic_pointer_cast<const NestedPattern>(*inner_pat)) {
+                            last_nested = np.get();
+                            while (!np->subpatterns.empty()) {
+                                auto next = std::dynamic_pointer_cast<const NestedPattern>(np->subpatterns.back());
+                                if (!next) break;
+                                np = next;
+                                last_nested = np.get();
+                            }
+                            // Use the constructor of the innermost NestedPattern
+                            inner_pat = &last_nested->constructor;
+                        }
+
+                        // Extract variant name from the innermost pattern
                         std::string vname;
-                        if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(pat)) {
+                        if (auto get_expr = std::dynamic_pointer_cast<const GetExpr>(*inner_pat)) {
                             vname = get_expr->name.lexeme;
-                        } else if (auto ve2 = std::dynamic_pointer_cast<const VarExpr>(pat)) {
+                        } else if (auto ve2 = std::dynamic_pointer_cast<const VarExpr>(*inner_pat)) {
                             vname = ve2->name.lexeme;
                         } else {
                             continue;
                         }
 
                         auto vit = enum_type->variants.find(vname);
+                        // If not found in the current enum, the nested pattern may
+                        // refer to a sub-enum — look through the outer variant's
+                        // return type.
+                        if (vit == enum_type->variants.end() &&
+                            std::dynamic_pointer_cast<const NestedPattern>(pat)) {
+                            // Walk the nested pattern to find the sub-enum type.
+                            // Stop BEFORE the innermost pattern — that's where the
+                            // bindings' variant lives.
+                            auto nested = std::dynamic_pointer_cast<const NestedPattern>(pat);
+                            std::shared_ptr<Type> cur_enum = enum_type;
+                            while (nested) {
+                                // Check if the next level is the leaf (not a NestedPattern)
+                                bool next_is_leaf = true;
+                                if (!nested->subpatterns.empty()) {
+                                    auto& next = nested->subpatterns.back();
+                                    if (std::dynamic_pointer_cast<const NestedPattern>(next)) {
+                                        next_is_leaf = false;
+                                    }
+                                }
+
+                                if (next_is_leaf) break;  // stop here — cur_enum is the right enum
+
+                                std::string outer_vname;
+                                if (auto ge = std::dynamic_pointer_cast<const GetExpr>(nested->constructor))
+                                    outer_vname = ge->name.lexeme;
+                                else if (auto ve = std::dynamic_pointer_cast<const VarExpr>(nested->constructor))
+                                    outer_vname = ve->name.lexeme;
+                                else break;
+
+                                auto etype = std::dynamic_pointer_cast<EnumType>(cur_enum);
+                                if (!etype) break;
+                                auto ovit = etype->variants.find(outer_vname);
+                                if (ovit == etype->variants.end()) break;
+                                if (ovit->second->param_types.empty()) break;
+                                cur_enum = ovit->second->param_types[0];
+                                nested = std::dynamic_pointer_cast<const NestedPattern>(nested->subpatterns.back());
+                            }
+                            if (cur_enum && cur_enum->kind == TypeKind::ENUM) {
+                                auto sub_enum = std::dynamic_pointer_cast<EnumType>(cur_enum);
+                                vit = sub_enum->variants.find(vname);
+                            }
+                        }
+                        if (vit == enum_type->variants.end() &&
+                            std::dynamic_pointer_cast<const NestedPattern>(pat)) {
+                            // Already tried sub-enum lookup above; just skip.
+                            continue;
+                        }
                         if (vit == enum_type->variants.end()) continue;
 
                         auto alt_types = vit->second->param_types;
