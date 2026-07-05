@@ -30,6 +30,7 @@ void RuntimeBuilder::generateRuntime() {
     generateObjectHash();
     generateListOps();
     generateRawArrayOps();  // SIMD-1
+    generateVectorOps();    // SIMD-5
     generateRecordOps();
     generateConversions();
     generateDeepClone();
@@ -146,6 +147,16 @@ void RuntimeBuilder::generateTypes() {
         Type::getInt64Ty(m_ctx),        // field 3: elem_size (sizeof(T))
         PointerType::get(m_ctx, 0)      // field 4: ptr → raw T[] elements
     }, "AngaraRawArray");
+
+    // SIMD-5: fixed-size SIMD vector — stores the element buffer inline via
+    // overallocation. The struct has a pointer to the buffer which immediately
+    // follows the header in memory.
+    m_vector_type = StructType::create(m_ctx, {
+        m_obj_header_type,              // field 0: header
+        Type::getInt32Ty(m_ctx),        // field 1: num_elements (2, 3, 4, 8)
+        Type::getInt32Ty(m_ctx),        // field 2: elem_size (sizeof(f32), etc.)
+        PointerType::get(m_ctx, 0)      // field 3: ptr → raw element buffer (overallocated inline)
+    }, "AngaraVector");
 
     m_native_instance_type = StructType::create(m_ctx, {
         m_obj_header_type,

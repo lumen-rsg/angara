@@ -1,0 +1,22 @@
+// SIMD-5: Basic vector type tests
+
+func main() {
+    // Test vector construction
+    let v1 = vec4(1.0, 2.0, 3.0, 4.0);
+    let v2 = vec4(5.0, 6.0, 7.0, 8.0);
+    
+    // Test vector addition
+    let v3 = v1 + v2;  // vec4(6.0, 8.0, 10.0, 12.0)
+    
+    // Test vector-scalar multiplication
+    let v4 = v1 * 2.0;  // vec4(2.0, 4.0, 6.0, 8.0)
+    
+    // Test element access
+    let x = v1[0];  // 1.0
+    let y = v1[1];  // 2.0
+    
+    println(v3);
+    println(v4);
+    println(x);
+    println(y);
+}

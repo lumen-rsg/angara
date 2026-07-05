@@ -1,0 +1,23 @@
+// SIMD-5: Test vec2, vec3, vec8 types
+
+func main() {
+    // vec2<f64>
+    let v2 = vec2(1.0, 2.0);
+    println(v2[0]);  // 1
+    println(v2[1]);  // 2
+    
+    // vec3<f64>
+    let v3 = vec3(10.0, 20.0, 30.0);
+    let v3b = vec3(1.0, 2.0, 3.0);
+    let v3c = v3 + v3b;
+    println(v3c[0]);  // 11
+    println(v3c[1]);  // 22
+    println(v3c[2]);  // 33
+    
+    // vec8<i64>
+    let v8 = vec8(1, 2, 3, 4, 5, 6, 7, 8);
+    let v8b = vec8(1, 1, 1, 1, 1, 1, 1, 1);
+    let v8c = v8 + v8b;
+    println(v8c[0]);  // 2
+    println(v8c[7]);  // 9
+}

@@ -1,0 +1,36 @@
+// SIMD-5: Vectors with function parameters and return types
+
+func add_vecs(a as vec4<f64>, b as vec4<f64>) -> vec4<f64> {
+    return a + b;
+}
+
+func scale_vec(v as vec4<f64>, s as f64) -> vec4<f64> {
+    return v * s;
+}
+
+func make_vec(x as f64, y as f64, z as f64, w as f64) -> vec4<f64> {
+    return vec4(x, y, z, w);
+}
+
+func sum_elements(v as vec4<f64>) -> f64 {
+    return v[0] + v[1] + v[2] + v[3];
+}
+
+func main() {
+    let a = make_vec(1.0, 2.0, 3.0, 4.0);
+    let b = make_vec(5.0, 6.0, 7.0, 8.0);
+    let c = add_vecs(a, b);
+    let d = scale_vec(a, 3.0);
+    
+    // c = vec4(6, 8, 10, 12)
+    println(c[0]);  // 6
+    println(c[1]);  // 8
+    
+    // d = vec4(3, 6, 9, 12)
+    println(d[0]);  // 3
+    println(d[2]);  // 9
+    
+    // sum of a = 1+2+3+4 = 10
+    let s = sum_elements(a);
+    println(s);      // 10
+}

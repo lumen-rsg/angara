@@ -23,6 +23,47 @@ namespace angara {
                 pushAndSave(&expr, m_type_i64);
                 return {};
             }
+            // SIMD-5: vector constructors — vec2(...), vec3(...), vec4(...), vec8(...)
+            const std::string& name = var_expr->name.lexeme;
+            if (name == "vec2" || name == "vec3" || name == "vec4" || name == "vec8") {
+                int expected_size = std::stoi(name.substr(3));
+                std::vector<std::shared_ptr<Type>> arg_types;
+                for (const auto& arg_expr : expr.arguments) {
+                    arg_expr->accept(*this);
+                    arg_types.push_back(popType());
+                }
+                if (m_hadError) { pushAndSave(&expr, m_type_error); return {}; }
+                if (arg_types.size() != static_cast<size_t>(expected_size)) {
+                    error(var_expr->name, name + "() expects exactly " +
+                          std::to_string(expected_size) + " argument(s), but got " +
+                          std::to_string(arg_types.size()) + ".", "E425");
+                    pushAndSave(&expr, m_type_error);
+                    return {};
+                }
+                // Infer element type from the first argument
+                auto elem_type = arg_types[0];
+                if (elem_type->kind != TypeKind::PRIMITIVE ||
+                    (!isInteger(elem_type) && !isFloat(elem_type))) {
+                    error(var_expr->name, "Vector element type must be a primitive numeric type "
+                          "(i32, i64, f32, f64, etc.), but got '" +
+                          elem_type->toString() + "' from first argument.", "E426");
+                    pushAndSave(&expr, m_type_error);
+                    return {};
+                }
+                // All arguments must be compatible with the element type
+                for (size_t i = 1; i < arg_types.size(); ++i) {
+                    if (!isNumeric(arg_types[i])) {
+                        error(var_expr->name, "Argument " + std::to_string(i + 1) +
+                              " must be numeric, but got '" + arg_types[i]->toString() + "'.", "E427");
+                        pushAndSave(&expr, m_type_error);
+                        return {};
+                    }
+                }
+                // Use the first argument's type as the element type
+                auto vec_type = std::make_shared<VectorType>(elem_type, expected_size);
+                pushAndSave(&expr, vec_type);
+                return {};
+            }
         }
 
         expr.callee->accept(*this);

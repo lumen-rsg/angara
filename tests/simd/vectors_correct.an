@@ -1,0 +1,86 @@
+// SIMD-5: Vector arithmetic correctness tests
+
+func test_add() {
+    let a = vec4(1.0, 2.0, 3.0, 4.0);
+    let b = vec4(5.0, 6.0, 7.0, 8.0);
+    let c = a + b;
+    
+    // Should print: 6, 8, 10, 12
+    println(c[0]);
+    println(c[1]);
+    println(c[2]);
+    println(c[3]);
+}
+
+func test_mul() {
+    let a = vec4(1.0, 2.0, 3.0, 4.0);
+    let c = a * 2.0;
+    
+    // Should print: 2, 4, 6, 8
+    println(c[0]);
+    println(c[1]);
+    println(c[2]);
+    println(c[3]);
+}
+
+func test_sub() {
+    let a = vec4(10.0, 20.0, 30.0, 40.0);
+    let b = vec4(1.0, 2.0, 3.0, 4.0);
+    let c = a - b;
+    
+    // Should print: 9, 18, 27, 36
+    println(c[0]);
+    println(c[1]);
+    println(c[2]);
+    println(c[3]);
+}
+
+func test_div() {
+    let a = vec4(10.0, 20.0, 30.0, 40.0);
+    let c = a / 2.0;
+    
+    // Should print: 5, 10, 15, 20
+    println(c[0]);
+    println(c[1]);
+    println(c[2]);
+    println(c[3]);
+}
+
+func test_int_vec() {
+    let a = vec4(1, 2, 3, 4);
+    let b = vec4(5, 6, 7, 8);
+    let c = a + b;
+    
+    // Should print: 6, 8, 10, 12
+    println(c[0]);
+    println(c[1]);
+    println(c[2]);
+    println(c[3]);
+}
+
+func test_write() {
+    let v = vec4(1.0, 2.0, 3.0, 4.0);
+    v[0] = 10.0;
+    v[2] = 30.0;
+    
+    // Should print: 10, 2, 30, 4
+    println(v[0]);
+    println(v[1]);
+    println(v[2]);
+    println(v[3]);
+}
+
+func main() {
+    println("add:");
+    test_add();
+    println("mul:");
+    test_mul();
+    println("sub:");
+    test_sub();
+    println("div:");
+    test_div();
+    println("int_vec:");
+    test_int_vec();
+    println("write:");
+    test_write();
+}

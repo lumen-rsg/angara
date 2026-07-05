@@ -88,6 +88,15 @@ namespace angara {
                 result_type = raw_arr_type->element_type;
             }
         }
+        // SIMD-5: vector subscript — returns the element type
+        else if (collection_type->kind == TypeKind::VECTOR) {
+            auto vec_type = std::dynamic_pointer_cast<VectorType>(collection_type);
+            if (!isInteger(index_type)) {
+                error(expr.bracket, "Vector index must be an integer, but got '" + index_type->toString() + "'.", "E424");
+            } else {
+                result_type = vec_type->element_type;
+            }
+        }
         else if (collection_type->toString() == "string") {
             if (!isInteger(index_type)) {
                 error(expr.bracket, "String index must be an integer, but got '" + index_type->toString() + "'.", "E350");
@@ -96,7 +105,8 @@ namespace angara {
             }
         }
         else {
-            error(expr.bracket, "Type '" + collection_type->toString() + "' does not support subscript access. Only lists, records, tuples, and strings are subscriptable.", "E351");
+            error(expr.bracket, "Type '" + collection_type->toString() + "' does not support subscript access. "
+                  "Only lists, records, vectors, tuples, raw arrays, and strings are subscriptable.", "E351");
         }
 
         pushAndSave(&expr, result_type);

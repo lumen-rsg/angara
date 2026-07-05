@@ -265,6 +265,15 @@ namespace angara {
         /// Unboxes an AngaraObject to a raw LLVM value.
         llvm::Value* unboxToRaw(llvm::Value* objVal, LocalKind kind);
 
+        // --- SIMD-5: Vector codegen helpers ---
+        /// Maps a VectorType to the corresponding LLVM fixed vector type (e.g., <4 x float>).
+        llvm::Type* llvmTypeForVector(const VectorType& vec_type);
+        /// Allocates a new AngaraVector heap object, stores the raw LLVM vector value,
+        /// and returns the boxed AngaraObject (TAG_OBJ + payload pointer).
+        llvm::Value* makeVector(llvm::Value* raw_vec, const VectorType& vec_type);
+        /// Extracts the raw LLVM vector value from a boxed AngaraObject of VECTOR kind.
+        llvm::Value* extractVector(llvm::Value* boxed_obj, const VectorType& vec_type);
+
         /// Produces a mangled function name: __ang_<module>_<name>.
         std::string mangle(const std::string& module, const std::string& name);
         /// Produces a mangled method name: __ang_<class>_<method>.

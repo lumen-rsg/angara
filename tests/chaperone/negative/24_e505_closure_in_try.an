@@ -1,0 +1,28 @@
+// Chaperone negative test — E505 via lambda body containing try/catch (H1)
+// collectVarRefs previously did not recurse into TryStmt, so a closure
+// whose body contained try/catch/finally would have invisible captures.
+// With H1 fixed, the VarExpr inside try must be found and E505 fired.
+//
+// expect: E505
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    // Lambda whose body contains a try block that references b.
+    let f = func() -> i64 {
+        try {
+            return b.get();   // captures b
+        } catch (e) {
+            return 0;
+        }
+    };
+    drop b;          // b freed, but lambda still references it
+    let r = f();     // use-after-free via the closure
+    return r;
+}

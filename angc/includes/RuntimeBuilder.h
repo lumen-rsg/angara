@@ -37,6 +37,7 @@ static constexpr int OBJ_ENUM_INSTANCE   = 11;
 static constexpr int OBJ_BOUND_METHOD    = 12;
 static constexpr int OBJ_TRAIT_OBJECT    = 13;  // TS-1: value viewed through a trait/contract
 static constexpr int OBJ_RAW_ARRAY       = 14;  // SIMD-1: unboxed dynamic array (f64[], i64[], ...)
+static constexpr int OBJ_VECTOR          = 15;  // SIMD-5: fixed-size SIMD vector (vec4<f32>, etc.)
 
 /// Generates all runtime types and functions as LLVM IR directly into the module.
 /// This eliminates the need for an external runtime library — the runtime is
@@ -87,6 +88,8 @@ public:
         llvm::StructType* getTraitObjectType() const { return m_trait_object_type; }
         /// SIMD-1: Returns the AngaraRawArray struct type.
         llvm::StructType* getRawArrayType() const { return m_raw_array_type; }
+        /// SIMD-5: Returns the AngaraVector struct type.
+        llvm::StructType* getVectorType() const { return m_vector_type; }
 
     // --- Runtime function accessors ---
 
@@ -103,6 +106,8 @@ public:
         llvm::FunctionCallee getFuncRawArrayNew()     const { return m_fn_raw_array_new; }
         llvm::FunctionCallee getFuncRawArrayPush()    const { return m_fn_raw_array_push; }
         llvm::FunctionCallee getFuncRawArrayLen()     const { return m_fn_raw_array_len; }
+        // SIMD-5: vector operations
+        llvm::FunctionCallee getFuncVectorNew()       const { return m_fn_vector_new; }
         llvm::FunctionCallee getFuncRecordNew()       const { return m_fn_record_new; }
     llvm::FunctionCallee getFuncRecordGet()       const { return m_fn_record_get; }
     llvm::FunctionCallee getFuncRecordSet()       const { return m_fn_record_set; }
@@ -191,6 +196,8 @@ private:
         void generateListOps();
         /// SIMD-1: Generates unboxed dynamic array allocation, push, and len.
         void generateRawArrayOps();
+        /// SIMD-5: Generates vector allocation.
+        void generateVectorOps();
     /// Generates record allocation, get, and set operations.
     void generateRecordOps();
     /// Generates type conversion functions (to_i64, to_f64, to_bool, typeof).
@@ -244,6 +251,7 @@ private:
     llvm::StructType* m_bound_method_type = nullptr;
         llvm::StructType* m_trait_object_type = nullptr;  // TS-1
         llvm::StructType* m_raw_array_type = nullptr;      // SIMD-1
+        llvm::StructType* m_vector_type = nullptr;          // SIMD-5
         llvm::StructType* m_native_instance_type = nullptr;
 
     llvm::FunctionCallee m_fn_string_from_c;
@@ -260,6 +268,8 @@ private:
         llvm::FunctionCallee m_fn_raw_array_new;
         llvm::FunctionCallee m_fn_raw_array_push;
         llvm::FunctionCallee m_fn_raw_array_len;
+        // SIMD-5: vector runtime functions
+        llvm::FunctionCallee m_fn_vector_new;
         llvm::FunctionCallee m_fn_record_new;
     llvm::FunctionCallee m_fn_record_get;
     llvm::FunctionCallee m_fn_record_set;

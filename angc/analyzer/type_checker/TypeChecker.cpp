@@ -390,6 +390,28 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
             return std::make_shared<RefType>(inner_type);
         }
 
+        // SIMD-5: vector types — vec2<f32>, vec3<f64>, vec4<i32>, vec8<f32>
+        if (base_name == "vec2" || base_name == "vec3" ||
+            base_name == "vec4" || base_name == "vec8") {
+            int size = std::stoi(base_name.substr(3));
+            if (generic->arguments.size() != 1) {
+                error(generic->name, "Type '" + base_name + "' expects exactly one type argument (e.g., '" +
+                      base_name + "<f32>').", "E251");
+                return m_type_error;
+            }
+            auto elem_type = resolveType(generic->arguments[0]);
+            if (elem_type->kind == TypeKind::ERROR) return m_type_error;
+            // Only primitive numeric types are valid vector element types.
+            if (elem_type->kind != TypeKind::PRIMITIVE ||
+                (!isInteger(elem_type) && !isFloat(elem_type))) {
+                error(generic->name, "Vector element type must be a primitive numeric type "
+                      "(f32, f64, i32, i64, u32, u64), but got '" +
+                      elem_type->toString() + "'.", "E420");
+                return m_type_error;
+            }
+            return std::make_shared<VectorType>(elem_type, size);
+        }
+
         auto symbol = m_symbols.resolve(base_name);
         if (symbol) {
             auto& base_type = symbol->type;

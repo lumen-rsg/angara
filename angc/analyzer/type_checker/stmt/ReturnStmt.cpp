@@ -226,6 +226,11 @@ bool TypeChecker::check_type_compatibility(
         return check_type_compatibility(ref_expected->inner_type, actual, nullptr);
     }
 
+    // SIMD-5: Vector types are compatible if they are structurally identical.
+    if (expected->kind == TypeKind::VECTOR && actual->kind == TypeKind::VECTOR) {
+        return sameType(expected, actual);
+    }
+
     // LANG-10: tuple type compatibility — same arity, element-wise compatibility.
     if (expected->kind == TypeKind::TUPLE && actual->kind == TypeKind::TUPLE) {
         auto expected_tuple = std::dynamic_pointer_cast<TupleType>(expected);

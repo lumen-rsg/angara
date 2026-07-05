@@ -605,9 +605,72 @@ llvm::Value* LLVMBackend::unboxToRaw(llvm::Value* objVal, LocalKind kind) {
         // string args, the call site uses marshalAngaraToC instead, which
         // extracts the char* correctly; this is the fallback for stored ptrs.)
         case LocalKind::RAW_PTR: return builder->CreateIntToPtr(getI64(objVal), llvm::PointerType::get(*ctx, 0));
-        case LocalKind::BOXED:   return objVal;
+	    case LocalKind::BOXED:   return objVal;
     }
     return objVal;
+}
+
+// --- SIMD-5: Vector codegen helpers ---
+
+llvm::Type* LLVMBackend::llvmTypeForVector(const VectorType& vec_type) {
+    auto* elem_ty = resolveCFieldType(vec_type.element_type);
+    return llvm::FixedVectorType::get(elem_ty, vec_type.size);
+}
+
+llvm::Value* LLVMBackend::makeVector(llvm::Value* raw_vec, const VectorType& vec_type) {
+    auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
+    auto* i8_ty = llvm::Type::getInt8Ty(*ctx);
+    auto* i8_ptr = llvm::PointerType::get(*ctx, 0);
+
+    // Determine element size in bytes
+    int elem_size_bytes = 0;
+    const auto& ename = vec_type.element_type->toString();
+    if (ename == "f32" || ename == "i32" || ename == "u32") elem_size_bytes = 4;
+    else if (ename == "f64" || ename == "i64" || ename == "u64") elem_size_bytes = 8;
+    else if (ename == "i8" || ename == "u8") elem_size_bytes = 1;
+    else if (ename == "i16" || ename == "u16") elem_size_bytes = 2;
+    else elem_size_bytes = 4; // fallback: assumes 4-byte element
+
+    // Call __ang_vector_new(num_elements, elem_size)
+    auto* num_elems_c = llvm::ConstantInt::get(i32_ty, vec_type.size);
+    auto* elem_size_c = llvm::ConstantInt::get(i32_ty, elem_size_bytes);
+    auto* boxed = callRt(rt->getFuncVectorNew(), {num_elems_c, elem_size_c});
+
+    // Extract heap pointer
+    auto* payload = builder->CreateExtractValue(boxed, {1}, "vec_payload");
+    auto* vec_ptr = builder->CreateIntToPtr(payload, llvm::PointerType::get(*ctx, 0));
+
+    // Load the data pointer (field 3 of AngaraVector)
+    auto* data_ptr = builder->CreateLoad(i8_ptr,
+        builder->CreateStructGEP(rt->getVectorType(), vec_ptr, 3), "data_ptr");
+
+    // Cast to the appropriate vector type pointer and store
+    auto* vec_ty = llvmTypeForVector(vec_type);
+    auto* typed_ptr = builder->CreateBitCast(data_ptr,
+        llvm::PointerType::get(vec_ty, 0), "typed_ptr");
+    builder->CreateStore(raw_vec, typed_ptr);
+
+    return boxed;
+}
+
+llvm::Value* LLVMBackend::extractVector(llvm::Value* boxed_obj, const VectorType& vec_type) {
+    auto* i8_ptr = llvm::PointerType::get(*ctx, 0);
+
+    // Extract heap pointer from AngaraObject
+    auto* payload = builder->CreateExtractValue(boxed_obj, {1}, "vec_payload");
+    auto* vec_ptr = builder->CreateIntToPtr(payload, llvm::PointerType::get(*ctx, 0));
+
+    // Load the data pointer (field 3 of AngaraVector)
+    auto* data_ptr = builder->CreateLoad(i8_ptr,
+        builder->CreateStructGEP(rt->getVectorType(), vec_ptr, 3), "data_ptr");
+
+    // Cast to the appropriate vector type pointer and load
+    auto* vec_ty = llvmTypeForVector(vec_type);
+    auto* typed_ptr = builder->CreateBitCast(data_ptr,
+        llvm::PointerType::get(vec_ty, 0), "typed_ptr");
+    auto* raw_vec = builder->CreateLoad(vec_ty, typed_ptr, "raw_vec");
+
+    return raw_vec;
 }
 
 llvm::Type* LLVMBackend::resolveCFieldType(const std::shared_ptr<Type>& type) {

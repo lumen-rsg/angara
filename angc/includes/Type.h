@@ -39,6 +39,7 @@ namespace angara {
         TRAIT_OBJECT, // TS-1: a value viewed through a trait/contract interface (erased impl)
         TUPLE,   // LANG-10: heterogeneous fixed-arity tuple (e.g., (i64, string))
         RAW_ARRAY, // SIMD-1: unboxed dynamic array (e.g., f64[], i64[]) — contiguous raw storage
+        VECTOR,   // SIMD-5: fixed-size vector type (e.g., vec4<f32>, vec3<f64>)
         ERROR // A special type to prevent cascading error messages
     };
 
@@ -541,6 +542,21 @@ namespace angara {
         }
     };
 
+    // --- VECTOR TYPE (SIMD-5) ---
+    // Represents a fixed-size SIMD vector type (e.g., vec4<f32>, vec3<f64>, vec4<i32>).
+    // At runtime, vectors are heap-allocated AngaraVector objects (OBJ_VECTOR) with
+    // the LLVM vector value stored inline. Element-wise arithmetic maps to LLVM SIMD
+    // instructions (fadd, fmul, etc. on <N x float>).
+    struct VectorType : Type {
+        const std::shared_ptr<Type> element_type;  // primitive type: f32, f64, i32, i64, u32, u64
+        const int size;  // number of elements: 2, 3, 4, or 8
+        VectorType(std::shared_ptr<Type> elem, int sz)
+            : Type(TypeKind::VECTOR), element_type(std::move(elem)), size(sz) {}
+        [[nodiscard]] std::string toString() const override {
+            return "vec" + std::to_string(size) + "<" + element_type->toString() + ">";
+        }
+    };
+
     // FFI pointer type (e.g., *i8, *void, **char) — raw C pointer, stored as i64
     struct PointerType : Type {
         std::shared_ptr<Type> pointee_type;
@@ -700,6 +716,10 @@ namespace angara {
                     auto a = std::dynamic_pointer_cast<RawArrayType>(type);
                     return std::make_shared<RawArrayType>(substitute(a->element_type));
                 }
+                case TypeKind::VECTOR: {
+                    auto v = std::dynamic_pointer_cast<VectorType>(type);
+                    return std::make_shared<VectorType>(substitute(v->element_type), v->size);
+                }
                 default:
                     // Primitives, nominal types, etc. carry no type params.
                     return type;
@@ -835,6 +855,12 @@ namespace angara {
                 auto lb = std::dynamic_pointer_cast<RawArrayType>(b);
                 return la && lb && sameType(la->element_type, lb->element_type);
             }
+            case TypeKind::VECTOR: {
+                auto la = std::dynamic_pointer_cast<VectorType>(a);
+                auto lb = std::dynamic_pointer_cast<VectorType>(b);
+                return la && lb && la->size == lb->size &&
+                       sameType(la->element_type, lb->element_type);
+            }
         }
         return false;
     }
@@ -934,6 +960,10 @@ namespace angara {
             case TypeKind::RAW_ARRAY: {
                 auto a = std::dynamic_pointer_cast<RawArrayType>(type);
                 return std::make_shared<RawArrayType>(substituteTypeArgs(a->element_type, args));
+            }
+            case TypeKind::VECTOR: {
+                auto v = std::dynamic_pointer_cast<VectorType>(type);
+                return std::make_shared<VectorType>(substituteTypeArgs(v->element_type, args), v->size);
             }
             default:
                 return type;

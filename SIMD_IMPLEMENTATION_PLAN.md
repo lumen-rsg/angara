@@ -555,7 +555,44 @@ unacceptable.
 
 ---
 
-## Phase 5: Language-Level Vector Types (Optional, Deferred)
+## Phase 5: Language-Level Vector Types ✅ DONE
+
+### Implementation Summary
+
+Phase 5 has been implemented. The following features are available:
+
+**Types:** `vec2<T>`, `vec3<T>`, `vec4<T>`, `vec8<T>` where T is a primitive numeric type
+(`f32`, `f64`, `i32`, `i64`, `u32`, `u64`).
+
+**Construction:** `vec4(1.0, 2.0, 3.0, 4.0)` — element type inferred from arguments.
+
+**Operations:**
+- Element-wise arithmetic: `+`, `-`, `*`, `/` between two vectors of the same type
+- Scalar broadcast: `vec + scalar`, `scalar + vec`, `vec * scalar`, `scalar * vec`,
+  `vec - scalar`, `scalar - vec`, `vec / scalar`
+- Element access: `v[0]`, `v[1]`, etc. (read and write)
+
+**Runtime:** Vectors are heap-allocated `AngaraVector` objects (subtype `OBJ_VECTOR = 15`).
+The element buffer is stored inline via overallocation for efficient SIMD loads/stores.
+Operations lower directly to LLVM vector instructions (`<N x float>`, `<N x i32>`, etc.).
+
+**Files modified:**
+- `angc/includes/Type.h` — `VectorType` struct, `TypeKind::VECTOR`, `sameType`/`substituteTypeArgs`
+- `angc/includes/RuntimeBuilder.h` — `OBJ_VECTOR=15`, type/function accessors
+- `angc/includes/LLVMBackend.h` — `llvmTypeForVector`, `makeVector`, `extractVector`
+- `angc/backend/llvm/RuntimeBuilder.cpp` — `AngaraVector` struct type
+- `angc/backend/llvm/rt/Collections.cpp` — `generateVectorOps()` runtime function
+- `angc/backend/llvm/LLVMBackend.cpp` — vector helpers implementation
+- `angc/backend/llvm/expr/ExprCodegen.cpp` — `cgBinary`, `cgCall`, `cgSubscript`, `cgAssign` vector paths
+- `angc/analyzer/type_checker/TypeChecker.cpp` — `resolveType` for vecN<T>
+- `angc/analyzer/type_checker/expr/BinaryExpr.cpp` — vector arithmetic type checking
+- `angc/analyzer/type_checker/expr/SubscriptExpr.cpp` — vector subscript type checking
+- `angc/analyzer/type_checker/expr/CallExpr.cpp` — vecN constructor type checking
+- `angc/analyzer/type_checker/stmt/ReturnStmt.cpp` — vector type compatibility
+
+**Tests:** `tests/simd/vectors_basic.an`, `vectors_correct.an`, `vectors_func.an`, `vectors_sizes.an`
+
+### Original Plan (for reference)
 
 ### Goal
 
@@ -642,7 +679,7 @@ type — assignment copies the reference, not the data.
 | 2.3 | @inline tests | ✅ done |
 | 3 | Auto-vectorization verification | ✅ done |
 | 4 | SIMD intrinsics | ✅ done |
-| 5 | Vector types | deferred |
+| 5 | Vector types | ✅ done |
 
 ---
 

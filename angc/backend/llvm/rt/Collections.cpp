@@ -550,6 +550,60 @@ void RuntimeBuilder::generateRawArrayOps() {
     }
 }
 
+void RuntimeBuilder::generateVectorOps() {
+    auto* i8_ty = Type::getInt8Ty(m_ctx);
+    auto* i32_ty = Type::getInt32Ty(m_ctx);
+    auto* i64_ty = Type::getInt64Ty(m_ctx);
+    auto* i8_ptr = PointerType::get(m_ctx, 0);
+    auto* obj_ty = m_angara_obj_type;
+
+    auto pack_obj = [&](IRBuilder<>& b, Value* raw_ptr) -> Value* {
+        auto* ptr_i8 = b.CreateBitCast(raw_ptr, i8_ptr);
+        auto* ptr_i64 = b.CreatePtrToInt(ptr_i8, i64_ty);
+        Value* result = UndefValue::get(obj_ty);
+        result = b.CreateInsertValue(result, ConstantInt::get(i32_ty, TAG_OBJ), {0});
+        result = b.CreateInsertValue(result, ptr_i64, {1});
+        return result;
+    };
+
+    // --- __ang_vector_new(num_elements: i32, elem_size: i32) -> obj ---
+    {
+        auto* fn_ty = FunctionType::get(obj_ty, {i32_ty, i32_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_vector_new", fn_ty);
+        m_fn_vector_new = FunctionCallee(fn);
+
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+        auto* num_elements = fn->arg_begin();
+        auto* elem_size = fn->arg_begin() + 1;
+
+        // Total size = sizeof(AngaraVector header) + num_elements * elem_size
+        auto* header_size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_vector_type));
+        auto* num_elements_64 = b.CreateZExt(num_elements, i64_ty);
+        auto* elem_size_64 = b.CreateZExt(elem_size, i64_ty);
+        auto* data_size = b.CreateMul(num_elements_64, elem_size_64, "data_size");
+        auto* total_size = b.CreateAdd(header_size, data_size, "total_size");
+
+        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* vec_ptr = b.CreateCall(gc_alloc_fn,
+            {total_size, ConstantInt::get(i32_ty, OBJ_VECTOR)}, "vec_mem");
+
+        // Set num_elements and elem_size
+        b.CreateStore(num_elements, b.CreateStructGEP(m_vector_type, vec_ptr, 1));
+        b.CreateStore(elem_size, b.CreateStructGEP(m_vector_type, vec_ptr, 2));
+
+        // The data buffer starts right after the header in memory.
+        // data_ptr = (i8*)vec_ptr + header_size
+        auto* vec_i8 = b.CreateBitCast(vec_ptr, i8_ptr);
+        auto* data_ptr = b.CreateGEP(i8_ty, vec_i8, {header_size}, "data_ptr");
+        b.CreateStore(b.CreateBitCast(data_ptr, PointerType::get(m_ctx, 0)),
+                      b.CreateStructGEP(m_vector_type, vec_ptr, 3));
+
+        b.CreateRet(pack_obj(b, vec_ptr));
+    }
+}
+
 void RuntimeBuilder::generateRecordOps() {
     auto* i8_ty = Type::getInt8Ty(m_ctx);
     auto* i32_ty = Type::getInt32Ty(m_ctx);

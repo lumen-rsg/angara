@@ -200,8 +200,145 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             builder->CreateSIToFP(getI64(val), f64_ty));
     };
 
+    // SIMD-5: helper for vector binary operations (vector+vector and scalar+vector)
+    auto vectorOp = [&](bool is_add, bool is_mul, bool is_div) -> std::optional<llvm::Value*> {
+        if (!types_known) return std::nullopt;
+        auto& ltype = lt_it->second;
+        auto& rtype = rt_it->second;
+        bool left_vec = ltype->kind == TypeKind::VECTOR;
+        bool right_vec = rtype->kind == TypeKind::VECTOR;
+
+        // Vector ±/* vector
+        if (left_vec && right_vec) {
+            auto lvec = std::dynamic_pointer_cast<VectorType>(ltype);
+            auto rvec = std::dynamic_pointer_cast<VectorType>(rtype);
+            if (!sameType(ltype, rtype)) return std::nullopt;
+            auto* raw_l = extractVector(l, *lvec);
+            auto* raw_r = extractVector(r, *rvec);
+            llvm::Value* result;
+            if (isFloat(lvec->element_type) || isFloat(rvec->element_type)) {
+                if (is_add) result = builder->CreateFAdd(raw_l, raw_r, "vecadd");
+                else if (is_mul) result = builder->CreateFMul(raw_l, raw_r, "vecmul");
+                else if (is_div) result = builder->CreateFDiv(raw_l, raw_r, "vecdiv");
+                else result = builder->CreateFSub(raw_l, raw_r, "vecsub");
+            } else {
+                if (is_add) result = builder->CreateAdd(raw_l, raw_r, "vecadd");
+                else if (is_mul) result = builder->CreateMul(raw_l, raw_r, "vecmul");
+                else if (is_div) result = builder->CreateSDiv(raw_l, raw_r, "vecdiv");
+                else result = builder->CreateSub(raw_l, raw_r, "vecsub");
+            }
+            return makeVector(result, *lvec);
+        }
+
+        // Vector ±/* scalar (broadcast scalar to vector)
+        if (left_vec && isNumeric(rtype)) {
+            auto lvec = std::dynamic_pointer_cast<VectorType>(ltype);
+            auto* raw_l = extractVector(l, *lvec);
+            auto* scalar = isFloat(rtype) ? getF64(r) :
+                isInteger(rtype) ? getI64(r) : nullptr;
+            if (!scalar) return std::nullopt;
+            // Broadcast: for float vectors, SIToFP int scalar; for int vectors, SIToFP... no, just use same type
+            auto* vec_ty = llvmTypeForVector(*lvec);
+            if (isFloat(lvec->element_type) && !isFloat(rtype)) {
+                scalar = builder->CreateSIToFP(scalar, isFloat(lvec->element_type) ?
+                    static_cast<llvm::Type*>(llvm::Type::getFloatTy(*ctx)) :
+                    static_cast<llvm::Type*>(llvm::Type::getDoubleTy(*ctx)));
+            }
+            // Check if scalar needs splat
+            auto* splat = [&]() -> llvm::Value* {
+                if (auto* fvt = llvm::dyn_cast<llvm::FixedVectorType>(vec_ty)) {
+                    // Use insertelement+shufflevector to create a splat
+                    auto* undef_vec = llvm::UndefValue::get(fvt);
+                    auto* ins = builder->CreateInsertElement(undef_vec, scalar, (uint64_t)0);
+                    auto* zero = llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0);
+                    auto* mask = llvm::ConstantVector::getSplat(
+                        llvm::ElementCount::getFixed(lvec->size), zero);
+                    return builder->CreateShuffleVector(ins, undef_vec, mask);
+                }
+                return scalar;
+            }();
+            llvm::Value* result;
+            if (isFloat(lvec->element_type)) {
+                if (is_add) result = builder->CreateFAdd(raw_l, splat, "vecsadd");
+                else if (is_mul) result = builder->CreateFMul(raw_l, splat, "vecsmul");
+                else if (is_div) result = builder->CreateFDiv(raw_l, splat, "vecsdiv");
+                else result = builder->CreateFSub(raw_l, splat, "vecssub");
+            } else {
+                if (is_add) result = builder->CreateAdd(raw_l, splat, "vecsadd");
+                else if (is_mul) result = builder->CreateMul(raw_l, splat, "vecsmul");
+                else if (is_div) result = builder->CreateSDiv(raw_l, splat, "vecsdiv");
+                else result = builder->CreateSub(raw_l, splat, "vecssub");
+            }
+            return makeVector(result, *lvec);
+        }
+
+        // Scalar ±/* vector — swap args and recurse via the vector+scalar path
+        if (isNumeric(ltype) && right_vec) {
+            // Swap operands: scalar * vec and scalar + vec are commutative
+            if (is_add || is_mul) {
+                // Commutative: just handle as vec op scalar with swapped args
+                auto rvec = std::dynamic_pointer_cast<VectorType>(rtype);
+                auto* raw_r = extractVector(r, *rvec);
+                auto* scalar = isFloat(ltype) ? getF64(l) :
+                    isInteger(ltype) ? getI64(l) : nullptr;
+                if (!scalar) return std::nullopt;
+                auto* vec_ty = llvmTypeForVector(*rvec);
+                if (isFloat(rvec->element_type) && !isFloat(ltype)) {
+                    scalar = builder->CreateSIToFP(scalar, llvm::Type::getDoubleTy(*ctx));
+                }
+                auto* undef_vec = llvm::UndefValue::get(llvm::dyn_cast<llvm::FixedVectorType>(vec_ty));
+                auto* ins = builder->CreateInsertElement(undef_vec, scalar, (uint64_t)0);
+                auto* zero = llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0);
+                auto* mask = llvm::ConstantVector::getSplat(
+                    llvm::ElementCount::getFixed(rvec->size), zero);
+                auto* splat = builder->CreateShuffleVector(ins, undef_vec, mask);
+                llvm::Value* result;
+                if (isFloat(rvec->element_type)) {
+                    if (is_add) result = builder->CreateFAdd(splat, raw_r, "vecsadd");
+                    else result = builder->CreateFMul(splat, raw_r, "vecsmul");
+                } else {
+                    if (is_add) result = builder->CreateAdd(splat, raw_r, "vecsadd");
+                    else result = builder->CreateMul(splat, raw_r, "vecsmul");
+                }
+                return makeVector(result, *rvec);
+            }
+            // scalar - vector: splat scalar, then scalar_splat - vector
+            if (!is_add && !is_mul && !is_div) {
+                // This is subtraction: scalar - vector
+                auto rvec = std::dynamic_pointer_cast<VectorType>(rtype);
+                auto* raw_r = extractVector(r, *rvec);
+                auto* scalar = isFloat(ltype) ? getF64(l) :
+                    isInteger(ltype) ? getI64(l) : nullptr;
+                if (!scalar) return std::nullopt;
+                auto* vec_ty = llvmTypeForVector(*rvec);
+                if (isFloat(rvec->element_type) && !isFloat(ltype)) {
+                    scalar = builder->CreateSIToFP(scalar, llvm::Type::getDoubleTy(*ctx));
+                }
+                auto* undef_vec = llvm::UndefValue::get(llvm::dyn_cast<llvm::FixedVectorType>(vec_ty));
+                auto* ins = builder->CreateInsertElement(undef_vec, scalar, (uint64_t)0);
+                auto* zero = llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0);
+                auto* mask = llvm::ConstantVector::getSplat(
+                    llvm::ElementCount::getFixed(rvec->size), zero);
+                auto* splat = builder->CreateShuffleVector(ins, undef_vec, mask);
+                llvm::Value* result;
+                if (isFloat(rvec->element_type)) {
+                    result = builder->CreateFSub(splat, raw_r, "scalar_minus_vec");
+                } else {
+                    result = builder->CreateSub(splat, raw_r, "scalar_minus_vec");
+                }
+                return makeVector(result, *rvec);
+            }
+            // scalar / vec: not supported (nonsensical)
+            return std::nullopt;
+        }
+
+        return std::nullopt;
+    };
+
     switch (e.op.type) {
         case TokenType::PLUS: {
+            // SIMD-5: vector fast path
+            if (auto vec_result = vectorOp(true, false, false)) return *vec_result;
             // Fast path: typed primitives — skip tag dispatch entirely
             if (types_known) {
                 auto& ltype = lt_it->second;
@@ -266,6 +403,8 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             return phi;
         }
         case TokenType::MINUS: {
+            // SIMD-5: vector fast path
+            if (auto vec_result = vectorOp(false, false, false)) return *vec_result;
             // Fast path: typed primitives
             if (types_known) {
                 auto& ltype = lt_it->second;
@@ -302,6 +441,8 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             return phi;
         }
         case TokenType::STAR: {
+            // SIMD-5: vector fast path
+            if (auto vec_result = vectorOp(false, true, false)) return *vec_result;
             // Fast path: typed primitives
             if (types_known) {
                 auto& ltype = lt_it->second;
@@ -344,6 +485,8 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             return phi;
         }
         case TokenType::SLASH: {
+            // SIMD-5: vector fast path
+            if (auto vec_result = vectorOp(false, false, true)) return *vec_result;
             // Fast path: typed primitives
             if (types_known) {
                 auto& ltype = lt_it->second;
@@ -781,6 +924,41 @@ llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
                     builder->CreateStore(raw_val, elem_ptr);
                     return v;
                 }
+            }
+        }
+
+        // SIMD-5: vector subscript assignment — insert element into vector
+        if (type_it != m_type_checker.getExpressionTypes().end() &&
+            type_it->second->kind == TypeKind::VECTOR) {
+            auto vec_type = std::dynamic_pointer_cast<VectorType>(type_it->second);
+            if (vec_type && vec_type->element_type) {
+                // Extract the raw LLVM vector from the boxed object
+                auto* raw_vec = extractVector(obj, *vec_type);
+
+                // Get the index as i32
+                auto* idx_obj = cg(sub->index);
+                auto* idx_val = getI64(idx_obj);
+                auto* idx_i32 = builder->CreateTrunc(idx_val,
+                    llvm::Type::getInt32Ty(*ctx), "idx_i32");
+
+                // Unbox the value to raw scalar
+                auto elem_kind = localKindForType(vec_type->element_type);
+                auto* raw_val = unboxToRaw(v, elem_kind);
+
+                // Insert the element
+                auto* new_vec = builder->CreateInsertElement(raw_vec, raw_val, idx_i32, "vec_ins");
+
+                // Store back to the heap object
+                auto* payload = builder->CreateExtractValue(obj, {1}, "vec_payload2");
+                auto* vec_ptr = builder->CreateIntToPtr(payload,
+                    llvm::PointerType::get(*ctx, 0));
+                auto* data_ptr = builder->CreateLoad(llvm::PointerType::get(*ctx, 0),
+                    builder->CreateStructGEP(rt->getVectorType(), vec_ptr, 3), "data_ptr2");
+                auto* vec_ty = llvmTypeForVector(*vec_type);
+                auto* typed_ptr = builder->CreateBitCast(data_ptr,
+                    llvm::PointerType::get(vec_ty, 0), "typed_ptr2");
+                builder->CreateStore(new_vec, typed_ptr);
+                return v;
             }
         }
 
@@ -1283,6 +1461,37 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                 return makeI64(callRtByName("__ang_obj_hash", {cg(getArgs(expr)[0])}));
             }
             return makeI64((int64_t)0);
+        }
+
+        // SIMD-5: vector constructors — vec2(...), vec3(...), vec4(...), vec8(...)
+        if (fn == "vec2" || fn == "vec3" || fn == "vec4" || fn == "vec8") {
+            int size = std::stoi(fn.substr(3));
+            // Get the result type from the type checker to determine element type
+            auto type_it = m_type_checker.getExpressionTypes().find(&expr);
+            if (type_it != m_type_checker.getExpressionTypes().end() &&
+                type_it->second->kind == TypeKind::VECTOR) {
+                auto vec_type = std::dynamic_pointer_cast<VectorType>(type_it->second);
+                if (vec_type) {
+                    // Determine LLVM vector type
+                    auto* vec_ty = llvmTypeForVector(*vec_type);
+                    // Build the vector from scalar arguments
+                    auto* undef_vec = llvm::UndefValue::get(vec_ty);
+                    llvm::Value* vec_val = undef_vec;
+                    for (size_t i = 0; i < getArgs(expr).size() && i < (size_t)size; i++) {
+                        auto* arg = cg(getArgs(expr)[i]);
+                        llvm::Value* scalar;
+                        if (isFloat(vec_type->element_type)) {
+                            scalar = getF64(arg);
+                        } else {
+                            scalar = getI64(arg);
+                        }
+                        vec_val = builder->CreateInsertElement(vec_val, scalar, (uint64_t)i, "vecins");
+                    }
+                    return makeVector(vec_val, *vec_type);
+                }
+            }
+            // Fallback: return nil if we couldn't determine the type
+            return makeNil();
         }
 
         if (fn=="string") {
@@ -1813,6 +2022,31 @@ llvm::Value* LLVMBackend::cgSubscript(const SubscriptExpr& e) {
         // Box back into AngaraObject
         return boxRaw(raw_val, elem_kind);
     }
+
+    // SIMD-5: vector subscript — extract a single element from the vector
+    if (type_it != m_type_checker.getExpressionTypes().end() &&
+        type_it->second->kind == TypeKind::VECTOR) {
+        auto vec_type = std::dynamic_pointer_cast<VectorType>(type_it->second);
+        if (!vec_type || !vec_type->element_type) goto fallback_list;
+
+        // Extract the raw LLVM vector from the boxed object
+        auto* raw_vec = extractVector(obj, *vec_type);
+
+        // Get the index as i64
+        auto* idx_obj = cg(e.index);
+        auto* idx_val = getI64(idx_obj);
+        // Truncate to i32 for extractelement (LLVM requires i32 index)
+        auto* idx_i32 = builder->CreateTrunc(idx_val,
+            llvm::Type::getInt32Ty(*ctx), "idx_i32");
+
+        // Extract the scalar element
+        auto* scalar = builder->CreateExtractElement(raw_vec, idx_i32, "vec_elem");
+
+        // Box the scalar back into AngaraObject
+        auto elem_kind = localKindForType(vec_type->element_type);
+        return boxRaw(scalar, elem_kind);
+    }
+
     fallback_list:
     return callRtByName("__ang_list_get", {obj, cg(e.index)});
 }

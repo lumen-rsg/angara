@@ -56,6 +56,26 @@ namespace angara {
                             else result_type = right_type;
                         }
                     }
+                } else if (left_type->kind == TypeKind::VECTOR && right_type->kind == TypeKind::VECTOR) {
+                    // SIMD-5: element-wise vector arithmetic
+                    if (sameType(left_type, right_type)) {
+                        result_type = left_type;
+                    } else {
+                        error(expr.op, "Operator '" + expr.op.lexeme + "' requires both vector operands to have "
+                                       "the same type, but got '" + left_type->toString() + "' and '" +
+                                       right_type->toString() + "'.", "E421");
+                    }
+                } else if (left_type->kind == TypeKind::VECTOR && isNumeric(right_type)) {
+                    // SIMD-5: vector - scalar, vector / scalar
+                    result_type = left_type;
+                } else if (isNumeric(left_type) && right_type->kind == TypeKind::VECTOR) {
+                    // SIMD-5: scalar - vector (makes sense for subtraction)
+                    if (expr.op.type == TokenType::MINUS) {
+                        result_type = right_type;
+                    } else {
+                        error(expr.op, "Operator '" + expr.op.lexeme + "' cannot be used with scalar left and vector "
+                                       "right operands.", "E428");
+                    }
                 } else {
                     error(expr.op, "Operator '" + expr.op.lexeme + "' requires numeric operands, but got '" +
                                    left_type->toString() + "' and '" + right_type->toString() + "'.", "E352");
@@ -73,6 +93,21 @@ namespace angara {
                     }
                 } else if (left_type->toString() == "string" && isNumeric(right_type)) {
                     result_type = m_type_string;
+                } else if (left_type->kind == TypeKind::VECTOR && right_type->kind == TypeKind::VECTOR) {
+                    // SIMD-5: element-wise vector multiplication
+                    if (sameType(left_type, right_type)) {
+                        result_type = left_type;
+                    } else {
+                        error(expr.op, "Vector multiplication requires both operands to have the same type, "
+                                       "but got '" + left_type->toString() + "' and '" +
+                                       right_type->toString() + "'.", "E422");
+                    }
+                } else if (left_type->kind == TypeKind::VECTOR && isNumeric(right_type)) {
+                    // SIMD-5: scalar broadcast: vec * scalar
+                    result_type = left_type;
+                } else if (isNumeric(left_type) && right_type->kind == TypeKind::VECTOR) {
+                    // SIMD-5: scalar broadcast: scalar * vec
+                    result_type = right_type;
                 } else {
                     error(expr.op, "Operator '*' can only be used with two numbers (arithmetic) or 'string * number' (repetition).", "E353");
                 }
@@ -89,6 +124,21 @@ namespace angara {
                     }
                 } else if (left_type->toString() == "string" && right_type->toString() == "string") {
                     result_type = m_type_string;
+                } else if (left_type->kind == TypeKind::VECTOR && right_type->kind == TypeKind::VECTOR) {
+                    // SIMD-5: element-wise vector addition
+                    if (sameType(left_type, right_type)) {
+                        result_type = left_type;
+                    } else {
+                        error(expr.op, "Vector addition requires both operands to have the same type, "
+                                       "but got '" + left_type->toString() + "' and '" +
+                                       right_type->toString() + "'.", "E423");
+                    }
+                } else if (left_type->kind == TypeKind::VECTOR && isNumeric(right_type)) {
+                    // SIMD-5: scalar broadcast: vec + scalar
+                    result_type = left_type;
+                } else if (isNumeric(left_type) && right_type->kind == TypeKind::VECTOR) {
+                    // SIMD-5: scalar broadcast: scalar + vec
+                    result_type = right_type;
                 } else {
                     error(expr.op, "Operator '+' can only be used with two numbers (addition) or two strings (concatenation).", "E354");
                 }
