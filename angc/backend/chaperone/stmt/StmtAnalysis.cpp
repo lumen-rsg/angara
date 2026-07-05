@@ -329,11 +329,25 @@ void Chaperone::analyzeStmt(Context& ctx,
             // Variable not tracked — check if it's a built-in heap-allocated
             // type (string, list, record, etc.) that we can still drop.
             bool is_heap_var = false;
+
+            // For variables not in the state map (globals, undeclared), resolve
+            // via the symbol table. For Uninit locals (declared but not tracked),
+            // look up the type via the TypeChecker's variable-types map.
             if (it == state.end()) {
                 auto sym = const_cast<SymbolTable&>(
                     ctx.tc.getSymbolTable()).resolve(drop->name.lexeme);
                 if (sym && sym->type) {
                     is_heap_var = isHeapAllocatedType(ctx, *sym->type);
+                }
+            } else {
+                // Variable is Uninit in the state map — it was declared as a
+                // local but not tracked (e.g. string, list). Walk the TypeChecker's
+                // variable-types map to find its type by name.
+                for (const auto& [decl, vtype] : ctx.tc.getVariableTypes()) {
+                    if (decl && decl->name.lexeme == drop->name.lexeme && vtype) {
+                        is_heap_var = isHeapAllocatedType(ctx, *vtype);
+                        break;
+                    }
                 }
             }
             if (is_heap_var) {
