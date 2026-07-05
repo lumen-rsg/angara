@@ -689,6 +689,15 @@ void LSPServer::buildSymbolCache(AnalysisResult& result, TypeChecker& typeChecke
             dsi.endLine = ct->name.line - 1;
             dsi.endCol = dsi.startCol + (int)ct->name.lexeme.size();
             result.documentSymbols.push_back(std::move(dsi));
+        } else if (auto* alias = dynamic_cast<const TypeAliasStmt*>(stmt.get())) {
+            DocumentSymbolInfo dsi;
+            dsi.name = alias->name.lexeme;
+            dsi.kind = 23; // Struct (same as data)
+            dsi.startLine = alias->name.line - 1;
+            dsi.startCol = alias->name.column - 1;
+            dsi.endLine = alias->name.line - 1;
+            dsi.endCol = dsi.startCol + (int)alias->name.lexeme.size();
+            result.documentSymbols.push_back(std::move(dsi));
         }
     }
 }

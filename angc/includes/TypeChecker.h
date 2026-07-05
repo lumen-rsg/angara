@@ -130,6 +130,7 @@ namespace angara {
         void visit(std::shared_ptr<const DataStmt> stmt) override;
         void visit(std::shared_ptr<const BreakStmt> stmt) override;
         void visit(std::shared_ptr<const ContinueStmt> stmt) override;
+        void visit(std::shared_ptr<const TypeAliasStmt> stmt) override;
 
         // --- Header definition passes ---
 
@@ -153,6 +154,9 @@ namespace angara {
 
         /// Resolves an attach/import statement, loading the module and declaring imported symbols.
         void resolveAttach(const AttachStmt &stmt);
+
+        /// Resolves the RHS type and registers the alias name in the symbol table.
+        void defineTypeAliasHeader(const TypeAliasStmt &stmt);
 
         // --- Type helpers ---
 

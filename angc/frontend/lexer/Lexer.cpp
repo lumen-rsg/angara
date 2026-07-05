@@ -43,6 +43,7 @@ namespace angara {
             {"enum",     TokenType::ENUM},
             {"union",    TokenType::UNION},
             {"owned",    TokenType::OWNED},
+            {"type",     TokenType::TYPE},
             {"drop",     TokenType::DROP},
             {"finally",  TokenType::FINALLY},
             {"match",    TokenType::MATCH},

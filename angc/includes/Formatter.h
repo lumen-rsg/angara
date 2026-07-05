@@ -38,6 +38,7 @@ namespace angara {
         void visit(std::shared_ptr<const EnumStmt> stmt) override;
         void visit(std::shared_ptr<const UnsafeBlockStmt> stmt) override;
         void visit(std::shared_ptr<const DropStmt> stmt) override;
+        void visit(std::shared_ptr<const TypeAliasStmt> stmt) override;
         void visit(std::shared_ptr<const EmptyStmt> stmt) override;
 
         // ── Expression visitors (std::any, const XxxExpr&)

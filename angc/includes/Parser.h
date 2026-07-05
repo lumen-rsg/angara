@@ -137,6 +137,10 @@ namespace angara {
         /// @return The parsed enum-declaration node.
         std::shared_ptr<Stmt> enumDeclaration();
 
+        /// Parses a `type` alias declaration (e.g., `type UserId = i64;`).
+        /// @return The parsed type-alias node.
+        std::shared_ptr<Stmt> typeAliasDeclaration();
+
         /// Parses a single pattern inside a `case` arm of a `match` expression.
         /// @return The parsed pattern expression node.
         std::shared_ptr<Expr> parseMatchPattern();

@@ -30,6 +30,8 @@ void LLVMBackend::codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>&
             codegenDataDecl(*s);
         else if (auto s = std::dynamic_pointer_cast<const EnumStmt>(stmt))
             codegenEnumDecl(*s);
+        else if (std::dynamic_pointer_cast<const TypeAliasStmt>(stmt))
+            continue;  // LANG-12: type aliases are compile-time only
     }
 }
 
@@ -1029,6 +1031,7 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
         if (std::dynamic_pointer_cast<const TraitStmt>(stmt)) continue;
         if (std::dynamic_pointer_cast<const ContractStmt>(stmt)) continue;
         if (std::dynamic_pointer_cast<const AttachStmt>(stmt)) continue;
+        if (std::dynamic_pointer_cast<const TypeAliasStmt>(stmt)) continue;  // LANG-12
 
         if (auto var_decl = std::dynamic_pointer_cast<const VarDeclStmt>(stmt)) {
             const std::string name = sanitize(var_decl->name.lexeme);

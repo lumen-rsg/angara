@@ -550,4 +550,8 @@ namespace angara {
         printHeader("DropStmt: " + stmt->name.lexeme);
     }
 
+    void ASTPrinter::visit(std::shared_ptr<const TypeAliasStmt> stmt) {
+        printHeader("TypeAliasStmt", stmt->name.lexeme);
+    }
+
 }

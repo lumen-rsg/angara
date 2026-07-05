@@ -37,6 +37,7 @@ namespace angara {
     struct EnumStmt;
     struct UnsafeBlockStmt;
     struct DropStmt;
+    struct TypeAliasStmt;
 
 // Statement Visitor Interface (returns void)
     class StmtVisitor {
@@ -64,6 +65,7 @@ namespace angara {
         virtual void visit(std::shared_ptr<const EnumStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const UnsafeBlockStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const DropStmt> stmt) = 0;
+        virtual void visit(std::shared_ptr<const TypeAliasStmt> stmt) = 0;
     };
     // A simple struct to pair a parameter's name with its type annotation.
     struct Parameter {
@@ -528,6 +530,20 @@ namespace angara {
 
         void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const DropStmt>(self));
+        }
+    };
+
+    // LANG-12: `type Name = Type;` — compile-time type alias.
+    struct TypeAliasStmt final : Stmt {
+        const Token name;
+        const std::shared_ptr<ASTType> aliased_type;
+        bool is_exported = false;
+
+        TypeAliasStmt(Token name, std::shared_ptr<ASTType> aliased_type)
+            : name(std::move(name)), aliased_type(std::move(aliased_type)) {}
+
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
+            visitor.visit(std::static_pointer_cast<const TypeAliasStmt>(self));
         }
     };
 }

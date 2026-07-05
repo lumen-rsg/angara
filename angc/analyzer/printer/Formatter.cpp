@@ -380,6 +380,15 @@ void Formatter::visit(std::shared_ptr<const EnumStmt> stmt) {
     decreaseIndent(); writeLine("}");
 }
 
+void Formatter::visit(std::shared_ptr<const TypeAliasStmt> stmt) {
+    std::string prefix;
+    if (stmt->is_exported) prefix += "export ";
+    write(prefix + "type " + stmt->name.lexeme + " = ");
+    fmtType(stmt->aliased_type);
+    m_out << ";";
+    newLine();
+}
+
 void Formatter::visit(std::shared_ptr<const UnsafeBlockStmt> stmt) {
     write("@unsafe "); fmtBlock(stmt->block.get());
 }

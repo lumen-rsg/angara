@@ -112,7 +112,7 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 ### Structuring / calls
 - [ ] **LANG-10** No **tuples** / tuple types / multi-return; no destructuring (assign, pattern, or `for (k, v in map)`).
 - [ ] **LANG-11** No **default arguments**; no **named arguments**.
-- [ ] **LANG-12** No **type aliases** (`type UserId = i64`).
+- [x] **LANG-12** ✅ Fixed — No **type aliases** (`type UserId = i64`).
 - [ ] **LANG-13** No **operator overloading** (`==`/`<` for user types).
 - [ ] **LANG-14** No `protected` access level (only `public`/`private`).
 

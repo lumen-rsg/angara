@@ -1,0 +1,56 @@
+attach io;
+
+// LANG-12: Basic alias to primitive
+type UserId = i64;
+
+// Alias to string
+type Name = string;
+
+// Alias to generic list type
+type IntList = list<i64>;
+
+// Alias to optional (using ? suffix syntax)
+type MaybeInt = i64?;
+
+// Alias to built-in bool
+type Flag = bool;
+
+// Alias used in data field type
+type ID = i64;
+
+data Person {
+    let id as ID;
+    let name as string;
+}
+
+// Alias-to-alias chain (must come after ID definition)
+type ID2 = ID;
+
+export func main() -> i64 {
+    // Basic usage in variable declaration
+    let uid as UserId = 42;
+    io.println(1, string(uid));
+
+    // Alias for string type
+    let nm as Name = "Alice";
+    io.println(1, nm);
+
+    // Alias for bool
+    let flag as Flag = true;
+    io.println(1, string(flag));
+
+    // Alias used in constructor
+    let p = Person(1, "Bob");
+    io.println(1, string(p.id));
+    io.println(1, p.name);
+
+    // Alias-to-alias chain usage
+    let id2 as ID2 = 99;
+    io.println(1, string(id2));
+
+    // Optional alias usage
+    let maybe as MaybeInt = 7;
+    io.println(1, string(maybe));
+
+    return 0;
+}

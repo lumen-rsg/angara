@@ -127,6 +127,10 @@ namespace angara {
                 auto enum_decl = std::static_pointer_cast<EnumStmt>(enumDeclaration());
                 enum_decl->is_exported = is_exported;
                 return enum_decl;
+            } else if (match({TokenType::TYPE})) {
+                auto alias_decl = std::static_pointer_cast<TypeAliasStmt>(typeAliasDeclaration());
+                alias_decl->is_exported = is_exported;
+                return alias_decl;
             } else {
                 if (is_exported) {
                     throw error(peek(), "Expected a declaration after 'export' (function, class, contract, trait, 'let', or 'const').", "E138");

@@ -199,6 +199,14 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
         }
     if (m_hadError) return false;
 
+    // Pass 1a2: define type aliases (after nominal types declared, before headers)
+    for (const auto& stmt : statements) {
+        if (auto alias_stmt = std::dynamic_pointer_cast<const TypeAliasStmt>(stmt)) {
+            defineTypeAliasHeader(*alias_stmt);
+        }
+    }
+    if (m_hadError) return false;
+
         for (const auto& stmt : statements) {
             if (auto enum_stmt = std::dynamic_pointer_cast<const EnumStmt>(stmt)) {
                 defineEnumHeader(*enum_stmt);
@@ -338,10 +346,8 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
             if (symbol->type->kind == TypeKind::CLASS) {
                 return std::make_shared<InstanceType>(std::dynamic_pointer_cast<ClassType>(symbol->type));
             }
-            if (symbol->type->kind == TypeKind::DATA || symbol->type->kind == TypeKind::TRAIT ||
-                    symbol->type->kind == TypeKind::CONTRACT || symbol->type->kind == TypeKind::ENUM) {
-                return symbol->type;
-    }
+            // For DATA, TRAIT, CONTRACT, ENUM, and type aliases (which resolve to any type)
+            return symbol->type;
         }
 
         error(simple->name, "Unknown type '" + name + "'.", "E250");

@@ -1,0 +1,20 @@
+attach io;
+
+// E248: Duplicate alias name (conflict with existing symbol)
+type X = i64;
+type X = string;                                // E248 already declared
+
+// E250: Alias to undefined type
+type Bad = NoSuchType;                          // E250 unknown type
+
+// E250: Forward reference to another alias (not yet defined)
+type ForwardRef = LaterAlias;                   // E250 unknown type
+type LaterAlias = i64;
+
+// E248: Alias name conflicts with function name
+func conflictFunc() {}
+type conflictFunc = i64;                        // E248 already declared
+
+export func main() -> i64 {
+    return 0;
+}
