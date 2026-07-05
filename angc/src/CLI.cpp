@@ -65,6 +65,14 @@ void CLI::parseFlags(std::vector<std::string>& args) {
         } else if (args[i] == "--error-format" && i + 1 < args.size()) {
             m_flags.error_format = args[i + 1];
             args.erase(args.begin() + i, args.begin() + i + 2);
+        } else if ((args[i] == "-j" || args[i] == "--jobs") && i + 1 < args.size()) {
+            // TOOL-2: parallel compilation thread count
+            m_flags.jobs = std::stoi(args[i + 1]);
+            args.erase(args.begin() + i, args.begin() + i + 2);
+        } else if (args[i] == "--force") {
+            // TOOL-2: force full rebuild (ignore incremental cache)
+            m_flags.force_rebuild = true;
+            args.erase(args.begin() + i);
         } else {
             ++i;
         }
@@ -81,60 +89,72 @@ int CLI::handleRepl() {
     return repl.run();
 }
 
-int CLI::run(int argc, char** argv) {
-    std::vector<std::string> args(argv + 1, argv + argc);
+    int CLI::run(int argc, char** argv) {
+        std::vector<std::string> args(argv + 1, argv + argc);
 
-    if (args.empty()) {
-        return handleNoArgs();
-    }
-
-    std::string cmd = args[0];
-    args.erase(args.begin());
-
-    if (cmd == "init")     return handleInit(args);
-    if (cmd == "run")      return handleRun(args);
-    if (cmd == "test")     return handleTest(args);
-    if (cmd == "clean")    return handleClean(args);
-    if (cmd == "publish")  return handlePublish(args);
-    if (cmd == "modules")  { list_modules(); return 0; }
-    if (cmd == "check")    return handleCheck(args);
-    if (cmd == "fmt")      return handleFmt(args);
-    if (cmd == "watch")    return handleWatch(args);
-    if (cmd == "explain")  return handleExplain(args);
-    if (cmd == "lsp")      return handleLsp();
-    if (cmd == "repl")     return handleRepl();
-    if (cmd == "-v" || cmd == "--version") { print_version(); return 0; }
-    if (cmd == "-h" || cmd == "--help")    { print_help(); return 0; }
-    if (cmd == "--make-perfect")           { run_easter_egg(); return 0; }
-
-    // Not a recognized command — treat as file/flags.
-    // Re-insert cmd so flag parsing sees all args (the first arg may be
-    // the filename, not a flag).
-    args.insert(args.begin(), cmd);
-    parseFlags(args);
-
-    if (m_flags.dump_ast && !args.empty()) {
-        return cmdDumpAst(args[0]);
-    }
-
-    if (!m_flags.target.empty()) {
-        // Target specified via --target; resolve and rebuild
-    }
-
-    // --path <file.abs> build
-    for (size_t i = 0; i < args.size(); i++) {
-        if (args[i] == "--path" && i + 1 < args.size()) {
-            return cmdPathBuild(args);
+        if (args.empty()) {
+            return handleNoArgs();
         }
-    }
 
-    // Single .an file compilation
-    if (!args.empty() && is_an_file(args[0])) {
-        return cmdCompileSingleFile(args[0]);
-    }
+        // TOOL-2: parse flags first so all subcommands get them.
+        parseFlags(args);
 
-    // Unknown
-    std::cerr << CLR_RED << "Unknown command or file: " << cmd << CLR_RESET << "\n";
+        if (args.empty()) {
+            return handleNoArgs();
+        }
+
+        std::string cmd = args[0];
+        args.erase(args.begin());
+
+        if (cmd == "init")     return handleInit(args);
+        if (cmd == "run")      return handleRun(args);
+        if (cmd == "test")     return handleTest(args);
+        if (cmd == "clean")    return handleClean(args);
+        if (cmd == "publish")  return handlePublish(args);
+        if (cmd == "modules")  { list_modules(); return 0; }
+        if (cmd == "check")    return handleCheck(args);
+        if (cmd == "fmt")      return handleFmt(args);
+        if (cmd == "watch")    return handleWatch(args);
+        if (cmd == "explain")  return handleExplain(args);
+        if (cmd == "lsp")      return handleLsp();
+        if (cmd == "repl")     return handleRepl();
+        if (cmd == "-v" || cmd == "--version") { print_version(); return 0; }
+        if (cmd == "-h" || cmd == "--help")    { print_help(); return 0; }
+        if (cmd == "--make-perfect")           { run_easter_egg(); return 0; }
+
+        // Not a recognized command — treat as file.
+        if (m_flags.dump_ast) {
+            // The file is either `cmd` or `args[0]` depending on flag position.
+            std::string file = is_an_file(cmd) ? cmd : (!args.empty() ? args[0] : "");
+            if (!file.empty()) return cmdDumpAst(file);
+        }
+
+        if (!m_flags.target.empty()) {
+            // Target specified via --target; resolve and rebuild
+        }
+
+        // --path <file.abs> build — path may be `cmd` or in args.
+        if (cmd == "--path" && !args.empty()) {
+            // args[0] is the project file
+            std::vector<std::string> path_args = {cmd, args[0]};
+            return cmdPathBuild(path_args);
+        }
+        for (size_t i = 0; i < args.size(); i++) {
+            if (args[i] == "--path" && i + 1 < args.size()) {
+                return cmdPathBuild(args);
+            }
+        }
+
+        // Single .an file compilation — the file may be `cmd` or `args[0]`.
+        if (is_an_file(cmd)) {
+            return cmdCompileSingleFile(cmd);
+        }
+        if (!args.empty() && is_an_file(args[0])) {
+            return cmdCompileSingleFile(args[0]);
+        }
+
+        // Unknown
+        std::cerr << CLR_RED << "Unknown command or file: " << cmd << CLR_RESET << "\n";
     print_help();
     return 1;
 }

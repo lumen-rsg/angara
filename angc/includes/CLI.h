@@ -28,6 +28,8 @@ struct CliFlags {
     bool werror = false;
     std::vector<std::string> suppress_warnings;
     std::string error_format = "text";
+    int jobs = 0;           // TOOL-2: 0 = auto (hardware_concurrency)
+    bool force_rebuild = false;  // TOOL-2: ignore incremental cache
 };
 
 // Free functions (declared here, defined in CliUtils.cpp / HelpText.cpp / etc.)
@@ -44,6 +46,9 @@ void list_modules();
 class CLI {
 public:
     int run(int argc, char** argv);
+
+    /// Returns the parsed CLI flags (read-only).
+    const CliFlags& getFlags() const { return m_flags; }
 
 private:
     // Shared state

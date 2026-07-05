@@ -7,10 +7,20 @@
 namespace fs = std::filesystem;
 namespace angara {
 
+// TOOL-2: helper to configure a BuildSystem from CLI flags.
+static void applyCliFlags(CLI& cli, BuildSystem& builder) {
+    const auto& flags = cli.getFlags();
+    if (flags.jobs > 0) builder.set_jobs(flags.jobs);
+    if (flags.force_rebuild) builder.set_force_rebuild(true);
+    if (flags.release) builder.set_build_mode(BuildMode::RELEASE);
+    if (flags.debug) builder.set_build_mode(BuildMode::DEBUG);
+}
+
 int angara::CLI::handleNoArgs() {
     if (std::string project_file = find_local_project_file(); !project_file.empty()) {
         std::cout << CLR_BOLD << "Found project configuration: " << project_file << CLR_RESET << "\n";
         angara::BuildSystem builder;
+        applyCliFlags(*this, builder);
         return builder.build(project_file) ? 0 : 1;
     }
     print_help();
@@ -34,6 +44,7 @@ int angara::CLI::handleRun(const std::vector<std::string>& args) {
         return 1;
     }
     angara::BuildSystem builder;
+    applyCliFlags(*this, builder);
     return builder.run(project_file) ? 0 : 1;
 }
 
@@ -56,6 +67,7 @@ int angara::CLI::handleClean(const std::vector<std::string>& args) {
         return 1;
     }
     angara::BuildSystem builder;
+    applyCliFlags(*this, builder);
     return builder.clean(project_file) ? 0 : 1;
 }
 
@@ -83,6 +95,7 @@ int angara::CLI::handlePublish(const std::vector<std::string>& args) {
         return 1;
     }
     angara::BuildSystem builder;
+    applyCliFlags(*this, builder);
     return builder.publish(project_file, publish_output) ? 0 : 1;
 }
 } // namespace angara

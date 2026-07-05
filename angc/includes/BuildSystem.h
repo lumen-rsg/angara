@@ -46,6 +46,12 @@ namespace angara {
         /// Sets the build mode (debug or release).
         void set_build_mode(BuildMode mode) { m_build_mode = mode; }
 
+        /// TOOL-2: sets the number of parallel compilation threads.
+        void set_jobs(int n) { m_jobs = n; }
+
+        /// TOOL-2: forces a full rebuild, ignoring the incremental cache.
+        void set_force_rebuild(bool v) { m_force_rebuild = v; }
+
     private:
         const std::string m_angara_home = "/opt/angara";
         const std::string m_native_lib_path;
@@ -57,6 +63,10 @@ namespace angara {
         std::string m_target_triple;
         std::string m_sysroot;
         BuildMode m_build_mode = BuildMode::DEBUG;
+
+        // TOOL-2: parallel + incremental compilation flags.
+        int m_jobs = 0;
+        bool m_force_rebuild = false;
 
         std::vector<std::string> m_built_artifacts;
 

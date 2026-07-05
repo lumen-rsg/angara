@@ -125,6 +125,13 @@ int angara::CLI::cmdCompileSingleFile(const std::string& source_file) {
     if (m_flags.werror) driver.set_warnings_as_errors(true);
     for (const auto& w : m_flags.suppress_warnings) driver.suppress_warning(w);
 
+    // TOOL-2: parallel + incremental flags.
+    if (m_flags.jobs > 0) driver.set_jobs(m_flags.jobs);
+    if (m_flags.force_rebuild) driver.set_force_rebuild(true);
+    // Use .angara/build as the build dir for single-file compilations too,
+    // so incremental caching works.
+    driver.set_build_dir(".angara/build/obj");
+
     std::string native_mod_path = "/opt/angara/modules";
     if (fs::exists("build/modules")) {
         native_mod_path = fs::absolute("build/modules").string();
@@ -225,16 +232,15 @@ int angara::CLI::cmdCompileSingleFile(const std::string& source_file) {
     double total_time = std::chrono::duration<double>(total_end - build_start).count();
 
     if (res == 0) {
-        // Generate dSYM bundle on macOS in debug mode before cleaning up object files
+        // Generate dSYM bundle on macOS in debug mode
         if (m_flags.debug) {
 #ifdef __APPLE__
             std::string dsym_cmd = "dsymutil " + angara::shell_escape(binary_name) + " 2>/dev/null";
             (void)system(dsym_cmd.c_str());
 #endif
         }
-        for (const auto& o_file : driver.get_generated_object_files()) {
-            remove(o_file.c_str());
-        }
+        // TOOL-2: keep .o files for incremental compilation.
+        // They live in .angara/build/obj/ and are cleaned by `angc clean`.
         std::cout << CLR_BOLD << CLR_GREEN << "[OK] " << CLR_RESET << "Built " << binary_name << CLR_DIM << " in " << total_time << "s" << CLR_RESET << "\n";
         return 0;
     } else {
@@ -259,6 +265,10 @@ int angara::CLI::cmdPathBuild(std::vector<std::string>& args) {
     if (!resolved_target.empty()) builder.set_target(resolved_target);
     if (!m_flags.sysroot.empty()) builder.set_sysroot(m_flags.sysroot);
     if (m_flags.release) builder.set_build_mode(angara::BuildMode::RELEASE);
+    if (m_flags.debug) builder.set_build_mode(angara::BuildMode::DEBUG);
+    // TOOL-2: parallel + incremental flags.
+    if (m_flags.jobs > 0) builder.set_jobs(m_flags.jobs);
+    if (m_flags.force_rebuild) builder.set_force_rebuild(true);
     return builder.build(args[1]) ? 0 : 1;
 }
 

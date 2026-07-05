@@ -6,13 +6,19 @@
 #include <set>
 #include <memory>
 #include <chrono>
+#include <mutex>
+#include <atomic>
 
 #include "ConfigParser.h"
 #include "SymbolTable.h"
 #include "Token.h"
 #include "Type.h"
+#include "DependencyGraph.h"
 
 namespace angara {
+
+    // Forward declarations.
+    struct Stmt;
 
     /// Represents a compiled or loaded module and its public exports.
     struct ModuleType : Type {
@@ -24,6 +30,17 @@ namespace angara {
             : Type(TypeKind::MODULE), name(std::move(name)) {}
 
         std::string toString() const override { return "module<" + name + ">"; }
+    };
+
+    /// TOOL-2: records a module discovered during the discovery phase
+    /// (parse-only, before type-checking).  Holds the parsed AST and the
+    /// set of import paths extracted from AttachStmt nodes.
+    struct ModuleDiscovery {
+        std::string path;          // absolute source-file path
+        std::string name;          // module name
+        std::vector<std::shared_ptr<Stmt>> statements;  // parsed AST
+        std::vector<std::string> imports;  // resolved absolute import paths
+        bool is_native = false;    // true for .so/.dylib native modules
     };
 
     /// Top-level driver that orchestrates the full compilation pipeline:
@@ -85,11 +102,34 @@ namespace angara {
         /// Sets the GC strategy ("chaperone" or "mark-sweep").
 
         /// Compiles a root source file and all its transitive imports.
-        /// Runs Lex -> Parse -> TypeCheck -> LLVM codegen for each module.
+        /// Runs the full pipeline: discover → compile modules in dependency order.
+        /// This is the main entry point for the build system.
         /// @param project         The project configuration.
         /// @param root_file_path  Absolute path to the entry source file.
         /// @return True if all stages succeeded.
         bool compile(const ProjectConfig& project, const std::string& root_file_path);
+
+        /// TOOL-2: Phase 1 — discovers all reachable modules by parsing them
+        /// (no type-checking) and builds the dependency graph.  Native modules
+        /// are loaded immediately.
+        /// @param root_file_path  Absolute path to the entry source file.
+        /// @return True if discovery succeeded with no errors.
+        bool discoverModules(const std::string& root_file_path);
+
+        /// TOOL-2: Phase 2 — compiles all discovered modules in topological
+        /// order, using the thread pool for parallelism within each level.
+        /// Must be called after a successful discoverModules().
+        /// @return True if all modules compiled successfully.
+        bool compileDiscoveredModules();
+
+        /// TOOL-2: compiles a single module through type-check → chaperone →
+        /// LLVM codegen, reusing the AST saved during discovery.  Called from
+        /// worker threads during parallel compilation.
+        /// @param path         Absolute module path.
+        /// @param is_clean     If true (incremental cache hit), skip LLVM codegen
+        ///                     and reuse the cached .o file.
+        /// @return True if compilation succeeded.
+        bool compileOneModule(const std::string& path, bool is_clean);
 
         /// Resolves a module by path or identifier, searching the configured paths.
         /// Returns a cached module if already compiled. Triggers recursive compilation
@@ -129,6 +169,19 @@ namespace angara {
         inline void set_workspace_projects(std::map<std::string, std::string> project_entries) {
             m_project_entries = std::move(project_entries);
         }
+
+        /// TOOL-2: sets the number of parallel compilation threads.
+        /// 0 = use std::thread::hardware_concurrency().
+        inline void set_jobs(int n) { m_jobs = n; }
+        inline int get_jobs() const { return m_jobs; }
+
+        /// TOOL-2: forces a full rebuild, ignoring the incremental cache.
+        inline void set_force_rebuild(bool v) { m_force_rebuild = v; }
+        inline bool get_force_rebuild() const { return m_force_rebuild; }
+
+        /// TOOL-2: sets the build output directory (for .o files and manifest).
+        inline void set_build_dir(const std::string& dir) { m_build_dir = dir; }
+        inline const std::string& get_build_dir() const { return m_build_dir; }
 
     protected:
         /// Prints a log line, temporarily clearing the progress bar.
@@ -170,9 +223,25 @@ namespace angara {
         std::vector<std::string> m_native_lib_names;
 
         int m_total_modules = 0;
-        int m_modules_compiled = 0;
+        std::atomic<int> m_modules_compiled{0};
         std::string m_last_progress_message;
         std::chrono::time_point<std::chrono::high_resolution_clock> m_build_start_time;
+
+        // TOOL-2: incremental + parallel compilation state
+        bool m_force_rebuild = false;
+        int m_jobs = 0;  // 0 = use hardware_concurrency
+        std::string m_build_dir;
+        std::map<std::string, ModuleDiscovery> m_discovered_modules;
+        DependencyGraph m_dependency_graph;
+
+        // TOOL-2: thread-safety for parallel compilation
+        mutable std::mutex m_cache_mutex;     // protects m_module_cache writes
+        mutable std::mutex m_obj_files_mutex; // protects m_generated_object_files
+
+        /// TOOL-2: resolves an import path to an absolute file path without
+        /// triggering compilation.  Uses the same search order as resolveModule().
+        std::string resolveImportPath(const std::string& path_or_id,
+                                      const Token& import_token);
 
         /// Open dlopen handles for native modules — closed in destructor.
         std::vector<void*> m_native_handles;

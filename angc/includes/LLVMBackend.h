@@ -57,6 +57,10 @@ namespace angara {
                       const std::shared_ptr<ModuleType>& module_type,
                       std::vector<std::string>& all_module_names);
 
+        /// Sets the output directory for object and IR files.
+        /// When set, files are written to `<dir>/ang_<module>.o` instead of CWD.
+        void set_output_dir(const std::string& dir) { m_output_dir = dir; }
+
         /// Returns the path to the emitted object file (.o).
         const std::string& get_object_file_path() const { return objPath; }
 
@@ -393,6 +397,7 @@ namespace angara {
 
         std::string objPath;
         std::string irPath;
+        std::string m_output_dir;  // TOOL-2: optional output directory for .o/.ll files
     };
 
 } // namespace angara

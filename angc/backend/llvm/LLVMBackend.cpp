@@ -12,6 +12,7 @@
 #include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/DIBuilder.h>
 #include <iostream>
+#include <filesystem>
 
 namespace angara {
 
@@ -27,8 +28,6 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
         : target_triple;
     targetTriple = llvm::Triple(llvm::StringRef(ttStr));
     mod->setTargetTriple(targetTriple);
-    llvm::InitializeAllTargetInfos(); llvm::InitializeAllTargets();
-    llvm::InitializeAllTargetMCs(); llvm::InitializeAllAsmParsers(); llvm::InitializeAllAsmPrinters();
     std::string te;
     if (auto* t = llvm::TargetRegistry::lookupTarget(llvm::Triple(targetTriple.str()), te)) {
         llvm::TargetOptions opt;
@@ -115,7 +114,15 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     if (has_user_main) {
         codegenMainFunction(stmts, moduleName, allMods);
     }
-    std::string base = "ang_" + moduleName;
+    std::string base = m_output_dir.empty()
+        ? "ang_" + moduleName
+        : m_output_dir + "/ang_" + moduleName;
+
+    // TOOL-2: ensure the output directory exists before writing files
+    if (!m_output_dir.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(m_output_dir, ec);
+    }
 
     if (m_dump_ir) {
         std::error_code ec;
@@ -131,7 +138,10 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     std::error_code ec;
     std::string le; auto* tgt = llvm::TargetRegistry::lookupTarget(llvm::Triple(targetTriple.str()),le);
     if (!tgt) { std::cerr<<"No target: "<<le<<"\n"; return false; }
-    llvm::TargetOptions opt; auto* tm = tgt->createTargetMachine(targetTriple,"generic","",opt,llvm::Reloc::PIC_,llvm::CodeModel::Small);
+    llvm::TargetOptions opt;
+    auto tm = std::unique_ptr<llvm::TargetMachine>(
+        tgt->createTargetMachine(targetTriple, "generic", "", opt,
+                                 llvm::Reloc::PIC_, llvm::CodeModel::Small));
     if (!tm) { std::cerr<<"No TM\n"; return false; }
 
     {
@@ -139,7 +149,7 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
         llvm::FunctionAnalysisManager fam;
         llvm::CGSCCAnalysisManager cgam;
         llvm::ModuleAnalysisManager mam;
-        llvm::PassBuilder pb(tm);
+        llvm::PassBuilder pb(tm.get());
         pb.registerModuleAnalyses(mam);
         pb.registerCGSCCAnalyses(cgam);
         pb.registerFunctionAnalyses(fam);

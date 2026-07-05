@@ -7,9 +7,13 @@
 #include "LLVMBackend.h"
 #include "AngaraABI.h"
 #include "Colors.h"
+#include "ThreadPool.h"
+#include "BuildManifest.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <thread>
+#include <future>
 
 #include <dlfcn.h>
 #include <filesystem>
@@ -180,10 +184,16 @@ namespace angara {
         m_compilation_stack.clear();
         m_generated_object_files.clear();
         m_native_lib_names.clear();
+        m_discovered_modules.clear();
+        m_dependency_graph = DependencyGraph();  // reset
 
-        auto root_module = resolveModule(root_file_path, Token());
+        // TOOL-2 Phase 1: discover all modules (parse only, no type-checking)
+        if (!discoverModules(root_file_path)) {
+            return false;
+        }
 
-        if (!root_module || m_had_error) {
+        // TOOL-2 Phase 2: compile in topological order (parallel within each level)
+        if (!compileDiscoveredModules()) {
             return false;
         }
 
@@ -200,6 +210,539 @@ namespace angara {
                       << " in " << CLR_BOLD << seconds << "s" << CLR_RESET << std::endl;
         }
 
+        return true;
+    }
+
+    // ── TOOL-2: resolveImportPath ──────────────────────────────────────────
+    // Extracts the path-resolution logic from resolveModule() without triggering
+    // compilation.  Returns the absolute file path on success, or empty string
+    // if the module cannot be found.
+
+    // Forward-declared: defined later in this file (used by resolveModule too).
+    static std::optional<std::string> find_candidate(const std::filesystem::path& dir,
+                                                      const std::string& name);
+
+    std::string CompilerDriver::resolveImportPath(const std::string& path_or_id,
+                                                   const Token& import_token) {
+        namespace fs = std::filesystem;
+        std::string found_path;
+
+        fs::path base_dir = fs::current_path();
+        if (import_token.file && !import_token.file->empty()) {
+            base_dir = fs::path(*import_token.file).parent_path();
+        }
+
+        fs::path input_path(path_or_id);
+        if (input_path.is_absolute()) {
+            std::error_code ec;
+            if (fs::exists(input_path, ec))
+                found_path = fs::canonical(input_path, ec).string();
+        }
+
+        if (found_path.empty()) {
+            bool is_relative = (path_or_id.find("./") == 0 ||
+                                path_or_id.find("../") == 0);
+
+            if (is_relative) {
+                if (auto p = find_candidate(base_dir, path_or_id))
+                    found_path = *p;
+            } else {
+                if (m_project_entries.count(path_or_id))
+                    found_path = m_project_entries.at(path_or_id);
+                if (found_path.empty()) {
+                    if (auto p = find_candidate(base_dir, path_or_id))
+                        found_path = *p;
+                }
+                if (found_path.empty()) {
+                    for (auto const& [name, entry_file] : m_project_entries) {
+                        fs::path proj_dir = fs::path(entry_file).parent_path();
+                        if (auto p = find_candidate(proj_dir, path_or_id)) {
+                            found_path = *p;
+                            break;
+                        }
+                    }
+                }
+                if (found_path.empty()) {
+                    if (auto p = find_candidate(fs::path(m_angara_module_path), path_or_id))
+                        found_path = *p;
+                }
+                if (found_path.empty()) {
+                    if (auto p = find_candidate(fs::path(m_native_module_path), path_or_id))
+                        found_path = *p;
+                }
+            }
+        }
+
+        if (found_path.empty()) {
+            std::string loc = (import_token.file)
+                ? *import_token.file : "entry point";
+            std::cerr << CLR_RED << "[ERROR] Module '" << path_or_id
+                      << "' not found.\n"
+                      << "         Searched: project entries, local directory, "
+                         "standard library, native modules.\n"
+                      << "         Imported from " << loc << CLR_RESET << "\n";
+            m_had_error = true;
+        }
+
+        return found_path;
+    }
+
+    // ── TOOL-2: discoverModules ────────────────────────────────────────────
+    // Phase 1: recursively parse every reachable .an module to build the
+    // dependency graph.  Native modules are loaded immediately (they have
+    // no source to parse and no further imports to discover).
+    //
+    // This is a recursive method — it calls itself for each discovered import.
+
+    bool CompilerDriver::discoverModules(const std::string& root_file_path) {
+        namespace fs = std::filesystem;
+
+        // Already discovered this module?  Skip.
+        if (m_discovered_modules.count(root_file_path)) return true;
+
+        // Create a dummy token for the root file (it has no import site).
+        Token dummy_token;
+
+        // ── Native module (.so / .dylib / .dll) ─────────────────────
+        if (root_file_path.ends_with(".so") ||
+            root_file_path.ends_with(".dylib") ||
+            root_file_path.ends_with(".dll")) {
+
+            // Load the native module immediately — it has no source to parse
+            // and no further imports to discover.
+            auto mod = loadNativeModule(root_file_path, dummy_token);
+            if (!mod) return false;
+
+            ModuleDiscovery disc;
+            disc.path = root_file_path;
+            disc.name = mod->name;
+            disc.is_native = true;
+            m_discovered_modules[root_file_path] = std::move(disc);
+
+            // Register in the dependency graph (leaf node — no imports).
+            m_dependency_graph.addModule(root_file_path, mod->name, {});
+            return true;
+        }
+
+        // ── Angara source (.an) ─────────────────────────────────────
+        std::string source = read_file(root_file_path);
+        if (source.empty() && !fs::exists(fs::path(root_file_path))) {
+            std::cerr << CLR_RED << "[ERROR] Cannot read source file '"
+                      << root_file_path << "'." << CLR_RESET << "\n";
+            m_had_error = true;
+            return false;
+        }
+
+        auto filename_ptr = std::make_shared<std::string>(root_file_path);
+
+        ErrorHandler errorHandler(source);
+        errorHandler.set_warnings_as_errors(m_werror);
+        errorHandler.set_error_format(m_error_format);
+        for (const auto& code : m_suppressed_warnings) {
+            errorHandler.suppress_warning(code);
+        }
+
+        // Lex + Parse only (no type-checking).
+        Lexer lexer(source, filename_ptr, errorHandler);
+        auto tokens = lexer.scanTokens();
+        if (errorHandler.hadError()) {
+            errorHandler.printSummary();
+            m_had_error = true;
+            return false;
+        }
+
+        Parser parser(tokens, errorHandler);
+        auto statements = parser.parseStmts();
+        if (errorHandler.hadError()) {
+            errorHandler.printSummary();
+            m_had_error = true;
+            return false;
+        }
+
+        // Determine module name (same logic as resolveModule).
+        std::string module_name;
+        for (auto const& [projName, entryPath] : m_project_entries) {
+            if (root_file_path == entryPath) {
+                module_name = projName;
+                break;
+            }
+        }
+        if (module_name.empty()) {
+            for (auto const& [projName, entryPath] : m_project_entries) {
+                fs::path proj_dir = fs::path(entryPath).parent_path();
+                if (root_file_path.find(proj_dir.string()) == 0) {
+                    module_name = projName + "_" + get_base_name(root_file_path);
+                    break;
+                }
+            }
+        }
+        if (module_name.empty()) {
+            module_name = get_base_name(root_file_path);
+        }
+        if (module_name == "main") {
+            module_name = "app_main";
+        }
+
+        // Extract import paths from AttachStmt nodes.
+        std::vector<std::string> import_paths;
+        for (const auto& stmt : statements) {
+            auto attach = std::dynamic_pointer_cast<const AttachStmt>(stmt);
+            if (!attach) continue;
+
+            // attach.modulePath.lexeme is the unresolved import path string,
+            // e.g. "./mymodule" or "io".
+            std::string resolved = resolveImportPath(
+                attach->modulePath.lexeme, attach->modulePath);
+            if (resolved.empty()) {
+                // resolveImportPath already set m_had_error and printed.
+                return false;
+            }
+            import_paths.push_back(resolved);
+        }
+
+        // Store the discovery record.
+        ModuleDiscovery disc;
+        disc.path = root_file_path;
+        disc.name = module_name;
+        disc.statements = std::move(statements);
+        disc.imports = import_paths;
+        m_discovered_modules[root_file_path] = disc;
+
+        // Register in the dependency graph.
+        m_dependency_graph.addModule(root_file_path, module_name, import_paths);
+
+        // Recursively discover imports.
+        // Note: import_paths is a copy since disc was moved.
+        for (const auto& import_path : m_discovered_modules[root_file_path].imports) {
+            if (!discoverModules(import_path)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // ── TOOL-2: compileDiscoveredModules ───────────────────────────────────
+    // Phase 2: compiles modules in topological order with incremental caching.
+    // - Loads the build manifest to determine which modules are clean.
+    // - Propagates dirtiness: if A imports B and B changed, A is dirty too.
+    // - Clean modules skip LLVM codegen and reuse cached .o files.
+    // - Modules at the same topological level are compiled in parallel.
+
+    // Helper: returns a numeric mtime for a file path (for equality comparison).
+    static int64_t file_mtime(const std::string& path) {
+        std::error_code ec;
+        auto ftime = std::filesystem::last_write_time(path, ec);
+        if (ec) return 0;
+        return ftime.time_since_epoch().count();
+    }
+
+    bool CompilerDriver::compileDiscoveredModules() {
+        namespace fs = std::filesystem;
+
+        auto levels = m_dependency_graph.topologicalLevels();
+
+        if (levels.empty() && m_dependency_graph.size() > 0) {
+            std::cerr << CLR_RED << "[ERROR] Circular dependency detected in "
+                      << "module graph." << CLR_RESET << "\n";
+            m_had_error = true;
+            return false;
+        }
+
+        m_total_modules = static_cast<int>(m_dependency_graph.size());
+
+        // ── Load manifest ────────────────────────────────────────────────
+        BuildManifest manifest;
+        if (!m_force_rebuild && !m_build_dir.empty()) {
+            std::string manifest_path = m_build_dir + "/manifest.json";
+            manifest.load(manifest_path);
+        }
+
+        // ── Compute dirtiness ────────────────────────────────────────────
+        // A module is "clean" if its source mtime and all dependency mtimes
+        // match the manifest AND the --force flag is not set.
+        // If a module is dirty, all modules that transitively import it are
+        // also dirty (their type-checking depends on the changed exports).
+        std::set<std::string> dirty_modules;
+
+        for (const auto& [path, disc] : m_discovered_modules) {
+            if (disc.is_native) continue;  // native modules never need recompilation
+
+            if (m_force_rebuild) {
+                dirty_modules.insert(path);
+                continue;
+            }
+
+            // Gather current mtimes.
+            int64_t src_mtime = file_mtime(path);
+            std::map<std::string, int64_t> dep_mtimes;
+            for (const auto& dep : disc.imports) {
+                // For native modules, use 0 as mtime (they don't change).
+                auto dit = m_discovered_modules.find(dep);
+                if (dit != m_discovered_modules.end() && dit->second.is_native) {
+                    dep_mtimes[dep] = 0;
+                } else {
+                    dep_mtimes[dep] = file_mtime(dep);
+                }
+            }
+
+            if (!manifest.isClean(path, src_mtime, dep_mtimes)) {
+                dirty_modules.insert(path);
+            }
+        }
+
+        // Propagate dirtiness transitively.
+        // If A imports B and B is dirty, A is dirty too.
+        std::set<std::string> all_dirty = dirty_modules;  // copy
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto& [path, disc] : m_discovered_modules) {
+                if (all_dirty.count(path)) continue;  // already dirty
+                for (const auto& dep : disc.imports) {
+                    if (all_dirty.count(dep)) {
+                        all_dirty.insert(path);
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!m_quiet && !all_dirty.empty()) {
+            int clean_count = static_cast<int>(m_discovered_modules.size()) -
+                              static_cast<int>(all_dirty.size());
+            std::cout << CLR_DIM << "   Incremental: " << all_dirty.size()
+                      << " dirty, " << clean_count << " clean"
+                      << CLR_RESET << "\n";
+        }
+
+        // ── Compile ──────────────────────────────────────────────────────
+        int num_threads = m_jobs;
+        if (num_threads <= 0) {
+            num_threads = static_cast<int>(
+                std::thread::hardware_concurrency());
+            if (num_threads <= 0) num_threads = 1;
+        }
+
+        ThreadPool pool(static_cast<size_t>(num_threads));
+
+        for (const auto& level : levels) {
+            if (m_had_error) break;
+
+            std::vector<std::future<bool>> futures;
+            futures.reserve(level.size());
+
+            for (const auto& path : level) {
+                if (m_had_error) break;
+
+                auto& disc = m_discovered_modules[path];
+                if (disc.is_native) {
+                    m_modules_compiled++;
+                    continue;
+                }
+
+                bool is_clean = !all_dirty.count(path);
+
+                // For clean modules, add the cached .o file to the link set
+                // before dispatching (compileOneModule skips codegen for these).
+                if (is_clean) {
+                    std::string obj_file = m_build_dir.empty()
+                        ? "ang_" + disc.name + ".o"
+                        : m_build_dir + "/ang_" + disc.name + ".o";
+                    {
+                        std::lock_guard<std::mutex> lock(m_obj_files_mutex);
+                        m_generated_object_files.insert(obj_file);
+                    }
+                }
+
+                futures.push_back(pool.enqueue([this, path, is_clean]() -> bool {
+                    return compileOneModule(path, is_clean);
+                }));
+            }
+
+            // Barrier: wait for all modules in this level.
+            bool level_ok = true;
+            for (auto& f : futures) {
+                bool ok = f.get();
+                if (!ok) level_ok = false;
+            }
+
+            if (!level_ok) break;
+        }
+
+        // ── Update manifest ──────────────────────────────────────────────
+        // Record freshly-compiled (dirty) modules so they are clean next time.
+        if (!m_had_error && !m_build_dir.empty()) {
+            for (const auto& path : all_dirty) {
+                auto dit = m_discovered_modules.find(path);
+                if (dit == m_discovered_modules.end()) continue;
+                const auto& disc = dit->second;
+
+                int64_t src_mtime = file_mtime(path);
+                std::map<std::string, int64_t> dep_mtimes;
+                for (const auto& dep : disc.imports) {
+                    dep_mtimes[dep] = file_mtime(dep);
+                }
+
+                // Determine the .o file path.
+                std::string obj_file = m_build_dir + "/ang_" + disc.name + ".o";
+
+                manifest.addEntry(path, disc.name, src_mtime,
+                                  dep_mtimes, obj_file);
+            }
+            manifest.save();
+        }
+
+        return !m_had_error;
+    }
+
+    // ── TOOL-2: compileOneModule ───────────────────────────────────────────
+    // Compiles a single module through type-check → chaperone → LLVM codegen.
+    // Called from worker threads during parallel compilation — all shared
+    // state access is mutex-protected.
+
+    bool CompilerDriver::compileOneModule(const std::string& path, bool is_clean) {
+        auto it = m_discovered_modules.find(path);
+        if (it == m_discovered_modules.end()) {
+            std::cerr << CLR_RED << "[ERROR] Module '" << path
+                      << "' was not discovered." << CLR_RESET << "\n";
+            m_had_error = true;
+            return false;
+        }
+
+        const auto& disc = it->second;
+
+        // Each worker creates its own pipeline objects — no shared mutable
+        // state across threads except what is explicitly synchronized below.
+        std::string source = read_file(path);
+        auto filename_ptr = std::make_shared<std::string>(path);
+
+        // Thread-local error handler.
+        ErrorHandler errorHandler(source);
+        errorHandler.set_warnings_as_errors(m_werror);
+        errorHandler.set_error_format(m_error_format);
+        for (const auto& code : m_suppressed_warnings) {
+            errorHandler.suppress_warning(code);
+        }
+
+        // Lex + Parse (fast, re-done per module for fresh ownership).
+        Lexer lexer(source, filename_ptr, errorHandler);
+        auto tokens = lexer.scanTokens();
+        if (errorHandler.hadError()) {
+            std::lock_guard<std::mutex> lock(m_cache_mutex);
+            errorHandler.printSummary();
+            m_had_error = true;
+            return false;
+        }
+
+        Parser parser(tokens, errorHandler);
+        auto statements = parser.parseStmts();
+        if (errorHandler.hadError()) {
+            std::lock_guard<std::mutex> lock(m_cache_mutex);
+            errorHandler.printSummary();
+            m_had_error = true;
+            return false;
+        }
+
+        // Type-checking.  `m_module_cache` is read-only for already-compiled
+        // dependencies (safe without lock since shared_ptr is thread-safe for
+        // reads).  New cache insertions are locked below.
+        TypeChecker typeChecker(*this, errorHandler, disc.name);
+        try {
+            if (!typeChecker.check(statements)) {
+                std::lock_guard<std::mutex> lock(m_cache_mutex);
+                errorHandler.printSummary();
+                m_had_error = true;
+                return false;
+            }
+        } catch (const std::exception& e) {
+            std::lock_guard<std::mutex> lock(m_cache_mutex);
+            std::cerr << "\n" << CLR_RED
+                      << "[ERROR] Type checker threw an exception while "
+                         "processing '" << path << "'.\n"
+                      << "         " << e.what() << CLR_RESET << "\n";
+            m_had_error = true;
+            return false;
+        }
+
+        auto mod = typeChecker.getModuleType();
+
+        // Check-only mode: stop after type-checking.
+        if (m_check_only) {
+            m_modules_compiled++;
+            {
+                std::lock_guard<std::mutex> lock(m_cache_mutex);
+                m_module_cache[path] = mod;
+            }
+            return true;
+        }
+
+        // Chaperone pass (v5).
+        try {
+            Chaperone::run(statements, typeChecker, errorHandler);
+            if (errorHandler.hadError()) {
+                std::lock_guard<std::mutex> lock(m_cache_mutex);
+                errorHandler.printSummary();
+                m_had_error = true;
+                return false;
+            }
+        } catch (const std::exception& e) {
+            std::lock_guard<std::mutex> lock(m_cache_mutex);
+            std::cerr << "\n" << CLR_RED
+                      << "[ERROR] Chaperone threw an exception while "
+                         "processing '" << path << "'.\n"
+                      << "         " << e.what() << CLR_RESET << "\n";
+            m_had_error = true;
+            return false;
+        }
+
+        // LLVM codegen (skip if incremental cache hit).
+        if (is_clean) {
+            m_modules_compiled++;
+            {
+                std::lock_guard<std::mutex> lock(m_cache_mutex);
+                m_module_cache[path] = mod;
+            }
+            return true;
+        }
+
+        try {
+            LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple,
+                                     m_freestanding, m_dump_ir, m_debug,
+                                     m_emit_llvm);
+            if (!m_build_dir.empty()) {
+                llvmBackend.set_output_dir(m_build_dir);
+            }
+            if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
+                std::lock_guard<std::mutex> lock(m_cache_mutex);
+                m_had_error = true;
+                return false;
+            }
+            {
+                std::lock_guard<std::mutex> lock(m_obj_files_mutex);
+                m_generated_object_files.insert(
+                    llvmBackend.get_object_file_path());
+            }
+            {
+                std::lock_guard<std::mutex> lock(m_cache_mutex);
+                m_angara_module_names.push_back(disc.name);
+            }
+        } catch (const std::exception& e) {
+            std::lock_guard<std::mutex> lock(m_cache_mutex);
+            std::cerr << "\n" << CLR_RED
+                      << "[ERROR] LLVM backend threw an exception while "
+                         "generating code for '" << path << "'.\n"
+                      << "         " << e.what() << CLR_RESET << "\n";
+            m_had_error = true;
+            return false;
+        }
+
+        m_modules_compiled++;
+        {
+            std::lock_guard<std::mutex> lock(m_cache_mutex);
+            m_module_cache[path] = mod;
+        }
         return true;
     }
 

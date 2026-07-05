@@ -381,6 +381,11 @@ namespace angara {
         if (config.nostdlib) driver.set_nostdlib(true);
         if (m_build_mode == BuildMode::DEBUG) driver.set_debug(true);
 
+        // TOOL-2: pass parallel / incremental flags from the build system.
+        if (m_jobs > 0) driver.set_jobs(m_jobs);
+        if (m_force_rebuild) driver.set_force_rebuild(true);
+        driver.set_build_dir(m_build_dir + "/obj");
+
         const std::string& entry_file = project_entries.at(config.name);
 
         std::cout << "   " << CLR_GREEN << "[CX] " << CLR_RESET << "Compiling \u2014 " << entry_file << "\n";
@@ -607,9 +612,9 @@ namespace angara {
             return false;
         }
 
-        for (const auto& file : object_files) {
-            fs::remove(file);
-        }
+        // TOOL-2: keep .o files for incremental compilation.
+        // They live in .angara/build/obj/ and are cleaned by `angc clean`.
+        // Single-file builds (no build dir) still delete as before.
 
         std::cout << "   " << CLR_BOLD << CLR_GREEN << "[OK] " << CLR_RESET << bin_path.string() << "\n";
         return true;
