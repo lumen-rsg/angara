@@ -1,11 +1,15 @@
-/// Angara HTTP server — raw-socket HTTP/1.1, poll-driven (no callbacks).
+/// Angara HTTP server — raw-socket HTTP/1.1, callback-driven.
 ///
+/// Callback mode:
 ///   let srv = http.server(8080)
-///   while (true) {
-///       for (req in srv.poll(100)) {
-///           srv.respond(req, 200, "Hello", [("Content-Type", "text/plain")])
-///       }
-///   }
+///   srv.on_request(func(req) {
+///       return {status = 200, body = "Hello " + req.path,
+///               headers = {"Content-Type": "text/plain"}}
+///   })
+///   srv.run()
+///
+/// Poll mode (legacy):
+///   for (req in srv.poll(100)) { srv.respond(req.id, 200, body) }
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,6 +51,7 @@ typedef struct {
     HttpRequest** reqs;
     size_t       req_count;
     size_t       req_cap;
+    AngaraObject on_req_cb;  /* callback for on_request() */
 } HttpServer;
 
 /* ---- internal ---- */
@@ -202,6 +207,7 @@ static void finalize_server(void* data) {
     if (srv->listen_fd >= 0) close(srv->listen_fd);
     for (size_t i = 0; i < srv->req_count; i++) free_request(srv->reqs[i]);
     free(srv->reqs);
+    if (ang_is_obj(srv->on_req_cb)) ang_api->decref(srv->on_req_cb);
     free(srv);
 }
 
@@ -265,6 +271,143 @@ AngaraObject Angara_http_server(int arg_count, AngaraObject* args) {
     srv->reqs = (HttpRequest**)calloc(srv->req_cap, sizeof(HttpRequest*));
 
     return ang_api->native_instance_new(srv, finalize_server, "HttpServer");
+}
+
+AngaraObject Angara_HttpServer_on_request(int arg_count, AngaraObject* args) {
+    /* srv.on_request(callback) — callback receives {id, method, path, headers, body?}
+       and must return {status?, body?, headers?} or a plain string. */
+    if (arg_count < 2) {
+        ang_api->throw_error("http.on_request(callback) expects a closure.");
+        return ang_nil();
+    }
+    HttpServer* srv = (HttpServer*)ang_api->native_instance_data(args[0]);
+    if (!srv) return ang_nil();
+
+    if (ang_is_obj(srv->on_req_cb)) ang_api->decref(srv->on_req_cb);
+    srv->on_req_cb = args[1];
+    ang_api->incref(srv->on_req_cb);
+    return ang_nil();
+}
+
+AngaraObject Angara_HttpServer_run(int arg_count, AngaraObject* args) {
+    /* srv.run() — blocks, accepts connections, parses requests,
+       calls on_request callback, sends response. */
+    (void)arg_count; (void)args;
+    HttpServer* srv = (HttpServer*)ang_api->native_instance_data(args[0]);
+    if (!srv || srv->listen_fd < 0) return ang_nil();
+
+    if (!ang_is_obj(srv->on_req_cb)) {
+        ang_api->throw_error("http.run: no callback set. Call on_request() first.");
+        return ang_nil();
+    }
+
+    while (1) {
+        /* accept */
+        struct sockaddr_storage client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        int client_fd = accept(srv->listen_fd, (struct sockaddr*)&client_addr, &client_len);
+        if (client_fd < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(1000);  /* 1ms */
+                continue;
+            }
+            break;
+        }
+        set_nonblocking(client_fd);
+
+        HttpRequest* req = (HttpRequest*)calloc(1, sizeof(HttpRequest));
+        req->fd = client_fd;
+        req->body = NULL;
+        req->body_len = 0;
+
+        /* read */
+        int rc = parse_http_request(req);
+        if (rc != 1) {
+            free_request(req);
+            continue;
+        }
+
+        /* build request record for callback */
+        AngaraObject req_rec = ang_api->record_new();
+        ang_api->record_set(req_rec, "id",      ang_i64((int64_t)(intptr_t)req));
+        ang_api->record_set(req_rec, "method",  ang_api->string(req->method));
+        ang_api->record_set(req_rec, "path",    ang_api->string(req->path));
+        ang_api->record_set(req_rec, "headers", req->headers);
+        if (req->body)
+            ang_api->record_set(req_rec, "body", ang_api->string_len(req->body, req->body_len));
+
+        /* call the Angara callback */
+        AngaraObject cb_args[1] = { req_rec };
+        AngaraObject cb_result = ang_api->call(srv->on_req_cb, 1, cb_args);
+
+        /* interpret the callback result */
+        int status = 200;
+        const char* body = "";
+        size_t body_len = 0;
+        AngaraObject headers_obj = ang_nil();
+
+        if (IS_STR(cb_result)) {
+            body = ang_api->as_cstr(cb_result);
+            body_len = ang_api->str_len(cb_result);
+        } else if (IS_REC(cb_result)) {
+            AngaraObject s = ang_api->record_get(cb_result, "status");
+            if (ang_is_i64(s)) status = (int)ang_as_i64(s);
+            ang_api->decref(s);
+
+            AngaraObject b = ang_api->record_get(cb_result, "body");
+            if (IS_STR(b)) {
+                body = ang_api->as_cstr(b);
+                body_len = ang_api->str_len(b);
+            }
+            ang_api->decref(b);
+
+            AngaraObject h = ang_api->record_get(cb_result, "headers");
+            if (IS_REC(h)) headers_obj = h;
+            else ang_api->decref(h);
+        }
+
+        /* build and send response */
+        const char* status_text = "OK";
+        switch (status) {
+            case 200: status_text = "OK"; break;
+            case 201: status_text = "Created"; break;
+            case 204: status_text = "No Content"; break;
+            case 400: status_text = "Bad Request"; break;
+            case 404: status_text = "Not Found"; break;
+            case 500: status_text = "Internal Server Error"; break;
+            default:  status_text = "Unknown"; break;
+        }
+
+        char header_buf[4096];
+        int hl = snprintf(header_buf, sizeof(header_buf),
+                          "HTTP/1.1 %d %s\r\nContent-Length: %zu\r\n", status, status_text, body_len);
+
+        /* user headers */
+        if (IS_REC(headers_obj)) {
+            size_t hc = ang_api->record_len(headers_obj);
+            for (size_t i = 0; i < hc; i++) {
+                const char* key = ang_api->record_key_at(headers_obj, i);
+                AngaraObject val = ang_api->record_val_at(headers_obj, i);
+                if (key && IS_STR(val)) {
+                    hl += snprintf(header_buf + hl, sizeof(header_buf) - hl,
+                                   "%s: %s\r\n", key, ang_api->as_cstr(val));
+                }
+                ang_api->decref(val);
+            }
+        }
+        hl += snprintf(header_buf + hl, sizeof(header_buf) - hl, "\r\n");
+
+        send(req->fd, header_buf, (size_t)hl, MSG_NOSIGNAL);
+        if (body_len > 0) send(req->fd, body, body_len, MSG_NOSIGNAL);
+
+        /* cleanup */
+        ang_api->decref(req_rec);
+        ang_api->decref(cb_result);
+        if (IS_REC(headers_obj)) ang_api->decref(headers_obj);
+        free_request(req);
+    }
+
+    return ang_nil();
 }
 
 AngaraObject Angara_HttpServer_poll(int arg_count, AngaraObject* args) {
@@ -451,9 +594,11 @@ AngaraObject Angara_HttpServer_close(int arg_count, AngaraObject* args) {
 /* ---- export table ---- */
 
 static const AngaraMethodDef SERVER_METHODS[] = {
-    {"poll",    (AngaraMethodFn)Angara_HttpServer_poll,    "i?->l<{}>"},
-    {"respond", (AngaraMethodFn)Angara_HttpServer_respond, "iis{}?->n"},
-    {"close",   (AngaraMethodFn)Angara_HttpServer_close,   "->n"},
+    {"on_request", (AngaraMethodFn)Angara_HttpServer_on_request, "a->n"},
+    {"run",        (AngaraMethodFn)Angara_HttpServer_run,        "->n"},
+    {"poll",       (AngaraMethodFn)Angara_HttpServer_poll,       "i?->l<{}>"},
+    {"respond",    (AngaraMethodFn)Angara_HttpServer_respond,    "iis{}?->n"},
+    {"close",      (AngaraMethodFn)Angara_HttpServer_close,      "->n"},
     {NULL, NULL, NULL}
 };
 

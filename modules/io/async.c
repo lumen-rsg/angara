@@ -1,11 +1,11 @@
 /// Angara async module — epoll event loop + thread-safe channels.
 ///
-/// Poll-driven (no callbacks), integrates with any fd (sockets, timers, channels).
+/// Supports both poll-driven and callback-driven usage:
 ///
 ///   let loop = async.Loop()
-///   loop.add(sock_fd, async.READ)
-///   let tid = loop.timer(1000)   // fires every 1000 ms
-///   for (ev in loop.poll(500)) { ... }
+///   loop.on_readable(sock_fd, func() { ... })
+///   loop.set_timeout(1000, func() { io.println(1, "tick") })
+///   loop.run()   // blocks, dispatches callbacks
 ///
 ///   let (tx, rx) = async.channel(16)
 ///   tx.send("hello")
@@ -38,22 +38,88 @@ AngaraObject Angara_async_CHANNEL(int c, AngaraObject* a)   { (void)c;(void)a; r
 
 
 /* =========================================================================
-   Loop — epoll wrapper
+   Callback registry — maps fd → callback closure
    ========================================================================= */
 
 typedef struct {
-    int epfd;
-    int* timer_fds;     /* track timer fds for cleanup */
-    size_t timer_count;
-    size_t timer_cap;
+    int           fd;
+    AngaraObject  callback;   /* Angara closure */
+    int           is_timer;
+    int           is_interval; /* 0 = one-shot, 1 = repeating */
+    int           is_writable; /* 0 = EPOLLIN, 1 = EPOLLOUT */
+} CbEntry;
+
+typedef struct {
+    CbEntry* entries;
+    size_t   count;
+    size_t   cap;
+} CbRegistry;
+
+static void cb_registry_init(CbRegistry* r) {
+    r->cap = 8;
+    r->count = 0;
+    r->entries = (CbEntry*)calloc(r->cap, sizeof(CbEntry));
+}
+
+static void cb_registry_free(CbRegistry* r) {
+    for (size_t i = 0; i < r->count; i++) {
+        ang_api->decref(r->entries[i].callback);
+    }
+    free(r->entries);
+    r->entries = NULL;
+    r->count = r->cap = 0;
+}
+
+static CbEntry* cb_registry_find(CbRegistry* r, int fd) {
+    for (size_t i = 0; i < r->count; i++) {
+        if (r->entries[i].fd == fd) return &r->entries[i];
+    }
+    return NULL;
+}
+
+static CbEntry* cb_registry_add(CbRegistry* r, int fd, AngaraObject cb,
+                                 int is_timer, int is_interval, int is_writable) {
+    if (r->count >= r->cap) {
+        r->cap *= 2;
+        r->entries = (CbEntry*)realloc(r->entries, r->cap * sizeof(CbEntry));
+        memset(r->entries + r->count, 0, (r->cap - r->count) * sizeof(CbEntry));
+    }
+    CbEntry* e = &r->entries[r->count++];
+    e->fd = fd;
+    e->callback = cb;
+    ang_api->incref(cb);
+    e->is_timer    = is_timer;
+    e->is_interval = is_interval;
+    e->is_writable = is_writable;
+    return e;
+}
+
+static void cb_registry_remove(CbRegistry* r, int fd) {
+    for (size_t i = 0; i < r->count; i++) {
+        if (r->entries[i].fd == fd) {
+            ang_api->decref(r->entries[i].callback);
+            r->entries[i] = r->entries[--r->count];
+            return;
+        }
+    }
+}
+
+
+/* =========================================================================
+   Loop
+   ========================================================================= */
+
+typedef struct {
+    int         epfd;
+    int         stop_efd;     /* eventfd for loop.stop() wake-up */
+    CbRegistry  cbs;          /* fd → callback */
+    int         running;      /* 1 while loop.run() is active */
 } LoopData;
 
 static void finalize_loop(void* data) {
     LoopData* l = (LoopData*)data;
-    for (size_t i = 0; i < l->timer_count; i++) {
-        if (l->timer_fds[i] >= 0) close(l->timer_fds[i]);
-    }
-    free(l->timer_fds);
+    cb_registry_free(&l->cbs);
+    if (l->stop_efd >= 0) close(l->stop_efd);
     if (l->epfd >= 0) close(l->epfd);
     free(l);
 }
@@ -65,114 +131,234 @@ AngaraObject Angara_async_Loop(int arg_count, AngaraObject* args) {
         ang_api->throw_error("async.Loop: epoll_create1 failed.");
         return ang_nil();
     }
+    int efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (efd < 0) {
+        close(epfd);
+        ang_api->throw_error("async.Loop: eventfd failed.");
+        return ang_nil();
+    }
+    /* register stop_efd so run() can be woken up */
+    struct epoll_event ev;
+    ev.events = EPOLLIN;
+    ev.data.fd = efd;
+    epoll_ctl(epfd, EPOLL_CTL_ADD, efd, &ev);
+
     LoopData* l = (LoopData*)calloc(1, sizeof(LoopData));
     l->epfd = epfd;
-    l->timer_cap = 4;
-    l->timer_fds = (int*)malloc(l->timer_cap * sizeof(int));
+    l->stop_efd = efd;
+    cb_registry_init(&l->cbs);
     return ang_api->native_instance_new(l, finalize_loop, "Loop");
 }
 
-AngaraObject Angara_Loop_add(int arg_count, AngaraObject* args) {
-    /* loop.add(fd, mask) */
-    if (arg_count < 3 || !ang_is_i64(args[1]) || !ang_is_i64(args[2])) {
-        ang_api->throw_error("loop.add(fd, mask) expects two i64 values.");
+/* ---- callback registration ---- */
+
+AngaraObject Angara_Loop_on_readable(int arg_count, AngaraObject* args) {
+    /* loop.on_readable(fd, callback) */
+    if (arg_count < 3 || !ang_is_i64(args[1])) {
+        ang_api->throw_error("loop.on_readable(fd, callback) expects i64 and closure.");
         return ang_nil();
     }
     LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
     if (!l || l->epfd < 0) return ang_nil();
 
     int fd = (int)ang_as_i64(args[1]);
-    uint32_t mask = (uint32_t)ang_as_i64(args[2]);
+    AngaraObject cb = args[2];
+
+    /* remove any existing callback for this fd */
+    cb_registry_remove(&l->cbs, fd);
+
+    /* register callback */
+    cb_registry_add(&l->cbs, fd, cb, 0, 0, 0);
+
+    /* add to epoll (or modify if already there) */
+    struct epoll_event ev;
+    ev.events = EPOLLIN | EPOLLET;
+    ev.data.fd = fd;
+    epoll_ctl(l->epfd, EPOLL_CTL_ADD, fd, &ev);
+    return ang_nil();
+}
+
+AngaraObject Angara_Loop_on_writable(int arg_count, AngaraObject* args) {
+    if (arg_count < 3 || !ang_is_i64(args[1])) {
+        ang_api->throw_error("loop.on_writable(fd, callback) expects i64 and closure.");
+        return ang_nil();
+    }
+    LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
+    if (!l || l->epfd < 0) return ang_nil();
+
+    int fd = (int)ang_as_i64(args[1]);
+    AngaraObject cb = args[2];
+
+    cb_registry_remove(&l->cbs, fd);
+    cb_registry_add(&l->cbs, fd, cb, 0, 0, 1);
 
     struct epoll_event ev;
-    ev.events = mask | EPOLLET;   /* edge-triggered for efficiency */
+    ev.events = EPOLLOUT | EPOLLET;
     ev.data.fd = fd;
-    if (epoll_ctl(l->epfd, EPOLL_CTL_ADD, fd, &ev) < 0) {
-        char buf[128];
-        snprintf(buf, sizeof(buf), "loop.add: epoll_ctl ADD fd=%d: %s", fd, strerror(errno));
-        ang_api->throw_error(buf);
-    }
+    epoll_ctl(l->epfd, EPOLL_CTL_ADD, fd, &ev);
     return ang_nil();
 }
 
-AngaraObject Angara_Loop_mod(int arg_count, AngaraObject* args) {
-    if (arg_count < 3 || !ang_is_i64(args[1]) || !ang_is_i64(args[2])) {
-        ang_api->throw_error("loop.mod(fd, mask) expects two i64 values.");
-        return ang_nil();
-    }
-    LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
-    if (!l || l->epfd < 0) return ang_nil();
-
-    int fd = (int)ang_as_i64(args[1]);
-    uint32_t mask = (uint32_t)ang_as_i64(args[2]);
-
-    struct epoll_event ev;
-    ev.events = mask | EPOLLET;
-    ev.data.fd = fd;
-    if (epoll_ctl(l->epfd, EPOLL_CTL_MOD, fd, &ev) < 0) {
-        char buf[128];
-        snprintf(buf, sizeof(buf), "loop.mod: epoll_ctl MOD fd=%d: %s", fd, strerror(errno));
-        ang_api->throw_error(buf);
-    }
-    return ang_nil();
-}
-
-AngaraObject Angara_Loop_remove(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !ang_is_i64(args[1])) {
-        ang_api->throw_error("loop.remove(fd) expects an i64.");
-        return ang_nil();
-    }
-    LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
-    if (!l || l->epfd < 0) return ang_nil();
-
-    int fd = (int)ang_as_i64(args[1]);
-    epoll_ctl(l->epfd, EPOLL_CTL_DEL, fd, NULL);
-    return ang_nil();
-}
-
-AngaraObject Angara_Loop_timer(int arg_count, AngaraObject* args) {
-    /* loop.timer(interval_ms) → timer_fd (i64) */
-    if (arg_count < 2 || !ang_is_i64(args[1])) {
-        ang_api->throw_error("loop.timer(interval_ms) expects an i64.");
+AngaraObject Angara_Loop_set_timeout(int arg_count, AngaraObject* args) {
+    /* loop.set_timeout(ms, callback) — one-shot */
+    if (arg_count < 3 || !ang_is_i64(args[1])) {
+        ang_api->throw_error("loop.set_timeout(ms, callback) expects i64 and closure.");
         return ang_nil();
     }
     LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
     if (!l || l->epfd < 0) return ang_i64(-1);
 
-    int64_t interval_ms = ang_as_i64(args[1]);
-    if (interval_ms < 1) interval_ms = 1;
+    int64_t ms = ang_as_i64(args[1]);
+    if (ms < 1) ms = 1;
+    AngaraObject cb = args[2];
 
     int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
     if (tfd < 0) {
-        ang_api->throw_error("loop.timer: timerfd_create failed.");
+        ang_api->throw_error("loop.set_timeout: timerfd_create failed.");
         return ang_i64(-1);
     }
 
     struct itimerspec its;
-    its.it_value.tv_sec     = interval_ms / 1000;
-    its.it_value.tv_nsec    = (interval_ms % 1000) * 1000000L;
-    its.it_interval.tv_sec  = interval_ms / 1000;
-    its.it_interval.tv_nsec = (interval_ms % 1000) * 1000000L;
+    its.it_value.tv_sec     = ms / 1000;
+    its.it_value.tv_nsec    = (ms % 1000) * 1000000L;
+    its.it_interval.tv_sec  = 0;  /* one-shot */
+    its.it_interval.tv_nsec = 0;
     timerfd_settime(tfd, 0, &its, NULL);
 
-    /* register the timer fd for reading */
+    cb_registry_add(&l->cbs, tfd, cb, 1, 0, 0);
+
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLET;
     ev.data.fd = tfd;
     epoll_ctl(l->epfd, EPOLL_CTL_ADD, tfd, &ev);
 
-    /* track for cleanup */
-    if (l->timer_count >= l->timer_cap) {
-        l->timer_cap *= 2;
-        l->timer_fds = (int*)realloc(l->timer_fds, l->timer_cap * sizeof(int));
+    return ang_i64(tfd);
+}
+
+AngaraObject Angara_Loop_set_interval(int arg_count, AngaraObject* args) {
+    /* loop.set_interval(ms, callback) — repeating */
+    if (arg_count < 3 || !ang_is_i64(args[1])) {
+        ang_api->throw_error("loop.set_interval(ms, callback) expects i64 and closure.");
+        return ang_nil();
     }
-    l->timer_fds[l->timer_count++] = tfd;
+    LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
+    if (!l || l->epfd < 0) return ang_i64(-1);
+
+    int64_t ms = ang_as_i64(args[1]);
+    if (ms < 1) ms = 1;
+    AngaraObject cb = args[2];
+
+    int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if (tfd < 0) {
+        ang_api->throw_error("loop.set_interval: timerfd_create failed.");
+        return ang_i64(-1);
+    }
+
+    struct itimerspec its;
+    its.it_value.tv_sec     = ms / 1000;
+    its.it_value.tv_nsec    = (ms % 1000) * 1000000L;
+    its.it_interval.tv_sec  = ms / 1000;   /* repeating */
+    its.it_interval.tv_nsec = (ms % 1000) * 1000000L;
+    timerfd_settime(tfd, 0, &its, NULL);
+
+    cb_registry_add(&l->cbs, tfd, cb, 1, 1, 0);
+
+    struct epoll_event ev;
+    ev.events = EPOLLIN | EPOLLET;
+    ev.data.fd = tfd;
+    epoll_ctl(l->epfd, EPOLL_CTL_ADD, tfd, &ev);
 
     return ang_i64(tfd);
 }
 
+AngaraObject Angara_Loop_clear(int arg_count, AngaraObject* args) {
+    /* loop.clear(fd) — remove fd/timer and its callback */
+    if (arg_count < 2 || !ang_is_i64(args[1])) return ang_nil();
+    LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
+    if (!l || l->epfd < 0) return ang_nil();
+
+    int fd = (int)ang_as_i64(args[1]);
+    epoll_ctl(l->epfd, EPOLL_CTL_DEL, fd, NULL);
+    cb_registry_remove(&l->cbs, fd);
+    close(fd);
+    return ang_nil();
+}
+
+/* ---- run / stop ---- */
+
+AngaraObject Angara_Loop_run(int arg_count, AngaraObject* args) {
+    /* loop.run() — blocks, dispatches callbacks, returns when stop() is called */
+    (void)arg_count; (void)args;
+    LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
+    if (!l || l->epfd < 0) return ang_nil();
+
+    l->running = 1;
+
+    while (l->running) {
+        struct epoll_event events[64];
+        int n = epoll_wait(l->epfd, events, 64, -1);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+
+        for (int i = 0; i < n; i++) {
+            int fd = events[i].data.fd;
+
+            /* stop_efd → exit the loop */
+            if (fd == l->stop_efd) {
+                uint64_t dummy;
+                read(fd, &dummy, sizeof(dummy));
+                l->running = 0;
+                continue;
+            }
+
+            CbEntry* e = cb_registry_find(&l->cbs, fd);
+            if (!e) continue;
+
+            /* for timers, read the expiration count */
+            int64_t timer_count = 1;
+            if (e->is_timer) {
+                uint64_t exp = 0;
+                read(fd, &exp, sizeof(exp));
+                timer_count = (int64_t)exp;
+            }
+
+            /* dispatch callback */
+            if (ang_is_obj(e->callback)) {
+                if (e->is_timer) {
+                    AngaraObject targv[1] = { ang_i64(timer_count) };
+                    ang_api->call(e->callback, 1, targv);
+                } else {
+                    ang_api->call(e->callback, 0, NULL);
+                }
+            }
+
+            /* one-shot timers: remove after firing */
+            if (e->is_timer && !e->is_interval) {
+                epoll_ctl(l->epfd, EPOLL_CTL_DEL, fd, NULL);
+                cb_registry_remove(&l->cbs, fd);
+                close(fd);
+            }
+        }
+    }
+
+    return ang_nil();
+}
+
+AngaraObject Angara_Loop_stop(int arg_count, AngaraObject* args) {
+    (void)arg_count;
+    LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
+    if (l && l->stop_efd >= 0) {
+        uint64_t one = 1;
+        write(l->stop_efd, &one, sizeof(one));
+    }
+    return ang_nil();
+}
+
+/* ---- poll (legacy) ---- */
+
 AngaraObject Angara_Loop_poll(int arg_count, AngaraObject* args) {
-    /* loop.poll(timeout_ms?) → list<{fd, kind, is_timer}> */
     LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
     if (!l || l->epfd < 0) return ang_api->list_new();
 
@@ -187,29 +373,26 @@ AngaraObject Angara_Loop_poll(int arg_count, AngaraObject* args) {
     AngaraObject list = ang_api->list_new();
     for (int i = 0; i < n; i++) {
         int fd = events[i].data.fd;
+        if (fd == l->stop_efd) continue; /* skip internal fd */
+
         uint32_t revents = events[i].events;
 
-        /* check if this fd is one of our timer fds */
-        int is_timer = 0;
-        for (size_t j = 0; j < l->timer_count; j++) {
-            if (l->timer_fds[j] == fd) { is_timer = 1; break; }
-        }
+        CbEntry* e = cb_registry_find(&l->cbs, fd);
+        int is_timer = e ? e->is_timer : 0;
 
         AngaraObject rec = ang_api->record_new();
         ang_api->record_set(rec, "fd", ang_i64(fd));
 
         if (is_timer) {
-            ang_api->record_set(rec, "kind", ang_i64(3));  /* TIMER */
-            /* read the timerfd to clear the event and get expiration count */
+            ang_api->record_set(rec, "kind", ang_i64(3));
             uint64_t expirations = 0;
             read(fd, &expirations, sizeof(expirations));
             ang_api->record_set(rec, "count", ang_i64((int64_t)expirations));
         } else if (revents & (EPOLLIN | EPOLLHUP | EPOLLERR)) {
-            ang_api->record_set(rec, "kind", ang_i64(1));  /* READABLE */
+            ang_api->record_set(rec, "kind", ang_i64(1));
         } else if (revents & EPOLLOUT) {
-            ang_api->record_set(rec, "kind", ang_i64(2));  /* WRITABLE */
+            ang_api->record_set(rec, "kind", ang_i64(2));
         }
-
         ang_api->list_push(list, rec);
         ang_api->decref(rec);
     }
@@ -217,15 +400,12 @@ AngaraObject Angara_Loop_poll(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Loop_close(int arg_count, AngaraObject* args) {
+    (void)arg_count;
     LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
     if (l) {
-        for (size_t i = 0; i < l->timer_count; i++) {
-            if (l->timer_fds[i] >= 0) close(l->timer_fds[i]);
-        }
-        free(l->timer_fds);
-        l->timer_fds = NULL;
-        l->timer_count = 0;
-        l->timer_cap = 0;
+        l->running = 0;
+        cb_registry_free(&l->cbs);
+        if (l->stop_efd >= 0) { close(l->stop_efd); l->stop_efd = -1; }
         if (l->epfd >= 0) { close(l->epfd); l->epfd = -1; }
     }
     return ang_nil();
@@ -237,19 +417,18 @@ AngaraObject Angara_Loop_close(int arg_count, AngaraObject* args) {
    ========================================================================= */
 
 typedef struct {
-    AngaraObject* buf;       /* ring buffer */
-    size_t         cap;       /* capacity (must be power of two, enforced) */
-    size_t         head;      /* read index */
-    size_t         tail;      /* write index */
-    size_t         count;     /* current item count */
-    int            closed;    /* set when closed */
-    int            efd;       /* eventfd for epoll wakeup on recv side */
+    AngaraObject* buf;
+    size_t         cap;
+    size_t         head;
+    size_t         tail;
+    size_t         count;
+    int            closed;
+    int            efd;
     pthread_mutex_t mutex;
     pthread_cond_t  not_empty;
     pthread_cond_t  not_full;
 } Channel;
 
-/* round up to next power of two */
 static size_t next_pow2(size_t v) {
     v--;
     v |= v >> 1; v |= v >> 2; v |= v >> 4;
@@ -276,7 +455,6 @@ static Channel* channel_new(size_t cap) {
 
 static void channel_free(Channel* ch) {
     if (!ch) return;
-    /* decref any remaining items */
     pthread_mutex_lock(&ch->mutex);
     while (ch->count > 0) {
         ang_api->decref(ch->buf[ch->head]);
@@ -294,7 +472,7 @@ static void channel_free(Channel* ch) {
 
 typedef struct {
     Channel* ch;
-    int      is_sender;   /* 1 = sender, 0 = receiver */
+    int      is_sender;
 } ChannelHandle;
 
 static void finalize_sender(void* data) {
@@ -312,33 +490,23 @@ static void finalize_sender(void* data) {
 }
 
 static void finalize_receiver(void* data) {
-    /* receiver doesn't own the channel — sender does.
-       just close our eventfd reference and free the handle */
     ChannelHandle* h = (ChannelHandle*)data;
     free(h);
 }
 
 AngaraObject Angara_async_channel(int arg_count, AngaraObject* args) {
-    /* async.channel(capacity?) → {tx: Sender, rx: Receiver} */
     size_t cap = 16;
     if (arg_count >= 1 && ang_is_i64(args[0])) {
         int64_t v = ang_as_i64(args[0]);
         if (v > 0) cap = (size_t)v;
     }
-
     Channel* ch = channel_new(cap);
-    if (!ch) {
-        ang_api->throw_error("async.channel: out of memory.");
-        return ang_nil();
-    }
+    if (!ch) { ang_api->throw_error("async.channel: out of memory."); return ang_nil(); }
 
     ChannelHandle* tx_h = (ChannelHandle*)calloc(1, sizeof(ChannelHandle));
-    tx_h->ch = ch;
-    tx_h->is_sender = 1;
-
+    tx_h->ch = ch; tx_h->is_sender = 1;
     ChannelHandle* rx_h = (ChannelHandle*)calloc(1, sizeof(ChannelHandle));
-    rx_h->ch = ch;
-    rx_h->is_sender = 0;
+    rx_h->ch = ch; rx_h->is_sender = 0;
 
     AngaraObject tx = ang_api->native_instance_new(tx_h, finalize_sender, "Sender");
     AngaraObject rx = ang_api->native_instance_new(rx_h, finalize_receiver, "Receiver");
@@ -351,29 +519,19 @@ AngaraObject Angara_async_channel(int arg_count, AngaraObject* args) {
     return rec;
 }
 
-
-/* ---- Sender ---- */
-
 AngaraObject Angara_Sender_send(int arg_count, AngaraObject* args) {
-    /* sender.send(value) — blocking */
     if (arg_count < 2) return ang_nil();
     ChannelHandle* h = (ChannelHandle*)ang_api->native_instance_data(args[0]);
     Channel* ch = h ? h->ch : NULL;
     if (!ch) return ang_nil();
-
     pthread_mutex_lock(&ch->mutex);
-    while (ch->count >= ch->cap && !ch->closed) {
+    while (ch->count >= ch->cap && !ch->closed)
         pthread_cond_wait(&ch->not_full, &ch->mutex);
-    }
-    if (ch->closed) {
-        pthread_mutex_unlock(&ch->mutex);
-        return ang_nil();
-    }
+    if (ch->closed) { pthread_mutex_unlock(&ch->mutex); return ang_nil(); }
     ang_api->incref(args[1]);
     ch->buf[ch->tail] = args[1];
     ch->tail = (ch->tail + 1) & (ch->cap - 1);
     ch->count++;
-    /* wake up receiver via eventfd */
     uint64_t one = 1;
     write(ch->efd, &one, sizeof(one));
     pthread_cond_signal(&ch->not_empty);
@@ -386,12 +544,8 @@ AngaraObject Angara_Sender_try_send(int arg_count, AngaraObject* args) {
     ChannelHandle* h = (ChannelHandle*)ang_api->native_instance_data(args[0]);
     Channel* ch = h ? h->ch : NULL;
     if (!ch) return ang_bool(false);
-
     pthread_mutex_lock(&ch->mutex);
-    if (ch->count >= ch->cap || ch->closed) {
-        pthread_mutex_unlock(&ch->mutex);
-        return ang_bool(false);
-    }
+    if (ch->count >= ch->cap || ch->closed) { pthread_mutex_unlock(&ch->mutex); return ang_bool(false); }
     ang_api->incref(args[1]);
     ch->buf[ch->tail] = args[1];
     ch->tail = (ch->tail + 1) & (ch->cap - 1);
@@ -421,29 +575,21 @@ AngaraObject Angara_Sender_fileno(int arg_count, AngaraObject* args) {
     return ang_i64(h && h->ch ? (int64_t)h->ch->efd : -1);
 }
 
-
-/* ---- Receiver ---- */
-
 AngaraObject Angara_Receiver_recv(int arg_count, AngaraObject* args) {
     (void)arg_count;
     ChannelHandle* h = (ChannelHandle*)ang_api->native_instance_data(args[0]);
     Channel* ch = h ? h->ch : NULL;
     if (!ch) return ang_nil();
-
     pthread_mutex_lock(&ch->mutex);
-    while (ch->count == 0 && !ch->closed) {
+    while (ch->count == 0 && !ch->closed)
         pthread_cond_wait(&ch->not_empty, &ch->mutex);
-    }
-    if (ch->count == 0) {
-        pthread_mutex_unlock(&ch->mutex);
-        return ang_nil();  /* closed + empty */
-    }
+    if (ch->count == 0) { pthread_mutex_unlock(&ch->mutex); return ang_nil(); }
     AngaraObject val = ch->buf[ch->head];
     ch->head = (ch->head + 1) & (ch->cap - 1);
     ch->count--;
     pthread_cond_signal(&ch->not_full);
     pthread_mutex_unlock(&ch->mutex);
-    return val;  /* caller takes ownership (no decref needed — we transferred) */
+    return val;
 }
 
 AngaraObject Angara_Receiver_try_recv(int arg_count, AngaraObject* args) {
@@ -451,12 +597,8 @@ AngaraObject Angara_Receiver_try_recv(int arg_count, AngaraObject* args) {
     ChannelHandle* h = (ChannelHandle*)ang_api->native_instance_data(args[0]);
     Channel* ch = h ? h->ch : NULL;
     if (!ch) return ang_nil();
-
     pthread_mutex_lock(&ch->mutex);
-    if (ch->count == 0) {
-        pthread_mutex_unlock(&ch->mutex);
-        return ang_nil();
-    }
+    if (ch->count == 0) { pthread_mutex_unlock(&ch->mutex); return ang_nil(); }
     AngaraObject val = ch->buf[ch->head];
     ch->head = (ch->head + 1) & (ch->cap - 1);
     ch->count--;
@@ -472,8 +614,6 @@ AngaraObject Angara_Receiver_fileno(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Receiver_close(int arg_count, AngaraObject* args) {
-    /* receiver close is a no-op (sender owns the channel).
-       just drain any pending eventfd writes so epoll doesn't spin */
     ChannelHandle* h = (ChannelHandle*)ang_api->native_instance_data(args[0]);
     if (h && h->ch && h->ch->efd >= 0) {
         uint64_t dummy;
@@ -488,12 +628,15 @@ AngaraObject Angara_Receiver_close(int arg_count, AngaraObject* args) {
    ========================================================================= */
 
 static const AngaraMethodDef LOOP_METHODS[] = {
-    {"add",    (AngaraMethodFn)Angara_Loop_add,    "ii->n"},
-    {"mod",    (AngaraMethodFn)Angara_Loop_mod,    "ii->n"},
-    {"remove", (AngaraMethodFn)Angara_Loop_remove, "i->n"},
-    {"timer",  (AngaraMethodFn)Angara_Loop_timer,  "i->i"},
-    {"poll",   (AngaraMethodFn)Angara_Loop_poll,   "i?->l<{}>"},
-    {"close",  (AngaraMethodFn)Angara_Loop_close,  "->n"},
+    {"on_readable",  (AngaraMethodFn)Angara_Loop_on_readable,  "ia->n"},
+    {"on_writable",  (AngaraMethodFn)Angara_Loop_on_writable,  "ia->n"},
+    {"set_timeout",  (AngaraMethodFn)Angara_Loop_set_timeout,  "ia->i"},
+    {"set_interval", (AngaraMethodFn)Angara_Loop_set_interval, "ia->i"},
+    {"clear",        (AngaraMethodFn)Angara_Loop_clear,        "i->n"},
+    {"run",          (AngaraMethodFn)Angara_Loop_run,          "->n"},
+    {"stop",         (AngaraMethodFn)Angara_Loop_stop,         "->n"},
+    {"poll",         (AngaraMethodFn)Angara_Loop_poll,         "i?->l<{}>"},
+    {"close",        (AngaraMethodFn)Angara_Loop_close,        "->n"},
     {NULL, NULL, NULL}
 };
 
@@ -521,13 +664,11 @@ static const AngaraClassDef RECEIVER_CLASS = { "Receiver", NULL, RECEIVER_METHOD
 
 static const AngaraFuncDef ASYNC_EXPORTS[] = {
     {"Loop",    Angara_async_Loop,    "->Loop",     &LOOP_CLASS},
-    {"channel", Angara_async_channel, "i?->{}",     NULL},  /* returns {tx, rx} */
+    {"channel", Angara_async_channel, "i?->{}",     NULL},
 
-    /* event mask constants */
     {"READ",     Angara_async_READ,     "->i", NULL},
     {"WRITE",    Angara_async_WRITE,    "->i", NULL},
     {"RDWR",     Angara_async_RDWR,     "->i", NULL},
-    /* poll result kind constants */
     {"READABLE", Angara_async_READABLE, "->i", NULL},
     {"WRITABLE", Angara_async_WRITABLE, "->i", NULL},
     {"TIMER",    Angara_async_TIMER,    "->i", NULL},
