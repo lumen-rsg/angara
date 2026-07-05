@@ -347,7 +347,7 @@ void Chaperone::analyzeStmt(Context& ctx,
             }
         } else if (it->second == State::Dropped) {
             diag(ctx, drop->name,
-                "⚠️ Double denaturation — `" + drop->name.lexeme + "` was already dropped, "
+                "⚠️ Cannot drop `" + drop->name.lexeme + "` — it was already dropped, "
                 "moved, or escaped. It's no longer live and cannot be dropped again.",
                 "E503");
         } else if (it->second == State::Escaped) {
