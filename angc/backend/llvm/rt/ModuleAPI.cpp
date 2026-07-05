@@ -230,6 +230,20 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRetVoid();
     }
 
+    Function* fn_call;
+    {
+        /* __ang_api_call(AngaraObject fn, i32 argc, void* argv) -> AngaraObject */
+        auto* ft = FunctionType::get(obj_ty, {obj_ty, i32_ty, i8_ptr}, false);
+        fn_call = mkExt("__ang_api_call", ft);
+        auto* bb = BasicBlock::Create(m_ctx, "entry", fn_call);
+        IRBuilder<> b(bb);
+        auto* fn_arg  = fn_call->arg_begin();
+        auto* ac_arg  = fn_call->arg_begin() + 1;
+        auto* av_arg  = fn_call->arg_begin() + 2;
+        auto* result  = b.CreateCall(m_module.getFunction("__ang_call"), {fn_arg, ac_arg, av_arg});
+        b.CreateRet(result);
+    }
+
     Function* fn_truthy;
     {
         auto* ft = FunctionType::get(i1_ty, {obj_ty}, false);
@@ -393,7 +407,7 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         bd.CreateRet(rec);
     }
 
-    std::vector<Type*> api_fields(27, ptr_ty);
+    std::vector<Type*> api_fields(28, ptr_ty);
     auto* api_type = StructType::create(m_ctx, api_fields, "AngaraAPI");
 
     std::vector<Constant*> fields = {
@@ -423,6 +437,7 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         fn_truthy,
         fn_equals,
         fn_throw_error,
+        fn_call,
         fn_obj_type,
     };
 

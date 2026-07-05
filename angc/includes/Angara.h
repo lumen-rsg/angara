@@ -167,6 +167,9 @@ struct AngaraAPI {
     // --- Error reporting ---
     __attribute__((__noreturn__)) void (*throw_error)(const char* msg); ///< Throw an Angara exception (does not return)
 
+    // --- Function calling ---
+    AngaraObject (*call)(AngaraObject fn, int argc, AngaraObject* argv); ///< Call an Angara closure/function from C
+
     // --- Type introspection ---
     int32_t (*obj_type)(AngaraObject obj);  ///< Get heap object type tag (ANG_OBJ_*)
 };
