@@ -1,0 +1,24 @@
+// Chaperone positive test — variadic function interprocedural summary (LOW2).
+// process() takes a tracked Buf param + variadic string args. It borrows
+// (does not drop) the Buf. The Chaperone must build a correct positional
+// summary: param 0 = Borrowed. The caller drops b after the call — no error
+// since b was only borrowed.
+//
+// exit: 0
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+// Variadic function: borrows tracked param, variadic args are strings.
+func process(b as Buf, msgs as string ...) -> nil {
+    // b is borrowed, not dropped
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    process(b, "hello");
+    drop b;        // ok: b was only borrowed by process
+    return 0;
+}

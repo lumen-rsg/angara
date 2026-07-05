@@ -1,0 +1,23 @@
+// Chaperone negative test — variadic function consumes tracked param (LOW2).
+// consume() takes a tracked Buf + variadic string args and drops the Buf
+// (consumes it). The Chaperone must propagate the Dropped behavior through
+// the positional summary. The caller then tries to drop b again → E503.
+//
+// expect: E503
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+// Variadic function: consumes (drops) the tracked param.
+func consume(b as Buf, msgs as string ...) -> nil {
+    drop b;
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    consume(b, "hello");  // b consumed here
+    drop b;               // E503: double-drop — b was already consumed by consume()
+    return 0;
+}

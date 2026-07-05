@@ -148,7 +148,7 @@ does nothing. This means:
 | ID | Status | File:Line | Description |
 |----|--------|-----------|-------------|
 | **LOW1** | [x] 🟢 Source → ✅ Fixed | `StmtAnalysis.cpp:492-573` | Loop condition re-analysis uses merged post-body state, not the exact state the next iteration would see. Fixed: `analyze_loop_body` returns exact `body_state`; condition/increment re-analysis uses it directly while post-loop state uses explicit `join_maps`. |
-| **LOW2** | [ ] 🟢 Source | test coverage | No variadic function interprocedural test. |
+| **LOW2** | [x] 🟢 Source → ✅ Verified | test coverage | No variadic function interprocedural test. Added: positive 17 (variadic function borrows tracked param, caller drops) and negative 35 (variadic function consumes tracked param → E503 double-drop). |
 | **LOW3** | [ ] 🟢 Source | test coverage | No indirect/function-pointer call test. |
 
 ---
@@ -281,6 +281,7 @@ then read ref), 11 (positive: read ref then drop referent).
 | Loop-body conditional drop + reassign (no false positive) | M2 | 14 (positive) |
 | Scoped block cleanup (variable declared in one branch, dropped) | M1 | 12 (positive) |
 | Shadow restore (inner block shadows outer variable) | M1 | 13 (positive) |
+| Variadic function interprocedural (borrow + consume) | LOW2 | 17 (positive), 35 (negative) |
 
 ---
 
@@ -318,7 +319,7 @@ then read ref), 11 (positive: read ref then drop referent).
 | **M4** | No test for mutual recursion | [x] ✅ |
 | **M5** | No test for RangeExpr/InterpStringExpr | [x] |
 | **LOW1** | Loop condition re-analysis state mismatch | [x] |
-| **LOW2** | No variadic function interprocedural test | [ ] |
+| **LOW2** | No variadic function interprocedural test | [x] |
 | **LOW3** | No indirect call test | [ ] |
 
 ---
