@@ -1367,7 +1367,25 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             if (vfit != m_variadic_foreign_funcs.end()) {
                 return callVariadicForeignFn(fnName, vfit->second, getArgs(expr));
             }
-            return callModuleFn(modName, fnName, getArgs(expr));
+            // If modName is a variable whose type is a native class, use the
+            // class's home module name so the mangled symbol matches the .so
+            // export (e.g. "Loop" → Angara_Loop_set_timeout, not ang_loop_set_timeout).
+            std::string resolved_mod = modName;
+            auto nt_it = namedTypes.find(modName);
+            if (nt_it != namedTypes.end() && nt_it->second) {
+                auto& t = nt_it->second;
+                std::shared_ptr<ClassType> cls;
+                if (t->kind == TypeKind::INSTANCE) {
+                    auto inst = std::dynamic_pointer_cast<InstanceType>(t);
+                    if (inst && inst->class_type) cls = inst->class_type;
+                } else if (t->kind == TypeKind::CLASS) {
+                    cls = std::dynamic_pointer_cast<ClassType>(t);
+                }
+                if (cls && cls->is_native) {
+                    resolved_mod = cls->name;  // use class name, not variable name
+                }
+            }
+            return callModuleFn(resolved_mod, fnName, getArgs(expr));
         }
         // Handle chained property access on arbitrary expressions:
         // e.g., this.mtx.lock(), this.mtx.unlock(), some_expr.join()
@@ -1645,26 +1663,11 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
     // convention — this is how variadic module functions are called.
     if (!f) {
         std::string native_name = "Angara_" + mod + "_" + fn;
-        llvm::Function* native_f = this->mod->getFunction(native_name);
-        if (native_f) {
-            // Call with native convention: (argc, AngaraObject* args[])
-            std::vector<llvm::Value*> native_args;
-            auto cnt = args.size();
-            native_args.push_back(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), (int)cnt));
-            if (cnt > 0) {
-                auto* aa = builder->CreateAlloca(llvm::ArrayType::get(objType, cnt));
-                for (size_t i = 0; i < cnt; i++) {
-                    auto* ep = builder->CreateGEP(llvm::ArrayType::get(objType, cnt), aa,
-                        {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
-                         llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), i)});
-                    builder->CreateStore(cg(args[i]), ep);
-                }
-                native_args.push_back(builder->CreateBitCast(aa, llvm::PointerType::get(*ctx, 0)));
-            } else {
-                native_args.push_back(llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0)));
-            }
-            return builder->CreateCall(native_f, native_args);
-        }
+        // Native functions live in .so files, not in the LLVM IR module.
+        // Declare them as external with the native calling convention.
+        auto* native_ft = llvm::FunctionType::get(objType,
+            {llvm::Type::getInt32Ty(*ctx), llvm::PointerType::get(*ctx, 0)}, false);
+        f = llvm::Function::Create(native_ft, llvm::Function::ExternalLinkage, native_name, this->mod.get());
     }
 
     if (!f) {
