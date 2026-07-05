@@ -20,6 +20,12 @@ namespace angara {
         MINUS_EQUAL,
         STAR_EQUAL,
         SLASH_EQUAL,
+        PERCENT_EQUAL,
+        AMPERSAND_EQUAL,
+        PIPE_EQUAL,
+        CARET_EQUAL,
+        LSHIFT_EQUAL,
+        RSHIFT_EQUAL,
         MINUS_GREATER,
 
         // One or two character tokens

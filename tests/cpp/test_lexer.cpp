@@ -50,8 +50,8 @@ TEST(brackets) {
 // ── Two-character operators ──
 
 TEST(two_char_operators) {
-    auto tokens = scan("++ -- && || += -= *= /=");
-    ASSERT_EQ(tokens.size(), 9u); // 8 operators + EOF
+    auto tokens = scan("++ -- && || += -= *= /= %= &= |= ^= <<= >>=");
+    ASSERT_EQ(tokens.size(), 15u); // 14 operators + EOF
     ASSERT_EQ(tokens[0].type, TokenType::PLUS_PLUS);
     ASSERT_EQ(tokens[1].type, TokenType::MINUS_MINUS);
     ASSERT_EQ(tokens[2].type, TokenType::LOGICAL_AND);
@@ -60,6 +60,12 @@ TEST(two_char_operators) {
     ASSERT_EQ(tokens[5].type, TokenType::MINUS_EQUAL);
     ASSERT_EQ(tokens[6].type, TokenType::STAR_EQUAL);
     ASSERT_EQ(tokens[7].type, TokenType::SLASH_EQUAL);
+    ASSERT_EQ(tokens[8].type, TokenType::PERCENT_EQUAL);
+    ASSERT_EQ(tokens[9].type, TokenType::AMPERSAND_EQUAL);
+    ASSERT_EQ(tokens[10].type, TokenType::PIPE_EQUAL);
+    ASSERT_EQ(tokens[11].type, TokenType::CARET_EQUAL);
+    ASSERT_EQ(tokens[12].type, TokenType::LSHIFT_EQUAL);
+    ASSERT_EQ(tokens[13].type, TokenType::RSHIFT_EQUAL);
 }
 
 TEST(comparison_operators) {
@@ -261,12 +267,16 @@ TEST(safe_navigation_operator) {
 }
 
 TEST(percent_equal) {
-    // % is its own token; %= is not a recognized two-char operator.
-    // Ensure % followed by = produces PERCENT then EQUAL.
-    auto tokens = scan("% =");
-    ASSERT_EQ(tokens.size(), 3u);
-    ASSERT_EQ(tokens[0].type, TokenType::PERCENT);
-    ASSERT_EQ(tokens[1].type, TokenType::EQUAL);
+    // %= is now a recognised two-char compound-assignment operator.
+    auto tokens = scan("%=");
+    ASSERT_EQ(tokens.size(), 2u);  // PERCENT_EQUAL + EOF
+    ASSERT_EQ(tokens[0].type, TokenType::PERCENT_EQUAL);
+
+    // % followed by = (with space) still produces PERCENT then EQUAL.
+    auto tokens2 = scan("% =");
+    ASSERT_EQ(tokens2.size(), 3u);
+    ASSERT_EQ(tokens2[0].type, TokenType::PERCENT);
+    ASSERT_EQ(tokens2[1].type, TokenType::EQUAL);
 }
 
 // ── Additional keywords ──

@@ -9,8 +9,6 @@
 
 | ID | Sev | Issue | Location |
 |---|---|---|---|
-| - [ ] **LANG-15** | Low | No compound bitwise/modulus assignment (`&= |= ^= %= <<= >>=`). The existing `+=`/`-=`/`*=`/`/=` are also likely mis-compiled (cgAssign stores only the RHS without reading the current value). Fixing all 10 operators requires codegen work. | `ExprCodegen.cpp` |
-| - [x] **RT-4** | 🟡 Source | No SIMD / vector types — numeric kernels can't use hardware. | — |
 | - [ ] **TOOL-1** | High | No package manager / registry / versioning / lockfile. `dependencies = [...]` is just `-l` flags. | `BuildSystem.cpp`, `CompilerDriver.cpp` |
 
 ---

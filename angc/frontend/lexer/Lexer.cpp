@@ -915,7 +915,7 @@ namespace angara {
                 addToken(match('=') ? TokenType::STAR_EQUAL : TokenType::STAR);
                 break;
             case '%':
-                addToken(TokenType::PERCENT);
+                addToken(match('=') ? TokenType::PERCENT_EQUAL : TokenType::PERCENT);
                 break;
             case ':':
                 addToken(TokenType::COLON);
@@ -952,12 +952,14 @@ namespace angara {
                 addToken(match('=') ? TokenType::EQUAL_EQUAL : TokenType::EQUAL);
                 break;
             case '<':
-                if (match('<')) addToken(TokenType::LSHIFT);
-                else addToken(match('=') ? TokenType::LESS_EQUAL : TokenType::LESS);
+                if (match('<')) {
+                    addToken(match('=') ? TokenType::LSHIFT_EQUAL : TokenType::LSHIFT);
+                } else addToken(match('=') ? TokenType::LESS_EQUAL : TokenType::LESS);
                 break;
             case '>':
-                if (match('>')) addToken(TokenType::RSHIFT);
-                else addToken(match('=') ? TokenType::GREATER_EQUAL : TokenType::GREATER);
+                if (match('>')) {
+                    addToken(match('=') ? TokenType::RSHIFT_EQUAL : TokenType::RSHIFT);
+                } else addToken(match('=') ? TokenType::GREATER_EQUAL : TokenType::GREATER);
                 break;
             case '+':
                 if (match('+')) addToken(TokenType::PLUS_PLUS);
@@ -971,13 +973,15 @@ namespace angara {
                 else addToken(TokenType::MINUS);
                 break;
             case '|':
-                addToken(match('|') ? TokenType::LOGICAL_OR : TokenType::PIPE);
+                if (match('|')) addToken(TokenType::LOGICAL_OR);
+                else addToken(match('=') ? TokenType::PIPE_EQUAL : TokenType::PIPE);
                 break;
             case '&':
-                addToken(match('&') ? TokenType::LOGICAL_AND : TokenType::AMPERSAND);
+                if (match('&')) addToken(TokenType::LOGICAL_AND);
+                else addToken(match('=') ? TokenType::AMPERSAND_EQUAL : TokenType::AMPERSAND);
                 break;
             case '^':
-                addToken(TokenType::CARET);
+                addToken(match('=') ? TokenType::CARET_EQUAL : TokenType::CARET);
                 break;
             case '~':
                 addToken(TokenType::TILDE);

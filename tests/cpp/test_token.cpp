@@ -64,6 +64,12 @@ TEST(to_string_two_char_operators) {
     ASSERT_EQ(to_string(TokenType::MINUS_EQUAL), "MINUS_EQUAL");
     ASSERT_EQ(to_string(TokenType::STAR_EQUAL), "STAR_EQUAL");
     ASSERT_EQ(to_string(TokenType::SLASH_EQUAL), "SLASH_EQUAL");
+    ASSERT_EQ(to_string(TokenType::PERCENT_EQUAL), "PERCENT_EQUAL");
+    ASSERT_EQ(to_string(TokenType::AMPERSAND_EQUAL), "AMPERSAND_EQUAL");
+    ASSERT_EQ(to_string(TokenType::PIPE_EQUAL), "PIPE_EQUAL");
+    ASSERT_EQ(to_string(TokenType::CARET_EQUAL), "CARET_EQUAL");
+    ASSERT_EQ(to_string(TokenType::LSHIFT_EQUAL), "LSHIFT_EQUAL");
+    ASSERT_EQ(to_string(TokenType::RSHIFT_EQUAL), "RSHIFT_EQUAL");
     ASSERT_EQ(to_string(TokenType::MINUS_GREATER), "MINUS_GREATER");
 }
 

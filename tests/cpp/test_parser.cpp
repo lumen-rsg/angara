@@ -226,12 +226,28 @@ TEST(assignment_expression) {
 }
 
 TEST(compound_assignment) {
-    auto stmts = parse("x += 1;");
-    ASSERT_EQ(stmts.size(), 1u);
-    auto exprStmt = as<ExpressionStmt>(stmts[0]);
-    auto assign = std::dynamic_pointer_cast<AssignExpr>(exprStmt->expression);
-    ASSERT_TRUE(assign != nullptr);
-    ASSERT_EQ(assign->op.type, TokenType::PLUS_EQUAL);
+    // LANG-15: all 10 compound-assignment operators
+    struct Case { const char* src; TokenType expected; };
+    Case cases[] = {
+        {"x += 1;",  TokenType::PLUS_EQUAL},
+        {"x -= 1;",  TokenType::MINUS_EQUAL},
+        {"x *= 1;",  TokenType::STAR_EQUAL},
+        {"x /= 1;",  TokenType::SLASH_EQUAL},
+        {"x %= 1;",  TokenType::PERCENT_EQUAL},
+        {"x &= 1;",  TokenType::AMPERSAND_EQUAL},
+        {"x |= 1;",  TokenType::PIPE_EQUAL},
+        {"x ^= 1;",  TokenType::CARET_EQUAL},
+        {"x <<= 1;", TokenType::LSHIFT_EQUAL},
+        {"x >>= 1;", TokenType::RSHIFT_EQUAL},
+    };
+    for (auto& c : cases) {
+        auto stmts = parse(c.src);
+        ASSERT_EQ(stmts.size(), 1u);
+        auto exprStmt = as<ExpressionStmt>(stmts[0]);
+        auto assign = std::dynamic_pointer_cast<AssignExpr>(exprStmt->expression);
+        ASSERT_TRUE(assign != nullptr);
+        ASSERT_EQ(assign->op.type, c.expected);
+    }
 }
 
 TEST(update_expression_postfix) {

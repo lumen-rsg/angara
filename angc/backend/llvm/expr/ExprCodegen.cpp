@@ -806,6 +806,32 @@ llvm::Value* LLVMBackend::maybeBoxTraitObject(llvm::Value* value, const Expr* sr
 
 llvm::Value* LLVMBackend::cgAssign(const AssignExpr& e) {
     auto* v = cg(e.value);
+
+    // LANG-15: compound assignment (e.g. a += b).  When the operator is not plain
+    // '=', synthesise a Binary expression (target OP value) and run it through
+    // the normal binary codegen so we get the combined value.  The result is then
+    // stored exactly like a plain assignment.
+    if (e.op.type != TokenType::EQUAL) {
+        TokenType binOp;
+        switch (e.op.type) {
+            case TokenType::PLUS_EQUAL:   binOp = TokenType::PLUS;   break;
+            case TokenType::MINUS_EQUAL:  binOp = TokenType::MINUS;  break;
+            case TokenType::STAR_EQUAL:   binOp = TokenType::STAR;   break;
+            case TokenType::SLASH_EQUAL:  binOp = TokenType::SLASH;  break;
+            case TokenType::PERCENT_EQUAL: binOp = TokenType::PERCENT; break;
+            case TokenType::AMPERSAND_EQUAL: binOp = TokenType::AMPERSAND; break;
+            case TokenType::PIPE_EQUAL:   binOp = TokenType::PIPE;   break;
+            case TokenType::CARET_EQUAL:  binOp = TokenType::CARET;  break;
+            case TokenType::LSHIFT_EQUAL: binOp = TokenType::LSHIFT; break;
+            case TokenType::RSHIFT_EQUAL: binOp = TokenType::RSHIFT; break;
+            default: binOp = TokenType::EQUAL; break;
+        }
+        Token binTok(binOp, e.op.lexeme.substr(0, e.op.lexeme.size() - 1),
+                     e.op.line, e.op.column, e.op.file);
+        auto synth = std::make_shared<Binary>(e.target, binTok, e.value);
+        v = cgBinary(*synth);
+    }
+
     if (auto* var = dynamic_cast<const VarExpr*>(e.target.get())) {
         // TS-1: box into a trait object if the target is trait/contract-typed.
         auto tgt_it = namedTypes.find(var->name.lexeme);

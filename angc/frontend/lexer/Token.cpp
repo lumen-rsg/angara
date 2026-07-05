@@ -35,6 +35,12 @@ namespace angara {
             case TokenType::MINUS_EQUAL: return "MINUS_EQUAL";
             case TokenType::STAR_EQUAL: return "STAR_EQUAL";
             case TokenType::SLASH_EQUAL: return "SLASH_EQUAL";
+            case TokenType::PERCENT_EQUAL: return "PERCENT_EQUAL";
+            case TokenType::AMPERSAND_EQUAL: return "AMPERSAND_EQUAL";
+            case TokenType::PIPE_EQUAL: return "PIPE_EQUAL";
+            case TokenType::CARET_EQUAL: return "CARET_EQUAL";
+            case TokenType::LSHIFT_EQUAL: return "LSHIFT_EQUAL";
+            case TokenType::RSHIFT_EQUAL: return "RSHIFT_EQUAL";
             case TokenType::MINUS_GREATER: return "MINUS_GREATER";
 
             // One or two character tokens
