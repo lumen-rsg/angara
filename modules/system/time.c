@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include "Angara.h"
 
+#define IS_STR(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)
+
 static double timespec_to_double(struct timespec ts) {
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1000000000.0;
 }
@@ -143,17 +145,94 @@ AngaraObject Angara_time_monotonic(int arg_count, AngaraObject* args) {
     return ang_f64(timespec_to_double(ts));
 }
 
+/* ---- local-time / timezone functions ---- */
+
+AngaraObject Angara_time_now_local(int arg_count, AngaraObject* args) {
+    (void)arg_count; (void)args;
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return ang_f64(timespec_to_double(ts));  /* same epoch; local interpretation is in formatting */
+}
+
+AngaraObject Angara_time_format_local(int arg_count, AngaraObject* args) {
+    if (arg_count != 2 || !ang_is_f64(args[0]) || !IS_STR(args[1])) {
+        ang_api->throw_error("format_local(timestamp, fmt) expects a float and a string.");
+        return ang_nil();
+    }
+    time_t seconds = (time_t)ang_as_f64(args[0]);
+    struct tm tm_buf;
+    localtime_r(&seconds, &tm_buf);
+    char buf[256];
+    strftime(buf, sizeof(buf), ang_api->as_cstr(args[1]), &tm_buf);
+    return ang_api->string(buf);
+}
+
+AngaraObject Angara_time_date_parts_local(int arg_count, AngaraObject* args) {
+    if (arg_count != 1 || !ang_is_f64(args[0])) {
+        ang_api->throw_error("date_parts_local(timestamp) expects one float argument.");
+        return ang_nil();
+    }
+    time_t seconds = (time_t)ang_as_f64(args[0]);
+    struct tm tm_buf;
+    localtime_r(&seconds, &tm_buf);
+
+    AngaraObject rec = ang_api->record_new();
+    ang_api->record_set(rec, "year",    ang_i64(tm_buf.tm_year + 1900));
+    ang_api->record_set(rec, "month",   ang_i64(tm_buf.tm_mon + 1));
+    ang_api->record_set(rec, "day",     ang_i64(tm_buf.tm_mday));
+    ang_api->record_set(rec, "hour",    ang_i64(tm_buf.tm_hour));
+    ang_api->record_set(rec, "minute",  ang_i64(tm_buf.tm_min));
+    ang_api->record_set(rec, "second",  ang_i64(tm_buf.tm_sec));
+    ang_api->record_set(rec, "weekday", ang_i64(tm_buf.tm_wday));
+    ang_api->record_set(rec, "yday",    ang_i64(tm_buf.tm_yday));
+    ang_api->record_set(rec, "isdst",   ang_i64(tm_buf.tm_isdst));
+    return rec;
+}
+
+AngaraObject Angara_time_timezone_offset(int arg_count, AngaraObject* args) {
+    (void)arg_count; (void)args;
+    time_t now = time(NULL);
+    struct tm local_buf, gmt_buf;
+    localtime_r(&now, &local_buf);
+    gmtime_r(&now, &gmt_buf);
+    /* tm_gmtoff is a glibc/BSD extension — use mktime/gmtime diff for portability */
+    time_t local_t = mktime(&local_buf);
+    /* mktime modified local_buf, so re-grab gmt */
+    struct tm gmt2_buf;
+    gmtime_r(&now, &gmt2_buf);
+    time_t gmt_t = timegm(&gmt2_buf);
+    return ang_i64((int64_t)(local_t - gmt_t));
+}
+
+AngaraObject Angara_time_timezone_name(int arg_count, AngaraObject* args) {
+    (void)arg_count; (void)args;
+    time_t now = time(NULL);
+    struct tm tm_buf;
+    localtime_r(&now, &tm_buf);
+#if defined(__linux__) || defined(__GLIBC__)
+    return ang_api->string(tm_buf.tm_zone ? tm_buf.tm_zone : "UTC");
+#else
+    /* BSD/macOS: use tzname[] */
+    return ang_api->string(tzname[tm_buf.tm_isdst > 0 ? 1 : 0]);
+#endif
+}
+
 static const AngaraFuncDef TIME_EXPORTS[] = {
-    {"now",        Angara_time_now,        "->d",    NULL},
-    {"unix",       Angara_time_unix,       "->i",    NULL},
-    {"from_unix",  Angara_time_from_unix,  "i->d",   NULL},
-    {"sleep",      Angara_time_sleep,      "d->n",   NULL},
-    {"format_iso", Angara_time_format_iso, "d->s",   NULL},
-    {"format",     Angara_time_format,     "ds->s",  NULL},
-    {"parse",      Angara_time_parse,      "ss->d?", NULL},
-    {"date_parts", Angara_time_date_parts, "d->{}",  NULL},
-    {"monotonic",  Angara_time_monotonic,  "->d",    NULL},
-    {"Stopwatch",  Angara_time_Stopwatch,  "->Stopwatch", &STOPWATCH_CLASS_DEF},
+    {"now",              Angara_time_now,              "->d",    NULL},
+    {"now_local",        Angara_time_now_local,        "->d",    NULL},
+    {"unix",             Angara_time_unix,             "->i",    NULL},
+    {"from_unix",        Angara_time_from_unix,        "i->d",   NULL},
+    {"sleep",            Angara_time_sleep,            "d->n",   NULL},
+    {"format_iso",       Angara_time_format_iso,       "d->s",   NULL},
+    {"format",           Angara_time_format,           "ds->s",  NULL},
+    {"format_local",     Angara_time_format_local,     "ds->s",  NULL},
+    {"parse",            Angara_time_parse,            "ss->d?", NULL},
+    {"date_parts",       Angara_time_date_parts,       "d->{}",  NULL},
+    {"date_parts_local", Angara_time_date_parts_local, "d->{}",  NULL},
+    {"monotonic",        Angara_time_monotonic,        "->d",    NULL},
+    {"timezone_offset",  Angara_time_timezone_offset,  "->i",    NULL},
+    {"timezone_name",    Angara_time_timezone_name,    "->s",    NULL},
+    {"Stopwatch",        Angara_time_Stopwatch,        "->Stopwatch", &STOPWATCH_CLASS_DEF},
     ANGARA_FUNC_END
 };
 
