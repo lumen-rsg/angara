@@ -37,10 +37,14 @@ public:
             // Add reverse edge: dep ← path
             m_reverse[dep].insert(path);
 
-            // Ensure the dep node exists.
+            // Ensure the dep node exists in m_nodes (for indegree calc).
+            // IMPORTANT: do NOT overwrite m_reverse[dep] — it may already
+            // have entries from earlier insertions where dep was the target.
             if (m_nodes.find(dep) == m_nodes.end()) {
                 m_nodes[dep] = {};
-                m_reverse[dep] = {};
+                if (m_reverse.find(dep) == m_reverse.end()) {
+                    m_reverse[dep] = {};
+                }
             }
         }
     }

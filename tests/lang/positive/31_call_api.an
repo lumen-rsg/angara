@@ -3,34 +3,54 @@ attach io;
 attach calltest;
 
 export func main() -> i64 {
-    let add = func(a, b) { return a + b; };
+    let add = func(a as i64, b as i64) -> i64 { return a + b; };
     let r1 = calltest.invoke(add, 10, 32);
-    if (r1 != 42) {
-        io.println("FAIL: 2-arg = " + string(r1));
+    if (r1 is i64) {
+        if (r1 != 42) {
+            io.println(1, "FAIL: 2-arg expected 42, got " + string(r1));
+            return 1;
+        }
+    } else {
+        io.println(1, "FAIL: 2-arg returned non-i64");
         return 1;
     }
 
-    let answer = func() { return 99; };
+    let answer = func() -> i64 { return 99; };
     let r2 = calltest.invoke0(answer);
-    if (r2 != 99) {
-        io.println("FAIL: 0-arg = " + string(r2));
+    if (r2 is i64) {
+        if (r2 != 99) {
+            io.println(1, "FAIL: 0-arg expected 99, got " + string(r2));
+            return 1;
+        }
+    } else {
+        io.println(1, "FAIL: 0-arg returned non-i64");
         return 1;
     }
 
-    let double = func(x) { return x * 2; };
+    let double = func(x as i64) -> i64 { return x * 2; };
     let r3 = calltest.invoke1(double, 21);
-    if (r3 != 42) {
-        io.println("FAIL: 1-arg = " + string(r3));
+    if (r3 is i64) {
+        if (r3 != 42) {
+            io.println(1, "FAIL: 1-arg expected 42, got " + string(r3));
+            return 1;
+        }
+    } else {
+        io.println(1, "FAIL: 1-arg returned non-i64");
         return 1;
     }
 
-    let greet = func(name) { return "Hello, " + name; };
+    let greet = func(name as string) -> string { return "Hello, " + name; };
     let r4 = calltest.invoke1(greet, "World");
-    if (r4 != "Hello, World") {
-        io.println("FAIL: string = " + string(r4));
+    if (r4 is string) {
+        if (r4 != "Hello, World") {
+            io.println(1, "FAIL: string mismatch, got " + r4);
+            return 1;
+        }
+    } else {
+        io.println(1, "FAIL: string test returned non-string");
         return 1;
     }
 
-    io.println("OK: call_api all tests passed");
+    io.println(1, "OK: call_api all tests passed");
     return 0;
 }
