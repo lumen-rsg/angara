@@ -140,7 +140,7 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 | - [ ] **LIB-8** | 🟡 Source | Medium | DB drivers: sqlite only (+ its finalizer never runs due to BUG-6). No Postgres/MySQL/Redis, no connection pooling, no explicit transaction API. | `modules/data/sqlite.c` |
 | - [x] **LIB-9** | ✅ Fixed | Medium | Module quality bugs: `net/rpc.c` server leaks accepted fds; `net/websocket.c::close` is a no-op; `system/process.c::run` drops the computed `exit_code`; `data/sort.c` is O(n²) insertion sort; `text/encoding.c::base32_encode` buggy shift logic; `system/os.c::run` is a shell-injection sink. | respective files |
 | - [x] **LIB-10** | ✅ Fixed (partial) | Low | ~~No logging module~~ → new `log` module with debug/info/warn/error + timestamps; ~~no string formatting~~ → new `adv_string.format()` with `{}` placeholders; ~~`adv_string` is byte-wise~~ → get/substring/chars/reverse/is_alpha/is_alnum/to_uppercase/to_lowercase/levenshtein now operate on Unicode code points; remaining items → see deferrals. | — |
-| - [x] **LIB-11** | ✅ Fixed (partial) | Low | ~~No file watching~~ → new `watch` module (Linux inotify); ~~no zstd/bzip2/xz~~ → new `compress` module (zstd + bzip2 + xz/lzma); ~~date/time is UTC-only~~ → added `format_local`, `date_parts_local`, `timezone_offset`, `timezone_name`; remaining items → see deferrals. | — |
+| - [x] **LIB-11** | ✅ Fixed | Low | ~~No file watching~~ → new `watch` module (Linux inotify + BSD/macOS kqueue); ~~no zstd/bzip2/xz~~ → new `compress` module (zstd + bzip2 + xz/lzma); ~~date/time is UTC-only~~ → added `format_local`, `date_parts_local`, `timezone_offset`, `timezone_name`. | — |
 | - [x] **LIB-12** | ✅ Fixed | Low | `testing/assert.c` is minimal (throw-on-fail only, no runner/fixtures). | `modules/testing/assert.c` |
 
 ---
@@ -247,5 +247,8 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 - **~~bzip2 / xz compression~~** ✅ Fixed — Both are now exposed via
   `compress.bzip2` and `compress.xz` (alongside the original zstd).
 
-- **kqueue (macOS / BSD)** — The `watch` module uses Linux inotify. A kqueue
-  backend is needed for macOS and BSD portability.
+- **~~kqueue (macOS / BSD)~~** ✅ Fixed — The `watch` module now has a
+  `#ifdef __linux__` / `#else` split with a full kqueue (`EVFILT_VNODE`)
+  backend. Event mask constants are portable across platforms.
+  **Note: the kqueue path is currently untested** — no macOS/BSD CI
+  is available.
