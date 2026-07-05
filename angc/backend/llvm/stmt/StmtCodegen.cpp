@@ -373,6 +373,28 @@ void LLVMBackend::cgForIn(const ForInStmt& s) {
 }
 
 void LLVMBackend::cgReturn(const ReturnStmt& s) {
+    // LIB-4: async return — store value in future frame, mark resolved, return future
+    if (m_in_async_function) {
+        auto* fn_frame = builder->CreateBitCast(m_current_async_frame,
+            m_current_async_frame_type->getPointerTo());
+        auto* result = s.value ? cg(s.value) : makeNil();
+        // Store result in frame
+        auto* res_ptr = builder->CreateStructGEP(m_current_async_frame_type, fn_frame, 1);
+        builder->CreateStore(result, res_ptr);
+        // Mark resolved (state = 1)
+        auto* state_p = builder->CreateStructGEP(m_current_async_frame_type, fn_frame, 0);
+        builder->CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 1), state_p);
+        // Pop GC frame if needed
+        if (m_exc_chain_save) emitGcPopFrame();
+        // Wrap frame as native instance and return
+        auto* name_str = builder->CreateGlobalString("Future");
+        auto* null_fin = llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
+        auto* future_obj = callRtByName("__ang_api_native_instance_new",
+            {m_current_async_frame, null_fin, name_str});
+        builder->CreateRet(future_obj);
+        return;
+    }
+
     if (m_inlined_main_ret_alloca) {
         // Inlined main: extract i32 exit code from return value, branch to cleanup
         auto* result = s.value ? cg(s.value) : makeNil();

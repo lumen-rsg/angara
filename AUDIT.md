@@ -18,21 +18,9 @@
 | ID | Issue |
 |---|---|
 | LIB-1 | AMQP/MQTT TLS — secure schemes parsed but TLS not configured on rabbitmq-c / mosquitto connections. |
-| LIB-4 | Futures / promises / async-await — requires language-level support (generator resumption, task scheduling). |
+| LIB-4 | Futures / promises / async-await — language-level support (async func, await, Future<T> type). **[IN PROGRESS]** Basic implementation done (Stages 1–4 + 6): `Future<T>` owned type, `async func` declarations, `await` expressions, Chaperone ownership tracking (E501/E502/E507). Remaining: full state-machine suspension (Stage 5), event-loop integration, combinators (Stage 7). Module renamed `async`→`eventloop` to avoid keyword conflict. |
 | LIB-7 | Native-call arg-type validation — module dispatcher should emit runtime type guards from DSL type-strings. |
 | LIB-10 | CLI/arg parser (subcommands, help generation); YAML / protobuf / msgpack serialisation; big integers. |
-
----
-
-## Known test regressions — all resolved ✅
-
-All three pre-existing test regressions have been fixed.  Full test suite: **63/63 language tests**, **52/52 Chaperone tests** pass.
-
-| Test | Root cause | Fix |
-|---|---|---|
-| `08_optionals.an` | `isBuiltinHeapType` didn't unwrap `OptionalType`, so `string?` wasn't recognised as a built-in heap type → E501 error instead of W521 warning. | Added optional unwrapping to `isBuiltinHeapType` (`Chaperone.cpp:86-91`). |
-| `16_is_downcast.an` | Same as above (`string?` → E501). | Same fix. |
-| `13_optional_narrowing.an` | `cgDrop` unconditionally dereferenced the payload pointer for cascade-drops and finalize/free, crashing when the optional was `nil` (NULL payload). | Added nil guard in `cgDrop` (`StmtCodegen.cpp:492-500`): checks `tag == TAG_NIL` and skips the heap deallocation when the value is nil. |
 
 ---
 

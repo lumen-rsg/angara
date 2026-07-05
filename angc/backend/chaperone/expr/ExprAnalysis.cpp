@@ -29,6 +29,7 @@ void Chaperone::collectExprVarRefs(const std::shared_ptr<Expr>& expr,
     if (auto* gt = dynamic_cast<const GetExpr*>(expr.get())) { collectExprVarRefs(gt->object, out); return; }
     if (auto* l = dynamic_cast<const ListExpr*>(expr.get())) { for (const auto& e : l->elements) collectExprVarRefs(e, out); return; }
     if (auto* tup = dynamic_cast<const TupleExpr*>(expr.get())) { for (const auto& e : tup->elements) collectExprVarRefs(e, out); return; }  // LANG-10
+    if (auto* await_e = dynamic_cast<const AwaitExpr*>(expr.get())) { collectExprVarRefs(await_e->future, out); return; }  // LIB-4
     if (auto* lo = dynamic_cast<const LogicalExpr*>(expr.get())) { collectExprVarRefs(lo->left, out); collectExprVarRefs(lo->right, out); return; }
     if (auto* su = dynamic_cast<const SubscriptExpr*>(expr.get())) { collectExprVarRefs(su->object, out); collectExprVarRefs(su->index, out); return; }
     if (auto* re = dynamic_cast<const RecordExpr*>(expr.get())) { for (const auto& v : re->values) collectExprVarRefs(v, out); return; }
@@ -547,6 +548,22 @@ void Chaperone::analyzeExpr(Context& ctx,
                 }
             }
             ctx.closure_summaries[lam_type_it->second.get()] = std::move(lam_summary);
+        }
+        return;
+    }
+
+    // LIB-4: AwaitExpr — consumes the future (move semantics).
+    // The future variable transitions from Live to Moved, just like
+    // assignment of a tracked variable transfers ownership.
+    if (auto* await_expr = dynamic_cast<const AwaitExpr*>(expr.get())) {
+        analyzeExpr(ctx, await_expr->future, state);
+        // If the awaited expression is a simple variable that is tracked
+        // and currently Live, the await consumes it (move semantics).
+        if (auto* ve = dynamic_cast<const VarExpr*>(await_expr->future.get())) {
+            auto it = state.find(ve->name.lexeme);
+            if (it != state.end() && it->second == State::Live) {
+                it->second = State::Moved;
+            }
         }
         return;
     }

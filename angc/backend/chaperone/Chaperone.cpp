@@ -99,6 +99,7 @@ bool Chaperone::isBuiltinHeapType(const Type& t) {
         case TypeKind::TRAIT_OBJECT:
         case TypeKind::RAW_ARRAY:
         case TypeKind::VECTOR:
+        case TypeKind::FUTURE:  // LIB-4: Future<T> is a heap-allocated owned type
             return true;
         case TypeKind::PRIMITIVE:
             // string is the only heap-allocated primitive

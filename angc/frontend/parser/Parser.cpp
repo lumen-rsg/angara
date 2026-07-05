@@ -216,6 +216,7 @@ namespace angara {
             case TokenType::EXPORT: case TokenType::CONTRACT: case TokenType::SIGNS:
             case TokenType::BREAK: case TokenType::CONTINUE: case TokenType::IS:
             case TokenType::DATA: case TokenType::ENUM: case TokenType::MATCH: case TokenType::DROP: case TokenType::OWNED: case TokenType::TYPE:
+            case TokenType::ASYNC: case TokenType::AWAIT:
             case TokenType::CASE: case TokenType::FOREIGN: case TokenType::INTRINSIC:
             case TokenType::UNION: case TokenType::AS:
             case TokenType::TYPE_STRING: case TokenType::TYPE_INT:

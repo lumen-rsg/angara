@@ -42,6 +42,7 @@ namespace angara {
     struct RangeExpr;
     struct InterpStringExpr;
     struct TupleExpr;  // LANG-10
+    struct AwaitExpr;  // LIB-4: await expression
 
     // The Visitor interface for expressions
     class ExprVisitor {
@@ -72,6 +73,7 @@ namespace angara {
         virtual std::any visit(const RangeExpr& expr) = 0;
         virtual std::any visit(const InterpStringExpr& expr) = 0;
         virtual std::any visit(const TupleExpr& expr) = 0;  // LANG-10
+        virtual std::any visit(const AwaitExpr& expr) = 0;  // LIB-4
         virtual std::any visit(const NestedPattern& expr) = 0;  // nested constructor pattern in match
 
     };
@@ -440,6 +442,21 @@ namespace angara {
 
         TupleExpr(Token paren, std::vector<std::shared_ptr<Expr>> elements)
                 : paren(std::move(paren)), elements(std::move(elements)) {}
+
+        std::any accept(ExprVisitor& visitor) const override {
+            return visitor.visit(*this);
+        }
+    };
+
+    // LIB-4: await expression — suspends the current async function until
+    // the awaited future resolves. Consumes the future (move semantics).
+    // Only valid inside `async func` bodies.
+    struct AwaitExpr : Expr {
+        const Token keyword;                    // the 'await' token
+        const std::shared_ptr<Expr> future;     // the future expression to await
+
+        AwaitExpr(Token keyword, std::shared_ptr<Expr> future)
+                : keyword(std::move(keyword)), future(std::move(future)) {}
 
         std::any accept(ExprVisitor& visitor) const override {
             return visitor.visit(*this);

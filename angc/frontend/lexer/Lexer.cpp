@@ -53,6 +53,8 @@ namespace angara {
             {"function",  TokenType::TYPE_FUNCTION},
             {"intrinsic", TokenType::INTRINSIC},
             {"void",      TokenType::TYPE_VOID},
+            {"async",    TokenType::ASYNC},
+            {"await",    TokenType::AWAIT},
     };
 
     Lexer::Lexer(std::string source, std::shared_ptr<std::string> filename, ErrorHandler& errorHandler)

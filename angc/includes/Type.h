@@ -35,6 +35,7 @@ namespace angara {
         GENERIC_INSTANCE, // A concrete instantiation of a generic type (e.g., Box<i64>)
         POINTER, // FFI pointer type (e.g., *i8, *void, **char)
         REF,     // v5: non-owning reference (ref<T>)
+        FUTURE,  // LIB-4: asynchronous computation result (Future<T>)
         VOID,    // C void type (only valid in FFI pointer context or as return type)
         TRAIT_OBJECT, // TS-1: a value viewed through a trait/contract interface (erased impl)
         TUPLE,   // LANG-10: heterogeneous fixed-arity tuple (e.g., (i64, string))
@@ -440,6 +441,20 @@ namespace angara {
         }
     };
 
+    // LIB-4: Future<T> — an asynchronous computation that will eventually
+    // produce a value of type T. Futures are owned (heap-allocated) types
+    // tracked by the Chaperone. They must be explicitly awaited (which
+    // consumes them) or dropped (which cancels the computation).
+    struct FutureType : Type {
+        const std::shared_ptr<Type> inner_type;
+        explicit FutureType(std::shared_ptr<Type> inner)
+                : Type(TypeKind::FUTURE), inner_type(std::move(inner)) {}
+
+        [[nodiscard]] std::string toString() const override {
+            return "Future<" + inner_type->toString() + ">";
+        }
+    };
+
     // LANG-10: heterogeneous fixed-arity tuple type (e.g., (i64, string)).
     // At runtime represented as an AngaraList — the type system enforces
     // fixed arity and positional (not uniform) element types.
@@ -671,6 +686,10 @@ namespace angara {
                     auto r = std::dynamic_pointer_cast<RefType>(type);
                     return std::make_shared<RefType>(substitute(r->inner_type));
                 }
+                case TypeKind::FUTURE: {
+                    auto f = std::dynamic_pointer_cast<FutureType>(type);
+                    return std::make_shared<FutureType>(substitute(f->inner_type));
+                }
                 case TypeKind::TUPLE: {
                     auto t = std::dynamic_pointer_cast<TupleType>(type);
                     std::vector<std::shared_ptr<Type>> ne;
@@ -807,6 +826,12 @@ namespace angara {
                 return la && lb && sameType(la->inner_type, lb->inner_type);
             }
 
+            case TypeKind::FUTURE: {
+                auto la = std::dynamic_pointer_cast<FutureType>(a);
+                auto lb = std::dynamic_pointer_cast<FutureType>(b);
+                return la && lb && sameType(la->inner_type, lb->inner_type);
+            }
+
             case TypeKind::TUPLE: {
                 auto la = std::dynamic_pointer_cast<TupleType>(a);
                 auto lb = std::dynamic_pointer_cast<TupleType>(b);
@@ -917,6 +942,9 @@ namespace angara {
             case TypeKind::REF:
                 return std::make_shared<RefType>(
                     substituteTypeArgs(std::dynamic_pointer_cast<RefType>(type)->inner_type, args));
+            case TypeKind::FUTURE:
+                return std::make_shared<FutureType>(
+                    substituteTypeArgs(std::dynamic_pointer_cast<FutureType>(type)->inner_type, args));
             case TypeKind::TUPLE: {
                 auto t = std::dynamic_pointer_cast<TupleType>(type);
                 std::vector<std::shared_ptr<Type>> ne;

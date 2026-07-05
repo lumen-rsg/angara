@@ -252,6 +252,7 @@ void Formatter::visit(std::shared_ptr<const FuncStmt> stmt) {
     if (stmt->is_exported) prefix += "export ";
     if (stmt->is_intrinsic) prefix += "intrinsic ";
     if (stmt->is_foreign) prefix += "foreign ";
+    if (stmt->is_async) prefix += "async ";
     if (stmt->is_static) prefix += "static ";
     prefix += "func ";
     write(prefix + stmt->name.lexeme);
@@ -609,6 +610,11 @@ std::any Formatter::visit(const TupleExpr& expr) {
     bool first = true;
     for (auto& e : expr.elements) { if (!first) r += ", "; first = false; r += fmtExpr(e); }
     return r + ")";
+}
+
+// LIB-4: await expression
+std::any Formatter::visit(const AwaitExpr& expr) {
+    return "await " + fmtExpr(expr.future);
 }
 
 } // namespace angara

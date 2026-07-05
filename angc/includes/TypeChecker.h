@@ -107,6 +107,7 @@ namespace angara {
         std::any visit(const RangeExpr& expr) override;
         std::any visit(const InterpStringExpr& expr) override;
         std::any visit(const TupleExpr& expr) override;  // LANG-10
+        std::any visit(const AwaitExpr& expr) override;  // LIB-4
         std::any visit(const NestedPattern& expr) override;
 
         // --- Statement visitors ---
@@ -254,6 +255,7 @@ namespace angara {
         bool m_hadError = false;
         int m_loop_depth = 0;
         bool m_is_in_trait = false;
+        bool m_in_async_function = false;  // LIB-4: true while visiting an async func body
 
         std::shared_ptr<Type> m_type_i8, m_type_i16, m_type_i32, m_type_i64;
         std::shared_ptr<Type> m_type_u8, m_type_u16, m_type_u32, m_type_u64;

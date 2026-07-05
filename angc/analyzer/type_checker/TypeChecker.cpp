@@ -390,6 +390,17 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
             return std::make_shared<RefType>(inner_type);
         }
 
+        // LIB-4: Future<T> — asynchronous computation result.
+        if (base_name == "Future") {
+            if (generic->arguments.size() != 1) {
+                error(generic->name, "Type 'Future' expects exactly one type argument (e.g., 'Future<string>').", "E251");
+                return m_type_error;
+            }
+            auto inner_type = resolveType(generic->arguments[0]);
+            if (inner_type->kind == TypeKind::ERROR) return m_type_error;
+            return std::make_shared<FutureType>(inner_type);
+        }
+
         // SIMD-5: vector types — vec2<f32>, vec3<f64>, vec4<i32>, vec8<f32>
         if (base_name == "vec2" || base_name == "vec3" ||
             base_name == "vec4" || base_name == "vec8") {

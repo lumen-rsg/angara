@@ -77,6 +77,18 @@ namespace angara {
             return_type = resolveType(stmt.returnType);
         }
 
+        // LIB-4: async functions return Future<T> (or Future<nil> if no explicit return type).
+        // Foreign/intrinsic functions cannot be async.
+        if (stmt.is_async) {
+            if (stmt.is_foreign) {
+                error(stmt.name, "An 'async' function cannot be 'foreign' — foreign functions are synchronous C imports.", "E417");
+            }
+            if (stmt.is_intrinsic) {
+                error(stmt.name, "An 'async' function cannot be 'intrinsic' — intrinsics are synchronous compiler builtins.", "E418");
+            }
+            return_type = std::make_shared<FutureType>(return_type);
+        }
+
         bool has_variadic = false;
         for (const auto& p : stmt.params) {
             if (p.is_variadic) { has_variadic = true; break; }
@@ -148,6 +160,10 @@ namespace angara {
         bool saved_had_error = m_hadError;
         m_hadError = false;
 
+        // LIB-4: track whether we're inside an async function (for await validation)
+        bool saved_in_async = m_in_async_function;
+        m_in_async_function = stmt->is_async;
+
         auto symbol = m_symbols.resolve(stmt->name.lexeme);
         std::shared_ptr<FunctionType> func_type;
         if (m_current_class && m_current_class->methods.count(stmt->name.lexeme)) {
@@ -159,7 +175,15 @@ namespace angara {
         }
 
         m_symbols.enterScope();
-        m_function_return_types.push(func_type->return_type);
+        // LIB-4: for async functions, the body returns T but the function type is Future<T>.
+        // Push the inner (user-visible) return type so return statements are checked against T,
+        // not Future<T>. The codegen wraps the result in the future.
+        if (stmt->is_async && func_type->return_type->kind == TypeKind::FUTURE) {
+            auto future_type = std::dynamic_pointer_cast<FutureType>(func_type->return_type);
+            m_function_return_types.push(future_type->inner_type);
+        } else {
+            m_function_return_types.push(func_type->return_type);
+        }
 
         auto saved_type_params = m_active_type_params;
         auto saved_bounds = m_active_type_param_bounds;
@@ -251,17 +275,24 @@ namespace angara {
         // TS-6: definite-return check. If the function declares a non-nil return
         // type, every control-flow path must end in a `return` (or `throw`).
         // Skip when this function already reported an error (avoid cascades).
-        if (!m_hadError && func_type->return_type &&
-            func_type->return_type->kind != TypeKind::NIL &&
-            func_type->return_type->kind != TypeKind::VOID) {
-            bool body_definitely_returns = false;
-            for (const auto& bodyStmt : (*stmt->body)) {
-                if (definitelyReturns(bodyStmt)) { body_definitely_returns = true; break; }
+        // LIB-4: for async functions, unwrap Future<T> — Future<nil> is effectively nil.
+        {
+            auto effective_return = func_type->return_type;
+            if (stmt->is_async && effective_return->kind == TypeKind::FUTURE) {
+                effective_return = std::dynamic_pointer_cast<FutureType>(effective_return)->inner_type;
             }
-            if (!body_definitely_returns) {
-                error(stmt->name, "Missing 'return' on some control-flow paths in function '" +
-                                  stmt->name.lexeme + "' declared to return '" +
-                                  func_type->return_type->toString() + "'.", "E387");
+            if (!m_hadError && effective_return &&
+                effective_return->kind != TypeKind::NIL &&
+                effective_return->kind != TypeKind::VOID) {
+                bool body_definitely_returns = false;
+                for (const auto& bodyStmt : (*stmt->body)) {
+                    if (definitelyReturns(bodyStmt)) { body_definitely_returns = true; break; }
+                }
+                if (!body_definitely_returns) {
+                    error(stmt->name, "Missing 'return' on some control-flow paths in function '" +
+                                      stmt->name.lexeme + "' declared to return '" +
+                                      func_type->return_type->toString() + "'.", "E387");
+                }
             }
         }
 
@@ -273,6 +304,7 @@ namespace angara {
         // Restore: if this function had errors, propagate to outer state
         if (m_hadError) saved_had_error = true;
         m_hadError = saved_had_error;
+        m_in_async_function = saved_in_async;  // LIB-4
     }
 
 }

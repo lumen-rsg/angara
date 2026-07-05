@@ -4,8 +4,9 @@
 #include "Parser.h"
 namespace angara {
 
-    // unary → ( "!" | "-" | "*" ) unary | primary
+    // unary → ( "!" | "-" | "*" | "await" ) unary | primary
     // *expr is pointer dereference (FFI only, enforced by type checker)
+    // await expr suspends until the future resolves (LIB-4)
     std::shared_ptr<Expr> Parser::unary() {
         if (match({TokenType::BANG, TokenType::MINUS, TokenType::TILDE, TokenType::PLUS_PLUS, TokenType::MINUS_MINUS, TokenType::STAR})) {
             Token op = previous();
@@ -18,6 +19,14 @@ namespace angara {
             }
             return std::make_shared<Unary>(std::move(op), std::move(right));
         }
+
+        // LIB-4: await expression
+        if (match({TokenType::AWAIT})) {
+            Token keyword = previous();
+            auto future_expr = unary();
+            return std::make_shared<AwaitExpr>(std::move(keyword), std::move(future_expr));
+        }
+
         return call();
     }
 

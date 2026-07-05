@@ -27,14 +27,14 @@
    Event mask constants
    ========================================================================= */
 
-AngaraObject Angara_async_READ(int c, AngaraObject* a)  { (void)c;(void)a; return ang_i64(EPOLLIN); }
-AngaraObject Angara_async_WRITE(int c, AngaraObject* a) { (void)c;(void)a; return ang_i64(EPOLLOUT); }
-AngaraObject Angara_async_RDWR(int c, AngaraObject* a)  { (void)c;(void)a; return ang_i64(EPOLLIN | EPOLLOUT); }
+AngaraObject Angara_eventloop_READ(int c, AngaraObject* a)  { (void)c;(void)a; return ang_i64(EPOLLIN); }
+AngaraObject Angara_eventloop_WRITE(int c, AngaraObject* a) { (void)c;(void)a; return ang_i64(EPOLLOUT); }
+AngaraObject Angara_eventloop_RDWR(int c, AngaraObject* a)  { (void)c;(void)a; return ang_i64(EPOLLIN | EPOLLOUT); }
 
-AngaraObject Angara_async_READABLE(int c, AngaraObject* a) { (void)c;(void)a; return ang_i64(1); }
-AngaraObject Angara_async_WRITABLE(int c, AngaraObject* a) { (void)c;(void)a; return ang_i64(2); }
-AngaraObject Angara_async_TIMER(int c, AngaraObject* a)    { (void)c;(void)a; return ang_i64(3); }
-AngaraObject Angara_async_CHANNEL(int c, AngaraObject* a)   { (void)c;(void)a; return ang_i64(4); }
+AngaraObject Angara_eventloop_READABLE(int c, AngaraObject* a) { (void)c;(void)a; return ang_i64(1); }
+AngaraObject Angara_eventloop_WRITABLE(int c, AngaraObject* a) { (void)c;(void)a; return ang_i64(2); }
+AngaraObject Angara_eventloop_TIMER(int c, AngaraObject* a)    { (void)c;(void)a; return ang_i64(3); }
+AngaraObject Angara_eventloop_CHANNEL(int c, AngaraObject* a)   { (void)c;(void)a; return ang_i64(4); }
 
 
 /* =========================================================================
@@ -124,7 +124,7 @@ static void finalize_loop(void* data) {
     free(l);
 }
 
-AngaraObject Angara_async_Loop(int arg_count, AngaraObject* args) {
+AngaraObject Angara_eventloop_Loop(int arg_count, AngaraObject* args) {
     (void)arg_count; (void)args;
     int epfd = epoll_create1(EPOLL_CLOEXEC);
     if (epfd < 0) {
@@ -511,7 +511,7 @@ static void finalize_receiver(void* data) {
     free(h);
 }
 
-AngaraObject Angara_async_channel(int arg_count, AngaraObject* args) {
+AngaraObject Angara_eventloop_channel(int arg_count, AngaraObject* args) {
     size_t cap = 16;
     if (arg_count >= 1 && ang_is_i64(args[0])) {
         int64_t v = ang_as_i64(args[0]);
@@ -680,21 +680,21 @@ static const AngaraMethodDef RECEIVER_METHODS[] = {
 static const AngaraClassDef RECEIVER_CLASS = { "Receiver", NULL, RECEIVER_METHODS };
 
 static const AngaraFuncDef ASYNC_EXPORTS[] = {
-    {"Loop",    Angara_async_Loop,    "->Loop",     &LOOP_CLASS},
-    {"channel", Angara_async_channel, "i?->{}",     NULL},
+    {"Loop",    Angara_eventloop_Loop,    "->Loop",     &LOOP_CLASS},
+    {"channel", Angara_eventloop_channel, "i?->{}",     NULL},
 
-    {"READ",     Angara_async_READ,     "->i", NULL},
-    {"WRITE",    Angara_async_WRITE,    "->i", NULL},
-    {"RDWR",     Angara_async_RDWR,     "->i", NULL},
-    {"READABLE", Angara_async_READABLE, "->i", NULL},
-    {"WRITABLE", Angara_async_WRITABLE, "->i", NULL},
-    {"TIMER",    Angara_async_TIMER,    "->i", NULL},
-    {"CHANNEL",  Angara_async_CHANNEL,  "->i", NULL},
+    {"READ",     Angara_eventloop_READ,     "->i", NULL},
+    {"WRITE",    Angara_eventloop_WRITE,    "->i", NULL},
+    {"RDWR",     Angara_eventloop_RDWR,     "->i", NULL},
+    {"READABLE", Angara_eventloop_READABLE, "->i", NULL},
+    {"WRITABLE", Angara_eventloop_WRITABLE, "->i", NULL},
+    {"TIMER",    Angara_eventloop_TIMER,    "->i", NULL},
+    {"CHANNEL",  Angara_eventloop_CHANNEL,  "->i", NULL},
 
     ANGARA_FUNC_END
 };
 
-ANGARA_MODULE_INIT(async) {
+ANGARA_MODULE_INIT(eventloop) {
     ang_api = api;
     *def_count = (sizeof(ASYNC_EXPORTS) / sizeof(AngaraFuncDef)) - 1;
     return ASYNC_EXPORTS;

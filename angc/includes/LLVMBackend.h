@@ -111,6 +111,8 @@ namespace angara {
         llvm::Value* cgInterpString(const InterpStringExpr& e);
         /// LANG-10: lowers a tuple literal to a list (same runtime repr).
         llvm::Value* cgTuple(const TupleExpr& e);
+        /// LIB-4: lowers an await expression (currently synchronous — extracts result).
+        llvm::Value* cgAwait(const AwaitExpr& e);
         llvm::Value* cgMatch(const MatchExpr& e);
         llvm::Value* cgLambda(const LambdaExpr& e);
 
@@ -150,6 +152,9 @@ namespace angara {
         void codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>& statements);
         void codegenGlobalVarDecl(const VarDeclStmt& stmt);
         void codegenFunctionDecl(const FuncStmt& stmt, const std::string& module_name);
+        /// LIB-4: codegen for async functions — allocates a Future<T> and wraps
+        /// the body in a resumable state machine.
+        void codegenAsyncFuncDecl(const FuncStmt& stmt, const std::string& module_name);
         void codegenForeignFuncDecl(const FuncStmt& stmt);
         void codegenClassDecl(const ClassStmt& stmt);
         void codegenDataDecl(const DataStmt& stmt);
@@ -351,6 +356,13 @@ namespace angara {
 
         // When inside a raw-signature function, holds the return kind (empty otherwise)
         std::optional<LocalKind> m_current_raw_return_kind;
+
+        // LIB-4: async function codegen state
+        bool m_in_async_function = false;
+        llvm::Value* m_current_async_frame = nullptr;       // future frame alloca (i8*)
+        llvm::StructType* m_current_async_frame_type = nullptr;  // frame struct type
+        llvm::Value* m_current_async_state_ptr = nullptr;   // pointer to state field
+        llvm::Value* m_current_async_result_ptr = nullptr;  // pointer to result field
 
         // Callback context: set by marshalAngaraToC for FUNCTION params (heap-allocated closure)
         llvm::Value* m_pending_callback_context = nullptr;

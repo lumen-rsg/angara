@@ -1,10 +1,10 @@
 // Test async callbacks: set_timeout + run (no explicit close to avoid
 // native method-call mangling issue).
 attach io;
-attach async;
+attach eventloop;
 
 export func main() -> i64 {
-    let loop = async.Loop();
+    let loop = eventloop.Loop();
 
     loop.set_timeout(10, func(count as i64) {
         io.println(1, "  timeout fired count=" + string(count));

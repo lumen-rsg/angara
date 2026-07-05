@@ -107,6 +107,7 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
     if (auto* p = dynamic_cast<const RangeExpr*>(e.get())) return cgRange(*p);
     if (auto* p = dynamic_cast<const InterpStringExpr*>(e.get())) return cgInterpString(*p);
     if (auto* p = dynamic_cast<const TupleExpr*>(e.get())) return cgTuple(*p);  // LANG-10
+    if (auto* p = dynamic_cast<const AwaitExpr*>(e.get())) return cgAwait(*p);  // LIB-4
     return makeNil();
 }
 
@@ -2959,6 +2960,16 @@ llvm::Value* LLVMBackend::cgInterpString(const InterpStringExpr& e) {
     }
     // If all segments were empty (e.g. $"") return an empty string.
     return acc ? acc : makeStr("");
+}
+
+// LIB-4: await expression — in Stage 3, synchronous passthrough.
+// Evaluates the future expression and returns its result directly.
+// Stage 4 will add the actual suspend/resume state machine.
+llvm::Value* LLVMBackend::cgAwait(const AwaitExpr& e) {
+    // For now, just evaluate the future expression and return it.
+    // The type checker already verified it's a Future<T>, and the
+    // runtime representation of T and Future<T> are the same (boxed).
+    return cg(e.future);
 }
 
 }

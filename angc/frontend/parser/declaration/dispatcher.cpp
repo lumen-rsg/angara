@@ -53,21 +53,31 @@ namespace angara {
             }
 
             bool is_exported = match({TokenType::EXPORT});
+            // LIB-4: async func — asynchronous function returning Future<T>
+            bool is_async = match({TokenType::ASYNC});
             // LANG-17: if 'func' is immediately followed by '(' (no name), it's
             // a lambda expression-statement (IIFE: func(){...}()), not a
             // declaration. Fall through to statement() so the lambda parser
             // (primaryExpression) handles it.
             if (check(TokenType::FUNC) && m_current + 1 < (int)m_tokens.size() &&
                 m_tokens[m_current + 1].type == TokenType::LEFT_PAREN) {
+                if (is_async) {
+                    throw error(previous(), "'async' must be followed by a named function declaration, not an anonymous function expression.", "E415");
+                }
                 return statement();
             }
             if (match({TokenType::FUNC})) {
                 auto func_decl = std::static_pointer_cast<FuncStmt>(function("function"));
                 func_decl->is_exported = is_exported;
+                func_decl->is_async = is_async;
                 func_decl->is_inline = pending_inline;
                 func_decl->consumes_params = std::move(pending_consumes);
                 func_decl->escape_params = std::move(pending_escapes);
                 return func_decl;
+            }
+
+            if (is_async) {
+                throw error(previous(), "Expected 'func' after 'async'.", "E416");
             }
 
             if (match({TokenType::INTRINSIC})) {

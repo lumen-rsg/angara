@@ -406,6 +406,7 @@ namespace angara {
 
     void ASTPrinter::visit(std::shared_ptr<const FuncStmt> stmt) {
         std::string info = stmt->name.lexeme;
+        if (stmt->is_async) info += " [async]";
         if (stmt->is_foreign) info += " [foreign]";
         if (stmt->is_exported) info += " [export]";
 
@@ -550,6 +551,12 @@ namespace angara {
         printHeader("NestedPattern", "bindings: " + std::to_string(expr.bindings.size()));
         printChild("constructor", expr.constructor, expr.subpatterns.empty());
         printChildren("subpatterns", expr.subpatterns, true);
+        return {};
+    }
+
+    std::any ASTPrinter::visit(const AwaitExpr& expr) {
+        printHeader("AwaitExpr");
+        printChild("future", expr.future, true);
         return {};
     }
 

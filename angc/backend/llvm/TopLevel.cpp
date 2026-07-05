@@ -22,6 +22,8 @@ void LLVMBackend::codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>&
             if (s->is_intrinsic) continue;
             if (s->is_foreign) { codegenForeignFuncDecl(*s); continue; }
             if (s->name.lexeme == "main") continue;
+            // LIB-4: async functions use the state-machine codegen path
+            if (s->is_async) { codegenAsyncFuncDecl(*s, moduleName); continue; }
             codegenFunctionDecl(*s, moduleName);
         }
         else if (auto s = std::dynamic_pointer_cast<const ClassStmt>(stmt))
@@ -276,6 +278,171 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     namedTypes = std::move(saved_types);
     namedKinds = std::move(saved_kinds);
     m_current_raw_return_kind = saved_raw_ret;
+    m_di_scope = saved_di_scope;
+    if (m_debug) builder->SetCurrentDebugLocation(llvm::DebugLoc());
+}
+
+// LIB-4: codegen for async functions.
+// Allocates a Future<T> frame on the heap, runs the body synchronously (for now),
+// stores the result, and returns the future as a native instance.
+// Stage 5 will add the state machine for suspension/resumption.
+void LLVMBackend::codegenAsyncFuncDecl(const FuncStmt& stmt, const std::string& module_name) {
+    const std::string func_name = mangle(module_name, stmt.name.lexeme);
+
+    // Resolve semantic function type to get param types
+    auto sem_sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(stmt.name.lexeme);
+    auto sem_fn_type = (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION)
+        ? std::dynamic_pointer_cast<FunctionType>(sem_sym->type) : nullptr;
+
+    // Build LLVM function signature: all boxed (objType params, objType return)
+    std::vector<llvm::Type*> param_types(stmt.params.size(), objType);
+    auto* fn_type = llvm::FunctionType::get(objType, param_types, false);
+
+    auto* fn = mod->getFunction(func_name);
+    if (!fn) {
+        fn = llvm::Function::Create(fn_type, llvm::Function::ExternalLinkage,
+                                     func_name, mod.get());
+    }
+
+    // Attach DWARF debug info
+    llvm::DIScope* saved_di_scope = m_di_scope;
+    if (m_debug && m_di_builder && m_di_file) {
+        std::string src_file = stmt.name.file ? *stmt.name.file : "unknown";
+        auto diFile = getOrCreateDIFile(src_file);
+        auto diFuncType = m_di_builder->createSubroutineType(
+            m_di_builder->getOrCreateTypeArray({}));
+        auto sp = m_di_builder->createFunction(
+            diFile, stmt.name.lexeme, func_name, diFile,
+            stmt.name.line, diFuncType, stmt.name.column,
+            llvm::DINode::FlagZero, llvm::DISubprogram::SPFlagDefinition);
+        fn->setSubprogram(sp);
+        m_di_scope = sp;
+        builder->SetCurrentDebugLocation(
+            llvm::DILocation::get(*ctx, stmt.name.line, stmt.name.column, sp));
+    }
+
+    // Name parameters
+    size_t idx = 0;
+    for (auto& arg : fn->args()) {
+        arg.setName(sanitize(stmt.params[idx].name.lexeme));
+        idx++;
+    }
+
+    auto* entry = llvm::BasicBlock::Create(*ctx, "entry", fn);
+    builder->SetInsertPoint(entry);
+
+    auto saved_values = std::move(namedVals);
+    auto saved_types = std::move(namedTypes);
+    auto saved_kinds = std::move(namedKinds);
+    namedVals.clear();
+    namedTypes.clear();
+    namedKinds.clear();
+
+    // ---- Future frame allocation ----
+    // The frame struct: { i32 state, AngaraObject result }
+    // state: 0 = pending, 1 = resolved
+    auto* state_ty = llvm::Type::getInt32Ty(*ctx);
+    auto* frame_struct_ty = llvm::StructType::get(*ctx, {state_ty, objType}, false);
+    auto* frame_ptr_ty = llvm::PointerType::get(*ctx, 0);
+
+    // Allocate the frame via malloc (the Chaperone tracks the returned future)
+    auto* malloc_fn = mod->getFunction("malloc");
+    if (!malloc_fn) {
+        malloc_fn = llvm::Function::Create(
+            llvm::FunctionType::get(llvm::PointerType::get(*ctx, 0),
+                                    {llvm::Type::getInt64Ty(*ctx)}, false),
+            llvm::Function::ExternalLinkage, "malloc", mod.get());
+    }
+    auto* frame_size = llvm::ConstantExpr::getSizeOf(frame_struct_ty);
+    auto* frame_ptr = builder->CreateCall(malloc_fn, {frame_size}, "future_frame");
+    auto* typed_frame_ptr = builder->CreateBitCast(frame_ptr, frame_ptr_ty);
+
+    // Initialize state to 0 (pending)
+    auto* state_ptr = builder->CreateStructGEP(frame_struct_ty, typed_frame_ptr, 0, "state_ptr");
+    builder->CreateStore(llvm::ConstantInt::get(state_ty, 0), state_ptr);
+
+    // Result slot (initially nil)
+    auto* result_ptr = builder->CreateStructGEP(frame_struct_ty, typed_frame_ptr, 1, "result_ptr");
+    builder->CreateStore(makeNil(), result_ptr);
+
+    // LIB-4: set async frame tracking for cgReturn
+    auto saved_in_async = m_in_async_function;
+    auto saved_async_frame = m_current_async_frame;
+    auto saved_async_frame_type = m_current_async_frame_type;
+    auto saved_async_state_ptr = m_current_async_state_ptr;
+    auto saved_async_result_ptr = m_current_async_result_ptr;
+    m_in_async_function = true;
+    m_current_async_frame = frame_ptr;          // i8* (malloc'd pointer)
+    m_current_async_frame_type = frame_struct_ty;
+    m_current_async_state_ptr = state_ptr;
+    m_current_async_result_ptr = result_ptr;
+
+    // ---- Register parameters as local variables ----
+    idx = 0;
+    for (auto& arg : fn->args()) {
+        auto pname = sanitize(stmt.params[idx].name.lexeme);
+        auto param_type = (sem_fn_type && idx < sem_fn_type->param_types.size())
+            ? sem_fn_type->param_types[idx] : nullptr;
+        auto* alloca = allocLocal(fn, pname, param_type);
+        namedVals[pname] = alloca;
+        if (param_type) {
+            namedTypes[pname] = param_type;
+            namedKinds[pname] = LocalKind::BOXED;
+        } else {
+            namedKinds[pname] = LocalKind::BOXED;
+        }
+        emitDbgDeclare(alloca, pname, stmt.params[idx].name.line,
+                       stmt.params[idx].name.column, namedKinds[pname]);
+        storeVar(pname, &arg);
+        idx++;
+    }
+
+    // ---- Run the function body synchronously ----
+    // Reset per-function codegen state
+    m_exc_chain_save = nullptr;
+    m_inlined_main_ret_alloca = nullptr;
+    m_inlined_main_cleanup_bb = nullptr;
+
+    // Push GC frame (async functions may allocate)
+    emitGcPushFrame(fn, 256);
+
+    if (stmt.body) {
+        for (const auto& s : *stmt.body) {
+            if (builder->GetInsertBlock()->getTerminator()) break;
+            cgStmt(s);
+        }
+    }
+
+    if (!builder->GetInsertBlock()->getTerminator()) {
+        if (m_exc_chain_save) emitGcPopFrame();
+        // LIB-4: async implicit return — store nil in the future and return it
+        if (m_in_async_function) {
+            auto* fn_frame = builder->CreateBitCast(m_current_async_frame, m_current_async_frame_type->getPointerTo());
+            auto* res_ptr = builder->CreateStructGEP(m_current_async_frame_type, fn_frame, 1);
+            builder->CreateStore(makeNil(), res_ptr);
+            auto* state_p = builder->CreateStructGEP(m_current_async_frame_type, fn_frame, 0);
+            builder->CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 1), state_p);
+            auto* name_str = builder->CreateGlobalString("Future");
+            auto* null_fin = llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
+            auto* future_obj = callRtByName("__ang_api_native_instance_new",
+                {m_current_async_frame, null_fin, name_str});
+            builder->CreateRet(future_obj);
+        } else {
+            builder->CreateRet(makeNil());
+        }
+    }
+
+    namedVals = std::move(saved_values);
+    namedTypes = std::move(saved_types);
+    namedKinds = std::move(saved_kinds);
+
+    // LIB-4: restore async state
+    m_in_async_function = saved_in_async;
+    m_current_async_frame = saved_async_frame;
+    m_current_async_frame_type = saved_async_frame_type;
+    m_current_async_state_ptr = saved_async_state_ptr;
+    m_current_async_result_ptr = saved_async_result_ptr;
+
     m_di_scope = saved_di_scope;
     if (m_debug) builder->SetCurrentDebugLocation(llvm::DebugLoc());
 }
