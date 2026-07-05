@@ -144,3 +144,16 @@ struct AngaraAPI {
    to `struct AngaraAPI` between `throw_error` and `obj_type`.
 
 3. **Commit:** `dde00ed`
+
+4. **Test infrastructure:** `c4d47ac` — `modules/testing/calltest.c` (native
+   module with invoke/invoke0/invoke1) + `tests/lang/positive/31_call_api.an`
+   (positive test covering 0/1/2-arg closures with int and string args).
+
+### Known issue
+
+Runtime testing is currently blocked by a **pre-existing compiler bug**
+("Circular dependency detected in module graph") that affects all native
+module loading from `build/modules/`.  This bug is present on the clean
+`stable` branch before any of our session's changes.  Once resolved (or
+once `sudo make install_libraries` puts modules in `/opt/angara/modules/`),
+the test at `tests/lang/positive/31_call_api.an` should exercise the feature.
