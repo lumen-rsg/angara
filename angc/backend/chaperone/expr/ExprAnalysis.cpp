@@ -253,18 +253,36 @@ void Chaperone::analyzeExpr(Context& ctx,
                 callee_name = method_name;  // fallback: bare method name
         }
 
-        // Look up the summary. For method calls, prefer the bare method name.
+        // Look up the summary: first by function name, then by closure
+        // FunctionType (H2). For method calls, also try the bare method name.
+        const FunctionSummary* summary = nullptr;
         auto sum_it = ctx.summaries.find(callee_name);
         if (sum_it == ctx.summaries.end() && !method_name.empty())
             sum_it = ctx.summaries.find(method_name);
         if (sum_it != ctx.summaries.end()) {
+            summary = &sum_it->second;
+        } else {
+            // H2: Check for closure call summary via the callee's FunctionType.
+            // Each LambdaExpr creates a unique FunctionType that flows through
+            // variable assignments, so looking up by the callee VarExpr's type
+            // finds the right summary.
+            if (dynamic_cast<const VarExpr*>(call->callee.get())) {
+                auto tit = ctx.tc.getExpressionTypes().find(call->callee.get());
+                if (tit != ctx.tc.getExpressionTypes().end() && tit->second &&
+                    tit->second->kind == TypeKind::FUNCTION) {
+                    auto cs_it = ctx.closure_summaries.find(tit->second.get());
+                    if (cs_it != ctx.closure_summaries.end())
+                        summary = &cs_it->second;
+                }
+            }
+        }
+
+        if (summary) {
             // Positional match: call-arg i binds to summary[i] (S5). The summary
             // is aligned to call-arg positions (`this` is not a call arg), so a
-            // direct index is correct for any arity — no more "single tracked
-            // param" shortcut or blanket-Escape fallback.
-            const auto& summary = sum_it->second;
-            for (size_t i = 0; i < effective_args.size() && i < summary.size(); i++) {
-                auto behavior = summary[i];
+            // direct index is correct for any arity.
+            for (size_t i = 0; i < effective_args.size() && i < summary->size(); i++) {
+                auto behavior = (*summary)[i];
                 if (behavior == ParamBehavior::Borrowed) continue;  // stays Live
                 auto* arg = effective_args[i].get();
                 if (auto* ve3 = dynamic_cast<const VarExpr*>(arg)) {
@@ -277,12 +295,8 @@ void Chaperone::analyzeExpr(Context& ctx,
                     }
                 }
             }
-        } else {
-            // Unknown function (foreign, module, or not yet analyzed):
-            // default is BORROW — the argument stays Live. This is correct
-            // for ~90% of FFI (io.println, string(), etc.). Functions that
-            // consume or escape need @consumes / @escape annotations.
         }
+        // else: Unknown function — default is BORROW (no state change).
         return;
     }
 
@@ -423,10 +437,54 @@ void Chaperone::analyzeExpr(Context& ctx,
         for (const auto& name : referenced) {
             lambda_state[name] = State::Escaped;
         }
+
+        // H2: Seed lambda parameters into lambda_state so drops/escapes/moves
+        // of params are tracked during body analysis. Without this, the summary
+        // can't see what the closure does to its arguments.
+        // Also save/restore ctx.current_params so that lambda params are
+        // excluded from E501 leak checks (just like regular function params).
+        auto lam_type_it = ctx.tc.getExpressionTypes().find(expr.get());
+        std::set<std::string> saved_params;
+        std::swap(saved_params, ctx.current_params);
+        if (lam_type_it != ctx.tc.getExpressionTypes().end() && lam_type_it->second &&
+            lam_type_it->second->kind == TypeKind::FUNCTION) {
+            auto* fn_type = static_cast<const FunctionType*>(lam_type_it->second.get());
+            for (size_t i = 0; i < lam->param_names.size() && i < fn_type->param_types.size(); i++) {
+                if (fn_type->param_types[i] && isTrackedTypeObj(ctx, *fn_type->param_types[i])) {
+                    lambda_state[lam->param_names[i].lexeme] = State::Live;
+                    ctx.current_params.insert(lam->param_names[i].lexeme);
+                }
+            }
+        }
+
         bool terminates = false;
         for (const auto& s : lam->body) {
             analyzeStmt(ctx, s, lambda_state, terminates);
             if (terminates) break;
+        }
+
+        // Restore the enclosing function's params.
+        std::swap(saved_params, ctx.current_params);
+
+        // H2: Build a closure call summary from the lambda body analysis.
+        // This enables call sites like f(args) to know what the closure does
+        // to its arguments (drop, escape, or borrow).
+        if (lam_type_it != ctx.tc.getExpressionTypes().end() && lam_type_it->second &&
+            lam_type_it->second->kind == TypeKind::FUNCTION) {
+            auto* fn_type = static_cast<const FunctionType*>(lam_type_it->second.get());
+            FunctionSummary lam_summary(lam->param_names.size(), ParamBehavior::Borrowed);
+            for (size_t i = 0; i < lam->param_names.size() && i < fn_type->param_types.size(); i++) {
+                if (!fn_type->param_types[i] || !isTrackedTypeObj(ctx, *fn_type->param_types[i]))
+                    continue;
+                auto st_it = lambda_state.find(lam->param_names[i].lexeme);
+                if (st_it != lambda_state.end()) {
+                    if (st_it->second == State::Dropped)
+                        lam_summary[i] = ParamBehavior::Dropped;
+                    else if (st_it->second == State::Escaped || st_it->second == State::Moved)
+                        lam_summary[i] = ParamBehavior::Escaped;
+                }
+            }
+            ctx.closure_summaries[lam_type_it->second.get()] = std::move(lam_summary);
         }
         return;
     }

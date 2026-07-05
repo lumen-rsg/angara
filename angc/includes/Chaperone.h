@@ -77,6 +77,10 @@ private:
         // positive. Reset per function in analyzeFunction.
         std::set<std::string> current_params;
         std::map<std::string, FunctionSummary> summaries;
+        // H2: closure call summaries. Keyed by FunctionType pointer — each LambdaExpr
+        // creates a unique FunctionType that flows through variable assignments,
+        // giving a stable lookup key for closure call sites.
+        std::map<const struct Type*, FunctionSummary> closure_summaries;
         bool in_unsafe = false;
         // During the interprocedural fixed-point convergence passes, suppress
         // diagnostics (they'd duplicate); emit only on the final pass.

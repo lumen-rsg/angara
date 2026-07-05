@@ -128,7 +128,7 @@ does nothing. This means:
 | ID | Status | File:Line | Description |
 |----|--------|-----------|-------------|
 | **H1** | [x] 🟢 Source → ✅ Fixed | `Chaperone.cpp:108-153` | **TryStmt missing from collectVarRefs.** Closures defined inside try/catch/finally have invisible captures — E505 never fires for variables they reference. |
-| **H2** | [ ] 🟢 Source | `ExprAnalysis.cpp:268-272` | **No summary for closure calls.** When a closure is called as `f()`, there is no entry in `ctx.summaries` (closures are LambdaExprs, not FuncStmts). All args are treated as Borrowed — a closure that drops or escapes its argument goes undetected. |
+| **H2** | [x] 🟢 Source → ✅ Fixed | `ExprAnalysis.cpp:268-272` | **No summary for closure calls.** When a closure is called as `f()`, there is no entry in `ctx.summaries` (closures are LambdaExprs, not FuncStmts). All args are treated as Borrowed — a closure that drops or escapes its argument goes undetected. Fixed by building summaries from lambda body analysis (keyed by FunctionType pointer) and looking them up at call sites via the callee VarExpr's type. |
 | **H3** | [ ] 🟢 Source | `ExprAnalysis.cpp:272` | **@consumes/@escape not implemented.** Documented in `CHAPERONE.md` as escape hatches, mentioned in code comments, but never parsed or checked. All FFI/unknown functions are permanently treated as borrowing — no way to mark a foreign function that takes ownership. |
 | **H4** | [x] 🟢 Source → ✅ Fixed | `Chaperone.cpp:308-313` | **No oscillation detection in fixed-point.** The convergence check is exact map equality. If summaries oscillate (A→B→A→B), the loop exhausts all 8 passes without converging and silently uses the last pass. No diagnostic emitted. With C3 (name collision), oscillation is plausible. |
 | **H5** | [ ] 🟢 Source | `StmtAnalysis.cpp:20` | **Borrow tracking is intraprocedural only.** `ctx.borrows.clear()` at function entry. If a `ref<T>` is passed to another function, the callee doesn't see the borrow relationship and won't flag E509 if it drops the referent. |
@@ -244,8 +244,13 @@ in a new "strict" mode.
 
 **H1 (TryStmt in collectVarRefs):** [x] Done — `case TryStmt` added to `collectVarRefs`.
 
-**H2 (Closure call summaries):** [ ] Deferred — requires tracking closure variable
-bindings and building summaries from lambda bodies. Non-trivial design needed.
+**H2 (Closure call summaries):** [x] Done — LambdaExpr handler builds a FunctionSummary
+from the body analysis (keyed by the LambdaExpr's unique FunctionType pointer).
+CallExpr handler looks up closure summaries via the callee VarExpr's type when
+no named-function summary is found. Lambda params are seeded into the body
+analysis state and excluded from E501 leak checks (save/restore ctx.current_params).
+Tests: 29 (E502 closure-drops-arg), 30 (E503 closure-drops-then-drop),
+09 + 10 (positive: borrow and drop-via-closure).
 
 **H3 (@consumes/@escape):** [x] Done — Parser recognizes `@consumes(i, j)` and
 `@escape(i, j)` annotations on function declarations. Summary building uses
@@ -292,7 +297,7 @@ have their summaries pre-built before the fixed-point loop.
 | **C3** | Method summary name collision | [x] |
 | **C4** | Closure bodies never analyzed | [x] |
 | **H1** | TryStmt missing from collectVarRefs | [x] |
-| **H2** | No summary for closure calls | [ ] |
+| **H2** | No summary for closure calls | [x] |
 | **H3** | @consumes/@escape not implemented | [x] |
 | **H4** | No oscillation detection in fixed-point | [x] |
 | **H5** | Borrow tracking intraprocedural only | [ ] |

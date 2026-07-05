@@ -1,0 +1,19 @@
+// Chaperone positive test — closure drops argument, satisfies leak obligation.
+// When a closure drops its argument, the caller's variable transitions to
+// Dropped. No explicit drop is needed and no E501 leak should be reported.
+//
+// exit: 42
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let f = func(x as Buf) {
+        drop x;
+    };
+    f(b);  // ownership transferred to closure, dropped inside
+    return 42;
+}

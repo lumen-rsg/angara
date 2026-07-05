@@ -1,0 +1,21 @@
+// Chaperone negative test — E502 (closure drops argument, then use-after-free)
+// A closure that drops its tracked argument must transition the caller's
+// variable to Dropped. Using it after the closure call is use-after-free.
+//
+// expect: E502
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let f = func(x as Buf) {
+        drop x;
+    };
+    f(b);
+    return b.get();  // E502: b was dropped by the closure
+}
