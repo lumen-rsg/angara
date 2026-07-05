@@ -342,6 +342,37 @@ AngaraObject Angara_jwt_verify(int arg_count, AngaraObject* args) {
     size_t payload_len = dot2 - dot1 - 1;
     size_t sig_len = token_len - (dot2 + 1 - token);
 
+    /* --- decode and validate the alg header (alg-confusion fix) --- */
+    {
+        uint8_t* header_bytes = (uint8_t*)malloc(header_len + 4);
+        ssize_t hd = base64url_decode(token, header_len, header_bytes);
+        int alg_ok = 0;
+        if (hd > 0) {
+            header_bytes[hd] = '\0';
+            char* error_msg = NULL;
+            JsonHandle header_json = json_bridge_parse((const char*)header_bytes, &error_msg);
+            if (header_json && json_bridge_is_object(header_json)) {
+                size_t sz = json_bridge_object_size(header_json);
+                for (size_t i = 0; i < sz; i++) {
+                    const char* key = json_bridge_object_get_key_at(header_json, i);
+                    if (key && strcmp(key, "alg") == 0) {
+                        JsonHandle alg_val = json_bridge_object_get_value_at(header_json, i);
+                        if (alg_val && json_bridge_is_string(alg_val)) {
+                            const char* alg_str = json_bridge_get_string(alg_val);
+                            if (alg_str && strcmp(alg_str, "HS256") == 0) alg_ok = 1;
+                            if (alg_str) free((void*)alg_str);
+                        }
+                    }
+                    if (key) free((void*)key);
+                }
+                json_bridge_free(header_json);
+            }
+            if (error_msg) free(error_msg);
+        }
+        free(header_bytes);
+        if (!alg_ok) return ang_nil();  /* reject unknown/missing/unsupported alg */
+    }
+
     size_t sig_input_len = header_len + 1 + payload_len;
     char* sig_input = (char*)malloc(sig_input_len + 1);
     memcpy(sig_input, token, sig_input_len);
@@ -352,12 +383,21 @@ AngaraObject Angara_jwt_verify(int arg_count, AngaraObject* args) {
                 (const uint8_t*)sig_input, sig_input_len, expected_sig);
     free(sig_input);
 
-    uint8_t provided_sig[64];
+    /* --- decode signature into a heap buffer (stack-overflow fix) --- */
+    /* max base64url-encoded length for a 64-byte hash is 86 chars;
+       reject anything larger as obviously malicious */
+    if (sig_len > 86) return ang_nil();
+    size_t sig_buf_size = (sig_len * 3) / 4 + 4;
+    uint8_t* provided_sig = (uint8_t*)malloc(sig_buf_size);
     ssize_t decoded_sig_len = base64url_decode(dot2 + 1, sig_len, provided_sig);
-    if (decoded_sig_len != 32) return ang_nil();
+    if (decoded_sig_len != 32) {
+        free(provided_sig);
+        return ang_nil();
+    }
 
     int diff = 0;
     for (int i = 0; i < 32; i++) diff |= provided_sig[i] ^ expected_sig[i];
+    free(provided_sig);
     if (diff != 0) return ang_nil();
 
     uint8_t* payload_bytes = (uint8_t*)malloc(payload_len + 4);
