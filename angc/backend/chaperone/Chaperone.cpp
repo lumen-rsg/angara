@@ -21,6 +21,12 @@ void Chaperone::diag(Context& ctx, const Token& tok,
         ctx.eh.report(tok, msg, code);
 }
 
+void Chaperone::warn(Context& ctx, const Token& tok,
+                     const std::string& msg, const std::string& code) {
+    if (ctx.suppress_diag) return;
+    ctx.eh.warning(tok, msg, code);
+}
+
 // ============================================================================
 // State machine helpers
 // ============================================================================
@@ -74,6 +80,30 @@ bool Chaperone::isTrackedType(Context& ctx, const std::string& type_name) {
     return ctx.tracked_types.count(type_name) > 0;
 }
 
+// Internal: check whether a resolved (non-optional, non-ref) Type is a
+// built-in heap-allocated subtype (string, list, record, closure, etc.).
+bool Chaperone::isBuiltinHeapType(const Type& t) {
+    switch (t.kind) {
+        case TypeKind::LIST:
+        case TypeKind::RECORD:
+        case TypeKind::EXCEPTION:
+        case TypeKind::THREAD:
+        case TypeKind::MUTEX:
+        case TypeKind::TRAIT_OBJECT:
+        case TypeKind::RAW_ARRAY:
+        case TypeKind::VECTOR:
+            return true;
+        case TypeKind::PRIMITIVE:
+            // string is the only heap-allocated primitive
+            return t.toString() == "string";
+        case TypeKind::FUNCTION:
+            // Closures and bound methods are FUNCTION-kind heap objects.
+            return true;
+        default:
+            return false;
+    }
+}
+
 bool Chaperone::isTrackedTypeObj(Context& ctx, const Type& type) {
     // ref<T> is never tracked (non-owning).
     if (type.kind == TypeKind::REF) return false;
@@ -86,45 +116,19 @@ bool Chaperone::isTrackedTypeObj(Context& ctx, const Type& type) {
     }
     if (t->kind == TypeKind::CLASS || t->kind == TypeKind::INSTANCE) return true;
     if (t->kind == TypeKind::DATA) return ctx.tracked_types.count(t->toString()) > 0;
+    // Phase B: track built-in heap-allocated types (string, list, record, etc.)
+    // so the Chaperone can detect leaks.  Leak diagnostics for built-in types
+    // are emitted as W521 warnings (not E501 errors) to avoid breaking existing
+    // code; class / owned-data leaks remain hard errors.
+    if (isBuiltinHeapType(*t)) return true;
     return false;
 }
 
 bool Chaperone::isHeapAllocatedType(Context& ctx, const Type& type) {
-    // Tracked types are always heap-allocated.
-    if (isTrackedTypeObj(ctx, type)) return true;
-
-    // Unwrap optionals for the built-in check.
-    const Type* t = &type;
-    if (t->kind == TypeKind::OPTIONAL) {
-        auto ot = dynamic_cast<const OptionalType*>(t);
-        if (!ot || !ot->wrapped_type) return false;
-        t = ot->wrapped_type.get();
-    }
-    if (t->kind == TypeKind::REF) return false;
-
-    // Built-in heap-allocated types (each corresponds to an OBJ_* tag).
-    switch (t->kind) {
-        case TypeKind::LIST:
-        case TypeKind::RECORD:
-        case TypeKind::EXCEPTION:
-        case TypeKind::THREAD:
-        case TypeKind::MUTEX:
-        case TypeKind::TRAIT_OBJECT:
-        case TypeKind::RAW_ARRAY:
-        case TypeKind::VECTOR:
-            return true;
-        case TypeKind::PRIMITIVE:
-            // string is the only heap-allocated primitive (PRIMITIVE kind,
-            // name "string").
-            return t->toString() == "string";
-        case TypeKind::FUNCTION:
-            // Closures and bound methods are FUNCTION-kind heap objects.
-            // Regular function references are not — but they can't be `drop`ped
-            // anyway (they're never Live in the Chaperone state).
-            return true;
-        default:
-            return false;
-    }
+    // All tracked types are heap-allocated. After Phase B, this covers
+    // class, owned data, and all built-in heap types — so the function
+    // is now equivalent to isTrackedTypeObj.
+    return isTrackedTypeObj(ctx, type);
 }
 
 bool Chaperone::isTrackedVar(Context& ctx, const VarDeclStmt& var) {
@@ -315,15 +319,25 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
     // programmer must manage it manually (future: @manual). Report E501 so it's
     // not invisible. (Top-level lets inside the program vector only — class
     // fields are handled by cascade-drops, not here.)
+    // Phase B: built-in types (string, list, etc.) get W521 warnings instead
+    // of E501 errors.
     for (const auto& stmt : program) {
         if (!stmt) continue;
         if (auto* var = dynamic_cast<const VarDeclStmt*>(stmt.get())) {
             if (isTrackedVar(ctx, *var)) {
-                diag(ctx, var->name,
-                    "🧬 Unfolded molecule — `" + var->name.lexeme + "` is a tracked "
-                    "allocation at module scope, which has no scope to drop it in. "
-                    "It leaks by construction; manage it manually (future: @manual).",
-                    "E501");
+                bool is_builtin = false;
+                auto& types = ctx.tc.getVariableTypes();
+                auto tit = types.find(var);
+                if (tit != types.end() && tit->second &&
+                    isBuiltinHeapType(*tit->second))
+                    is_builtin = true;
+                auto msg = "🧬 Unfolded molecule — `" + var->name.lexeme + "` is a tracked "
+                           "allocation at module scope, which has no scope to drop it in. "
+                           "It leaks by construction; manage it manually (future: @manual).";
+                if (is_builtin)
+                    warn(ctx, var->name, msg, "W521");
+                else
+                    diag(ctx, var->name, msg, "E501");
             }
         }
     }

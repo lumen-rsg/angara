@@ -53,10 +53,17 @@ void Chaperone::collectExprVarRefs(const std::shared_ptr<Expr>& expr,
 }
 
 
-// E505 helper
+// E505 helper: if `elem` is a tracked Live variable being placed into an
+// *untracked* container, flag it.  Phase B: lists and records are now tracked,
+// so E505 only fires for truly untracked containers (e.g. tuples).
 void Chaperone::checkEscapeIntoContainer(Context& ctx,
-    const std::shared_ptr<Expr>& elem, StateMap& state)
+    const std::shared_ptr<Expr>& elem, StateMap& state,
+    const Type* container_type)
 {
+    // If the container itself is tracked, the Chaperone can verify that
+    // it gets dropped, which cascades to elements — no escape.
+    if (container_type && isTrackedTypeObj(ctx, *container_type)) return;
+
     auto* ve = dynamic_cast<const VarExpr*>(elem.get());
     if (!ve) return;
     auto it = state.find(ve->name.lexeme);
@@ -312,13 +319,19 @@ void Chaperone::analyzeExpr(Context& ctx,
         return;
     }
 
-    // ListExpr: walk all elements. E505 — a tracked Live value placed into a
-    // list literal escapes into an untracked container: the container isn't
-    // tracked, so the value can't be dropped correctly (leak or double-free).
+    // ListExpr: walk all elements. E505 — a tracked Live value placed into
+    // an untracked container (Phase B: lists are now tracked, so E505 only
+    // fires for untracked element types like tuples).
     if (auto* list = dynamic_cast<const ListExpr*>(expr.get())) {
+        // Get the resolved type to check if the container is tracked.
+        const Type* container_type = nullptr;
+        auto& expr_types = ctx.tc.getExpressionTypes();
+        auto et = expr_types.find(expr.get());
+        if (et != expr_types.end()) container_type = et->second.get();
+
         for (const auto& elem : list->elements) {
             analyzeExpr(ctx, elem, state);
-            checkEscapeIntoContainer(ctx, elem, state);
+            checkEscapeIntoContainer(ctx, elem, state, container_type);
         }
         return;
     }
@@ -348,9 +361,14 @@ void Chaperone::analyzeExpr(Context& ctx,
 
     // RecordExpr: walk all values.
     if (auto* rec = dynamic_cast<const RecordExpr*>(expr.get())) {
+        const Type* container_type = nullptr;
+        auto& expr_types = ctx.tc.getExpressionTypes();
+        auto et = expr_types.find(expr.get());
+        if (et != expr_types.end()) container_type = et->second.get();
+
         for (const auto& val : rec->values) {
             analyzeExpr(ctx, val, state);
-            checkEscapeIntoContainer(ctx, val, state);   // E505
+            checkEscapeIntoContainer(ctx, val, state, container_type);   // E505
         }
         return;
     }

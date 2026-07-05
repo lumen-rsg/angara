@@ -98,6 +98,11 @@ private:
         // if a pre-loop-Live variable is destroyed on one branch of an if/else
         // but not the other, it won't be available on the next iteration.
         std::set<std::string> loop_pre_live;
+        // Phase B: names of variables whose type is a built-in heap-allocated
+        // type (string, list, record, etc.) as opposed to a class or owned data.
+        // Leak diagnostics for these variables use W521 (warning) instead of
+        // E501 (error), giving developers visibility without breaking compilation.
+        std::set<std::string> builtin_heap_vars;
 
         Context(const TypeChecker& t, ErrorHandler& e)
             : tc(t), eh(e) {}
@@ -105,6 +110,10 @@ private:
 
     // --- Helper: report as error (normal) or warning (inside @unsafe) ---
     static void diag(Context& ctx, const Token& tok,
+                     const std::string& msg, const std::string& code);
+
+    // --- Helper: always emit a warning (Phase B: built-in type leaks) ---
+    static void warn(Context& ctx, const Token& tok,
                      const std::string& msg, const std::string& code);
 
     // --- Phase 1: Collect tracked types ---
@@ -158,8 +167,11 @@ private:
         StateMap& state);
 
     /// E505: flag a tracked Live value escaping into an untracked container.
+    /// @param container_type  Optional resolved type of the container; if tracked,
+    ///                         the check is skipped (Phase B: lists/records are tracked).
     static void checkEscapeIntoContainer(Context& ctx,
-        const std::shared_ptr<struct Expr>& elem, StateMap& state);
+        const std::shared_ptr<struct Expr>& elem, StateMap& state,
+        const struct Type* container_type = nullptr);
 
     /// Collect every VarExpr name referenced in a statement / expression tree
     /// (used to find closure captures).
@@ -187,6 +199,9 @@ private:
     /// Whether a resolved Type object is a heap-allocated type (tracked or
     /// built-in) — used to allow `drop` on any heap value, not just tracked ones.
     static bool isHeapAllocatedType(Context& ctx, const struct Type& type);
+    /// Whether a resolved (non-optional, non-ref) Type is a built-in heap type
+    /// (string, list, record, etc.) as opposed to a class or owned data.
+    static bool isBuiltinHeapType(const struct Type& type);
 };
 
 } // namespace angara

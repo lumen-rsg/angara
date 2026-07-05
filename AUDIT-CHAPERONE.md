@@ -129,7 +129,7 @@ does nothing. This means:
 |----|--------|-----------|-------------|
 | **H1** | [x] 🟢 Source → ✅ Fixed | `Chaperone.cpp:108-153` | **TryStmt missing from collectVarRefs.** Closures defined inside try/catch/finally have invisible captures — E505 never fires for variables they reference. |
 | **H2** | [x] 🟢 Source → ✅ Fixed | `ExprAnalysis.cpp:268-272` | **No summary for closure calls.** When a closure is called as `f()`, there is no entry in `ctx.summaries` (closures are LambdaExprs, not FuncStmts). All args are treated as Borrowed — a closure that drops or escapes its argument goes undetected. Fixed by building summaries from lambda body analysis (keyed by FunctionType pointer) and looking them up at call sites via the callee VarExpr's type. |
-| **H3** | [ ] 🟢 Source | `ExprAnalysis.cpp:272` | **@consumes/@escape not implemented.** Documented in `CHAPERONE.md` as escape hatches, mentioned in code comments, but never parsed or checked. All FFI/unknown functions are permanently treated as borrowing — no way to mark a foreign function that takes ownership. |
+| **H3** | [x] 🟢 Source → ✅ Fixed | `ExprAnalysis.cpp:272` | **@consumes/@escape implemented.** Parser recognizes `@consumes(i, j)` and `@escape(i, j)` annotations. Summary building uses annotations (takes precedence over inference). Annotated foreign functions have their summaries pre-built before the fixed-point loop. |
 | **H4** | [x] 🟢 Source → ✅ Fixed | `Chaperone.cpp:308-313` | **No oscillation detection in fixed-point.** The convergence check is exact map equality. If summaries oscillate (A→B→A→B), the loop exhausts all 8 passes without converging and silently uses the last pass. No diagnostic emitted. With C3 (name collision), oscillation is plausible. |
 | **H5** | [x] 🟢 Source → ✅ Fixed | `StmtAnalysis.cpp:69-118` | **Borrow tracking is intraprocedural only.** `ctx.borrows.clear()` at function entry. If a `ref<T>` is passed to another function, the callee doesn't see the borrow relationship and won't flag E509 if it drops the referent. Fixed by seeding `ctx.borrows` in `analyzeFunction`: when a function receives both a `ref<T>` param and a tracked `T` param of matching type, a borrow edge `ref → referent` is established so dropping the referent inside the callee flags E509 on subsequent ref reads. |
 
@@ -238,7 +238,7 @@ decision #11, or applied universally in a new "strict" mode.
 `StmtAnalysis.cpp` (DropStmt handler, VarDeclStmt handler),
 `StmtCodegen.cpp` (cgDrop already handles non-class structs).
 
-**Status:** [ ] Partial — drop/double-drop/use-after-free work; E501 leak detection not yet implemented
+**Status:** [x] Complete — `isTrackedTypeObj` returns true for all `isHeapAllocatedType` types (string, list, record, vector, raw_array, closures, etc.). Built-in types enter `Live` state. Leak diagnostics for built-in types use W521 (warning, does not halt compilation); class/owned-data leaks remain E501 (error). E505 now only fires for truly untracked containers (tuples). 52/52 Chaperone tests pass.
 
 ### Phase C — Fix Control-Flow Gaps
 

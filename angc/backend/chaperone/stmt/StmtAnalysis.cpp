@@ -131,11 +131,14 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
             if (st == State::Live && param_names.count(name) == 0) {
                 // Only report leaks for locals allocated inside this function,
                 // not for borrowed parameters (the caller owns those).
-                diag(ctx, func.name,
-                    "🧬 Unfolded molecule — `" + name + "` is live when function `" +
-                    func.name.lexeme + "` exits but was never dropped or returned. "
-                    "Add `drop " + name + ";` before the function ends.",
-                    "E501");
+                bool is_builtin = ctx.builtin_heap_vars.count(name) > 0;
+                auto msg = "🧬 Unfolded molecule — `" + name + "` is live when function `" +
+                           func.name.lexeme + "` exits but was never dropped or returned. "
+                           "Add `drop " + name + ";` before the function ends.";
+                if (is_builtin)
+                    warn(ctx, func.name, msg, "W521");
+                else
+                    diag(ctx, func.name, msg, "E501");
             }
         }
     }
@@ -293,13 +296,29 @@ void Chaperone::analyzeStmt(Context& ctx,
 
         auto it = state.find(var->name.lexeme);
         if (it != state.end() && it->second == State::Live) {
-            diag(ctx, var->name,
-                "🧬 Unfolded molecule — `" + var->name.lexeme + "` held a live "
-                "allocation that is now overwritten without being dropped.",
-                "E501");
+            bool is_builtin = ctx.builtin_heap_vars.count(var->name.lexeme) > 0;
+            auto msg = "🧬 Unfolded molecule — `" + var->name.lexeme + "` held a live "
+                       "allocation that is now overwritten without being dropped.";
+            if (is_builtin)
+                warn(ctx, var->name, msg, "W521");
+            else
+                diag(ctx, var->name, msg, "E501");
         }
         bool tracked = isTrackedVar(ctx, *var);
         state[var->name.lexeme] = tracked ? State::Live : State::Uninit;
+
+        // Phase B: record whether this variable is a built-in heap type
+        // (string, list, record, etc.) vs a class/owned-data.  Leak
+        // diagnostics use W521 (warning) for built-in types, E501 (error)
+        // for class/owned-data.
+        if (tracked) {
+            auto& types = ctx.tc.getVariableTypes();
+            auto tit = types.find(var);
+            if (tit != types.end() && tit->second &&
+                isBuiltinHeapType(*tit->second)) {
+                ctx.builtin_heap_vars.insert(var->name.lexeme);
+            }
+        }
 
         // S1 move: the source of a `let x = y` move is invalidated. Only when
         // the new binding is itself tracked (otherwise y is borrowed/copied,
@@ -393,10 +412,13 @@ void Chaperone::analyzeStmt(Context& ctx,
             // Exclude tracked parameters — they're borrowed (caller-owned), not
             // this function's responsibility to drop.
             if (st == State::Live && ctx.current_params.count(name) == 0) {
-                diag(ctx, ret->keyword,
-                    "🧬 Unfolded molecule — `" + name + "` leaks on the return at line " +
-                    std::to_string(ret->keyword.line) + ". Add `drop " + name + ";`.",
-                    "E501");
+                bool is_builtin = ctx.builtin_heap_vars.count(name) > 0;
+                auto msg = "🧬 Unfolded molecule — `" + name + "` leaks on the return at line " +
+                           std::to_string(ret->keyword.line) + ". Add `drop " + name + ";`.";
+                if (is_builtin)
+                    warn(ctx, ret->keyword, msg, "W521");
+                else
+                    diag(ctx, ret->keyword, msg, "E501");
             }
         }
         terminates = true;
@@ -413,12 +435,15 @@ void Chaperone::analyzeStmt(Context& ctx,
         for (auto& [name, st] : state) {
             if (st == State::Live && ctx.finally_protected.count(name) == 0
                 && ctx.current_params.count(name) == 0) {  // borrowed params excluded
-                diag(ctx, thr->keyword,
-                    "🧬 Unfolded molecule — `" + name + "` is live when `throw` "
-                    "fires at line " + std::to_string(thr->keyword.line) + ". "
-                    "Add `drop " + name + ";` before the throw, or wrap in "
-                    "try/catch/finally with explicit cleanup.",
-                    "E501");
+                bool is_builtin = ctx.builtin_heap_vars.count(name) > 0;
+                auto msg = "🧬 Unfolded molecule — `" + name + "` is live when `throw` "
+                           "fires at line " + std::to_string(thr->keyword.line) + ". "
+                           "Add `drop " + name + ";` before the throw, or wrap in "
+                           "try/catch/finally with explicit cleanup.";
+                if (is_builtin)
+                    warn(ctx, thr->keyword, msg, "W521");
+                else
+                    diag(ctx, thr->keyword, msg, "E501");
             }
         }
         terminates = true;

@@ -13,6 +13,7 @@ class Buf {
 export func main() -> i64 {
     let b = Buf(42);
     drop b;
-    let s = $"buf is {b}";  // b used after drop in interpolated string
+    let s = $"buf is {b}";  // b used after drop in interpolated string — E502
+    drop s;                  // Phase B: strings are tracked
     return 0;
 }

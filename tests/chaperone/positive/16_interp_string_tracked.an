@@ -16,5 +16,6 @@ export func main() -> i64 {
     let b = Buf(42);
     let s = $"buf is {b}";   // b is Live — no diagnostic
     drop b;
+    drop s;                  // Phase B: strings are tracked
     return 0;
 }

@@ -1,9 +1,11 @@
 // Chaperone negative test — E505 (tracked value escapes into untracked container, G4)
-// Storing a Live tracked allocation into an untracked container (list/record)
+// Storing a Live tracked allocation into an untracked container (tuple)
 // loses the ability to drop it correctly — the container isn't tracked, so the
 // allocation either leaks (container dropped without cascade) or double-frees
 // (caller also drops). The Chaperone must report E505 and require @escape or
 // an owning container.
+// Phase B: lists and records are now tracked, so this test uses a tuple
+// (the only remaining untracked container type).
 //
 // expect: E505
 
@@ -14,6 +16,7 @@ class Buf {
 
 export func main() -> i64 {
     let b = Buf(42);
-    let items as list<Buf> = [b];   // b escapes into an untracked list
+    let t = (b, 42);            // tuple — untracked container
+    drop b;                      // E505: b escaped into the tuple
     return 0;
 }
