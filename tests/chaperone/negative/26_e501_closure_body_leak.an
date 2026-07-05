@@ -1,0 +1,23 @@
+// Chaperone negative test — E501 leak inside closure body (C4)
+// Closure bodies were previously never analyzed for memory safety.
+// With C4 fixed, a leak inside a lambda body must be detected.
+//
+// expect: E501
+
+class Buf {
+    public:
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let outer = Buf(42);
+    // This closure allocates a Buf inside but never drops it.
+    // Previously this leak was invisible; now it must be caught.
+    let f = func() -> i64 {
+        let inner = Buf(99);
+        return inner.v;  // inner leaks — never dropped before return
+    };
+    drop outer;
+    return f();
+}

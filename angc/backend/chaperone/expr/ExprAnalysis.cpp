@@ -393,6 +393,11 @@ void Chaperone::analyzeExpr(Context& ctx,
     // to Escaped (the closure holds the reference; dropping the local would
     // leave the closure dangling). Without this, use-after-free via a closure
     // that outlives its capture was invisible.
+    //
+    // C4: Previously the lambda body was never analyzed for memory safety —
+    // leaks, use-after-free, double-drops, etc. inside the closure were invisible.
+    // Now we analyze the body with its own state map, seeded with captured
+    // variables in Escaped state (they belong to the outer scope).
     if (auto* lam = dynamic_cast<const LambdaExpr*>(expr.get())) {
         std::set<std::string> referenced;
         for (const auto& s : lam->body)
@@ -407,6 +412,21 @@ void Chaperone::analyzeExpr(Context& ctx,
                     "E505");
                 it->second = State::Escaped;
             }
+        }
+
+        // C4: Analyze the lambda body for memory safety. Start with a fresh
+        // state map containing captured variables as Escaped (they come from
+        // outside). Walk each statement — the individual statement handlers
+        // (ReturnStmt, function exit, etc.) will report leaks, use-after-free,
+        // and other violations just like they do for regular functions.
+        StateMap lambda_state;
+        for (const auto& name : referenced) {
+            lambda_state[name] = State::Escaped;
+        }
+        bool terminates = false;
+        for (const auto& s : lam->body) {
+            analyzeStmt(ctx, s, lambda_state, terminates);
+            if (terminates) break;
         }
         return;
     }

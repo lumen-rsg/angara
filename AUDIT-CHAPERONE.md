@@ -121,7 +121,7 @@ does nothing. This means:
 | **C1** | [x] 🟢 Source → ✅ Fixed | `ExprAnalysis.cpp` (no handler) | **RangeExpr not analyzed.** `a..b` expressions are not walked by `analyzeExpr`. A dropped/moved tracked variable in a range goes undetected (use-after-free silent). `collectExprVarRefs` DOES handle it (line 39), so closure capture works, but the memory-safety walk doesn't. |
 | **C2** | [x] 🟢 Source → ✅ Fixed | `ExprAnalysis.cpp` (no handler) | **InterpStringExpr not analyzed.** `"Hello, {name}"` interpolations are not walked. A dropped/moved tracked variable in an interpolation segment goes undetected. `collectExprVarRefs` handles it (lines 40-43), but `analyzeExpr` doesn't. |
 | **C3** | [x] 🟢 Source → ✅ Fixed | `StmtAnalysis.cpp:108` | **Method summary name collision.** Summaries are keyed by bare function name: `ctx.summaries[func.name.lexeme] = ...`. If two classes both define `init()`, the last one analyzed overwrites the first. All call sites for any class's `init` use the overwritten summary. A method that drops its first arg can have its summary replaced by one that borrows it, causing silent false negatives. |
-| **C4** | [ ] 🟢 Source | `ExprAnalysis.cpp:368-384` | **Closure bodies never analyzed.** The `LambdaExpr` handler marks captures as Escaped (E505) but NEVER walks the lambda body's statements. All E501/E502/E503/E506/E507/E509 checks are missing inside closures. This is the single largest analysis gap. |
+| **C4** | [x] 🟢 Source → ✅ Fixed | `ExprAnalysis.cpp:368-384` | **Closure bodies never analyzed.** The `LambdaExpr` handler marks captures as Escaped (E505) but NEVER walks the lambda body's statements. All E501/E502/E503/E506/E507/E509 checks are missing inside closures. This is the single largest analysis gap. |
 
 ### HIGH — Potentially unsound under specific conditions
 
@@ -295,7 +295,7 @@ potential oscillation.
 | **C1** | RangeExpr not analyzed | [x] |
 | **C2** | InterpStringExpr not analyzed | [x] |
 | **C3** | Method summary name collision | [x] |
-| **C4** | Closure bodies never analyzed | [ ] |
+| **C4** | Closure bodies never analyzed | [x] |
 | **H1** | TryStmt missing from collectVarRefs | [x] |
 | **H2** | No summary for closure calls | [ ] |
 | **H3** | @consumes/@escape not implemented | [ ] |
