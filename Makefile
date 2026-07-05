@@ -277,6 +277,21 @@ build/modules/sqlite.$(SO_EXT): build/obj/modules/data/sqlite.o
 	@printf "$(MAGENTA)[MD] $(RESET) %s (SQLITE3)\n" "$@"
 	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(SQLITE_LIBS) -o $@
 
+build/modules/redis.$(SO_EXT): build/obj/modules/data/redis.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (REDIS)\n" "$@"
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lhiredis -o $@
+
+build/modules/postgres.$(SO_EXT): build/obj/modules/data/postgres.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (POSTGRES)\n" "$@"
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lpq -o $@
+
+build/modules/mysql.$(SO_EXT): build/obj/modules/data/mysql.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (MYSQL)\n" "$@"
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lmariadb -o $@
+
 build/modules/jwt.$(SO_EXT): build/obj/modules/crypto/jwt.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (JWT+JSON)\n" "$@"

@@ -1,7 +1,10 @@
-/// Angara SQLite module — database open, query, execute, prepared statements. Depends: sqlite3.
+/// Angara SQLite module — database open, query, execute, pool, transactions.
+/// Depends: sqlite3.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
+#include <unistd.h>
 #include "Angara.h"
 #include <sqlite3.h>
 
@@ -232,6 +235,164 @@ AngaraObject Angara_SqliteDb_changes(int arg_count, AngaraObject* args) {
     return ang_i64((int64_t)sqlite3_changes(dbc->db));
 }
 
+/* ---- transaction API ---- */
+
+AngaraObject Angara_SqliteDb_begin(int arg_count, AngaraObject* args) {
+    (void)arg_count;
+    DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
+    if (!dbc || !dbc->db) { ang_api->throw_error("begin: database is closed."); return ang_nil(); }
+    char* err = NULL;
+    if (sqlite3_exec(dbc->db, "BEGIN", NULL, NULL, &err) != SQLITE_OK) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "sqlite begin: %s", err ? err : "unknown");
+        if (err) sqlite3_free(err);
+        ang_api->throw_error(buf);
+    }
+    return ang_nil();
+}
+
+AngaraObject Angara_SqliteDb_commit(int arg_count, AngaraObject* args) {
+    (void)arg_count;
+    DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
+    if (!dbc || !dbc->db) { ang_api->throw_error("commit: database is closed."); return ang_nil(); }
+    char* err = NULL;
+    if (sqlite3_exec(dbc->db, "COMMIT", NULL, NULL, &err) != SQLITE_OK) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "sqlite commit: %s", err ? err : "unknown");
+        if (err) sqlite3_free(err);
+        ang_api->throw_error(buf);
+    }
+    return ang_nil();
+}
+
+AngaraObject Angara_SqliteDb_rollback(int arg_count, AngaraObject* args) {
+    (void)arg_count;
+    DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
+    if (!dbc || !dbc->db) { ang_api->throw_error("rollback: database is closed."); return ang_nil(); }
+    char* err = NULL;
+    if (sqlite3_exec(dbc->db, "ROLLBACK", NULL, NULL, &err) != SQLITE_OK) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "sqlite rollback: %s", err ? err : "unknown");
+        if (err) sqlite3_free(err);
+        ang_api->throw_error(buf);
+    }
+    return ang_nil();
+}
+
+
+/* ---- connection pool ---- */
+
+typedef struct {
+    DbConn**  conns;
+    size_t    count;
+    size_t    cap;
+    char*     path;
+    pthread_mutex_t mutex;
+} PoolData;
+
+static void finalize_pool(void* data) {
+    PoolData* p = (PoolData*)data;
+    for (size_t i = 0; i < p->count; i++) {
+        if (p->conns[i]->db) sqlite3_close(p->conns[i]->db);
+        free(p->conns[i]);
+    }
+    free(p->conns);
+    free(p->path);
+    pthread_mutex_destroy(&p->mutex);
+    free(p);
+}
+
+AngaraObject Angara_sqlite_pool(int arg_count, AngaraObject* args) {
+    if (arg_count < 2 || !IS_STR(args[0]) || !ang_is_i64(args[1])) {
+        ang_api->throw_error("sqlite.pool(path, size) expects a string and an i64.");
+        return ang_nil();
+    }
+    const char* path = ang_api->as_cstr(args[0]);
+    int64_t size = ang_as_i64(args[1]);
+    if (size < 1) size = 1;
+    if (size > 64) size = 64;
+
+    PoolData* p = (PoolData*)calloc(1, sizeof(PoolData));
+    p->path = strdup(path);
+    p->cap = (size_t)size;
+    p->conns = (DbConn**)calloc(p->cap, sizeof(DbConn*));
+    pthread_mutex_init(&p->mutex, NULL);
+
+    /* pre-open all connections */
+    for (size_t i = 0; i < p->cap; i++) {
+        DbConn* dbc = (DbConn*)calloc(1, sizeof(DbConn));
+        int rc = sqlite3_open(path, &dbc->db);
+        if (rc == SQLITE_OK) {
+            sqlite3_exec(dbc->db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
+            p->conns[p->count++] = dbc;
+        } else {
+            sqlite3_close(dbc->db);
+            free(dbc);
+        }
+    }
+
+    if (p->count == 0) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "sqlite.pool: failed to open any connections to '%s'", path);
+        finalize_pool(p);
+        ang_api->throw_error(buf);
+        return ang_nil();
+    }
+
+    return ang_api->native_instance_new(p, finalize_pool, "SqlitePool");
+}
+
+AngaraObject Angara_SqlitePool_acquire(int arg_count, AngaraObject* args) {
+    (void)arg_count;
+    PoolData* p = (PoolData*)ang_api->native_instance_data(args[0]);
+    if (!p) return ang_nil();
+
+    pthread_mutex_lock(&p->mutex);
+    while (p->count == 0) {
+        pthread_mutex_unlock(&p->mutex);
+        usleep(1000);  /* 1 ms */
+        pthread_mutex_lock(&p->mutex);
+    }
+    DbConn* dbc = p->conns[--p->count];
+    pthread_mutex_unlock(&p->mutex);
+
+    /* return conn as native instance; caller must pool.release(conn) when done.
+       no finalizer — the pool owns the sqlite3 handle. */
+    return ang_api->native_instance_new(dbc, NULL, "SqliteDb");
+}
+
+/* for release we need a different approach — just re-store the conn in the pool */
+AngaraObject Angara_SqlitePool_release(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) return ang_nil();
+    PoolData* p = (PoolData*)ang_api->native_instance_data(args[0]);
+    DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[1]);
+    if (!p || !dbc || !dbc->db) return ang_nil();
+
+    pthread_mutex_lock(&p->mutex);
+    if (p->count < p->cap) {
+        p->conns[p->count++] = dbc;
+    } else {
+        /* pool is full — close this extra connection */
+        sqlite3_close(dbc->db);
+        free(dbc);
+    }
+    pthread_mutex_unlock(&p->mutex);
+    return ang_nil();
+}
+
+AngaraObject Angara_SqlitePool_close(int arg_count, AngaraObject* args) {
+    (void)arg_count;
+    PoolData* p = (PoolData*)ang_api->native_instance_data(args[0]);
+    if (p) {
+        for (size_t i = 0; i < p->count; i++) {
+            if (p->conns[i]->db) sqlite3_close(p->conns[i]->db);
+            free(p->conns[i]);
+        }
+        p->count = 0;
+    }
+    return ang_nil();
+}
+
 static const AngaraMethodDef DB_METHODS[] = {
     {"execute",        (AngaraMethodFn)Angara_SqliteDb_execute,        "sl<a>?->l<{}>"},
     {"query_one",      (AngaraMethodFn)Angara_SqliteDb_query_one,      "sl<a>?->{}?"},
@@ -239,13 +400,26 @@ static const AngaraMethodDef DB_METHODS[] = {
     {"close",          (AngaraMethodFn)Angara_SqliteDb_close,           "->n"},
     {"last_insert_id", (AngaraMethodFn)Angara_SqliteDb_last_insert_id,  "->i"},
     {"changes",        (AngaraMethodFn)Angara_SqliteDb_changes,         "->i"},
+    {"begin",          (AngaraMethodFn)Angara_SqliteDb_begin,           "->n"},
+    {"commit",         (AngaraMethodFn)Angara_SqliteDb_commit,          "->n"},
+    {"rollback",       (AngaraMethodFn)Angara_SqliteDb_rollback,        "->n"},
     {NULL, NULL, NULL}
 };
 
 static const AngaraClassDef DB_CLASS = { "SqliteDb", NULL, DB_METHODS };
 
+static const AngaraMethodDef POOL_METHODS[] = {
+    {"acquire", (AngaraMethodFn)Angara_SqlitePool_acquire, "->SqliteDb?"},
+    {"release", (AngaraMethodFn)Angara_SqlitePool_release, "SqliteDb->n"},
+    {"close",   (AngaraMethodFn)Angara_SqlitePool_close,   "->n"},
+    {NULL, NULL, NULL}
+};
+
+static const AngaraClassDef POOL_CLASS = { "SqlitePool", NULL, POOL_METHODS };
+
 static const AngaraFuncDef SQLITE_EXPORTS[] = {
     {"open", Angara_sqlite_open, "s->SqliteDb", &DB_CLASS},
+    {"pool", Angara_sqlite_pool, "si->SqlitePool", &POOL_CLASS},
     ANGARA_FUNC_END
 };
 
