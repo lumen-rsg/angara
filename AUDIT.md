@@ -180,11 +180,17 @@ Everyday conveniences absent today (most are documented but unimplemented — no
 
 ## LANG-7 deferrals (2026-07-05)
 
-- **Nested patterns** — `case Ok(Some(v)):` where a constructor pattern's argument
+- **Nested patterns** ✅ Fixed — `case Ok(Some(v)):` where a constructor pattern's argument
   is itself a pattern. Requires a dedicated `Pattern` AST node hierarchy (currently
   patterns are plain `Expr` nodes, which can't express nesting). The `MatchCase`
   struct would need `patterns` to hold `Pattern*` instead of `Expr*`, with a
-  visitor for type-checking and codegen dispatch.
+  visitor for type-checking and codegen dispatch. _(Fixed: added `NestedPattern`
+  expression type holding a constructor, sub-patterns, and bindings; new
+  `parseMatchPattern()` in parser handles recursive pattern parsing with
+  two-token lookahead for disambiguation; type checker validates outer variant
+  and resolves sub-enum types for variable bindings; codegen recursively
+  extracts payload through nested layers and binds leaf variables directly.
+  Verified: `case Outer.A(Inner.B(v)):` correctly destructures.)_
 
 - **Or-patterns with per-alternative bindings** ✅ Fixed — `case Foo(a, b) | Bar(c, d):`
   where each alternative in the or-group carries its own variable list. Syntax
