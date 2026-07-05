@@ -488,6 +488,22 @@ void LLVMBackend::cgDrop(const DropStmt& s) {
     auto* alloca = it->second;
     auto* val = builder->CreateLoad(objType, alloca, "drop_val");
 
+    // Nil guard: if the value is nil (optional types or uninitialised),
+    // there is nothing to deallocate.  Skip straight to invalidation.
+    auto* tag = builder->CreateExtractValue(val, {0});
+    auto* is_nil = builder->CreateICmpEQ(
+        tag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_NIL));
+
+    auto* fn = builder->GetInsertBlock()->getParent();
+    auto* notnil_bb = llvm::BasicBlock::Create(*ctx, "drop_notnil", fn);
+    auto* nil_bb    = llvm::BasicBlock::Create(*ctx, "drop_nil", fn);
+    auto* after_bb  = llvm::BasicBlock::Create(*ctx, "drop_after", fn);
+
+    builder->CreateCondBr(is_nil, nil_bb, notnil_bb);
+
+    // --- Not-nil path: extract heap pointer and perform the full drop ---
+    builder->SetInsertPoint(notnil_bb);
+
     // Extract the heap pointer from the AngaraObject payload.
     auto* payload = builder->CreateExtractValue(val, {1});
     auto* ptr_i64 = builder->CreateBitCast(payload, llvm::Type::getInt64Ty(*ctx));
@@ -549,7 +565,14 @@ void LLVMBackend::cgDrop(const DropStmt& s) {
     callRtByName("__ang_gc_free",
         {obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
 
-    // Invalidate the variable.
+    builder->CreateBr(after_bb);
+
+    // --- Nil path: nothing to deallocate ---
+    builder->SetInsertPoint(nil_bb);
+    builder->CreateBr(after_bb);
+
+    // --- After: invalidate the variable ---
+    builder->SetInsertPoint(after_bb);
     builder->CreateStore(makeNil(), alloca);
 }
 

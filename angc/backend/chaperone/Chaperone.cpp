@@ -83,7 +83,14 @@ bool Chaperone::isTrackedType(Context& ctx, const std::string& type_name) {
 // Internal: check whether a resolved (non-optional, non-ref) Type is a
 // built-in heap-allocated subtype (string, list, record, closure, etc.).
 bool Chaperone::isBuiltinHeapType(const Type& t) {
-    switch (t.kind) {
+    // Unwrap optionals: string? is a built-in heap type iff string is.
+    const Type* inner = &t;
+    if (inner->kind == TypeKind::OPTIONAL) {
+        auto ot = dynamic_cast<const OptionalType*>(inner);
+        if (!ot || !ot->wrapped_type) return false;
+        inner = ot->wrapped_type.get();
+    }
+    switch (inner->kind) {
         case TypeKind::LIST:
         case TypeKind::RECORD:
         case TypeKind::EXCEPTION:
@@ -95,7 +102,7 @@ bool Chaperone::isBuiltinHeapType(const Type& t) {
             return true;
         case TypeKind::PRIMITIVE:
             // string is the only heap-allocated primitive
-            return t.toString() == "string";
+            return inner->toString() == "string";
         case TypeKind::FUNCTION:
             // Closures and bound methods are FUNCTION-kind heap objects.
             return true;

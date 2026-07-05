@@ -24,22 +24,15 @@
 
 ---
 
-## LANG deferrals
+## Known test regressions — all resolved ✅
 
-| ID | Issue |
-|---|---|
-| ~~LANG-11~~ | ~~No default arguments; no named arguments.~~ ✅ Resolved (2026-07-06) |
+All three pre-existing test regressions have been fixed.  Full test suite: **63/63 language tests**, **52/52 Chaperone tests** pass.
 
----
-
-## Known test regressions
-
-These tests fail under the current Chaperone (v5 ownership tracking).  They are **pre-existing** and unrelated to LANG-11.
-
-| Test | Error | Notes |
+| Test | Root cause | Fix |
 |---|---|---|
-| `tests/lang/positive/08_optionals.an` | E501: `s`, `sn` (both `string?`) leak on return | Adding `drop` compiles but segfaults at runtime — likely a Chaperone lowering bug for optional drop sites. |
-| `tests/lang/positive/16_is_downcast.an` | E501: `maybe_name` (`string?`) leaks on return | Same root cause as above. |
+| `08_optionals.an` | `isBuiltinHeapType` didn't unwrap `OptionalType`, so `string?` wasn't recognised as a built-in heap type → E501 error instead of W521 warning. | Added optional unwrapping to `isBuiltinHeapType` (`Chaperone.cpp:86-91`). |
+| `16_is_downcast.an` | Same as above (`string?` → E501). | Same fix. |
+| `13_optional_narrowing.an` | `cgDrop` unconditionally dereferenced the payload pointer for cascade-drops and finalize/free, crashing when the optional was `nil` (NULL payload). | Added nil guard in `cgDrop` (`StmtCodegen.cpp:492-500`): checks `tag == TAG_NIL` and skips the heap deallocation when the value is nil. |
 
 ---
 
