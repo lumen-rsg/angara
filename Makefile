@@ -302,6 +302,11 @@ build/modules/net.$(SO_EXT): build/obj/modules/net/net.o
 	@printf "$(MAGENTA)[MD] $(RESET) %s (NET)\n" "$@"
 	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
 
+build/modules/http_server.$(SO_EXT): build/obj/modules/net/http_server.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (HTTP)\n" "$@"
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
+
 build/modules/io.$(SO_EXT): build/obj/modules/io/io.o
 build/modules/term.$(SO_EXT): build/obj/modules/io/term.o
 build/modules/color.$(SO_EXT): build/obj/modules/io/color.o
