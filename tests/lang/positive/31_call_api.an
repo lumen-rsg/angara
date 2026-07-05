@@ -1,0 +1,36 @@
+// Test ang_api->call() — invoke Angara closures from native C code.
+attach io;
+attach calltest;
+
+export func main() -> i64 {
+    let add = func(a, b) { return a + b; };
+    let r1 = calltest.invoke(add, 10, 32);
+    if (r1 != 42) {
+        io.println("FAIL: 2-arg = " + string(r1));
+        return 1;
+    }
+
+    let answer = func() { return 99; };
+    let r2 = calltest.invoke0(answer);
+    if (r2 != 99) {
+        io.println("FAIL: 0-arg = " + string(r2));
+        return 1;
+    }
+
+    let double = func(x) { return x * 2; };
+    let r3 = calltest.invoke1(double, 21);
+    if (r3 != 42) {
+        io.println("FAIL: 1-arg = " + string(r3));
+        return 1;
+    }
+
+    let greet = func(name) { return "Hello, " + name; };
+    let r4 = calltest.invoke1(greet, "World");
+    if (r4 != "Hello, World") {
+        io.println("FAIL: string = " + string(r4));
+        return 1;
+    }
+
+    io.println("OK: call_api all tests passed");
+    return 0;
+}
