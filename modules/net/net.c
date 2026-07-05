@@ -46,7 +46,7 @@ AngaraObject Angara_net_tcp_connect(int arg_count, AngaraObject* args) {
 
     struct addrinfo hints, *result;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
+    hints.ai_family = AF_UNSPEC;   /* support both IPv4 and IPv6 */
     hints.ai_socktype = SOCK_STREAM;
 
     char port_str[16];
@@ -220,7 +220,7 @@ static void finalize_tcp_listener(void* data) {
 }
 
 AngaraObject Angara_net_tcp_listen(int arg_count, AngaraObject* args) {
-    const char* host = "0.0.0.0";
+    const char* host = NULL;  /* NULL → AI_PASSIVE → all interfaces */
     int port = 8080;
     int backlog = 128;
 
@@ -228,27 +228,50 @@ AngaraObject Angara_net_tcp_listen(int arg_count, AngaraObject* args) {
     if (arg_count >= 2 && ang_is_i64(args[1])) port = (int)ang_as_i64(args[1]);
     if (arg_count >= 3 && ang_is_i64(args[2])) backlog = (int)ang_as_i64(args[2]);
 
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        ang_api->throw_error("tcp_listen: failed to create socket.");
+    struct addrinfo hints, *result;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;    /* support both IPv4 and IPv6 */
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;    /* bind to all interfaces when host is NULL */
+
+    char port_str[16];
+    snprintf(port_str, sizeof(port_str), "%d", port);
+
+    int gai = getaddrinfo(host, port_str, &hints, &result);
+    if (gai != 0) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "tcp_listen: failed to resolve '%s': %s",
+                 host ? host : "*", gai_strerror(gai));
+        ang_api->throw_error(buf);
         return ang_nil();
     }
 
-    int opt = 1;
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    /* try each address returned by getaddrinfo until one binds */
+    int sock = -1;
+    struct addrinfo* rp;
+    for (rp = result; rp; rp = rp->ai_next) {
+        sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (sock < 0) continue;
 
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)port);
-    if (inet_pton(AF_INET, host, &addr.sin_addr) <= 0) {
-        addr.sin_addr.s_addr = INADDR_ANY;
+        int opt = 1;
+        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+        /* also set IPV6_V6ONLY=0 on dual-stack hosts so IPv4 clients work */
+        if (rp->ai_family == AF_INET6) {
+            int v6only = 0;
+            setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
+        }
+
+        if (bind(sock, rp->ai_addr, rp->ai_addrlen) == 0) break;
+        close(sock);
+        sock = -1;
     }
 
-    if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+    freeaddrinfo(result);
+
+    if (sock < 0) {
         char buf[256];
-        snprintf(buf, sizeof(buf), "tcp_listen: bind failed on %s:%d: %s", host, port, strerror(errno));
-        close(sock);
+        snprintf(buf, sizeof(buf), "tcp_listen: bind failed on %s:%d: %s",
+                 host ? host : "*", port, strerror(errno));
         ang_api->throw_error(buf);
         return ang_nil();
     }
@@ -283,7 +306,7 @@ AngaraObject Angara_TcpListener_accept(int arg_count, AngaraObject* args) {
         if (pret <= 0) return ang_nil();
     }
 
-    struct sockaddr_in client_addr;
+    struct sockaddr_storage client_addr;
     socklen_t client_len = sizeof(client_addr);
     int client_fd = accept(lstn->listen_fd, (struct sockaddr*)&client_addr, &client_len);
     if (client_fd < 0) return ang_nil();
@@ -313,17 +336,23 @@ AngaraObject Angara_TcpListener_accept_raw(int arg_count, AngaraObject* args) {
         if (pret <= 0) return ang_nil();
     }
 
-    struct sockaddr_in client_addr;
+    struct sockaddr_storage client_addr;
     socklen_t client_len = sizeof(client_addr);
     int client_fd = accept(lstn->listen_fd, (struct sockaddr*)&client_addr, &client_len);
     if (client_fd < 0) return ang_nil();
 
     AngaraObject rec = ang_api->record_new();
     ang_api->record_set(rec, "fd", ang_i64(client_fd));
-    char addr_str[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &client_addr.sin_addr, addr_str, sizeof(addr_str));
-    ang_api->record_set(rec, "addr", ang_api->string(addr_str));
-    ang_api->record_set(rec, "port", ang_i64(ntohs(client_addr.sin_port)));
+    char host_str[NI_MAXHOST], svc_str[NI_MAXSERV];
+    if (getnameinfo((struct sockaddr*)&client_addr, client_len,
+                    host_str, sizeof(host_str), svc_str, sizeof(svc_str),
+                    NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
+        ang_api->record_set(rec, "addr", ang_api->string(host_str));
+        ang_api->record_set(rec, "port", ang_i64(atoi(svc_str)));
+    } else {
+        ang_api->record_set(rec, "addr", ang_api->string(""));
+        ang_api->record_set(rec, "port", ang_i64(0));
+    }
     return rec;
 }
 
@@ -352,24 +381,66 @@ static void finalize_udp_sock(void* data) {
 }
 
 AngaraObject Angara_net_udp_socket(int arg_count, AngaraObject* args) {
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
-        ang_api->throw_error("udp_socket: failed to create socket.");
-        return ang_nil();
-    }
+    int port = -1;
+    if (arg_count >= 1 && ang_is_i64(args[0])) port = (int)ang_as_i64(args[0]);
 
-    if (arg_count >= 1 && ang_is_i64(args[0])) {
-        int port = (int)ang_as_i64(args[0]);
-        struct sockaddr_in addr;
-        memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = INADDR_ANY;
-        addr.sin_port = htons((uint16_t)port);
-        if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+    int sock = -1;
+
+    if (port >= 0) {
+        /* resolve bind address with getaddrinfo for dual-stack support */
+        struct addrinfo hints, *result;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_DGRAM;
+        hints.ai_flags = AI_PASSIVE;
+
+        char port_str[16];
+        snprintf(port_str, sizeof(port_str), "%d", port);
+
+        int gai = getaddrinfo(NULL, port_str, &hints, &result);
+        if (gai != 0) {
+            char buf[128];
+            snprintf(buf, sizeof(buf), "udp_socket: failed to resolve port %d: %s",
+                     port, gai_strerror(gai));
+            ang_api->throw_error(buf);
+            return ang_nil();
+        }
+
+        struct addrinfo* rp;
+        for (rp = result; rp; rp = rp->ai_next) {
+            sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+            if (sock < 0) continue;
+
+            int opt = 1;
+            setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+            if (rp->ai_family == AF_INET6) {
+                int v6only = 0;
+                setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
+            }
+
+            if (bind(sock, rp->ai_addr, rp->ai_addrlen) == 0) break;
             close(sock);
+            sock = -1;
+        }
+        freeaddrinfo(result);
+
+        if (sock < 0) {
             char buf[128];
             snprintf(buf, sizeof(buf), "udp_socket: bind failed on port %d", port);
             ang_api->throw_error(buf);
+            return ang_nil();
+        }
+    } else {
+        /* unbound socket — prefer IPv6 for dual-stack */
+        sock = socket(AF_INET6, SOCK_DGRAM, 0);
+        if (sock < 0) {
+            sock = socket(AF_INET, SOCK_DGRAM, 0);
+        } else {
+            int v6only = 1; /* unbound: don't accept IPv4 on the IPv6 socket */
+            setsockopt(sock, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
+        }
+        if (sock < 0) {
+            ang_api->throw_error("udp_socket: failed to create socket.");
             return ang_nil();
         }
     }
@@ -393,23 +464,18 @@ AngaraObject Angara_UdpSocket_send_to(int arg_count, AngaraObject* args) {
     const char* host = ang_api->as_cstr(args[2]);
     int port = (int)ang_as_i64(args[3]);
 
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)port);
-    if (inet_pton(AF_INET, host, &addr.sin_addr) <= 0) {
-        struct addrinfo hints, *result;
-        memset(&hints, 0, sizeof(hints));
-        hints.ai_family = AF_INET;
-        hints.ai_socktype = SOCK_DGRAM;
-        char port_str[16];
-        snprintf(port_str, sizeof(port_str), "%d", port);
-        if (getaddrinfo(host, port_str, &hints, &result) != 0) return ang_i64(-1);
-        memcpy(&addr, result->ai_addr, sizeof(struct sockaddr_in));
-        freeaddrinfo(result);
-    }
+    struct addrinfo hints, *result;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;   /* support both IPv4 and IPv6 */
+    hints.ai_socktype = SOCK_DGRAM;
 
-    ssize_t sent = sendto(us->fd, data, len, 0, (struct sockaddr*)&addr, sizeof(addr));
+    char port_str[16];
+    snprintf(port_str, sizeof(port_str), "%d", port);
+
+    if (getaddrinfo(host, port_str, &hints, &result) != 0) return ang_i64(-1);
+
+    ssize_t sent = sendto(us->fd, data, len, 0, result->ai_addr, result->ai_addrlen);
+    freeaddrinfo(result);
     return ang_i64((int64_t)sent);
 }
 
@@ -422,17 +488,23 @@ AngaraObject Angara_UdpSocket_recv_from(int arg_count, AngaraObject* args) {
     if (buf_size == 0) buf_size = 65536;
 
     char* buf = (char*)malloc(buf_size);
-    struct sockaddr_in sender;
+    struct sockaddr_storage sender;
     socklen_t slen = sizeof(sender);
     ssize_t n = recvfrom(us->fd, buf, buf_size, 0, (struct sockaddr*)&sender, &slen);
     if (n <= 0) { free(buf); return ang_nil(); }
 
     AngaraObject rec = ang_api->record_new();
     ang_api->record_set(rec, "data", ang_api->string_no_copy(buf, (size_t)n));
-    char addr_str[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &sender.sin_addr, addr_str, sizeof(addr_str));
-    ang_api->record_set(rec, "addr", ang_api->string(addr_str));
-    ang_api->record_set(rec, "port", ang_i64(ntohs(sender.sin_port)));
+    char host_str[NI_MAXHOST], svc_str[NI_MAXSERV];
+    if (getnameinfo((struct sockaddr*)&sender, slen,
+                    host_str, sizeof(host_str), svc_str, sizeof(svc_str),
+                    NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
+        ang_api->record_set(rec, "addr", ang_api->string(host_str));
+        ang_api->record_set(rec, "port", ang_i64(atoi(svc_str)));
+    } else {
+        ang_api->record_set(rec, "addr", ang_api->string(""));
+        ang_api->record_set(rec, "port", ang_i64(0));
+    }
     return rec;
 }
 
@@ -460,7 +532,7 @@ AngaraObject Angara_net_resolve(int arg_count, AngaraObject* args) {
 
     struct addrinfo hints, *result;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET;
+    hints.ai_family = AF_UNSPEC;   /* support both IPv4 and IPv6 */
     hints.ai_socktype = SOCK_STREAM;
 
     int gai = getaddrinfo(ang_api->as_cstr(args[0]), NULL, &hints, &result);
@@ -468,10 +540,12 @@ AngaraObject Angara_net_resolve(int arg_count, AngaraObject* args) {
 
     AngaraObject list = ang_api->list_new();
     for (struct addrinfo* rp = result; rp; rp = rp->ai_next) {
-        struct sockaddr_in* sin = (struct sockaddr_in*)rp->ai_addr;
-        char addr_str[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &sin->sin_addr, addr_str, sizeof(addr_str));
-        ang_api->list_push(list, ang_api->string(addr_str));
+        char host_str[NI_MAXHOST];
+        if (getnameinfo(rp->ai_addr, rp->ai_addrlen,
+                        host_str, sizeof(host_str), NULL, 0,
+                        NI_NUMERICHOST) == 0) {
+            ang_api->list_push(list, ang_api->string(host_str));
+        }
     }
     freeaddrinfo(result);
     return list;
@@ -479,16 +553,22 @@ AngaraObject Angara_net_resolve(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_net_reverse_lookup(int arg_count, AngaraObject* args) {
     if (arg_count < 1 || !IS_STR(args[0])) return ang_api->string("");
-    struct sockaddr_in sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sin_family = AF_INET;
-    if (inet_pton(AF_INET, ang_api->as_cstr(args[0]), &sa.sin_addr) <= 0) {
-        return ang_api->string("");
-    }
+
+    /* use getaddrinfo with AI_NUMERICHOST to parse the address string
+       into a sockaddr, then getnameinfo for the reverse lookup */
+    struct addrinfo hints, *result;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_flags = AI_NUMERICHOST;
+
+    int gai = getaddrinfo(ang_api->as_cstr(args[0]), NULL, &hints, &result);
+    if (gai != 0) return ang_api->string("");
+
     char host[NI_MAXHOST];
-    if (getnameinfo((struct sockaddr*)&sa, sizeof(sa), host, sizeof(host), NULL, 0, 0) != 0) {
-        return ang_api->string("");
-    }
+    int rc = getnameinfo(result->ai_addr, result->ai_addrlen,
+                         host, sizeof(host), NULL, 0, 0);
+    freeaddrinfo(result);
+    if (rc != 0) return ang_api->string("");
     return ang_api->string(host);
 }
 
