@@ -93,6 +93,11 @@ private:
         // referent is dropped/moved while a ref still aliases it, the ref
         // dangles (E509). Tracked within the current function's analysis.
         std::map<std::string, std::string> borrows;
+        // M2: names of variables that were Live before entering the current
+        // loop body. Used to detect conditional destruction inside loops:
+        // if a pre-loop-Live variable is destroyed on one branch of an if/else
+        // but not the other, it won't be available on the next iteration.
+        std::set<std::string> loop_pre_live;
 
         Context(const TypeChecker& t, ErrorHandler& e)
             : tc(t), eh(e) {}

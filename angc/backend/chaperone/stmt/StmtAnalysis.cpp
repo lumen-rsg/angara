@@ -448,10 +448,23 @@ void Chaperone::analyzeStmt(Context& ctx,
             // Case 1: variable exists in both branches with different states.
             if (in_then && in_else && it_then->second != it_else->second) {
                 if ((it_then->second == State::Live) != (it_else->second == State::Live)) {
-                    ctx.eh.warning(ifs->keyword,
-                        "🔄 Incomplete fold — `" + name + "` is handled differently on "
-                        "the two branches. Add `drop " + name + ";` to the path that's missing it.",
-                        "W510");
+                    // M2: inside a loop body, conditional destruction is a hard error
+                    // (E506), not just a warning. If the variable was Live before the
+                    // loop, destroying it on only one branch means it won't be available
+                    // on the next iteration for that path — use-after-free / double-free.
+                    if (!ctx.loop_pre_live.empty() && ctx.loop_pre_live.count(name)) {
+                        diag(ctx, ifs->keyword,
+                            "🔄 `" + name + "` is conditionally destroyed inside the loop — "
+                            "it is dropped/moved/escaped on one branch but not the other. "
+                            "It won't be available on the next iteration for that path. "
+                            "Ensure it's handled consistently on all branches.",
+                            "E506");
+                    } else {
+                        ctx.eh.warning(ifs->keyword,
+                            "🔄 Incomplete fold — `" + name + "` is handled differently on "
+                            "the two branches. Add `drop " + name + ";` to the path that's missing it.",
+                            "W510");
+                    }
                 }
             }
             // M1: Case 2 — variable exists in only one branch and is Live there.
@@ -483,12 +496,23 @@ void Chaperone::analyzeStmt(Context& ctx,
     // use-after-free in them is a real bug (S2). Previously only the body
     // was walked, so `drop b; while (b.get() > 0) {}` compiled silently.
     //
-    // M2: E506 now also catches variables moved or escaped inside the loop
-    // body (not just explicitly dropped). A variable that transitions from
-    // Live to Moved/Escaped inside the body won't be Live on the next
-    // iteration, which is equivalent to a double-free.
+    // M2: two complementary E506 checks for loop-body destruction:
+    //   1. Unconditional: after body analysis, if a pre-Live var is non-Live
+    //      in the merged body_state, it's destroyed on all paths → E506.
+    //   2. Conditional: at if/else merge points inside the body, if a pre-Live
+    //      var is destroyed on one branch but not the other (detected via the
+    //      loop_pre_live set), the merge would mask it → E506 at the merge point.
     auto analyze_loop_body = [&](const Token& kw, const std::shared_ptr<Stmt>& body) {
         StateMap pre = state;
+
+        // M2: save and populate loop_pre_live for conditional-destruction
+        // detection at if/else merge points inside the loop body.
+        auto saved_loop_pre_live = std::move(ctx.loop_pre_live);
+        ctx.loop_pre_live.clear();
+        for (auto& [name, st] : pre) {
+            if (st == State::Live) ctx.loop_pre_live.insert(name);
+        }
+
         StateMap body_state = state;
         bool body_term = false;
         if (body) {
@@ -497,6 +521,10 @@ void Chaperone::analyzeStmt(Context& ctx,
             else
                 analyzeScopedStmt(ctx, body, body_state, body_term);
         }
+
+        // Restore the outer loop's pre_live set (for nested loops).
+        ctx.loop_pre_live = std::move(saved_loop_pre_live);
+
         // Loop-body drop/move/escape check (E506).
         for (auto& [name, st_pre] : pre) {
             if (st_pre == State::Live) {

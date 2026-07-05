@@ -1,0 +1,29 @@
+// Chaperone positive test — M2 (conditional drop + reassign inside loop body)
+// A tracked variable is conditionally dropped on one branch but reassigned
+// on that same branch, so it IS available on every iteration. No E506.
+//
+// exit: 20
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let i as i64 = 0;
+    let sum as i64 = 0;
+    while (i < 3) {
+        if (i == 0) {
+            drop b;
+            b = Buf(10);       // reassigned — b is Live for next iteration
+        } else {
+            sum = sum + b.get();
+        }
+        i = i + 1;
+    }
+    drop b;
+    return sum;   // 10 + 10 = 20
+}

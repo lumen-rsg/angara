@@ -1,0 +1,25 @@
+// Chaperone negative test — M2 (conditional drop inside loop body, E506)
+// A tracked variable allocated before a loop is dropped conditionally inside
+// an if/else within the loop body. The merged state has it Live, but on the
+// path where it was dropped it won't be available on iteration 2+.
+//
+// expect: E506
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let i as i64 = 0;
+    while (i < 3) {
+        if (i == 0) {
+            drop b;          // b destroyed on this path only
+        } else {
+            // b stays Live — merge masks the destruction
+        }
+        i = i + 1;
+    }
+    return 0;
+}

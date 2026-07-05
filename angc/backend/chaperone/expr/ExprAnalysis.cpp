@@ -183,6 +183,12 @@ void Chaperone::analyzeExpr(Context& ctx,
             if (rhs_is_move_source) {
                 state[move_src] = State::Moved;
                 tit->second = State::Live;
+            } else if (tit->second != State::Uninit) {
+                // Non-move assignment (constructor call, function return, etc.)
+                // on a variable that was previously holding a tracked allocation:
+                // the target now holds a new allocation → Live.  (Uninit targets
+                // are non-tracked declarations like `let i as i64`; skip them.)
+                tit->second = State::Live;
             }
             return;
         }

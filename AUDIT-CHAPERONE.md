@@ -138,7 +138,7 @@ does nothing. This means:
 | ID | Status | File:Line | Description |
 |----|--------|-----------|-------------|
 | **M1** | [x] 🟢 Source → ✅ Fixed | `StmtAnalysis.cpp:384-474` | **W510 only scans then_state keys.** If a variable exists only in the else branch and is Live there, no asymmetry warning is emitted. The variable appears Live after merge, potentially producing a confusing E501 later. Fixed with full lexical scope tracking: `analyzeScopedBlock`/`analyzeScopedStmt` save pre-block state and restore/remove variables declared inside blocks. W510 extended to warn when a variable is Live in one branch but absent from the other. |
-| **M2** | [ ] 🟢 Source | `StmtAnalysis.cpp:315-338` | **Loop body analyzed only once (no fixed-point).** Complex loop-body patterns (e.g., a variable moved on one path through the body but not another) are not caught. The E506 check catches the common case (drop without reassign). |
+| **M2** | [x] 🟢 Source → ✅ Fixed | `StmtAnalysis.cpp:490-530` | **Loop body analyzed once — conditional destruction now caught at if/else merge points.** When a variable Live before the loop is destroyed (dropped/moved/escaped) on one branch of an if/else inside the loop but not the other, the merged state previously masked it via `join(Dropped, Live) = Live`. Now the `loop_pre_live` set tracks which vars were Live pre-loop, and any branch asymmetry involving them triggers E506 directly at the merge point. Complements the existing unconditional E506 check. |
 | **M3** | [ ] 🟢 Source | `Chaperone.cpp:28-32` | **`join(Escaped, Moved) = Dropped`.** Both are "gone" states but for different reasons. A post-merge `drop` reports "E503: double denaturation" regardless of path, which is safe but the error message may mislead on the Escaped path. |
 | **M4** | [ ] 🟢 Source | test coverage | **No test for mutual recursion.** The fixed-point should handle A→B→A patterns but this is untested. |
 | **M5** | [ ] 🟢 Source | test coverage | **No test for RangeExpr or InterpStringExpr in tracked contexts** (C1, C2). |
@@ -276,6 +276,9 @@ then read ref), 11 (positive: read ref then drop referent).
 | Closure inside try/catch capturing tracked var | H1 |
 | Mutual recursion (A→B→A) | M4 |
 | `ref<T>` passed to another function that drops referent | H5 | 31 (negative), 11 (positive) |
+| Loop-body conditional drop (if/else, one branch drops) | M2 | 32 (negative) |
+| Loop-body conditional move (if/else, one branch moves) | M2 | 33 (negative) |
+| Loop-body conditional drop + reassign (no false positive) | M2 | 14 (positive) |
 | Scoped block cleanup (variable declared in one branch, dropped) | M1 | 12 (positive) |
 | Shadow restore (inner block shadows outer variable) | M1 | 13 (positive) |
 
