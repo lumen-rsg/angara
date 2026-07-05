@@ -186,12 +186,17 @@ Everyday conveniences absent today (most are documented but unimplemented — no
   struct would need `patterns` to hold `Pattern*` instead of `Expr*`, with a
   visitor for type-checking and codegen dispatch.
 
-- **Or-patterns with per-alternative bindings** — `case Foo(a, b) | Bar(c, d):`
+- **Or-patterns with per-alternative bindings** ✅ Fixed — `case Foo(a, b) | Bar(c, d):`
   where each alternative in the or-group carries its own variable list. Syntax
   is parsed but the type checker does not yet verify that all alternatives bind
   the same names with the same types (today only the first alternative's bindings
   are used). Full support requires per-pattern variable vectors in `MatchCase`
-  and a cross-alternative compatibility check.
+  and a cross-alternative compatibility check. _(Fixed: added `alt_variables`
+  field to `MatchCase` storing per-alternative variable lists; parser now
+  preserves them; type checker iterates all alternatives, resolves each
+  variant's payload types, and cross-checks that same-named variables have
+  compatible types (new E406 error). Also improved E405 to include the variant
+  name.)_
 
 - **Pre-existing string-interning bug (unrelated to LANG-7)** ✅ Fixed — When the same
   variable name is reused across match expressions (or `let` declarations) and
