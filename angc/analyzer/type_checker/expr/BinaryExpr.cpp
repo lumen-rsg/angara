@@ -107,6 +107,27 @@ namespace angara {
                             }
                         }
                     }
+                    // M8: check trait-bound operator on TYPE_PARAM
+                    if ((!result_type || result_type->kind == TypeKind::ERROR) &&
+                        left_type->kind == TypeKind::TYPE_PARAM) {
+                        auto tp = std::dynamic_pointer_cast<TypeParameterType>(left_type);
+                        auto bound_it = m_active_type_param_bounds.find(tp->name);
+                        if (bound_it != m_active_type_param_bounds.end() && bound_it->second) {
+                            const char* op_name = nullptr;
+                            switch (expr.op.type) {
+                                case TokenType::MINUS:   op_name = "opSub"; break;
+                                case TokenType::SLASH:   op_name = "opDiv"; break;
+                                case TokenType::PERCENT: op_name = "opRem"; break;
+                                default: break;
+                            }
+                            if (op_name) {
+                                auto mit = bound_it->second->methods.find(op_name);
+                                if (mit != bound_it->second->methods.end()) {
+                                    result_type = mit->second->return_type;
+                                }
+                            }
+                        }
+                    }
                     if (!result_type || result_type->kind == TypeKind::ERROR) {
                         error(expr.op, "Operator '" + expr.op.lexeme + "' requires numeric operands, but got '" +
                                        left_type->toString() + "' and '" + right_type->toString() + "'.", "E352");
@@ -158,6 +179,18 @@ namespace angara {
                             } else {
                                 error(expr.op, "Method 'opMul' must have signature 'func opMul(self, other) -> T' "
                                        "(1 parameter).", "E430");
+                            }
+                        }
+                    }
+                    // M8: check trait-bound opMul on TYPE_PARAM
+                    if ((!result_type || result_type->kind == TypeKind::ERROR) &&
+                        left_type->kind == TypeKind::TYPE_PARAM) {
+                        auto tp = std::dynamic_pointer_cast<TypeParameterType>(left_type);
+                        auto bound_it = m_active_type_param_bounds.find(tp->name);
+                        if (bound_it != m_active_type_param_bounds.end() && bound_it->second) {
+                            auto mit = bound_it->second->methods.find("opMul");
+                            if (mit != bound_it->second->methods.end()) {
+                                result_type = mit->second->return_type;
                             }
                         }
                     }
@@ -214,6 +247,18 @@ namespace angara {
                             }
                         }
                     }
+                    // M8: check trait-bound opAdd on TYPE_PARAM
+                    if ((!result_type || result_type->kind == TypeKind::ERROR) &&
+                        left_type->kind == TypeKind::TYPE_PARAM) {
+                        auto tp = std::dynamic_pointer_cast<TypeParameterType>(left_type);
+                        auto bound_it = m_active_type_param_bounds.find(tp->name);
+                        if (bound_it != m_active_type_param_bounds.end() && bound_it->second) {
+                            auto mit = bound_it->second->methods.find("opAdd");
+                            if (mit != bound_it->second->methods.end()) {
+                                result_type = mit->second->return_type;
+                            }
+                        }
+                    }
                     if (!result_type || result_type->kind == TypeKind::ERROR) {
                         error(expr.op, "Operator '+' can only be used with two numbers (addition) or two strings (concatenation).", "E354");
                     }
@@ -249,6 +294,18 @@ namespace angara {
                             } else {
                                 error(expr.op, "Method 'opCmp' must have signature 'func opCmp(self, other) -> i64' "
                                        "(1 parameter, returns i64).", "E420");
+                            }
+                        }
+                    }
+                    // M8: check trait-bound opCmp on TYPE_PARAM
+                    if ((!result_type || result_type->kind == TypeKind::ERROR) &&
+                        left_type->kind == TypeKind::TYPE_PARAM) {
+                        auto tp = std::dynamic_pointer_cast<TypeParameterType>(left_type);
+                        auto bound_it = m_active_type_param_bounds.find(tp->name);
+                        if (bound_it != m_active_type_param_bounds.end() && bound_it->second) {
+                            auto mit = bound_it->second->methods.find("opCmp");
+                            if (mit != bound_it->second->methods.end()) {
+                                result_type = m_type_bool;
                             }
                         }
                     }

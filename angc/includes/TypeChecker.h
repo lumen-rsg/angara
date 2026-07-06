@@ -193,6 +193,13 @@ namespace angara {
         bool conformsToTrait(const std::shared_ptr<Type>& subject,
                              const std::shared_ptr<TraitType>& trait);
 
+        /// M8: recursively validate a substituted type tree, ensuring that any
+        /// RawArray types have only primitive element types (TYPE_PARAM is also
+        /// allowed as it will be further substituted). Emits errors via error().
+        /// Returns true if the type is valid.
+        bool validate_substituted_type(const std::shared_ptr<Type>& type,
+                                       const Token& token);
+
         /// TS-1: does the concrete `subject` type adopt the `iface` (a TraitType
         /// or ContractType)? Returns false for non-instance subjects. Used to
         /// decide whether a concrete value may flow into a trait/contract slot.

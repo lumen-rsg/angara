@@ -161,6 +161,23 @@ namespace angara {
                     auto sub_ret = substituteTypeArgs(func_type->return_type, inferred_args);
                     check_type = std::make_shared<FunctionType>(sub_params, sub_ret, func_type->is_variadic);
 
+                    // M8: validate that substituted RawArray types have valid
+                    // (primitive) element types. TYPE_PARAM elements are deferred
+                    // in resolveType() but never re-checked after substitution.
+                    {
+                        bool raw_valid = true;
+                        for (const auto& pt : sub_params) {
+                            if (!validate_substituted_type(pt, expr.paren))
+                                raw_valid = false;
+                        }
+                        if (!validate_substituted_type(sub_ret, expr.paren))
+                            raw_valid = false;
+                        if (!raw_valid) {
+                            pushAndSave(&expr, m_type_error);
+                            return {};
+                        }
+                    }
+
                     // M9: verify that each inferred concrete type arg satisfies its
                     // declared trait bound (e.g. render<T: Drawable>(42) should fail
                     // because i64 does not conform to Drawable). This mirrors the
@@ -502,6 +519,59 @@ namespace angara {
         }
 
         return resolved;
+    }
+
+    // M8: recursively validate that RawArray types in a substituted type tree
+    // have valid (primitive) element types. TYPE_PARAM elements are allowed
+    // because they will be further substituted. Returns true if valid.
+    bool TypeChecker::validate_substituted_type(
+            const std::shared_ptr<Type>& type,
+            const Token& token)
+    {
+        if (!type || m_hadError) return true;
+
+        if (type->kind == TypeKind::RAW_ARRAY) {
+            auto elem = std::dynamic_pointer_cast<RawArrayType>(type)->element_type;
+            if (elem->kind != TypeKind::PRIMITIVE &&
+                elem->kind != TypeKind::TYPE_PARAM) {
+                error(token, "Raw array element type must be primitive, but got '" +
+                      elem->toString() + "'. Use list<" + elem->toString() +
+                      "> for complex types.", "E114");
+                return false;
+            }
+            return validate_substituted_type(elem, token);
+        }
+        if (type->kind == TypeKind::LIST) {
+            return validate_substituted_type(
+                std::dynamic_pointer_cast<ListType>(type)->element_type, token);
+        }
+        if (type->kind == TypeKind::OPTIONAL) {
+            return validate_substituted_type(
+                std::dynamic_pointer_cast<OptionalType>(type)->wrapped_type, token);
+        }
+        if (type->kind == TypeKind::REF) {
+            return validate_substituted_type(
+                std::dynamic_pointer_cast<RefType>(type)->inner_type, token);
+        }
+        if (type->kind == TypeKind::FUTURE) {
+            return validate_substituted_type(
+                std::dynamic_pointer_cast<FutureType>(type)->inner_type, token);
+        }
+        if (type->kind == TypeKind::TUPLE) {
+            for (const auto& e :
+                 std::dynamic_pointer_cast<TupleType>(type)->element_types) {
+                if (!validate_substituted_type(e, token)) return false;
+            }
+            return true;
+        }
+        if (type->kind == TypeKind::FUNCTION) {
+            auto ft = std::dynamic_pointer_cast<FunctionType>(type);
+            for (const auto& p : ft->param_types) {
+                if (!validate_substituted_type(p, token)) return false;
+            }
+            return validate_substituted_type(ft->return_type, token);
+        }
+        return true;
     }
 
 }
