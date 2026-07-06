@@ -130,6 +130,31 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
         }
     }
 
+    // H8: cross-function field tracking. For non-constructor methods,
+    // seed all tracked fields of `this` as Live. This causes the first
+    // field overwrite in a regular method to trigger E501 (leak) unless
+    // the field was explicitly dropped first. Constructors (`init`) are
+    // exempt — fields start uninitialized and the first assignment is
+    // always clean.
+    if (func.has_this && func.name.lexeme != "init") {
+        auto dot = summary_key.rfind('.');
+        if (dot != std::string::npos) {
+            std::string cls_name = summary_key.substr(0, dot);
+            auto sym = const_cast<SymbolTable&>(
+                ctx.tc.getSymbolTable()).resolve(cls_name);
+            if (sym && sym->type && sym->type->kind == TypeKind::CLASS) {
+                auto cls = std::dynamic_pointer_cast<ClassType>(sym->type);
+                if (cls) {
+                    for (const auto& [fname, finfo] : cls->fields) {
+                        if (finfo.type && isTrackedTypeObj(ctx, *finfo.type)) {
+                            state["this." + fname] = State::Live;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     bool terminates = false;
     if (func.body) {
         // analyzeBlock takes state by value and returns the threaded map;
@@ -547,6 +572,8 @@ void Chaperone::analyzeStmt(Context& ctx,
             }
         }
         for (auto& [name, st] : state) {
+            // H8: skip field-state entries (keys containing '.').
+            if (name.find('.') != std::string::npos) continue;
             // Exclude tracked parameters — they're borrowed (caller-owned), not
             // this function's responsibility to drop.
             if (st == State::Live && ctx.current_params.count(name) == 0) {
@@ -571,6 +598,8 @@ void Chaperone::analyzeStmt(Context& ctx,
         // S8: a name listed in a surrounding `finally {}`'s drops is
         // discharged (the finally runs on the throw path), so skip it.
         for (auto& [name, st] : state) {
+            // H8: skip field-state entries (keys containing '.').
+            if (name.find('.') != std::string::npos) continue;
             if (st == State::Live && ctx.finally_protected.count(name) == 0
                 && ctx.current_params.count(name) == 0) {  // borrowed params excluded
                 bool is_builtin = ctx.builtin_heap_vars.count(name) > 0;

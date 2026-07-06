@@ -1,0 +1,31 @@
+// Chaperone positive test — cross-function field drop + reassign (H8)
+// Seeding tracked fields as Live at method entry means the developer must
+// explicitly drop a field before reassignment. This is the correct pattern.
+//
+// exit: 0
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+class Holder {
+    let inner as Buf;
+    func init(this) {
+        this.inner = Buf(1);    // constructor: OK
+    }
+    public:
+    func safe_replace(this) -> nil {
+        drop this.inner;         // explicit drop
+        this.inner = Buf(2);    // reassign: OK (previous was dropped)
+    }
+}
+
+export func main() -> i64 {
+    let h = Holder();
+    h.safe_replace();
+    drop h;
+    return 0;
+}

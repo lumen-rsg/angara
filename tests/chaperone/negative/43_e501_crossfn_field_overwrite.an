@@ -1,0 +1,32 @@
+// Chaperone negative test — E501 (cross-function field overwrite leak, H8)
+// When a tracked field is set in the constructor and then overwritten in
+// a regular method without an explicit drop, the previous allocation leaks.
+// The Chaperone seeds tracked fields as Live at non-constructor method entry
+// so the first overwrite triggers E501.
+//
+// expect: E501
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+class Holder {
+    let inner as Buf;
+    func init(this) {
+        this.inner = Buf(1);    // constructor: first assignment OK
+    }
+    public:
+    func leaky_replace(this) -> nil {
+        this.inner = Buf(2);    // overwrites Buf(1) from init → E501
+    }
+}
+
+export func main() -> i64 {
+    let h = Holder();
+    h.leaky_replace();
+    drop h;
+    return 0;
+}

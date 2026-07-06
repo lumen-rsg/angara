@@ -2,6 +2,7 @@
 // Inside a method, `this.f = tracked_local` MOVES the local's ownership into
 // the field. The source becomes invalid; only the owning object is dropped
 // (which cascades to the field). Using the source afterward would be E507.
+// H8: must drop the field first to avoid cross-function leak (E501).
 //
 // exit: 0
 
@@ -15,7 +16,8 @@ class Outer {
     func init(this) { this.inner = Inner(0); }
     public:
     func set(this, i as Inner) -> nil {
-        this.inner = i;   // MOVE: i's ownership transfers into this.inner
+        drop this.inner;    // H8: drop previous value from init
+        this.inner = i;     // MOVE: i's ownership transfers into this.inner
     }
 }
 
