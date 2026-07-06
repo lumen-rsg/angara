@@ -25,7 +25,7 @@ else
     SONAME_FLAG := -Wl,-soname
 endif
 
-LLVM_CONFIG := $(shell ls /usr/bin/llvm-config-* 2>/dev/null | sort -t- -k3 -V | tail -1 || which llvm-config 2>/dev/null)
+LLVM_CONFIG := $(shell ls /usr/bin/llvm-config* 2>/dev/null | sort -t- -k3 -V | tail -1 || which llvm-config 2>/dev/null)
 ifeq ($(UNAME_S),Darwin)
     ifeq ($(LLVM_CONFIG),)
         LLVM_CONFIG := $(shell ls $(BREW_DIR)/opt/llvm/bin/llvm-config 2>/dev/null)
@@ -42,10 +42,10 @@ CXX := clang++
 CFLAGS   := -fPIC -Wall -Wextra -g -MMD -MP -Iangc/includes
 CXXFLAGS := -std=c++23 -fPIC -Wall -Wextra -g -MMD -MP -Wno-trigraphs -Iangc/includes $(EXTRA_CXXFLAGS)
 
+LDFLAGS_BIN := $(LLVM_LDFLAGS) $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS)
+
 CURL_CFLAGS := $(shell pkg-config --cflags libcurl 2>/dev/null)
 CURL_LIBS   := $(shell pkg-config --libs libcurl 2>/dev/null)
-
-LDFLAGS_BIN := $(LLVM_LDFLAGS) $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS) $(CURL_LIBS)
 LWS_CFLAGS  := $(shell pkg-config --cflags libwebsockets openssl 2>/dev/null)
 LWS_LIBS    := $(shell pkg-config --libs libwebsockets openssl 2>/dev/null)
 AMQP_CFLAGS := $(shell pkg-config --cflags librabbitmq 2>/dev/null)
@@ -58,11 +58,8 @@ SQLITE_CFLAGS := $(shell pkg-config --cflags sqlite3 2>/dev/null)
 SQLITE_LIBS   := $(shell pkg-config --libs sqlite3 2>/dev/null)
 GMP_CFLAGS    := $(shell pkg-config --cflags gmp 2>/dev/null)
 GMP_LIBS      := $(shell pkg-config --libs gmp 2>/dev/null)
-YAML_CFLAGS   := $(shell pkg-config --cflags yaml-0.1 2>/dev/null)
-YAML_LIBS     := $(shell pkg-config --libs yaml-0.1 2>/dev/null)
-ifeq ($(YAML_LIBS),)
-    YAML_LIBS := -l:libyaml-0.so.2
-endif
+PG_CFLAGS := $(shell pkg-config --cflags libpq 2>/dev/null)
+PG_LIBS   := $(shell pkg-config --libs libpq 2>/dev/null)
 
 ifeq ($(UNAME_S),Darwin)
     ifeq ($(LWS_CFLAGS),)
@@ -208,15 +205,20 @@ build/obj/modules/net/rpc.o: modules/net/rpc.c
 	@printf "$(GREEN)[CC]  $(RESET) %s (RPC)\n" "$<"
 	@$(CC) $(CFLAGS) -Imodules/data -c $< -o $@
 
-build/obj/modules/data/yaml.o: modules/data/yaml.c
-	@mkdir -p $(@D)
-	@printf "$(GREEN)[CC]  $(RESET) %s (YAML)\n" "$<"
-	@$(CC) $(CFLAGS) -Imodules/data $(YAML_CFLAGS) -c $< -o $@
-
 build/obj/modules/data/json_bridge.o: modules/data/json_bridge.cpp
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CX] $(RESET) %s (JSON Bridge)\n" "$<"
 	@$(CXX) $(CXXFLAGS) -Iangc-ls/vendor -c $< -o $@
+
+build/obj/modules/data/postgres.o: modules/data/postgres.c
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CC]  $(RESET) %s (POSTGRES)\n" "$<"
+	@$(CC) $(CFLAGS) $(PG_CFLAGS) -c $< -o $@
+
+build/obj/modules/simd/simd.o: modules/simd/simd.c
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CC]  $(RESET) %s (SIMD)\n" "$<"
+	@$(CC) $(CFLAGS) -mavx2 -mfma -c $< -o $@
 
 build/modules/http.$(SO_EXT): build/obj/modules/net/http.o
 	@mkdir -p $(@D)
@@ -308,7 +310,7 @@ build/modules/redis.$(SO_EXT): build/obj/modules/data/redis.o
 build/modules/postgres.$(SO_EXT): build/obj/modules/data/postgres.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (POSTGRES)\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lpq -o $@
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(PG_LIBS) -o $@
 
 build/modules/mysql.$(SO_EXT): build/obj/modules/data/mysql.o
 	@mkdir -p $(@D)
@@ -363,13 +365,6 @@ build/modules/csv.$(SO_EXT): build/obj/modules/data/csv.o
 build/modules/config.$(SO_EXT): build/obj/modules/data/config.o
 build/modules/sort.$(SO_EXT): build/obj/modules/data/sort.o
 build/modules/args.$(SO_EXT): build/obj/modules/data/args.o
-build/modules/cli.$(SO_EXT): build/obj/modules/data/cli.o
-build/modules/protobuf.$(SO_EXT): build/obj/modules/data/protobuf.o
-build/modules/msgpack.$(SO_EXT): build/obj/modules/data/msgpack.o
-build/modules/yaml.$(SO_EXT): build/obj/modules/data/yaml.o
-	@mkdir -p $(@D)
-	@printf "$(MAGENTA)[MD] $(RESET) %s (YAML)\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(YAML_LIBS) -o $@
 build/modules/assert.$(SO_EXT): build/obj/modules/testing/assert.o
 build/modules/calltest.$(SO_EXT): build/obj/modules/testing/calltest.o
 
@@ -382,7 +377,7 @@ build/modules/watch.$(SO_EXT) \
 build/modules/adv_string.$(SO_EXT) build/modules/regex.$(SO_EXT) build/modules/encoding.$(SO_EXT) \
 build/modules/hash.$(SO_EXT) build/modules/uuid.$(SO_EXT) build/modules/random.$(SO_EXT) \
 build/modules/csv.$(SO_EXT) build/modules/config.$(SO_EXT) build/modules/sort.$(SO_EXT) \
-build/modules/args.$(SO_EXT) build/modules/cli.$(SO_EXT) build/modules/protobuf.$(SO_EXT) build/modules/msgpack.$(SO_EXT) build/modules/assert.$(SO_EXT) build/modules/calltest.$(SO_EXT):
+build/modules/args.$(SO_EXT) build/modules/assert.$(SO_EXT) build/modules/calltest.$(SO_EXT):
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
