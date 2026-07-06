@@ -41,7 +41,7 @@ let result = await fetch(url);      // consumes future (moves to Moved)
 | **6** | Chaperone async verification (E501 leak in async func, E502 use-after-free on awaited future, E507 use-after-move on double-await) | ✅ Done | `c189ac3` |
 | **7** | Combinators (`Future.all`, `Future.race`, `Future.map`) | ⏳ Pending | — |
 | **S** | Real suspension — state machine dispatch, separate `$resume` function, waker chain (cascading resume without event loop), frame-based local storage, `free` finalizer for frame cleanup | ✅ Done (Stage S-1) | — |
-| **S-2** | Event loop integration (`loop.create_timer`, `loop.run_until`, Runtime API for future state/result/loop, `Future<T>` type DSL support, end-to-end timer suspend/resume) | ✅ Done | — |
+| **S-2** | Event loop integration + I/O futures (`loop.create_timer`, `loop.read`, `loop.write`, `loop.accept`, `loop.run_until`, Runtime API, unified IOFuture) | ✅ Done | `a8af3dc` |
 | **Module** | Rename `async` module → `eventloop` to avoid keyword conflict | ✅ Done | `c189ac3` |
 
 ## Files changed
