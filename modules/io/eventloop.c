@@ -118,9 +118,12 @@ static CbEntry* cb_registry_find(CbRegistry* r, int fd) {
 static CbEntry* cb_registry_add(CbRegistry* r, int fd, AngaraObject cb,
                                  int is_timer, int is_interval, int is_writable) {
     if (r->count >= r->cap) {
-        r->cap *= 2;
-        r->entries = (CbEntry*)realloc(r->entries, r->cap * sizeof(CbEntry));
-        memset(r->entries + r->count, 0, (r->cap - r->count) * sizeof(CbEntry));
+        size_t new_cap = r->cap * 2;
+        CbEntry* new_entries = (CbEntry*)realloc(r->entries, new_cap * sizeof(CbEntry));
+        if (!new_entries) return NULL;
+        memset(new_entries + r->count, 0, (new_cap - r->count) * sizeof(CbEntry));
+        r->entries = new_entries;
+        r->cap = new_cap;
     }
     CbEntry* e = &r->entries[r->count++];
     e->fd = fd;
@@ -564,7 +567,9 @@ AngaraObject Angara_Loop_close(int arg_count, AngaraObject* args) {
 static void pending_add(LoopData* l, IOFuture* f) {
     if (l->pending_count >= l->pending_cap) {
         size_t new_cap = l->pending_cap ? l->pending_cap * 2 : 4;
-        l->pending = (IOFuture**)realloc(l->pending, new_cap * sizeof(IOFuture*));
+        IOFuture** new_pending = (IOFuture**)realloc(l->pending, new_cap * sizeof(IOFuture*));
+        if (!new_pending) return;  /* out of memory — future won't be tracked */
+        l->pending = new_pending;
         l->pending_cap = new_cap;
     }
     l->pending[l->pending_count++] = f;

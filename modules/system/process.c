@@ -14,37 +14,143 @@
 #define IS_STR(v)  (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)
 #define IS_LIST(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_LIST)
 
+/* Simple whitespace tokenizer for command strings.
+   Splits on whitespace, respecting single and double quotes.
+   Returns a NULL-terminated argv array; caller must free each element and the array.
+   Sets *argc_out to the number of arguments. */
+static char** tokenize_command(const char* cmd, int* argc_out) {
+    int cap = 8;
+    int count = 0;
+    char** argv = (char**)malloc((cap + 1) * sizeof(char*));
+    if (!argv) { *argc_out = 0; return NULL; }
+
+    const char* p = cmd;
+    while (*p) {
+        /* skip leading whitespace */
+        while (*p == ' ' || *p == '\t' || *p == '\n') p++;
+        if (!*p) break;
+
+        const char* start;
+        const char* end;
+        char quote = 0;
+
+        if (*p == '\'' || *p == '"') {
+            quote = *p;
+            p++;
+            start = p;
+            while (*p && *p != quote) p++;
+            end = p;
+            if (*p == quote) p++;
+        } else {
+            start = p;
+            while (*p && *p != ' ' && *p != '\t' && *p != '\n') p++;
+            end = p;
+        }
+
+        size_t len = (size_t)(end - start);
+        if (count >= cap) {
+            cap *= 2;
+            char** tmp = (char**)realloc(argv, (cap + 1) * sizeof(char*));
+            if (!tmp) {
+                for (int i = 0; i < count; i++) free(argv[i]);
+                free(argv);
+                *argc_out = 0;
+                return NULL;
+            }
+            argv = tmp;
+        }
+        argv[count] = (char*)malloc(len + 1);
+        if (!argv[count]) {
+            for (int i = 0; i < count; i++) free(argv[i]);
+            free(argv);
+            *argc_out = 0;
+            return NULL;
+        }
+        memcpy(argv[count], start, len);
+        argv[count][len] = '\0';
+        count++;
+    }
+    argv[count] = NULL;
+    *argc_out = count;
+    return argv;
+}
+
 AngaraObject Angara_process_exec(int arg_count, AngaraObject* args) {
 
-    FILE* fp = popen(ang_api->as_cstr(args[0]), "r");
-    if (!fp) {
-        char buf[256];
-        snprintf(buf, sizeof(buf), "exec: failed to run command: %s", strerror(errno));
-        ang_api->throw_error(buf);
+    const char* cmd = ang_api->as_cstr(args[0]);
+
+    int argc = 0;
+    char** argv = tokenize_command(cmd, &argc);
+    if (!argv || argc == 0) {
+        ang_api->throw_error("exec: empty or invalid command.");
         return ang_nil();
     }
+
+    int stdout_pipe[2];
+    if (pipe(stdout_pipe) < 0) {
+        for (int i = 0; i < argc; i++) free(argv[i]);
+        free(argv);
+        ang_api->throw_error("exec: pipe failed.");
+        return ang_nil();
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(stdout_pipe[0]); close(stdout_pipe[1]);
+        for (int i = 0; i < argc; i++) free(argv[i]);
+        free(argv);
+        ang_api->throw_error("exec: fork failed.");
+        return ang_nil();
+    }
+
+    if (pid == 0) {
+        /* child */
+        close(stdout_pipe[0]);
+        dup2(stdout_pipe[1], STDOUT_FILENO);
+        close(stdout_pipe[1]);
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+
+    /* parent */
+    close(stdout_pipe[1]);
+    for (int i = 0; i < argc; i++) free(argv[i]);
+    free(argv);
 
     char* output = NULL;
     size_t output_len = 0;
     size_t output_cap = 4096;
     output = (char*)malloc(output_cap);
-    if (!output) { pclose(fp); ang_api->throw_error("exec: out of memory."); return ang_nil(); }
-
-    char chunk[4096];
-    size_t n;
-    while ((n = fread(chunk, 1, sizeof(chunk), fp)) > 0) {
-        if (output_len + n >= output_cap) {
-            output_cap = (output_len + n) * 2;
-            char* new_output = (char*)realloc(output, output_cap);
-            if (!new_output) { free(output); pclose(fp); ang_api->throw_error("exec: out of memory."); return ang_nil(); }
-            output = new_output;
-        }
-        memcpy(output + output_len, chunk, n);
-        output_len += n;
+    if (!output) {
+        close(stdout_pipe[0]);
+        waitpid(pid, NULL, 0);
+        ang_api->throw_error("exec: out of memory.");
+        return ang_nil();
     }
 
-    int status = pclose(fp);
-    (void)status;  /* exit status available via WIFEXITED/WEXITSTATUS if needed */
+    char chunk[4096];
+    ssize_t n;
+    while ((n = read(stdout_pipe[0], chunk, sizeof(chunk))) > 0) {
+        if (output_len + (size_t)n >= output_cap) {
+            output_cap = (output_len + (size_t)n) * 2;
+            char* new_output = (char*)realloc(output, output_cap);
+            if (!new_output) {
+                free(output);
+                close(stdout_pipe[0]);
+                waitpid(pid, NULL, 0);
+                ang_api->throw_error("exec: out of memory.");
+                return ang_nil();
+            }
+            output = new_output;
+        }
+        memcpy(output + output_len, chunk, (size_t)n);
+        output_len += (size_t)n;
+    }
+    close(stdout_pipe[0]);
+
+    int status;
+    waitpid(pid, &status, 0);
+    (void)status;
 
     if (output_len == 0) {
         free(output);

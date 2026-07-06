@@ -150,6 +150,22 @@ static int mkdirs(const char* path) {
     return 0;
 }
 
+/* Validate that an archive entry pathname does not attempt directory traversal.
+   Rejects absolute paths and paths containing ".." components. */
+static int path_is_safe(const char* pathname) {
+    if (!pathname || pathname[0] == '\0') return 0;
+    /* Reject absolute paths */
+    if (pathname[0] == '/') return 0;
+    /* Reject paths with ".." as a path component */
+    const char* p = pathname;
+    while (*p) {
+        if (p[0] == '.' && p[1] == '.' && (p[2] == '/' || p[2] == '\0'))
+            return 0;
+        p++;
+    }
+    return 1;
+}
+
 AngaraObject Angara_archive_zip_extract(int arg_count, AngaraObject* args) {
 
     const char* filepath = ang_api->as_cstr(args[0]);
@@ -171,6 +187,10 @@ AngaraObject Angara_archive_zip_extract(int arg_count, AngaraObject* args) {
     struct archive_entry* entry;
     while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
         const char* pathname = archive_entry_pathname(entry);
+        if (!path_is_safe(pathname)) {
+            /* skip entries that attempt path traversal */
+            continue;
+        }
         char* fullpath = (char*)malloc(strlen(destdir) + strlen(pathname) + 2);
         snprintf(fullpath, strlen(destdir) + strlen(pathname) + 2, "%s/%s", destdir, pathname);
         archive_entry_set_pathname(entry, fullpath);
@@ -261,6 +281,10 @@ AngaraObject Angara_archive_tar_extract(int arg_count, AngaraObject* args) {
     struct archive_entry* entry;
     while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
         const char* pathname = archive_entry_pathname(entry);
+        if (!path_is_safe(pathname)) {
+            /* skip entries that attempt path traversal */
+            continue;
+        }
         char* fullpath = (char*)malloc(strlen(destdir) + strlen(pathname) + 2);
         snprintf(fullpath, strlen(destdir) + strlen(pathname) + 2, "%s/%s", destdir, pathname);
         archive_entry_set_pathname(entry, fullpath);
