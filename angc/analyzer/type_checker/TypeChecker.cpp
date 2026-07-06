@@ -277,11 +277,15 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
     void TypeChecker::exitScopeAndWarn() {
         auto unused = m_symbols.exitScope();
         for (const auto& sym : unused) {
-            if (sym->depth > 0 && sym->type->kind != TypeKind::FUNCTION &&
-                sym->type->kind != TypeKind::MODULE &&
-                sym->name != "this") {
-                warning(sym->declaration_token,
-                    "Unused variable '" + sym->name + "'.", "W003");
+            if (sym->depth > 0 && sym->name != "this") {
+                if (sym->type->kind == TypeKind::MODULE) {
+                    // L19: warn about unused module imports
+                    warning(sym->declaration_token,
+                        "Unused import '" + sym->name + "'.", "W271");
+                } else if (sym->type->kind != TypeKind::FUNCTION) {
+                    warning(sym->declaration_token,
+                        "Unused variable '" + sym->name + "'.", "W003");
+                }
             }
         }
     }

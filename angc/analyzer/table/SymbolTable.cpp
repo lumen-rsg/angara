@@ -70,4 +70,16 @@ namespace angara {
 
     const std::vector<std::map<std::string, std::shared_ptr<Symbol>>>& SymbolTable::getScopes() const { return m_scopes; }
 
+    std::shared_ptr<Symbol> SymbolTable::findShadowed(const std::string& name) const {
+        // Walk scopes from second-innermost to outermost, looking for the name.
+        if (m_scopes.size() < 2) return nullptr;
+        for (auto it = m_scopes.rbegin() + 1; it != m_scopes.rend(); ++it) {
+            auto symbol_it = it->find(name);
+            if (symbol_it != it->end()) {
+                return symbol_it->second;
+            }
+        }
+        return nullptr;
+    }
+
 }

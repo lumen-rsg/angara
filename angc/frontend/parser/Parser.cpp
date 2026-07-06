@@ -288,8 +288,10 @@ namespace angara {
 
     // LANG-16: consume a closing '>' for generic type arguments/params. If the
     // token is RSHIFT ('>>'), split it: consume one '>' and leave the other for
-    // the enclosing generic context (by replacing the current token with GREATER
-    // and backing up m_current so the next consume sees it).
+    // the enclosing generic context. The token stream mutation here (replacing
+    // RSHIFT with GREATER in-place) is intentional — the token being mutated is
+    // immediately consumed and never revisited, so the mutation is safe and
+    // contained. This avoids the cost of inserting/deleting from the token vector.
     void Parser::consumeClosingAngle() {
         if (check(TokenType::GREATER)) {
             advance();

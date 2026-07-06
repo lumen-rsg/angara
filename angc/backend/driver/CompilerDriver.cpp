@@ -725,7 +725,7 @@ namespace angara {
         try {
             LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple,
                                      m_freestanding, m_dump_ir, m_debug,
-                                     m_emit_llvm);
+                                     m_emit_llvm, m_lto, m_dwarf_version);
             if (!m_build_dir.empty()) {
                 llvmBackend.set_output_dir(m_build_dir);
             }
@@ -974,7 +974,7 @@ namespace angara {
                 return nullptr;
             }
 
-            LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding, m_dump_ir, m_debug, m_emit_llvm);
+            LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding, m_dump_ir, m_debug, m_emit_llvm, m_lto, m_dwarf_version);
             if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
                 m_had_error = true;
                 return nullptr;

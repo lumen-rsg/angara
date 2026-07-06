@@ -43,7 +43,8 @@ namespace angara {
                     bool dump_ir = false,
                     bool debug = false,
                     bool emit_llvm = false,
-                    bool lto = false);
+                    bool lto = false,
+                    int dwarf_version = 0);
 
         /// Releases LLVM objects (cleanup at process exit).
         ~LLVMBackend();
@@ -425,6 +426,7 @@ namespace angara {
         bool m_emit_llvm = false;
         bool m_debug = false;
         bool m_lto = false;
+        int  m_dwarf_version = 0;   // 0 = auto-detect by platform
 
         // Debug info (DWARF) generation
         std::unique_ptr<llvm::DIBuilder> m_di_builder;

@@ -31,6 +31,7 @@ struct CliFlags {
     bool nostdlib = false;
     bool release = false;
     bool debug = false;
+    int dwarf_version = 0;  // 0 = auto-detect by platform
     bool verbose_flag = false;
     bool wall = false;
     bool werror = false;

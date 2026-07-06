@@ -37,8 +37,8 @@ unsigned LLVMBackend::getJmpBufSize(const llvm::Triple& target) {
     return 1024;      // conservative fallback for unknown targets
 }
 
-LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir, bool debug, bool emit_llvm, bool lto)
-    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm), m_lto(lto) {
+LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir, bool debug, bool emit_llvm, bool lto, int dwarf_version)
+    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm), m_lto(lto), m_dwarf_version(dwarf_version) {
     ctx = std::make_unique<llvm::LLVMContext>();
     mod = std::make_unique<llvm::Module>("angara_module", *ctx);
     builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
@@ -59,11 +59,15 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
     // Set up DWARF debug info in debug mode
     if (m_debug) {
         mod->addModuleFlag(llvm::Module::Warning, "Debug Info Version", llvm::DEBUG_METADATA_VERSION);
+        int dwarf_ver = m_dwarf_version;
+        if (dwarf_ver == 0) {
 #ifdef __APPLE__
-        mod->addModuleFlag(llvm::Module::Warning, "Dwarf Version", 2);
+            dwarf_ver = 2;
 #else
-        mod->addModuleFlag(llvm::Module::Warning, "Dwarf Version", 5);
+            dwarf_ver = 5;
 #endif
+        }
+        mod->addModuleFlag(llvm::Module::Warning, "Dwarf Version", dwarf_ver);
         auto diBuilder = std::make_unique<llvm::DIBuilder>(*mod);
         auto diFile = diBuilder->createFile("angara", ".");
         auto diCU = diBuilder->createCompileUnit(llvm::dwarf::DW_LANG_C_plus_plus, diFile, "angc", false, "", 0);

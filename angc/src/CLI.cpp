@@ -53,6 +53,9 @@ void CLI::parseFlags(std::vector<std::string>& args) {
         } else if (args[i] == "--debug") {
             m_flags.debug = true;
             args.erase(args.begin() + i);
+        } else if (args[i].substr(0, 15) == "--dwarf-version" && args[i].size() > 16 && args[i][15] == '=') {
+            m_flags.dwarf_version = std::stoi(args[i].substr(16));
+            args.erase(args.begin() + i);
         } else if (args[i] == "-Wall") {
             m_flags.wall = true;
             args.erase(args.begin() + i);

@@ -18,6 +18,7 @@ namespace angara {
         bool is_const;
         int depth;
         bool used = false;
+        bool is_imported = false;   // true if this symbol comes from an `attach` import
         std::shared_ptr<ModuleType> from_module = nullptr;
     };
 
@@ -62,6 +63,10 @@ namespace angara {
 
         /// Returns the full scope stack for external iteration.
         [[nodiscard]] const std::vector<std::map<std::string, std::shared_ptr<Symbol>>>& getScopes() const;
+
+        /// Searches outer scopes (excluding the innermost) for a given name.
+        /// Returns the shadowed symbol if found, or nullptr.
+        [[nodiscard]] std::shared_ptr<Symbol> findShadowed(const std::string& name) const;
 
     private:
         std::vector<std::map<std::string, std::shared_ptr<Symbol>>> m_scopes;

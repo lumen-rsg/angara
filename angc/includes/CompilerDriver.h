@@ -91,6 +91,10 @@ namespace angara {
         void set_debug(bool val) { m_debug = val; }
         bool is_debug() const { return m_debug; }
 
+        /// Sets the DWARF version for debug info (0 = auto-detect by platform).
+        void set_dwarf_version(int v) { m_dwarf_version = v; }
+        int get_dwarf_version() const { return m_dwarf_version; }
+
         /// Configures warning control flags.
         void set_warnings_as_errors(bool val) { m_werror = val; }
         void set_wall(bool val) { m_wall = val; }
@@ -223,6 +227,7 @@ namespace angara {
         bool m_dump_ir = false;
         bool m_emit_llvm = false;
         bool m_debug = false;
+        int m_dwarf_version = 0;   // 0 = auto-detect by platform
         bool m_werror = false;
         bool m_wall = false;
         std::set<std::string> m_suppressed_warnings;

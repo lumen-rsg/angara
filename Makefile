@@ -53,8 +53,13 @@ endif
 CFLAGS   := -fPIC -Wall -Wextra $(OPT_FLAGS) $(DBG_FLAGS) -MMD -MP -Iangc/includes
 CXXFLAGS := -std=c++23 -fPIC -Wall -Wextra $(OPT_FLAGS) $(DBG_FLAGS) -MMD -MP -Wno-trigraphs -Iangc/includes $(EXTRA_CXXFLAGS)
 
+# pkg-config helper: warn if a required package is missing.
+# Usage: $(call pkg_warn,<pkg-name>)
+pkg_warn = $(if $(shell pkg-config --exists $(1) 2>/dev/null || echo missing),$(warning [pkg-config] Package '$(1)' not found — some features may be unavailable))
+
 CURL_CFLAGS := $(shell pkg-config --cflags libcurl 2>/dev/null)
 CURL_LIBS   := $(shell pkg-config --libs libcurl 2>/dev/null)
+$(call pkg_warn,libcurl)
 
 LDFLAGS_BIN := $(LLVM_LDFLAGS) $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS) $(CURL_LIBS)
 LWS_CFLAGS  := $(shell pkg-config --cflags libwebsockets openssl 2>/dev/null)
@@ -90,7 +95,7 @@ ANGC_SRCS := $(shell find angc -name "*.cpp")
 ANGC_OBJS := $(patsubst %.cpp,build/obj/%.o,$(ANGC_SRCS))
 ANGC_OUT  := build/angc
 
-.PHONY: all logo clean install uninstall lint install_vim uninstall_vim test test-cpp test-chaperone test-lang
+.PHONY: all logo clean install uninstall lint install_vim uninstall_vim test test-ci test-cpp test-chaperone test-lang
 
 all: logo $(ANGC_OUT)
 	@printf "$(BOLD)$(GREEN)>>> Build Completed Successfully <<<$(RESET)\n"
@@ -479,12 +484,23 @@ test-chaperone: $(ANGC_OUT)
 	@./tests/chaperone/test_lsp_chaperone.sh ./$(ANGC_OUT)
 
 # Language positive/negative suite (compile & run + expected compile errors).
+# In CI mode (CI_MODE=1), failures propagate. Otherwise, they're reported but don't halt.
 test-lang: $(ANGC_OUT)
 	@printf "$(CYAN)[TS] $(RESET) Running language test suite\n"
+ifeq ($(CI_MODE),1)
+	@./tests/lang/run_tests.sh ./$(ANGC_OUT)
+else
 	@./tests/lang/run_tests.sh ./$(ANGC_OUT) || true
+endif
 
-# Aggregate: all tests.
+# Aggregate: all tests (local use — non-fatal).
 test: test-cpp test-chaperone test-lang
+
+# Aggregate: all tests (CI use — failures propagate).
+test-ci:
+	@$(MAKE) test-cpp
+	@$(MAKE) test-chaperone
+	@$(MAKE) test-lang CI_MODE=1
 
 clean:
 	@printf "$(RED)[CL] $(RESET) Cleaning build directory...\n"

@@ -195,6 +195,22 @@ struct AngaraAPI {
 // =============================================================================
 
 /// Function signature for native module functions.
+/// 
+/// Error handling convention (L27):
+///   All module functions MUST follow a uniform error protocol:
+///   1. On error: call ang_api->throw_error(msg) then return ang_nil().
+///      throw_error is __noreturn__, but the return guards against a non-standard
+///      implementation (e.g., setjmp/longjmp that may return).
+///   2. On success: return the result value directly.
+///   3. Never silently return nil for an error condition — always throw.
+///      (Functions that return Optional results are the exception:
+///       they return nil() for "no result" and throw for real errors.)
+///   4. Always validate arg_count before accessing args[N].
+///   5. Always validate argument types (IS_STR / IS_REC / IS_LIST / ang_is_i64)
+///      before extracting values from args.
+///
+///   The throw_error + return ang_nil() pattern is present at ~394 call sites
+///   across all modules. New modules must follow the same convention.
 typedef AngaraObject (*AngaraGlobalFn)(int argc, AngaraObject* args);
 typedef AngaraObject (*AngaraMethodFn)(int argc, AngaraObject* args);
 
@@ -241,7 +257,9 @@ typedef struct AngaraClassDef {
 // Store it globally — it remains valid for the lifetime of the process.
 // =============================================================================
 
-/// Global API pointer — set once during module init.
+/// Global API pointer — set once during module init by ANGARA_MODULE_INIT.
+/// Do NOT write to this pointer after initialization. The API struct it points
+/// to is const-protected; use only through the `ang_api->` calling convention.
 static const AngaraAPI* ang_api;
 
 /// Define a module entry point. The module loader calls this at dlopen time.

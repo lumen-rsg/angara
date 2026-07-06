@@ -115,7 +115,10 @@ bool TypeChecker::check_type_compatibility(
     // the source is an integer literal whose value fits the target range, or we
     // are inside an @unsafe block. @unsafe is the universal opt-out.
     if (isInteger(expected) && isInteger(actual)) {
-        if (m_is_in_unsafe_context) return true;
+        if (m_is_in_unsafe_context) {
+            warning(Token(), "Integer type compatibility check bypassed by @unsafe block.", "W260");
+            return true;
+        }
         switch (classifyIntConv(expected, actual)) {
             case IntConv::Identical:
                 return true;
@@ -152,6 +155,8 @@ bool TypeChecker::check_type_compatibility(
         // field-by-field (same names, pairwise-compatible types). Previously an
         // empty record on EITHER side matched anything. Relaxed inside @unsafe.
         if (m_is_in_unsafe_context) {
+            // L16: warn when @unsafe suppresses record type mismatch
+            warning(Token(), "Record type compatibility check bypassed by @unsafe block.", "W260");
             return true;
         }
         auto expected_record = std::dynamic_pointer_cast<RecordType>(expected);

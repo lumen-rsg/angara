@@ -44,105 +44,129 @@ AngaraObject Angara_math_EPSILON(int arg_count, AngaraObject* args) {
 
 
 AngaraObject Angara_math_abs_i64(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.abs_i64: expected 1 argument"); return ang_nil(); }
     int64_t v = ang_as_i64(args[0]);
     return ang_i64(v < 0 ? -v : v);
 }
 
 AngaraObject Angara_math_abs_f64(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.abs_f64: expected 1 argument"); return ang_nil(); }
     return ang_f64(fabs(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_sqrt(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.sqrt: expected 1 argument"); return ang_nil(); }
     return ang_f64(sqrt(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_cbrt(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.cbrt: expected 1 argument"); return ang_nil(); }
     return ang_f64(cbrt(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_pow(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("math.pow: expected 2 arguments"); return ang_nil(); }
     return ang_f64(pow(ang_as_f64(args[0]), ang_as_f64(args[1])));
 }
 
 AngaraObject Angara_math_exp(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.exp: expected 1 argument"); return ang_nil(); }
     return ang_f64(exp(ang_as_f64(args[0])));
 }
 
 
 AngaraObject Angara_math_log(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.log: expected 1 argument"); return ang_nil(); }
     return ang_f64(log(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_log2(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.log2: expected 1 argument"); return ang_nil(); }
     return ang_f64(log2(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_log10(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.log10: expected 1 argument"); return ang_nil(); }
     return ang_f64(log10(ang_as_f64(args[0])));
 }
 
 
 AngaraObject Angara_math_sin(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.sin: expected 1 argument"); return ang_nil(); }
     return ang_f64(sin(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_cos(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.cos: expected 1 argument"); return ang_nil(); }
     return ang_f64(cos(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_tan(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.tan: expected 1 argument"); return ang_nil(); }
     return ang_f64(tan(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_asin(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.asin: expected 1 argument"); return ang_nil(); }
     return ang_f64(asin(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_acos(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.acos: expected 1 argument"); return ang_nil(); }
     return ang_f64(acos(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_atan(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.atan: expected 1 argument"); return ang_nil(); }
     return ang_f64(atan(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_atan2(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("math.atan2: expected 2 arguments"); return ang_nil(); }
     return ang_f64(atan2(ang_as_f64(args[0]), ang_as_f64(args[1])));
 }
 
 AngaraObject Angara_math_hypot(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("math.hypot: expected 2 arguments"); return ang_nil(); }
     return ang_f64(hypot(ang_as_f64(args[0]), ang_as_f64(args[1])));
 }
 
 
 AngaraObject Angara_math_ceil(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.ceil: expected 1 argument"); return ang_nil(); }
     return ang_f64(ceil(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_floor(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.floor: expected 1 argument"); return ang_nil(); }
     return ang_f64(floor(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_round(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.round: expected 1 argument"); return ang_nil(); }
     return ang_f64(round(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_trunc(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.trunc: expected 1 argument"); return ang_nil(); }
     return ang_f64(trunc(ang_as_f64(args[0])));
 }
 
 
 AngaraObject Angara_math_min(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("math.min: expected 2 arguments"); return ang_nil(); }
     double a = ang_as_f64(args[0]), b = ang_as_f64(args[1]);
     return ang_f64(a < b ? a : b);
 }
 
 AngaraObject Angara_math_max(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("math.max: expected 2 arguments"); return ang_nil(); }
     double a = ang_as_f64(args[0]), b = ang_as_f64(args[1]);
     return ang_f64(a > b ? a : b);
 }
 
 AngaraObject Angara_math_clamp(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("math.clamp: expected 3 arguments"); return ang_nil(); }
     double v = ang_as_f64(args[0]), lo = ang_as_f64(args[1]), hi = ang_as_f64(args[2]);
     if (v < lo) return ang_f64(lo);
     if (v > hi) return ang_f64(hi);
@@ -151,6 +175,7 @@ AngaraObject Angara_math_clamp(int arg_count, AngaraObject* args) {
 
 
 AngaraObject Angara_math_sign(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.sign: expected 1 argument"); return ang_nil(); }
     double v = ang_as_f64(args[0]);
     if (v > 0.0) return ang_i64(1);
     if (v < 0.0) return ang_i64(-1);
@@ -158,22 +183,27 @@ AngaraObject Angara_math_sign(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_math_to_radians(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.to_radians: expected 1 argument"); return ang_nil(); }
     return ang_f64(ang_as_f64(args[0]) * 3.14159265358979323846 / 180.0);
 }
 
 AngaraObject Angara_math_to_degrees(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.to_degrees: expected 1 argument"); return ang_nil(); }
     return ang_f64(ang_as_f64(args[0]) * 180.0 / 3.14159265358979323846);
 }
 
 AngaraObject Angara_math_is_nan(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.is_nan: expected 1 argument"); return ang_nil(); }
     return ang_bool(isnan(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_is_infinite(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.is_infinite: expected 1 argument"); return ang_nil(); }
     return ang_bool(isinf(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_lerp(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("math.lerp: expected 3 arguments"); return ang_nil(); }
     double a = ang_as_f64(args[0]), b = ang_as_f64(args[1]), t = ang_as_f64(args[2]);
     return ang_f64(a + (b - a) * t);
 }

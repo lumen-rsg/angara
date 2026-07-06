@@ -87,10 +87,16 @@ namespace angara {
         return c >= '0' && c <= '7';
     }
 
+    // L1: Unicode identifier support. Non-ASCII bytes (>= 0x80) are valid in
+    // identifiers — they represent UTF-8 multi-byte sequences. This is permissive
+    // (accepts any non-ASCII Unicode, including symbols), matching the behaviour
+    // of Go, early Rust, and similar compilers. Full Unicode ID_Start/ID_Continue
+    // classification (TR31) requires embedded property tables and is deferred.
     bool isAlpha(char c) {
         return (c >= 'a' && c <= 'z') ||
                (c >= 'A' && c <= 'Z') ||
-               c == '_';
+               c == '_' ||
+               (static_cast<unsigned char>(c) >= 0x80);  // UTF-8 multi-byte
     }
 
     bool isAlphaNumeric(char c) {
@@ -592,12 +598,30 @@ namespace angara {
     }
 
     void Lexer::multilineString() {
+        std::stringstream value;
+
         while (!(peek() == '"' && peekNext() == '"' && peekAhead(2) == '"') && !isAtEnd()) {
             if (peek() == '\n') {
                 m_line++;
                 m_column = 0;
+                value << advance();
+                continue;
             }
-            advance();
+
+            char c = advance();
+
+            if (c == '\\') {
+                if (isAtEnd()) {
+                    m_errorHandler.report(
+                        Token(TokenType::STRING, "\"\"\"", m_line, m_column, m_filename),
+                        "Unterminated multi-line string; ends with '\\'.", "E008"
+                    );
+                    return;
+                }
+                lexEscape(advance(), value, TokenType::STRING);
+            } else {
+                value << c;
+            }
         }
 
         if (isAtEnd()) {
@@ -612,8 +636,7 @@ namespace angara {
         advance();
         advance();
 
-        std::string value = m_source.substr(m_start + 3, m_current - m_start - 6);
-        addToken(TokenType::STRING, value);
+        addToken(TokenType::STRING, value.str());
     }
 
     // LANG-6: scans a raw string literal (r"..."). No escape processing —

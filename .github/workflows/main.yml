@@ -67,20 +67,19 @@ jobs:
         env:
           CC: clang
           CXX: clang++
+          EXTRA_CXXFLAGS: -Werror -Wno-error=unused-parameter
         run: make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu) all
 
       - name: Build Modules
         env:
           CC: clang
           CXX: clang++
+          EXTRA_CXXFLAGS: -Werror -Wno-error=unused-parameter
         run: make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu) modules
 
       # ── Test ──
-      - name: Run C++ Unit Tests
-        run: make test-cpp
-
-      - name: Run Language Tests
-        run: bash tests/lang/run_tests.sh
+      - name: Run Test Suite
+        run: make test-ci
 
       - name: Run LLVM Backend Tests
         run: |
@@ -192,30 +191,18 @@ jobs:
         env:
           CC: clang
           CXX: clang++
-          EXTRA_CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+          EXTRA_CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer -Werror -Wno-error=unused-parameter
         run: make -j$(nproc) all
 
       - name: Build Modules with Sanitizers
         env:
           CC: clang
           CXX: clang++
-          EXTRA_CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+          EXTRA_CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer -Werror -Wno-error=unused-parameter
         run: make -j$(nproc) modules
 
-      - name: Run C++ Unit Tests
+      - name: Run Test Suite
         env:
           ASAN_OPTIONS: detect_leaks=1
           UBSAN_OPTIONS: print_stacktrace=1
-        run: make test-cpp
-
-      - name: Run Chaperone Tests
-        env:
-          ASAN_OPTIONS: detect_leaks=1
-          UBSAN_OPTIONS: print_stacktrace=1
-        run: make test-chaperone
-
-      - name: Run Language Tests
-        env:
-          ASAN_OPTIONS: detect_leaks=1
-          UBSAN_OPTIONS: print_stacktrace=1
-        run: bash tests/lang/run_tests.sh
+        run: make test-ci

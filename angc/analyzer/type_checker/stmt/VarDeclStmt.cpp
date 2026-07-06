@@ -132,6 +132,10 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
     if (auto conflicting_symbol = m_symbols.declare(stmt->name, final_type, stmt->is_const)) {
         error(stmt->name, "Symbol '" + stmt->name.lexeme + "' is already declared.", "E276");
         note(conflicting_symbol->declaration_token, "Previous declaration was here.");
+    } else if (auto shadowed = m_symbols.findShadowed(stmt->name.lexeme)) {
+        warning(stmt->name, "Variable '" + stmt->name.lexeme + "' shadows previous declaration.",
+                "W270");
+        note(shadowed->declaration_token, "Shadowed declaration was here.");
     }
 
     if (stmt->is_exported) {

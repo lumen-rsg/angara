@@ -122,6 +122,7 @@ int angara::CLI::cmdCompileSingleFile(const std::string& source_file) {
     if (m_flags.dump_ir) driver.set_dump_ir(true);
     if (m_flags.emit_llvm) driver.set_emit_llvm(true);
     if (m_flags.debug) driver.set_debug(true);
+    if (m_flags.dwarf_version > 0) driver.set_dwarf_version(m_flags.dwarf_version);
     if (m_flags.werror) driver.set_warnings_as_errors(true);
     for (const auto& w : m_flags.suppress_warnings) driver.suppress_warning(w);
 
