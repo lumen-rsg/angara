@@ -1,0 +1,30 @@
+// Chaperone negative test — E502 (field UAF on non-this object, H8)
+// After dropping a field on another instance, reading it is use-after-free.
+// The Chaperone must detect this for non-this objects.
+//
+// expect: E502
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+class Holder {
+    let inner as Buf;
+    func init(this) {
+        this.inner = Buf(1);
+    }
+    public:
+    func use_other_after_drop(this, other as Holder) -> i64 {
+        drop other.inner;
+        return other.inner.get();   // E502: field was dropped
+    }
+}
+
+export func main() -> i64 {
+    let a = Holder();
+    let b = Holder();
+    return a.use_other_after_drop(b);
+}

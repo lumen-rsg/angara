@@ -1,0 +1,34 @@
+// Chaperone negative test — E501 (field overwrite leak on non-this object, H8)
+// Writing to a tracked field of another instance (same class) without
+// dropping the previous allocation is a leak. The Chaperone must detect
+// this for non-this objects as well.
+//
+// expect: E501
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+class Holder {
+    let inner as Buf;
+    func init(this) {
+        this.inner = Buf(1);
+    }
+    public:
+    func double_assign_other(this, other as Holder) -> nil {
+        other.inner = Buf(1);   // first assignment to other.inner: OK
+        other.inner = Buf(2);   // overwrite without drop → E501
+    }
+}
+
+export func main() -> i64 {
+    let a = Holder();
+    let b = Holder();
+    a.double_assign_other(b);
+    drop a;
+    drop b;
+    return 0;
+}

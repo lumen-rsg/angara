@@ -254,10 +254,12 @@ void Chaperone::analyzeExpr(Context& ctx,
         if (auto* get = dynamic_cast<const GetExpr*>(asgn->target.get())) {
             analyzeExpr(ctx, get->object, state);   // catch UAF on the object
 
-            // H8: build a field-state key for `this.field` accesses.
+            // H8: build a field-state key for `this.field` and `obj.field` accesses.
             std::string field_key;
             if (dynamic_cast<const ThisExpr*>(get->object.get())) {
                 field_key = "this." + get->name.lexeme;
+            } else if (auto* ove = dynamic_cast<const VarExpr*>(get->object.get())) {
+                field_key = ove->name.lexeme + "." + get->name.lexeme;
             }
 
             if (!field_key.empty()) {

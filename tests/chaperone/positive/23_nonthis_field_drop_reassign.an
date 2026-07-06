@@ -1,0 +1,33 @@
+// Chaperone positive test — field drop + reassign on non-this object (H8)
+// Dropping a tracked field on another instance before reassigning it
+// should satisfy the Chaperone — no leak.
+//
+// exit: 0
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+class Holder {
+    let inner as Buf;
+    func init(this) {
+        this.inner = Buf(1);
+    }
+    public:
+    func safe_replace_other(this, other as Holder) -> nil {
+        drop other.inner;
+        other.inner = Buf(2);   // OK: previous was dropped
+    }
+}
+
+export func main() -> i64 {
+    let a = Holder();
+    let b = Holder();
+    a.safe_replace_other(b);
+    drop a;
+    drop b;
+    return 0;
+}
