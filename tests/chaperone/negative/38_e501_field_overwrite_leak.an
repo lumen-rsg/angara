@@ -1,0 +1,32 @@
+// Chaperone negative test — E501 (field overwrite leak, H8)
+// When a tracked field is reassigned within the same method without
+// dropping the previous allocation, the old value silently leaks.
+// The Chaperone must detect this, mirroring the S7 variable-overwrite
+// check (local variable reassignment already triggers E501).
+//
+// expect: E501
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+class Holder {
+    let inner as Buf;
+    func init(this) {
+        this.inner = Buf(1);
+    }
+    public:
+    func double_assign(this) -> nil {
+        this.inner = Buf(1);   // first assignment in this function: OK
+        this.inner = Buf(2);   // overwrites Buf(1) without drop → E501
+    }
+}
+
+export func main() -> i64 {
+    let h = Holder();
+    h.double_assign();
+    return 0;
+}

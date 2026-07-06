@@ -141,6 +141,10 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
 
     if (!terminates) {
         for (auto& [name, st] : state) {
+            // H8: skip field-state entries (keys containing '.'). Field state
+            // is tracked per-method for overwrite detection only; fields are
+            // owned by the object and not leaked at function exit.
+            if (name.find('.') != std::string::npos) continue;
             if (st == State::Live && param_names.count(name) == 0) {
                 // Only report leaks for locals allocated inside this function,
                 // not for borrowed parameters (the caller owns those).

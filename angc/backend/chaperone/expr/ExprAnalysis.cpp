@@ -235,18 +235,53 @@ void Chaperone::analyzeExpr(Context& ctx,
             return;
         }
 
-        // --- Target is a field (this.f = ...): S6 field ownership move ---
+        // --- Target is a field (this.f = ...): S6 field ownership move + H8 field overwrite leak ---
         // External field writes are already blocked by the type checker (private
         // fields, E336), so this only fires inside methods/constructors. The
         // sound rule is unique_ptr field semantics: assigning a tracked Live
         // variable to a field MOVES its ownership into the field — the source
         // becomes invalid (E507 on later use). This prevents the double-free
         // where both the field's owning object (cascade-drop) and the source
-        // would free the same allocation. (We don't track per-field state, so
-        // the field's previous value leaking is out of scope — addressed with
-        // field-state tracking later.)
+        // would free the same allocation.
+        //
+        // H8: track per-field ownership state for `this` fields so that
+        // overwriting a field that already holds a tracked allocation is
+        // detected as a leak (E501), mirroring the S7 variable-overwrite check.
+        // Field state is keyed as "this.<fieldname>" in the StateMap — the '.'
+        // character is not valid in Angara identifiers, so there's no collision
+        // with variable names. Only fields of tracked types are registered;
+        // non-tracked fields (i64, string, etc.) are ignored.
         if (auto* get = dynamic_cast<const GetExpr*>(asgn->target.get())) {
             analyzeExpr(ctx, get->object, state);   // catch UAF on the object
+
+            // H8: build a field-state key for `this.field` accesses.
+            std::string field_key;
+            if (dynamic_cast<const ThisExpr*>(get->object.get())) {
+                field_key = "this." + get->name.lexeme;
+            }
+
+            if (!field_key.empty()) {
+                auto& expr_types = ctx.tc.getExpressionTypes();
+                auto tt = expr_types.find(asgn->target.get());
+                bool field_is_tracked = tt != expr_types.end() && tt->second &&
+                                        isTrackedTypeObj(ctx, *tt->second);
+
+                if (field_is_tracked) {
+                    auto fit = state.find(field_key);
+                    // H8: if the field already holds a Live tracked allocation,
+                    // overwriting it without a drop is a leak (mirrors S7).
+                    if (fit != state.end() && fit->second == State::Live) {
+                        diag(ctx, get->name,
+                            "\xf0\x9f\xa7\xac Unfolded molecule — field `" +
+                            get->name.lexeme + "` held a live allocation that "
+                            "is overwritten by this assignment without being "
+                            "dropped.",
+                            "E501");
+                    }
+                    state[field_key] = State::Live;
+                }
+            }
+
             if (rhs_is_move_source) {
                 state[move_src] = State::Moved;
             }
