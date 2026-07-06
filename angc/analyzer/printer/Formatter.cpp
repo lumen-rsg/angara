@@ -622,6 +622,7 @@ std::any Formatter::visit(const AwaitExpr& expr) {
 #include "Stmt.h"
 namespace angara {
     void Formatter::visit(std::shared_ptr<const DropStmt> stmt) {
-        m_out << "drop " << stmt->name.lexeme << ";\n";
+        // H8: use fmtExpr to handle both `drop x` and `drop this.field`.
+        m_out << "drop " << fmtExpr(stmt->target) << ";\n";
     }
 } // namespace angara

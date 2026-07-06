@@ -286,7 +286,20 @@ static std::set<std::string> collectGuaranteedDrops(const std::shared_ptr<Stmt>&
     }
 
     if (auto* d = dynamic_cast<const DropStmt*>(stmt.get())) {
-        result.insert(d->name.lexeme);
+        // H8: extract the state-map key from the drop target.
+        if (auto* ve = dynamic_cast<const VarExpr*>(d->target.get())) {
+            result.insert(ve->name.lexeme);
+        } else if (auto* get = dynamic_cast<const GetExpr*>(d->target.get())) {
+            std::string obj_name;
+            if (dynamic_cast<const ThisExpr*>(get->object.get())) {
+                obj_name = "this";
+            } else if (auto* ove = dynamic_cast<const VarExpr*>(get->object.get())) {
+                obj_name = ove->name.lexeme;
+            }
+            if (!obj_name.empty()) {
+                result.insert(obj_name + "." + get->name.lexeme);
+            }
+        }
         return result;
     }
 
@@ -415,18 +428,71 @@ void Chaperone::analyzeStmt(Context& ctx,
 
     // --- DropStmt ---
     if (auto* drop = dynamic_cast<const DropStmt*>(stmt.get())) {
-        auto it = state.find(drop->name.lexeme);
+        // H8: determine the state-map key for the drop target.
+        //   - `drop x`         → key = "x" (VarExpr)
+        //   - `drop this.f`    → key = "this.f" (GetExpr on ThisExpr)
+        //   - `drop obj.f`     → key = "obj.f" (GetExpr on VarExpr)
+        std::string key;
+        const Token* diag_tok = &drop->name;  // source location for diagnostics
+
+        if (auto* ve = dynamic_cast<const VarExpr*>(drop->target.get())) {
+            key = ve->name.lexeme;
+            diag_tok = &ve->name;
+        } else if (auto* get = dynamic_cast<const GetExpr*>(drop->target.get())) {
+            // Build the field key: "<object>.<field>".
+            // For `this.field`, object is ThisExpr → use "this".
+            // For `obj.field`, object is VarExpr → use the variable name.
+            std::string obj_name;
+            if (dynamic_cast<const ThisExpr*>(get->object.get())) {
+                obj_name = "this";
+            } else if (auto* ove = dynamic_cast<const VarExpr*>(get->object.get())) {
+                obj_name = ove->name.lexeme;
+            }
+            if (!obj_name.empty()) {
+                key = obj_name + "." + get->name.lexeme;
+                diag_tok = &get->name;
+            }
+        }
+
+        if (key.empty()) {
+            // Unsupported drop target (e.g., complex expression).
+            diag(ctx, drop->name,
+                "Cannot drop this expression — drop only supports variables "
+                "and field access (`drop x` or `drop this.field`).",
+                "E503");
+            return;
+        }
+
+        auto it = state.find(key);
         if (it == state.end() || it->second == State::Uninit) {
-            // Variable not tracked — check if it's a built-in heap-allocated
+            // Variable/field not tracked — check if it's a heap-allocated
             // type (string, list, record, etc.) that we can still drop.
             bool is_heap_var = false;
+
+            // H8: for field drops (GetExpr target), check the field's resolved
+            // type via the TypeChecker. If it's a tracked field that wasn't yet
+            // registered in the state map (e.g., assigned in a constructor or
+            // previous method call), register it now so we can drop it.
+            if (it == state.end() && dynamic_cast<const GetExpr*>(drop->target.get())) {
+                auto& expr_types = ctx.tc.getExpressionTypes();
+                auto tt = expr_types.find(drop->target.get());
+                if (tt != expr_types.end() && tt->second) {
+                    if (isTrackedTypeObj(ctx, *tt->second)) {
+                        // Tracked field not yet in state map — register and drop.
+                        state[key] = State::Dropped;
+                        return;
+                    } else if (isHeapAllocatedType(ctx, *tt->second)) {
+                        is_heap_var = true;
+                    }
+                }
+            }
 
             // For variables not in the state map (globals, undeclared), resolve
             // via the symbol table. For Uninit locals (declared but not tracked),
             // look up the type via the TypeChecker's variable-types map.
             if (it == state.end()) {
                 auto sym = const_cast<SymbolTable&>(
-                    ctx.tc.getSymbolTable()).resolve(drop->name.lexeme);
+                    ctx.tc.getSymbolTable()).resolve(key);
                 if (sym && sym->type) {
                     is_heap_var = isHeapAllocatedType(ctx, *sym->type);
                 }
@@ -435,7 +501,7 @@ void Chaperone::analyzeStmt(Context& ctx,
                 // local but not tracked (e.g. string, list). Walk the TypeChecker's
                 // variable-types map to find its type by name.
                 for (const auto& [decl, vtype] : ctx.tc.getVariableTypes()) {
-                    if (decl && decl->name.lexeme == drop->name.lexeme && vtype) {
+                    if (decl && decl->name.lexeme == key && vtype) {
                         is_heap_var = isHeapAllocatedType(ctx, *vtype);
                         break;
                     }
@@ -444,24 +510,24 @@ void Chaperone::analyzeStmt(Context& ctx,
             if (is_heap_var) {
                 // Register and drop it — the codegen will emit finalize+free
                 // which cleans up interior buffers via __ang_gc_finalize.
-                state[drop->name.lexeme] = State::Dropped;
+                state[key] = State::Dropped;
             } else {
-                diag(ctx, drop->name,
-                    "⚠️ Cannot drop `" + drop->name.lexeme + "` — not a tracked allocation.",
+                diag(ctx, *diag_tok,
+                    "\xe2\x9a\xa0\xef\xb8\x8f Cannot drop `" + key + "` — not a tracked allocation.",
                     "E503");
             }
         } else if (it->second == State::Dropped) {
-            diag(ctx, drop->name,
-                "⚠️ Cannot drop `" + drop->name.lexeme + "` — it was already dropped, "
+            diag(ctx, *diag_tok,
+                "\xe2\x9a\xa0\xef\xb8\x8f Cannot drop `" + key + "` — it was already dropped, "
                 "moved, or escaped. It's no longer live and cannot be dropped again.",
                 "E503");
         } else if (it->second == State::Escaped) {
-            diag(ctx, drop->name,
-                "⚠️ Cannot drop `" + drop->name.lexeme + "` — ownership was transferred.",
+            diag(ctx, *diag_tok,
+                "\xe2\x9a\xa0\xef\xb8\x8f Cannot drop `" + key + "` — ownership was transferred.",
                 "E503");
         } else if (it->second == State::Moved) {
-            diag(ctx, drop->name,
-                "⚠️ Double denaturation — `" + drop->name.lexeme + "` had its ownership "
+            diag(ctx, *diag_tok,
+                "\xe2\x9a\xa0\xef\xb8\x8f Double denaturation — `" + key + "` had its ownership "
                 "moved to another variable; dropping it would double-free. Drop the new owner instead.",
                 "E503");
         } else {

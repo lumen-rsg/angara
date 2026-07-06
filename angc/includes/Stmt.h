@@ -536,10 +536,15 @@ namespace angara {
     };
 
     // v5: `drop x;` — explicit deallocation via the Allocator.
+    // H8: extended to support `drop this.field` via a target expression.
+    // `name` provides the source location for diagnostics; `target` is the
+    // expression to drop (VarExpr for simple vars, GetExpr for field access).
     struct DropStmt final : Stmt {
         const Token name;
+        const std::shared_ptr<Expr> target;  // VarExpr for `drop x`, GetExpr for `drop this.field`
 
-        DropStmt(Token name) : name(std::move(name)) {}
+        DropStmt(Token name, std::shared_ptr<Expr> target)
+            : name(std::move(name)), target(std::move(target)) {}
 
         void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const DropStmt>(self));

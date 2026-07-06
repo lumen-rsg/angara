@@ -1,0 +1,32 @@
+// Chaperone positive test — field drop before reassignment (H8)
+// Dropping a tracked field before reassigning it should satisfy the
+// Chaperone — no leak, no double-free. The field was set in init
+// but dropped and reassigned in a later method call.
+//
+// exit: 0
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+class Holder {
+    let inner as Buf;
+    func init(this) {
+        this.inner = Buf(1);
+    }
+    public:
+    func safe_replace(this) -> nil {
+        drop this.inner;
+        this.inner = Buf(2);   // OK: previous was dropped
+    }
+}
+
+export func main() -> i64 {
+    let h = Holder();
+    h.safe_replace();
+    drop h;
+    return 0;
+}

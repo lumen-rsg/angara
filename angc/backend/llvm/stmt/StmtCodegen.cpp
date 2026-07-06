@@ -536,6 +536,101 @@ void LLVMBackend::cgTry(const TryStmt& s) {
 }
 
 void LLVMBackend::cgDrop(const DropStmt& s) {
+    // H8: support field drops (`drop this.field`) in addition to variable drops.
+    // For field drops, load the field value via __ang_record_get, cascade-drop
+    // its sub-fields, finalize+free it, then store nil back via __ang_record_set.
+    if (auto* get = dynamic_cast<const GetExpr*>(s.target.get())) {
+        // --- Field drop: drop obj.field ---
+        auto* obj = cg(get->object);
+
+        // Get the field value from the object.
+        auto* field_val = callRtByName("__ang_record_get",
+            {obj, builder->CreateGlobalStringPtr(get->name.lexeme, "fld")});
+
+        // Nil guard: if the field is nil, skip deallocation.
+        auto* tag = builder->CreateExtractValue(field_val, {0});
+        auto* is_nil = builder->CreateICmpEQ(
+            tag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_NIL));
+
+        auto* fn = builder->GetInsertBlock()->getParent();
+        auto* notnil_bb = llvm::BasicBlock::Create(*ctx, "dropf_notnil", fn);
+        auto* nil_bb    = llvm::BasicBlock::Create(*ctx, "dropf_nil", fn);
+        auto* after_bb  = llvm::BasicBlock::Create(*ctx, "dropf_after", fn);
+
+        builder->CreateCondBr(is_nil, nil_bb, notnil_bb);
+
+        // --- Not-nil path: cascade-drop the field's sub-fields, then finalize+free ---
+        builder->SetInsertPoint(notnil_bb);
+
+        auto* payload = builder->CreateExtractValue(field_val, {1});
+        auto* ptr_i64 = builder->CreateBitCast(payload, llvm::Type::getInt64Ty(*ctx));
+        auto* obj_ptr = builder->CreateIntToPtr(ptr_i64, llvm::PointerType::get(*ctx, 0));
+
+        // Look up the field's type for cascade-dropping its sub-fields.
+        auto& expr_types = m_type_checker.getExpressionTypes();
+        auto et = expr_types.find(s.target.get());
+        if (et != expr_types.end() && et->second) {
+            auto& type = et->second;
+
+            auto drop_field = [&](const std::string& field_name) {
+                auto* name_gstr = builder->CreateGlobalStringPtr(field_name, "ffld");
+                auto* f_val = callRtByName("__ang_record_get", {field_val, name_gstr});
+                auto* f_payload = builder->CreateExtractValue(f_val, {1});
+                auto* f_ptr_i64 = builder->CreateBitCast(f_payload, llvm::Type::getInt64Ty(*ctx));
+                auto* f_obj_ptr = builder->CreateIntToPtr(f_ptr_i64, llvm::PointerType::get(*ctx, 0));
+                callRtByName("__ang_gc_finalize", {f_obj_ptr});
+                callRtByName("__ang_gc_free",
+                    {f_obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
+            };
+
+            auto is_heap_field = [&](const std::shared_ptr<Type>& t) -> bool {
+                if (!t) return false;
+                auto name = t->toString();
+                return m_tracked_types.count(name) || m_heap_types.count(name);
+            };
+
+            if (type->kind == TypeKind::DATA) {
+                auto dt = std::dynamic_pointer_cast<DataType>(type);
+                if (dt) {
+                    for (auto& [fname, finfo] : dt->fields) {
+                        if (is_heap_field(finfo.type))
+                            drop_field(fname);
+                    }
+                }
+            } else if (type->kind == TypeKind::CLASS || type->kind == TypeKind::INSTANCE) {
+                std::shared_ptr<ClassType> ct;
+                if (type->kind == TypeKind::INSTANCE)
+                    ct = std::dynamic_pointer_cast<InstanceType>(type)->class_type;
+                else
+                    ct = std::dynamic_pointer_cast<ClassType>(type);
+                if (ct) {
+                    for (auto& [fname, finfo] : ct->fields) {
+                        if (is_heap_field(finfo.type))
+                            drop_field(fname);
+                    }
+                }
+            }
+        }
+
+        // Finalize + free the field value itself.
+        callRtByName("__ang_gc_finalize", {obj_ptr});
+        callRtByName("__ang_gc_free",
+            {obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
+
+        builder->CreateBr(after_bb);
+
+        // --- Nil path: nothing to deallocate ---
+        builder->SetInsertPoint(nil_bb);
+        builder->CreateBr(after_bb);
+
+        // --- After: store nil back to the field ---
+        builder->SetInsertPoint(after_bb);
+        callRtByName("__ang_record_set",
+            {obj, builder->CreateGlobalStringPtr(get->name.lexeme, "fld_set"), makeNil()});
+        return;
+    }
+
+    // --- Variable drop: existing logic ---
     llvm::Value* val = nullptr;
     llvm::AllocaInst* alloca = nullptr;
     bool is_async_slot = false;

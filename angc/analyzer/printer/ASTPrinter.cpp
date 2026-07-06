@@ -561,7 +561,14 @@ namespace angara {
     }
 
     void ASTPrinter::visit(std::shared_ptr<const DropStmt> stmt) {
-        printHeader("DropStmt: " + stmt->name.lexeme);
+        // H8: show target expression info.
+        std::string desc = "DropStmt";
+        if (auto* ve = dynamic_cast<const VarExpr*>(stmt->target.get())) {
+            desc += ": " + ve->name.lexeme;
+        } else if (auto* get = dynamic_cast<const GetExpr*>(stmt->target.get())) {
+            desc += ": " + get->name.lexeme + " (field)";
+        }
+        printHeader(desc);
     }
 
     void ASTPrinter::visit(std::shared_ptr<const TypeAliasStmt> stmt) {

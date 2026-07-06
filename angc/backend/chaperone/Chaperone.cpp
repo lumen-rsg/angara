@@ -203,7 +203,13 @@ void Chaperone::collectVarRefs(const std::shared_ptr<Stmt>& stmt,
         collectVarRefs(fi->body, out);
         return;
     }
-    if (auto* dr = dynamic_cast<const DropStmt*>(stmt.get())) { out.insert(dr->name.lexeme); return; }
+    if (auto* dr = dynamic_cast<const DropStmt*>(stmt.get())) {
+        // H8: walk the drop target expression to collect variable references.
+        // For `drop x` this captures `x`; for `drop this.field` this captures
+        // nothing new (`this` is implicit); for `drop obj.field` this captures `obj`.
+        collectExprVarRefs(dr->target, out);
+        return;
+    }
     // H1: TryStmt was previously unhandled — closures inside try/catch/finally
     // had invisible captures. Recurse into try body, catch body, and finally body.
     if (auto* tr = dynamic_cast<const TryStmt*>(stmt.get())) {
