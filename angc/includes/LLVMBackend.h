@@ -197,6 +197,17 @@ namespace angara {
         /// Declares external wrappers for native module exports.
         void codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stmt>>& statements);
 
+        /// LIB-7: Emits a runtime type guard for one argument of a native-call wrapper.
+        /// Creates a "next" and "error" basic block; emits a check of \p arg_val
+        /// against \p expected, branching to next on success or error on failure.
+        /// The error block throws with a descriptive message including \p fn_name
+        /// and \p param_idx.  Returns the "next" basic block where the caller
+        /// should resume insertion (the next guard or the native call).
+        llvm::BasicBlock* emitNativeTypeGuard(llvm::Value* arg_val,
+                                              const std::shared_ptr<Type>& expected,
+                                              const std::string& fn_name,
+                                              int param_idx);
+
         /// Generates the C-compatible main() or _start entry point.
         void codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& statements,
                                  const std::string& module_name,

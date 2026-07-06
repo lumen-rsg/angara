@@ -1663,6 +1663,206 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
     }
 }
 
+// LIB-7: Returns a human-readable type name for use in runtime error messages.
+static std::string typeNameForError(const std::shared_ptr<Type>& type) {
+    if (!type) return "unknown";
+    switch (type->kind) {
+        case TypeKind::PRIMITIVE: {
+            auto& name = std::dynamic_pointer_cast<PrimitiveType>(type)->name;
+            if (name == "i64") return "integer";
+            if (name == "f64") return "float";
+            if (name == "bool") return "bool";
+            if (name == "string") return "string";
+            return name;
+        }
+        case TypeKind::LIST:   return "list";
+        case TypeKind::RECORD: return "record";
+        case TypeKind::NIL:    return "nil";
+        case TypeKind::ANY:    return "any";
+        case TypeKind::OPTIONAL:
+            return typeNameForError(std::dynamic_pointer_cast<OptionalType>(type)->wrapped_type) + "?";
+        case TypeKind::FUTURE: return "future";
+        case TypeKind::INSTANCE:
+            return std::dynamic_pointer_cast<InstanceType>(type)->class_type->name;
+        default:
+            return type->toString();
+    }
+}
+
+llvm::BasicBlock* LLVMBackend::emitNativeTypeGuard(
+    llvm::Value* arg_val,
+    const std::shared_ptr<Type>& expected,
+    const std::string& fn_name,
+    int param_idx)
+{
+    using namespace llvm;
+    auto* fn = builder->GetInsertBlock()->getParent();
+    auto* i32_ty = llvm::Type::getInt32Ty(*ctx);
+
+    // If "any", no guard needed — return current block unchanged.
+    if (expected && expected->kind == TypeKind::ANY) {
+        return builder->GetInsertBlock();
+    }
+
+    // Create the success-continuation block and the error block.
+    auto* next_bb = BasicBlock::Create(*ctx, "guard.ok", fn);
+    auto* err_bb  = BasicBlock::Create(*ctx, "guard.err", fn);
+
+    // Helper: emit a check that arg's tag equals a specific TAG_* constant.
+    auto emitTagCheck = [&](int tag_val) -> Value* {
+        auto* tag = builder->CreateExtractValue(arg_val, {0});
+        return builder->CreateICmpEQ(tag, ConstantInt::get(i32_ty, tag_val));
+    };
+
+    // Helper: after confirming arg is TAG_OBJ, load the heap object's type
+    // from the ObjHeader and compare against an expected OBJ_* constant.
+    // Returns an i1 condition; creates intermediate blocks as needed.
+    auto emitHeapTypeCheck = [&](int expected_obj_type) -> Value* {
+        auto* is_obj = emitTagCheck(TAG_OBJ);
+        auto* check_bb = BasicBlock::Create(*ctx, "heap.ck", fn);
+        // Branch: if obj → check_bb to inspect header; otherwise → err_bb.
+        builder->CreateCondBr(is_obj, check_bb, err_bb);
+        builder->SetInsertPoint(check_bb);
+        auto* payload = builder->CreateExtractValue(arg_val, {1});
+        auto* ptr = builder->CreateIntToPtr(payload, llvm::PointerType::get(*ctx, 0));
+        auto* hdr_ptr = builder->CreateBitCast(ptr, llvm::PointerType::get(i32_ty, 0));
+        auto* obj_type = builder->CreateLoad(i32_ty, hdr_ptr);
+        return builder->CreateICmpEQ(obj_type, ConstantInt::get(i32_ty, expected_obj_type));
+    };
+
+    Value* cond = nullptr;
+    bool    used_heap_check = false; // true when the check already branched to err_bb on tag!=OBJ
+
+    if (!expected) {
+        cond = ConstantInt::getTrue(*ctx);
+    } else {
+        switch (expected->kind) {
+            case TypeKind::PRIMITIVE: {
+                auto& name = std::dynamic_pointer_cast<PrimitiveType>(expected)->name;
+                if (name == "i64")      cond = emitTagCheck(TAG_I64);
+                else if (name == "f64") cond = emitTagCheck(TAG_F64);
+                else if (name == "bool")cond = emitTagCheck(TAG_BOOL);
+                else if (name == "string") {
+                    cond = emitHeapTypeCheck(OBJ_STRING);
+                    used_heap_check = true;
+                }
+                else cond = ConstantInt::getTrue(*ctx); // unknown primitive — skip
+                break;
+            }
+            case TypeKind::NIL:
+                cond = emitTagCheck(TAG_NIL);
+                break;
+            case TypeKind::LIST:
+                cond = emitHeapTypeCheck(OBJ_LIST);
+                used_heap_check = true;
+                break;
+            case TypeKind::RECORD:
+                cond = emitHeapTypeCheck(OBJ_RECORD);
+                used_heap_check = true;
+                break;
+            case TypeKind::INSTANCE:
+                // Native class instance — OBJ_NATIVE_INSTANCE
+                cond = emitHeapTypeCheck(OBJ_NATIVE_INSTANCE);
+                used_heap_check = true;
+                break;
+            case TypeKind::FUTURE:
+                // Futures are stored as native instances at runtime
+                cond = emitHeapTypeCheck(OBJ_NATIVE_INSTANCE);
+                used_heap_check = true;
+                break;
+            case TypeKind::OPTIONAL: {
+                auto opt = std::dynamic_pointer_cast<OptionalType>(expected);
+                auto* is_nil = emitTagCheck(TAG_NIL);
+                // Create a block to check the inner type when arg is not nil.
+                auto* inner_bb = BasicBlock::Create(*ctx, "opt.ck", fn);
+                builder->CreateCondBr(is_nil, next_bb, inner_bb);
+                builder->SetInsertPoint(inner_bb);
+                // Recurse: emit the inner-type check into inner_bb.
+                // This will create its own next_bb'/err_bb' and branch.
+                // We need to capture the result carefully.
+                // Instead, handle inner check inline for simplicity.
+                auto inner_kind = opt->wrapped_type->kind;
+                Value* inner_cond = nullptr;
+                bool inner_heap = false;
+                if (inner_kind == TypeKind::PRIMITIVE) {
+                    auto& iname = std::dynamic_pointer_cast<PrimitiveType>(opt->wrapped_type)->name;
+                    if (iname == "i64")      inner_cond = emitTagCheck(TAG_I64);
+                    else if (iname == "f64") inner_cond = emitTagCheck(TAG_F64);
+                    else if (iname == "bool")inner_cond = emitTagCheck(TAG_BOOL);
+                    else if (iname == "string") {
+                        inner_cond = emitHeapTypeCheck(OBJ_STRING);
+                        inner_heap = true;
+                    }
+                    else inner_cond = ConstantInt::getTrue(*ctx);
+                } else if (inner_kind == TypeKind::LIST) {
+                    inner_cond = emitHeapTypeCheck(OBJ_LIST);
+                    inner_heap = true;
+                } else if (inner_kind == TypeKind::RECORD) {
+                    inner_cond = emitHeapTypeCheck(OBJ_RECORD);
+                    inner_heap = true;
+                } else if (inner_kind == TypeKind::INSTANCE || inner_kind == TypeKind::FUTURE) {
+                    inner_cond = emitHeapTypeCheck(OBJ_NATIVE_INSTANCE);
+                    inner_heap = true;
+                } else {
+                    inner_cond = ConstantInt::getTrue(*ctx);
+                }
+                // After the inner check, the builder is at either:
+                // - the inner check block (simple tag check), or
+                // - the heap.ck block (heap type check)
+                // In both cases we need to branch to next_bb or err_bb.
+                if (!inner_heap) {
+                    builder->CreateCondBr(inner_cond, next_bb, err_bb);
+                } else {
+                    // emitHeapTypeCheck already branched on tag!=OBJ to err_bb;
+                    // we still need to branch on obj_type match.
+                    builder->CreateCondBr(inner_cond, next_bb, err_bb);
+                }
+                // Set insert point to next_bb for the caller.
+                builder->SetInsertPoint(next_bb);
+                return next_bb;
+            }
+            default:
+                cond = ConstantInt::getTrue(*ctx);
+                break;
+        }
+    }
+
+    // Branch to success or error (unless already handled, e.g. by optional).
+    if (!used_heap_check) {
+        builder->CreateCondBr(cond, next_bb, err_bb);
+    } else {
+        // emitHeapTypeCheck already branched on tag!=OBJ to err_bb;
+        // we still need the final branch on the obj_type comparison.
+        builder->CreateCondBr(cond, next_bb, err_bb);
+    }
+
+    // --- Build the error block ---
+    builder->SetInsertPoint(err_bb);
+    std::string msg = fn_name + "(param " + std::to_string(param_idx) + "): expected ";
+    msg += typeNameForError(expected);
+    auto* msg_global = builder->CreateGlobalString(msg);
+    auto* msg_i8 = builder->CreateBitCast(msg_global, llvm::PointerType::get(*ctx, 0));
+    auto* str_fn = mod->getFunction("__ang_string_from_c");
+    llvm::Value* str_val = nullptr;
+    if (str_fn)
+        str_val = builder->CreateCall(str_fn, {msg_i8});
+    else
+        str_val = ConstantAggregateZero::get(objType);
+    auto* exc_fn = mod->getFunction("__ang_exception_new");
+    llvm::Value* exc_val = nullptr;
+    if (exc_fn)
+        exc_val = builder->CreateCall(exc_fn, {str_val});
+    else
+        exc_val = ConstantAggregateZero::get(objType);
+    auto* throw_fn = mod->getFunction("__ang_throw");
+    if (throw_fn) builder->CreateCall(throw_fn, {exc_val});
+    builder->CreateUnreachable();
+
+    // --- Continue from success block ---
+    builder->SetInsertPoint(next_bb);
+    return next_bb;
+}
+
 void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stmt>>& statements) {
     for (const auto& stmt : statements) {
         auto attach = std::dynamic_pointer_cast<const AttachStmt>(stmt);
@@ -1703,6 +1903,16 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
                                     {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
                                      llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), mi++)});
                                 builder->CreateStore(&marg, ep2);
+                            }
+                            // LIB-7: emit runtime type guards for each argument
+                            {
+                                auto self_type = std::make_shared<InstanceType>(class_type);
+                                emitNativeTypeGuard(mw->getArg(0), self_type,
+                                                    class_type->name + "." + method_name, 0);
+                                for (int pi = 0; pi < mpc; pi++) {
+                                    emitNativeTypeGuard(mw->getArg(pi + 1), mft->param_types[pi],
+                                                        class_type->name + "." + method_name, pi + 1);
+                                }
                             }
                             auto* nmf = mod->getFunction(nmn);
                             auto* mr = builder->CreateCall(nmf, {
@@ -1752,6 +1962,11 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
                         {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0),
                          llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), ai++)});
                     builder->CreateStore(&arg, ep);
+                }
+                // LIB-7: emit runtime type guards for each argument
+                for (int pi = 0; pi < param_count; pi++) {
+                    emitNativeTypeGuard(wf->getArg(pi), func_type->param_types[pi],
+                                        mod_name + "." + export_name, pi);
                 }
                 auto* nf = mod->getFunction(native_name);
                 if (!nf) {
