@@ -77,8 +77,40 @@ namespace angara {
                                        "right operands.", "E428");
                     }
                 } else {
-                    error(expr.op, "Operator '" + expr.op.lexeme + "' requires numeric operands, but got '" +
-                                   left_type->toString() + "' and '" + right_type->toString() + "'.", "E352");
+                    // LANG-13: check for user-defined opSub/opDiv/opRem on the left type.
+                    std::shared_ptr<ClassType> cls;
+                    if (left_type->kind == TypeKind::INSTANCE) {
+                        auto inst = std::dynamic_pointer_cast<InstanceType>(left_type);
+                        if (inst) cls = inst->class_type;
+                    } else if (left_type->kind == TypeKind::CLASS) {
+                        cls = std::dynamic_pointer_cast<ClassType>(left_type);
+                    }
+                    if (cls) {
+                        const char* op_name = nullptr;
+                        switch (expr.op.type) {
+                            case TokenType::MINUS:   op_name = "opSub"; break;
+                            case TokenType::SLASH:   op_name = "opDiv"; break;
+                            case TokenType::PERCENT: op_name = "opRem"; break;
+                            default: break;
+                        }
+                        if (op_name) {
+                            const auto* op_info = cls->findProperty(op_name);
+                            if (op_info && op_info->type->kind == TypeKind::FUNCTION) {
+                                auto ft = std::dynamic_pointer_cast<FunctionType>(op_info->type);
+                                if (ft && ft->param_types.size() == 1) {
+                                    result_type = ft->return_type;
+                                } else {
+                                    error(expr.op, std::string("Method '") + op_name +
+                                          "' must have signature 'func " + op_name +
+                                          "(self, other) -> T' (1 parameter).", "E429");
+                                }
+                            }
+                        }
+                    }
+                    if (!result_type || result_type->kind == TypeKind::ERROR) {
+                        error(expr.op, "Operator '" + expr.op.lexeme + "' requires numeric operands, but got '" +
+                                       left_type->toString() + "' and '" + right_type->toString() + "'.", "E352");
+                    }
                 }
                 break;
 
@@ -109,7 +141,29 @@ namespace angara {
                     // SIMD-5: scalar broadcast: scalar * vec
                     result_type = right_type;
                 } else {
-                    error(expr.op, "Operator '*' can only be used with two numbers (arithmetic) or 'string * number' (repetition).", "E353");
+                    // LANG-13: check for user-defined opMul on the left type.
+                    std::shared_ptr<ClassType> cls;
+                    if (left_type->kind == TypeKind::INSTANCE) {
+                        auto inst = std::dynamic_pointer_cast<InstanceType>(left_type);
+                        if (inst) cls = inst->class_type;
+                    } else if (left_type->kind == TypeKind::CLASS) {
+                        cls = std::dynamic_pointer_cast<ClassType>(left_type);
+                    }
+                    if (cls) {
+                        const auto* op_info = cls->findProperty("opMul");
+                        if (op_info && op_info->type->kind == TypeKind::FUNCTION) {
+                            auto ft = std::dynamic_pointer_cast<FunctionType>(op_info->type);
+                            if (ft && ft->param_types.size() == 1) {
+                                result_type = ft->return_type;
+                            } else {
+                                error(expr.op, "Method 'opMul' must have signature 'func opMul(self, other) -> T' "
+                                       "(1 parameter).", "E430");
+                            }
+                        }
+                    }
+                    if (!result_type || result_type->kind == TypeKind::ERROR) {
+                        error(expr.op, "Operator '*' can only be used with two numbers (arithmetic) or 'string * number' (repetition).", "E353");
+                    }
                 }
                 break;
 
@@ -140,7 +194,29 @@ namespace angara {
                     // SIMD-5: scalar broadcast: scalar + vec
                     result_type = right_type;
                 } else {
-                    error(expr.op, "Operator '+' can only be used with two numbers (addition) or two strings (concatenation).", "E354");
+                    // LANG-13: check for user-defined opAdd on the left type.
+                    std::shared_ptr<ClassType> cls;
+                    if (left_type->kind == TypeKind::INSTANCE) {
+                        auto inst = std::dynamic_pointer_cast<InstanceType>(left_type);
+                        if (inst) cls = inst->class_type;
+                    } else if (left_type->kind == TypeKind::CLASS) {
+                        cls = std::dynamic_pointer_cast<ClassType>(left_type);
+                    }
+                    if (cls) {
+                        const auto* op_info = cls->findProperty("opAdd");
+                        if (op_info && op_info->type->kind == TypeKind::FUNCTION) {
+                            auto ft = std::dynamic_pointer_cast<FunctionType>(op_info->type);
+                            if (ft && ft->param_types.size() == 1) {
+                                result_type = ft->return_type;
+                            } else {
+                                error(expr.op, "Method 'opAdd' must have signature 'func opAdd(self, other) -> T' "
+                                       "(1 parameter).", "E431");
+                            }
+                        }
+                    }
+                    if (!result_type || result_type->kind == TypeKind::ERROR) {
+                        error(expr.op, "Operator '+' can only be used with two numbers (addition) or two strings (concatenation).", "E354");
+                    }
                 }
                 break;
 

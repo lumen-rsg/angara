@@ -370,6 +370,17 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
                     return callRtByName("__ang_string_concat", {l, r});
                 }
             }
+            // LANG-13: check for user-defined opAdd on the left type.
+            {
+                auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+                if (lt != m_type_checker.getExpressionTypes().end()) {
+                    std::string mname = resolveMethodForType(lt->second, "opAdd");
+                    if (!mname.empty()) {
+                        llvm::Function* mf = mod->getFunction(mname);
+                        if (mf) return builder->CreateCall(mf, {l, r});
+                    }
+                }
+            }
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
             auto* bothI64 = builder->CreateAnd(
@@ -419,6 +430,17 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
                     return makeF64(builder->CreateFSub(ld, rd));
                 }
             }
+            // LANG-13: check for user-defined opSub on the left type.
+            {
+                auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+                if (lt != m_type_checker.getExpressionTypes().end()) {
+                    std::string mname = resolveMethodForType(lt->second, "opSub");
+                    if (!mname.empty()) {
+                        llvm::Function* mf = mod->getFunction(mname);
+                        if (mf) return builder->CreateCall(mf, {l, r});
+                    }
+                }
+            }
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
             auto* eitherF64 = builder->CreateOr(
@@ -463,6 +485,17 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
                     return callRtByName("__ang_string_repeat", {l, r});
                 }
             }
+            // LANG-13: check for user-defined opMul on the left type.
+            {
+                auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+                if (lt != m_type_checker.getExpressionTypes().end()) {
+                    std::string mname = resolveMethodForType(lt->second, "opMul");
+                    if (!mname.empty()) {
+                        llvm::Function* mf = mod->getFunction(mname);
+                        if (mf) return builder->CreateCall(mf, {l, r});
+                    }
+                }
+            }
             auto* lTag = getTag(l);
             auto* rTag = getTag(r);
             auto* eitherF64 = builder->CreateOr(
@@ -502,6 +535,17 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
                     auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
                     auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
                     return makeF64(builder->CreateFDiv(ld, rd));
+                }
+            }
+            // LANG-13: check for user-defined opDiv on the left type.
+            {
+                auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+                if (lt != m_type_checker.getExpressionTypes().end()) {
+                    std::string mname = resolveMethodForType(lt->second, "opDiv");
+                    if (!mname.empty()) {
+                        llvm::Function* mf = mod->getFunction(mname);
+                        if (mf) return builder->CreateCall(mf, {l, r});
+                    }
                 }
             }
             auto* lTag = getTag(l);
@@ -546,6 +590,17 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
                     auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
                     auto* rd = isFloat(rtype) ? getF64(r) : builder->CreateSIToFP(getI64(r), f64_ty);
                     return makeF64(builder->CreateFRem(ld, rd));
+                }
+            }
+            // LANG-13: check for user-defined opRem on the left type.
+            {
+                auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
+                if (lt != m_type_checker.getExpressionTypes().end()) {
+                    std::string mname = resolveMethodForType(lt->second, "opRem");
+                    if (!mname.empty()) {
+                        llvm::Function* mf = mod->getFunction(mname);
+                        if (mf) return builder->CreateCall(mf, {l, r});
+                    }
                 }
             }
             auto* lTag = getTag(l);
@@ -739,6 +794,17 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
 llvm::Value* LLVMBackend::cgUnary(const Unary& e) {
     auto* o=cg(e.right); if(!o) return makeNil();
     if (e.op.type==TokenType::MINUS) {
+        // LANG-13: check for user-defined opNeg method on the type.
+        {
+            auto rt = m_type_checker.getExpressionTypes().find(e.right.get());
+            if (rt != m_type_checker.getExpressionTypes().end()) {
+                std::string mname = resolveMethodForType(rt->second, "opNeg");
+                if (!mname.empty()) {
+                    llvm::Function* mf = mod->getFunction(mname);
+                    if (mf) return builder->CreateCall(mf, {o});
+                }
+            }
+        }
         auto* tag = getTag(o);
         auto* isF64 = builder->CreateICmpEQ(tag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_F64));
         auto* fn = builder->GetInsertBlock()->getParent();

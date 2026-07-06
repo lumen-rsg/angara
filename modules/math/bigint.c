@@ -210,6 +210,154 @@ AngaraObject Angara_BigInt_opCmp(int arg_count, AngaraObject* args) {
 }
 
 // ---------------------------------------------------------------------------
+// Operator-overload wrappers (LANG-13: enable + - * / % and unary -)
+// These delegate to the existing arithmetic methods.
+// ---------------------------------------------------------------------------
+
+AngaraObject Angara_BigInt_opAdd(int arg_count, AngaraObject* args) {
+    return Angara_BigInt_add(arg_count, args);
+}
+AngaraObject Angara_BigInt_opSub(int arg_count, AngaraObject* args) {
+    return Angara_BigInt_sub(arg_count, args);
+}
+AngaraObject Angara_BigInt_opMul(int arg_count, AngaraObject* args) {
+    return Angara_BigInt_mul(arg_count, args);
+}
+AngaraObject Angara_BigInt_opDiv(int arg_count, AngaraObject* args) {
+    return Angara_BigInt_div(arg_count, args);
+}
+AngaraObject Angara_BigInt_opRem(int arg_count, AngaraObject* args) {
+    return Angara_BigInt_rem(arg_count, args);
+}
+AngaraObject Angara_BigInt_opNeg(int arg_count, AngaraObject* args) {
+    return Angara_BigInt_neg(arg_count, args);
+}
+
+// ---------------------------------------------------------------------------
+// Additional GMP-backed methods
+// ---------------------------------------------------------------------------
+
+/// pow(self, exp: BigInt) -> BigInt   (exponent must be >= 0 and fit in unsigned long)
+AngaraObject Angara_BigInt_pow(int arg_count, AngaraObject* args) {
+    mpz_ptr a = bigint_arg(arg_count, args, 0);
+    mpz_ptr b = bigint_arg(arg_count, args, 1);
+    if (!a || !b) return ang_nil();
+    if (mpz_sgn(b) < 0) { ang_api->throw_error("bigint.pow: negative exponent is not supported."); return ang_nil(); }
+    if (!mpz_fits_ulong_p(b)) { ang_api->throw_error("bigint.pow: exponent too large."); return ang_nil(); }
+    unsigned long exp = mpz_get_ui(b);
+    BigInt* r = (BigInt*)malloc(sizeof(BigInt));
+    if (!r) { ang_api->throw_error("bigint: out of memory."); return ang_nil(); }
+    mpz_init(r->value);
+    mpz_pow_ui(r->value, a, exp);
+    return ang_api->native_instance_new(r, bigint_finalize, "BigInt");
+}
+
+/// gcd(self, other: BigInt) -> BigInt
+AngaraObject Angara_BigInt_gcd(int arg_count, AngaraObject* args) {
+    mpz_ptr a = bigint_arg(arg_count, args, 0);
+    mpz_ptr b = bigint_arg(arg_count, args, 1);
+    if (!a || !b) return ang_nil();
+    BigInt* r = (BigInt*)malloc(sizeof(BigInt));
+    if (!r) { ang_api->throw_error("bigint: out of memory."); return ang_nil(); }
+    mpz_init(r->value);
+    mpz_gcd(r->value, a, b);
+    return ang_api->native_instance_new(r, bigint_finalize, "BigInt");
+}
+
+/// lcm(self, other: BigInt) -> BigInt
+AngaraObject Angara_BigInt_lcm(int arg_count, AngaraObject* args) {
+    mpz_ptr a = bigint_arg(arg_count, args, 0);
+    mpz_ptr b = bigint_arg(arg_count, args, 1);
+    if (!a || !b) return ang_nil();
+    BigInt* r = (BigInt*)malloc(sizeof(BigInt));
+    if (!r) { ang_api->throw_error("bigint: out of memory."); return ang_nil(); }
+    mpz_init(r->value);
+    mpz_lcm(r->value, a, b);
+    return ang_api->native_instance_new(r, bigint_finalize, "BigInt");
+}
+
+/// sqrt(self) -> BigInt   (integer truncating square root)
+AngaraObject Angara_BigInt_sqrt(int arg_count, AngaraObject* args) {
+    mpz_ptr a = bigint_arg(arg_count, args, 0);
+    if (!a) return ang_nil();
+    if (mpz_sgn(a) < 0) { ang_api->throw_error("bigint.sqrt: negative argument."); return ang_nil(); }
+    BigInt* r = (BigInt*)malloc(sizeof(BigInt));
+    if (!r) { ang_api->throw_error("bigint: out of memory."); return ang_nil(); }
+    mpz_init(r->value);
+    mpz_sqrt(r->value, a);
+    return ang_api->native_instance_new(r, bigint_finalize, "BigInt");
+}
+
+/// bit_and(self, other: BigInt) -> BigInt
+AngaraObject Angara_BigInt_bit_and(int arg_count, AngaraObject* args) {
+    mpz_ptr a = bigint_arg(arg_count, args, 0);
+    mpz_ptr b = bigint_arg(arg_count, args, 1);
+    if (!a || !b) return ang_nil();
+    BigInt* r = (BigInt*)malloc(sizeof(BigInt));
+    if (!r) { ang_api->throw_error("bigint: out of memory."); return ang_nil(); }
+    mpz_init(r->value);
+    mpz_and(r->value, a, b);
+    return ang_api->native_instance_new(r, bigint_finalize, "BigInt");
+}
+
+/// bit_or(self, other: BigInt) -> BigInt
+AngaraObject Angara_BigInt_bit_or(int arg_count, AngaraObject* args) {
+    mpz_ptr a = bigint_arg(arg_count, args, 0);
+    mpz_ptr b = bigint_arg(arg_count, args, 1);
+    if (!a || !b) return ang_nil();
+    BigInt* r = (BigInt*)malloc(sizeof(BigInt));
+    if (!r) { ang_api->throw_error("bigint: out of memory."); return ang_nil(); }
+    mpz_init(r->value);
+    mpz_ior(r->value, a, b);
+    return ang_api->native_instance_new(r, bigint_finalize, "BigInt");
+}
+
+/// bit_xor(self, other: BigInt) -> BigInt
+AngaraObject Angara_BigInt_bit_xor(int arg_count, AngaraObject* args) {
+    mpz_ptr a = bigint_arg(arg_count, args, 0);
+    mpz_ptr b = bigint_arg(arg_count, args, 1);
+    if (!a || !b) return ang_nil();
+    BigInt* r = (BigInt*)malloc(sizeof(BigInt));
+    if (!r) { ang_api->throw_error("bigint: out of memory."); return ang_nil(); }
+    mpz_init(r->value);
+    mpz_xor(r->value, a, b);
+    return ang_api->native_instance_new(r, bigint_finalize, "BigInt");
+}
+
+/// shift_left(self, n: i64) -> BigInt   (shift left by n bits; n must be >= 0)
+AngaraObject Angara_BigInt_shift_left(int arg_count, AngaraObject* args) {
+    mpz_ptr a = bigint_arg(arg_count, args, 0);
+    if (!a) return ang_nil();
+    int64_t n = ang_as_i64(args[1]);
+    if (n < 0) { ang_api->throw_error("bigint.shift_left: negative shift count."); return ang_nil(); }
+    BigInt* r = (BigInt*)malloc(sizeof(BigInt));
+    if (!r) { ang_api->throw_error("bigint: out of memory."); return ang_nil(); }
+    mpz_init(r->value);
+    mpz_mul_2exp(r->value, a, (mp_bitcnt_t)n);
+    return ang_api->native_instance_new(r, bigint_finalize, "BigInt");
+}
+
+/// shift_right(self, n: i64) -> BigInt   (shift right by n bits; n must be >= 0)
+AngaraObject Angara_BigInt_shift_right(int arg_count, AngaraObject* args) {
+    mpz_ptr a = bigint_arg(arg_count, args, 0);
+    if (!a) return ang_nil();
+    int64_t n = ang_as_i64(args[1]);
+    if (n < 0) { ang_api->throw_error("bigint.shift_right: negative shift count."); return ang_nil(); }
+    BigInt* r = (BigInt*)malloc(sizeof(BigInt));
+    if (!r) { ang_api->throw_error("bigint: out of memory."); return ang_nil(); }
+    mpz_init(r->value);
+    mpz_tdiv_q_2exp(r->value, a, (mp_bitcnt_t)n);
+    return ang_api->native_instance_new(r, bigint_finalize, "BigInt");
+}
+
+/// sign(self) -> i64   (-1 if negative, 0 if zero, 1 if positive)
+AngaraObject Angara_BigInt_sign(int arg_count, AngaraObject* args) {
+    mpz_ptr a = bigint_arg(arg_count, args, 0);
+    if (!a) return ang_i64(0);
+    return ang_i64((int64_t)mpz_sgn(a));
+}
+
+// ---------------------------------------------------------------------------
 // Export tables
 // ---------------------------------------------------------------------------
 
@@ -221,8 +369,24 @@ static const AngaraMethodDef BIGINT_METHODS[] = {
     {"rem",       (AngaraMethodFn)Angara_BigInt_rem,       "BigInt->BigInt"},
     {"neg",       (AngaraMethodFn)Angara_BigInt_neg,       "->BigInt"},
     {"abs",       (AngaraMethodFn)Angara_BigInt_abs,       "->BigInt"},
+    {"pow",       (AngaraMethodFn)Angara_BigInt_pow,       "BigInt->BigInt"},
+    {"gcd",       (AngaraMethodFn)Angara_BigInt_gcd,       "BigInt->BigInt"},
+    {"lcm",       (AngaraMethodFn)Angara_BigInt_lcm,       "BigInt->BigInt"},
+    {"sqrt",      (AngaraMethodFn)Angara_BigInt_sqrt,      "->BigInt"},
+    {"bit_and",   (AngaraMethodFn)Angara_BigInt_bit_and,   "BigInt->BigInt"},
+    {"bit_or",    (AngaraMethodFn)Angara_BigInt_bit_or,    "BigInt->BigInt"},
+    {"bit_xor",   (AngaraMethodFn)Angara_BigInt_bit_xor,   "BigInt->BigInt"},
+    {"shift_left",  (AngaraMethodFn)Angara_BigInt_shift_left,  "i->BigInt"},
+    {"shift_right", (AngaraMethodFn)Angara_BigInt_shift_right, "i->BigInt"},
+    {"sign",      (AngaraMethodFn)Angara_BigInt_sign,      "->i"},
     {"to_string", (AngaraMethodFn)Angara_BigInt_to_string, "->s"},
     {"to_i64",    (AngaraMethodFn)Angara_BigInt_to_i64,    "->i"},
+    {"opAdd",     (AngaraMethodFn)Angara_BigInt_opAdd,     "BigInt->BigInt"},
+    {"opSub",     (AngaraMethodFn)Angara_BigInt_opSub,     "BigInt->BigInt"},
+    {"opMul",     (AngaraMethodFn)Angara_BigInt_opMul,     "BigInt->BigInt"},
+    {"opDiv",     (AngaraMethodFn)Angara_BigInt_opDiv,     "BigInt->BigInt"},
+    {"opRem",     (AngaraMethodFn)Angara_BigInt_opRem,     "BigInt->BigInt"},
+    {"opNeg",     (AngaraMethodFn)Angara_BigInt_opNeg,     "->BigInt"},
     {"opEquals",  (AngaraMethodFn)Angara_BigInt_opEquals,  "BigInt->b"},
     {"opCmp",     (AngaraMethodFn)Angara_BigInt_opCmp,     "BigInt->i"},
     {NULL, NULL, NULL}
