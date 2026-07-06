@@ -24,10 +24,6 @@ static void finalize_pg(void* data) {
 }
 
 AngaraObject Angara_postgres_connect(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("postgres.connect(conninfo) expects a string.");
-        return ang_nil();
-    }
     const char* conninfo = ang_api->as_cstr(args[0]);
 
     PGconn* conn = PQconnectdb(conninfo);
@@ -148,10 +144,6 @@ static AngaraObject pg_cell_to_angara(PGresult* res, int row, int col) {
 }
 
 AngaraObject Angara_PgConn_query(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !IS_STR(args[1])) {
-        ang_api->throw_error("pg.query(sql, params?) expects a string.");
-        return ang_nil();
-    }
     PgConn* p = (PgConn*)ang_api->native_instance_data(args[0]);
     if (!p || !p->conn) { ang_api->throw_error("pg.query: connection is closed."); return ang_nil(); }
 
@@ -206,10 +198,6 @@ AngaraObject Angara_PgConn_query_one(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_PgConn_execute(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !IS_STR(args[1])) {
-        ang_api->throw_error("pg.execute(sql, params?) expects a string.");
-        return ang_nil();
-    }
     PgConn* p = (PgConn*)ang_api->native_instance_data(args[0]);
     if (!p || !p->conn) { ang_api->throw_error("pg.execute: connection is closed."); return ang_nil(); }
 

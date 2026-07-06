@@ -23,10 +23,6 @@ static void list_push_str(AngaraObject list, const char* val) {
 }
 
 AngaraObject Angara_args_parse(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !IS_LIST(args[0])) {
-        ang_api->throw_error("parse(argv, spec?) expects a list of strings.");
-        return ang_nil();
-    }
 
     AngaraObject argv = args[0];
     size_t argv_len = ang_api->list_len(argv);

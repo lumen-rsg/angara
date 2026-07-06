@@ -15,10 +15,6 @@
 #define IS_LIST(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_LIST)
 
 AngaraObject Angara_process_exec(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("exec(cmd) expects one string argument.");
-        return ang_nil();
-    }
 
     FILE* fp = popen(ang_api->as_cstr(args[0]), "r");
     if (!fp) {
@@ -59,10 +55,6 @@ AngaraObject Angara_process_exec(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_process_run(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("run(cmd, args?, options?) expects at least a string.");
-        return ang_nil();
-    }
 
     const char* cmd = ang_api->as_cstr(args[0]);
 
@@ -204,10 +196,6 @@ static void finalize_process(void* data) {
 }
 
 AngaraObject Angara_process_spawn(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("spawn(cmd, args?) expects at least a string.");
-        return ang_nil();
-    }
 
     const char* cmd = ang_api->as_cstr(args[0]);
 
@@ -277,10 +265,6 @@ AngaraObject Angara_process_spawn(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Process_write(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !IS_STR(args[1])) {
-        ang_api->throw_error("write(data) expects a string.");
-        return ang_nil();
-    }
     ProcessData* pd = (ProcessData*)ang_api->native_instance_data(args[0]);
     if (!pd || pd->stdin_fd < 0) return ang_nil();
 
@@ -371,10 +355,6 @@ AngaraObject Angara_process_getppid(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_process_kill(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !ang_is_i64(args[0])) {
-        ang_api->throw_error("kill(pid, signal?) expects an i64 pid.");
-        return ang_nil();
-    }
     int sig = SIGTERM;
     if (arg_count >= 2 && ang_is_i64(args[1])) sig = (int)ang_as_i64(args[1]);
     kill((pid_t)ang_as_i64(args[0]), sig);

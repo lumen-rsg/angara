@@ -276,10 +276,6 @@ AngaraObject Angara_http_server_server(int arg_count, AngaraObject* args) {
 AngaraObject Angara_HttpServer_on_request(int arg_count, AngaraObject* args) {
     /* srv.on_request(callback) — callback receives {id, method, path, headers, body?}
        and must return {status?, body?, headers?} or a plain string. */
-    if (arg_count < 2) {
-        ang_api->throw_error("http.on_request(callback) expects a closure.");
-        return ang_nil();
-    }
     HttpServer* srv = (HttpServer*)ang_api->native_instance_data(args[0]);
     if (!srv) return ang_nil();
 
@@ -479,10 +475,6 @@ AngaraObject Angara_HttpServer_poll(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_HttpServer_respond(int arg_count, AngaraObject* args) {
     /* srv.respond(req_id, status, body, headers?) */
-    if (arg_count < 4) {
-        ang_api->throw_error("http.respond(req_id, status, body, headers?) expects at least 3 args.");
-        return ang_nil();
-    }
 
     HttpServer* srv = (HttpServer*)ang_api->native_instance_data(args[0]);
     if (!srv) return ang_nil();

@@ -36,10 +36,6 @@ static void throw_assert_error(const char* type, AngaraObject actual, AngaraObje
 
 
 AngaraObject Angara_assert_that(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ang_is_obj(args[1])) {
-        ang_api->throw_error("assert.that(condition, message) expects 'any' and 'string'.");
-        return ang_nil();
-    }
 
     if (!ang_api->truthy(args[0])) {
         const char* msg = ang_api->as_cstr(args[1]);
@@ -50,10 +46,6 @@ AngaraObject Angara_assert_that(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_assert_eq(int arg_count, AngaraObject* args) {
-    if (arg_count != 3 || !ang_is_obj(args[2])) {
-        ang_api->throw_error("assert.eq(actual, expected, message) expects 'any', 'any', and 'string'.");
-        return ang_nil();
-    }
 
     if (!ang_api->equals(args[0], args[1])) {
         throw_assert_error("EQUAL", args[0], args[1], ang_api->as_cstr(args[2]));
@@ -63,10 +55,6 @@ AngaraObject Angara_assert_eq(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_assert_ne(int arg_count, AngaraObject* args) {
-    if (arg_count != 3 || !ang_is_obj(args[2])) {
-        ang_api->throw_error("assert.ne(actual, expected, message) expects 'any', 'any', and 'string'.");
-        return ang_nil();
-    }
 
     if (ang_api->equals(args[0], args[1])) {
         throw_assert_error("NOT EQUAL", args[0], args[1], ang_api->as_cstr(args[2]));
@@ -76,10 +64,6 @@ AngaraObject Angara_assert_ne(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_assert_fail(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_obj(args[0])) {
-        ang_api->throw_error("assert.fail(message) expects a 'string'.");
-        return ang_nil();
-    }
 
     char buffer[1024];
     snprintf(buffer, 1024, "Explicit Failure: %s", ang_api->as_cstr(args[0]));

@@ -33,10 +33,6 @@ static int qsort_compare(const void* va, const void* vb) {
 }
 
 AngaraObject Angara_sort_sorted(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_LIST(args[0])) {
-        ang_api->throw_error("sorted(list) expects a list argument.");
-        return ang_nil();
-    }
     size_t len = ang_api->list_len(args[0]);
     if (len <= 1) {
         AngaraObject copy = ang_api->list_new();
@@ -63,10 +59,6 @@ AngaraObject Angara_sort_sorted(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_sort_reverse(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_LIST(args[0])) {
-        ang_api->throw_error("reverse(list) expects a list argument.");
-        return ang_nil();
-    }
     size_t len = ang_api->list_len(args[0]);
     AngaraObject result = ang_api->list_new();
     for (size_t i = len; i > 0; i--) {
@@ -78,10 +70,6 @@ AngaraObject Angara_sort_reverse(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_sort_contains(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_LIST(args[0])) {
-        ang_api->throw_error("contains(sorted_list, value) expects a list and a value.");
-        return ang_nil();
-    }
     size_t len = ang_api->list_len(args[0]);
     size_t lo = 0, hi = len;
     while (lo < hi) {
@@ -97,10 +85,6 @@ AngaraObject Angara_sort_contains(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_sort_binary_search(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_LIST(args[0])) {
-        ang_api->throw_error("binary_search(sorted_list, value) expects a list and a value.");
-        return ang_nil();
-    }
     size_t len = ang_api->list_len(args[0]);
     size_t lo = 0, hi = len;
     while (lo < hi) {
@@ -116,10 +100,6 @@ AngaraObject Angara_sort_binary_search(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_sort_dedup(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_LIST(args[0])) {
-        ang_api->throw_error("dedup(sorted_list) expects a list argument.");
-        return ang_nil();
-    }
     size_t len = ang_api->list_len(args[0]);
     if (len == 0) return ang_api->list_new();
 
@@ -142,10 +122,6 @@ AngaraObject Angara_sort_dedup(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_sort_merge(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_LIST(args[0]) || !IS_LIST(args[1])) {
-        ang_api->throw_error("merge(list1, list2) expects two sorted lists.");
-        return ang_nil();
-    }
     size_t len1 = ang_api->list_len(args[0]), len2 = ang_api->list_len(args[1]);
     size_t i = 0, j = 0;
     AngaraObject result = ang_api->list_new();

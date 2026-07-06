@@ -13,10 +13,6 @@
 #include <zlib.h>
 
 AngaraObject Angara_archive_gzip_compress(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("gzip_compress(data) expects a string.");
-        return ang_nil();
-    }
 
     const uint8_t* data = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t data_len = ang_api->str_len(args[0]);
@@ -36,10 +32,6 @@ AngaraObject Angara_archive_gzip_compress(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_archive_gzip_decompress(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("gzip_decompress(data, original_size?) expects a string.");
-        return ang_nil();
-    }
 
     const uint8_t* data = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t data_len = ang_api->str_len(args[0]);
@@ -73,10 +65,6 @@ AngaraObject Angara_archive_gzip_decompress(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_archive_zlib_compress(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("zlib_compress(data) expects a string.");
-        return ang_nil();
-    }
 
     const uint8_t* data = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t data_len = ang_api->str_len(args[0]);
@@ -96,10 +84,6 @@ AngaraObject Angara_archive_zlib_compress(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_archive_zlib_decompress(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("zlib_decompress(data, original_size?) expects a string.");
-        return ang_nil();
-    }
 
     const uint8_t* data = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t data_len = ang_api->str_len(args[0]);
@@ -133,10 +117,6 @@ AngaraObject Angara_archive_zlib_decompress(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_archive_crc32(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("crc32(data) expects a string.");
-        return ang_nil();
-    }
     const uint8_t* data = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     uLong crc = crc32(0L, data, (uInt)len);
@@ -144,10 +124,6 @@ AngaraObject Angara_archive_crc32(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_archive_adler32(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("adler32(data) expects a string.");
-        return ang_nil();
-    }
     const uint8_t* data = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     uLong adler = adler32(0L, data, (uInt)len);
@@ -175,10 +151,6 @@ static int mkdirs(const char* path) {
 }
 
 AngaraObject Angara_archive_zip_extract(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("zip_extract(path, dest_dir) expects two strings.");
-        return ang_nil();
-    }
 
     const char* filepath = ang_api->as_cstr(args[0]);
     const char* destdir = ang_api->as_cstr(args[1]);
@@ -222,10 +194,6 @@ AngaraObject Angara_archive_zip_extract(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_archive_zip_create(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_LIST(args[1])) {
-        ang_api->throw_error("zip_create(output_path, file_paths) expects a string and a list.");
-        return ang_nil();
-    }
 
     const char* output_path = ang_api->as_cstr(args[0]);
     size_t nfiles = ang_api->list_len(args[1]);
@@ -273,10 +241,6 @@ AngaraObject Angara_archive_zip_create(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_archive_tar_extract(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("tar_extract(path, dest_dir) expects two strings.");
-        return ang_nil();
-    }
 
     const char* filepath = ang_api->as_cstr(args[0]);
     const char* destdir = ang_api->as_cstr(args[1]);
@@ -318,10 +282,6 @@ AngaraObject Angara_archive_tar_extract(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_archive_tar_create(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_LIST(args[1])) {
-        ang_api->throw_error("tar_create(output_path, file_paths) expects a string and a list.");
-        return ang_nil();
-    }
 
     const char* output_path = ang_api->as_cstr(args[0]);
 

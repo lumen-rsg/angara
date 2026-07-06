@@ -196,10 +196,6 @@ static int parse_mqtt_url(const char* url, MqttUrlInfo* info) {
 }
 
 AngaraObject Angara_mqtt_connect(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("mqtt.connect(url, options?) expects a string URL.");
-        return ang_nil();
-    }
 
     static bool mosquitto_initialized = false;
     if (!mosquitto_initialized) {
@@ -310,10 +306,6 @@ AngaraObject Angara_Connection_publish(int arg_count, AngaraObject* args) {
     MqttConnectionData* conn = (MqttConnectionData*)ang_api->native_instance_data(args[0]);
     if (!conn || !conn->mosq) { ang_api->throw_error("mqtt: invalid connection."); return ang_nil(); }
 
-    if (arg_count < 3 || !IS_STR(args[1]) || !IS_STR(args[2])) {
-        ang_api->throw_error("Connection.publish(topic, payload, qos?) expects strings.");
-        return ang_nil();
-    }
 
     const char* topic = ang_api->as_cstr(args[1]);
     const char* payload = ang_api->as_cstr(args[2]);
@@ -336,10 +328,6 @@ AngaraObject Angara_Connection_subscribe(int arg_count, AngaraObject* args) {
     MqttConnectionData* conn = (MqttConnectionData*)ang_api->native_instance_data(args[0]);
     if (!conn || !conn->mosq) { ang_api->throw_error("mqtt: invalid connection."); return ang_nil(); }
 
-    if (arg_count < 2 || !IS_STR(args[1])) {
-        ang_api->throw_error("Connection.subscribe(topic, qos?) expects a string topic.");
-        return ang_nil();
-    }
 
     const char* topic = ang_api->as_cstr(args[1]);
     int qos = 0;
@@ -360,10 +348,6 @@ AngaraObject Angara_Connection_unsubscribe(int arg_count, AngaraObject* args) {
     MqttConnectionData* conn = (MqttConnectionData*)ang_api->native_instance_data(args[0]);
     if (!conn || !conn->mosq) { ang_api->throw_error("mqtt: invalid connection."); return ang_nil(); }
 
-    if (arg_count < 2 || !IS_STR(args[1])) {
-        ang_api->throw_error("Connection.unsubscribe(topic) expects a string topic.");
-        return ang_nil();
-    }
 
     int rc = mosquitto_unsubscribe(conn->mosq, NULL, ang_api->as_cstr(args[1]));
     if (rc != MOSQ_ERR_SUCCESS) {

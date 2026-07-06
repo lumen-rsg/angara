@@ -23,10 +23,6 @@ static void finalize_db(void* data) {
 }
 
 AngaraObject Angara_sqlite_open(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("open(path) expects a string.");
-        return ang_nil();
-    }
     const char* path = ang_api->as_cstr(args[0]);
 
     DbConn* dbc = (DbConn*)calloc(1, sizeof(DbConn));
@@ -45,10 +41,6 @@ AngaraObject Angara_sqlite_open(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_SqliteDb_execute(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !IS_STR(args[1])) {
-        ang_api->throw_error("execute(sql, params?) expects a string.");
-        return ang_nil();
-    }
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (!dbc || !dbc->db) { ang_api->throw_error("execute: database is closed."); return ang_nil(); }
 
@@ -131,10 +123,6 @@ AngaraObject Angara_SqliteDb_execute(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_SqliteDb_query_one(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !IS_STR(args[1])) {
-        ang_api->throw_error("query_one(sql, params?) expects a string.");
-        return ang_nil();
-    }
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (!dbc || !dbc->db) return ang_nil();
 
@@ -179,10 +167,6 @@ AngaraObject Angara_SqliteDb_query_one(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_SqliteDb_run(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !IS_STR(args[1])) {
-        ang_api->throw_error("run(sql, params?) expects a string.");
-        return ang_nil();
-    }
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (!dbc || !dbc->db) { ang_api->throw_error("run: database is closed."); return ang_nil(); }
 
@@ -303,10 +287,6 @@ static void finalize_pool(void* data) {
 }
 
 AngaraObject Angara_sqlite_pool(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !IS_STR(args[0]) || !ang_is_i64(args[1])) {
-        ang_api->throw_error("sqlite.pool(path, size) expects a string and an i64.");
-        return ang_nil();
-    }
     const char* path = ang_api->as_cstr(args[0]);
     int64_t size = ang_as_i64(args[1]);
     if (size < 1) size = 1;

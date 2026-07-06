@@ -44,201 +44,105 @@ AngaraObject Angara_math_EPSILON(int arg_count, AngaraObject* args) {
 
 
 AngaraObject Angara_math_abs_i64(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_i64(args[0])) {
-        ang_api->throw_error("abs_i64(x) expects one i64 argument.");
-        return ang_nil();
-    }
     int64_t v = ang_as_i64(args[0]);
     return ang_i64(v < 0 ? -v : v);
 }
 
 AngaraObject Angara_math_abs_f64(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("abs_f64(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(fabs(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_sqrt(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("sqrt(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(sqrt(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_cbrt(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("cbrt(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(cbrt(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_pow(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ang_is_f64(args[0]) || !ang_is_f64(args[1])) {
-        ang_api->throw_error("pow(base, exp) expects two f64 arguments.");
-        return ang_nil();
-    }
     return ang_f64(pow(ang_as_f64(args[0]), ang_as_f64(args[1])));
 }
 
 AngaraObject Angara_math_exp(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("exp(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(exp(ang_as_f64(args[0])));
 }
 
 
 AngaraObject Angara_math_log(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("log(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(log(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_log2(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("log2(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(log2(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_log10(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("log10(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(log10(ang_as_f64(args[0])));
 }
 
 
 AngaraObject Angara_math_sin(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("sin(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(sin(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_cos(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("cos(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(cos(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_tan(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("tan(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(tan(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_asin(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("asin(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(asin(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_acos(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("acos(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(acos(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_atan(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("atan(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(atan(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_atan2(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ang_is_f64(args[0]) || !ang_is_f64(args[1])) {
-        ang_api->throw_error("atan2(y, x) expects two f64 arguments.");
-        return ang_nil();
-    }
     return ang_f64(atan2(ang_as_f64(args[0]), ang_as_f64(args[1])));
 }
 
 AngaraObject Angara_math_hypot(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ang_is_f64(args[0]) || !ang_is_f64(args[1])) {
-        ang_api->throw_error("hypot(x, y) expects two f64 arguments.");
-        return ang_nil();
-    }
     return ang_f64(hypot(ang_as_f64(args[0]), ang_as_f64(args[1])));
 }
 
 
 AngaraObject Angara_math_ceil(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("ceil(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(ceil(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_floor(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("floor(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(floor(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_round(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("round(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(round(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_trunc(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("trunc(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(trunc(ang_as_f64(args[0])));
 }
 
 
 AngaraObject Angara_math_min(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ang_is_f64(args[0]) || !ang_is_f64(args[1])) {
-        ang_api->throw_error("min(a, b) expects two f64 arguments.");
-        return ang_nil();
-    }
     double a = ang_as_f64(args[0]), b = ang_as_f64(args[1]);
     return ang_f64(a < b ? a : b);
 }
 
 AngaraObject Angara_math_max(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ang_is_f64(args[0]) || !ang_is_f64(args[1])) {
-        ang_api->throw_error("max(a, b) expects two f64 arguments.");
-        return ang_nil();
-    }
     double a = ang_as_f64(args[0]), b = ang_as_f64(args[1]);
     return ang_f64(a > b ? a : b);
 }
 
 AngaraObject Angara_math_clamp(int arg_count, AngaraObject* args) {
-    if (arg_count != 3 || !ang_is_f64(args[0]) || !ang_is_f64(args[1]) || !ang_is_f64(args[2])) {
-        ang_api->throw_error("clamp(val, lo, hi) expects three f64 arguments.");
-        return ang_nil();
-    }
     double v = ang_as_f64(args[0]), lo = ang_as_f64(args[1]), hi = ang_as_f64(args[2]);
     if (v < lo) return ang_f64(lo);
     if (v > hi) return ang_f64(hi);
@@ -247,10 +151,6 @@ AngaraObject Angara_math_clamp(int arg_count, AngaraObject* args) {
 
 
 AngaraObject Angara_math_sign(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("sign(x) expects one f64 argument.");
-        return ang_nil();
-    }
     double v = ang_as_f64(args[0]);
     if (v > 0.0) return ang_i64(1);
     if (v < 0.0) return ang_i64(-1);
@@ -258,42 +158,22 @@ AngaraObject Angara_math_sign(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_math_to_radians(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("to_radians(degrees) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(ang_as_f64(args[0]) * 3.14159265358979323846 / 180.0);
 }
 
 AngaraObject Angara_math_to_degrees(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("to_degrees(radians) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_f64(ang_as_f64(args[0]) * 180.0 / 3.14159265358979323846);
 }
 
 AngaraObject Angara_math_is_nan(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("is_nan(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_bool(isnan(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_is_infinite(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_f64(args[0])) {
-        ang_api->throw_error("is_infinite(x) expects one f64 argument.");
-        return ang_nil();
-    }
     return ang_bool(isinf(ang_as_f64(args[0])));
 }
 
 AngaraObject Angara_math_lerp(int arg_count, AngaraObject* args) {
-    if (arg_count != 3 || !ang_is_f64(args[0]) || !ang_is_f64(args[1]) || !ang_is_f64(args[2])) {
-        ang_api->throw_error("lerp(a, b, t) expects three f64 arguments.");
-        return ang_nil();
-    }
     double a = ang_as_f64(args[0]), b = ang_as_f64(args[1]), t = ang_as_f64(args[2]);
     return ang_f64(a + (b - a) * t);
 }
@@ -456,18 +336,10 @@ static int64_t gcd_impl(int64_t a, int64_t b) {
 }
 
 AngaraObject Angara_math_gcd(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ang_is_i64(args[0]) || !ang_is_i64(args[1])) {
-        ang_api->throw_error("gcd(a, b) expects two i64 arguments.");
-        return ang_nil();
-    }
     return ang_i64(gcd_impl(ang_as_i64(args[0]), ang_as_i64(args[1])));
 }
 
 AngaraObject Angara_math_lcm(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ang_is_i64(args[0]) || !ang_is_i64(args[1])) {
-        ang_api->throw_error("lcm(a, b) expects two i64 arguments.");
-        return ang_nil();
-    }
     int64_t a = ang_as_i64(args[0]), b = ang_as_i64(args[1]);
     if (a == 0 || b == 0) return ang_i64(0);
     int64_t g = gcd_impl(a, b);
@@ -477,10 +349,6 @@ AngaraObject Angara_math_lcm(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_math_factorial(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_i64(args[0])) {
-        ang_api->throw_error("factorial(n) expects one i64 argument.");
-        return ang_nil();
-    }
     int64_t n = ang_as_i64(args[0]);
     if (n < 0) { ang_api->throw_error("factorial: n must be >= 0."); return ang_nil(); }
     if (n > 20) { ang_api->throw_error("factorial: overflow for n > 20."); return ang_nil(); }
@@ -490,10 +358,6 @@ AngaraObject Angara_math_factorial(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_math_fibonacci(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_i64(args[0])) {
-        ang_api->throw_error("fibonacci(n) expects one i64 argument.");
-        return ang_nil();
-    }
     int64_t n = ang_as_i64(args[0]);
     if (n < 0) { ang_api->throw_error("fibonacci: n must be >= 0."); return ang_nil(); }
     if (n == 0) return ang_i64(0);
@@ -508,10 +372,6 @@ AngaraObject Angara_math_fibonacci(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_math_is_prime(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_i64(args[0])) {
-        ang_api->throw_error("is_prime(n) expects one i64 argument.");
-        return ang_nil();
-    }
     int64_t n = ang_as_i64(args[0]);
     if (n < 2) return ang_bool(false);
     if (n < 4) return ang_bool(true);

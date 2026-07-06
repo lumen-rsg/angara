@@ -263,10 +263,6 @@ static JsonHandle angara_to_json(AngaraObject obj) {
 
 
 AngaraObject Angara_jwt_create(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !IS_REC(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("create(payload, secret, algorithm?) expects a record and a string.");
-        return ang_nil();
-    }
 
     const char* alg = "HS256";
     if (arg_count >= 3 && IS_STR(args[2])) alg = ang_api->as_cstr(args[2]);
@@ -324,10 +320,6 @@ AngaraObject Angara_jwt_create(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_jwt_verify(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("verify(token, secret) expects two strings.");
-        return ang_nil();
-    }
 
     const char* token = ang_api->as_cstr(args[0]);
     size_t token_len = ang_api->str_len(args[0]);
@@ -432,10 +424,6 @@ AngaraObject Angara_jwt_verify(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_jwt_decode(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("decode(token) expects a string.");
-        return ang_nil();
-    }
 
     const char* token = ang_api->as_cstr(args[0]);
     size_t token_len = ang_api->str_len(args[0]);

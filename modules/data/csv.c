@@ -95,10 +95,6 @@ static AngaraObject parse_row(CsvParser* p) {
 }
 
 AngaraObject Angara_csv_parse(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("csv.parse(text, delimiter?) expects a string and optional delimiter.");
-        return ang_nil();
-    }
 
     char delim = ',';
     if (arg_count >= 2 && IS_STR(args[1]) && ang_api->str_len(args[1]) > 0) {
@@ -124,10 +120,6 @@ AngaraObject Angara_csv_parse(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_csv_parse_record(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("csv.parse_record(text, delimiter?) expects a string and optional delimiter.");
-        return ang_nil();
-    }
 
     char delim = ',';
     if (arg_count >= 2 && IS_STR(args[1]) && ang_api->str_len(args[1]) > 0) {
@@ -171,10 +163,6 @@ AngaraObject Angara_csv_parse_record(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_csv_stringify(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !IS_LIST(args[0])) {
-        ang_api->throw_error("csv.stringify(rows, delimiter?) expects a list of lists.");
-        return ang_nil();
-    }
 
     char delim = ',';
     if (arg_count >= 2 && IS_STR(args[1]) && ang_api->str_len(args[1]) > 0) {
@@ -241,10 +229,6 @@ AngaraObject Angara_csv_stringify(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_csv_read_file(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("csv.read_file(path, delimiter?) expects a path string.");
-        return ang_nil();
-    }
 
     const char* path = ang_api->as_cstr(args[0]);
     FILE* file = fopen(path, "rb");
@@ -289,10 +273,6 @@ AngaraObject Angara_csv_read_file(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_csv_write_file(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !IS_STR(args[0]) || !IS_LIST(args[1])) {
-        ang_api->throw_error("csv.write_file(path, rows, delimiter?) expects a path and a list of lists.");
-        return ang_nil();
-    }
 
     AngaraObject csv_text = Angara_csv_stringify(arg_count >= 2 ? arg_count - 1 : 1, args + 1);
     if (!IS_STR(csv_text)) return ang_nil();

@@ -10,10 +10,6 @@
 static const char b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 AngaraObject Angara_encoding_base64_encode(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("base64_encode(data) expects one string argument.");
-        return ang_nil();
-    }
     const unsigned char* src = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
 
@@ -46,10 +42,6 @@ static int b64_decode_char(char c) {
 }
 
 AngaraObject Angara_encoding_base64_decode(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("base64_decode(s) expects one string argument.");
-        return ang_nil();
-    }
     const char* src = ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
 
@@ -86,10 +78,6 @@ AngaraObject Angara_encoding_base64_decode(int arg_count, AngaraObject* args) {
 
 
 AngaraObject Angara_encoding_hex_encode(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("hex_encode(data) expects one string argument.");
-        return ang_nil();
-    }
     const unsigned char* src = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -113,10 +101,6 @@ static int hex_val(char c) {
 }
 
 AngaraObject Angara_encoding_hex_decode(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("hex_decode(s) expects one string argument.");
-        return ang_nil();
-    }
     size_t len = ang_api->str_len(args[0]);
     if (len % 2 != 0) {
         ang_api->throw_error("hex_decode: input length must be even.");
@@ -147,10 +131,6 @@ static int is_url_safe(char c) {
 }
 
 AngaraObject Angara_encoding_url_encode(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("url_encode(s) expects one string argument.");
-        return ang_nil();
-    }
     const char* src = ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -173,10 +153,6 @@ AngaraObject Angara_encoding_url_encode(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_encoding_url_decode(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("url_decode(s) expects one string argument.");
-        return ang_nil();
-    }
     const char* src = ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -207,10 +183,6 @@ AngaraObject Angara_encoding_url_decode(int arg_count, AngaraObject* args) {
 static const char b32_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 AngaraObject Angara_encoding_base32_encode(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("base32_encode(data) expects one string argument.");
-        return ang_nil();
-    }
     const unsigned char* src = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
 
@@ -249,10 +221,6 @@ static int b32_val(char c) {
 }
 
 AngaraObject Angara_encoding_base32_decode(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("base32_decode(s) expects one string argument.");
-        return ang_nil();
-    }
     const char* src = ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
 
@@ -282,10 +250,6 @@ AngaraObject Angara_encoding_base32_decode(int arg_count, AngaraObject* args) {
 static const char b64url_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 AngaraObject Angara_encoding_base64url_encode(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("base64url_encode(data) expects one string argument.");
-        return ang_nil();
-    }
     const unsigned char* src = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
 
@@ -318,10 +282,6 @@ static int b64url_decode_char(char c) {
 }
 
 AngaraObject Angara_encoding_base64url_decode(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("base64url_decode(s) expects one string argument.");
-        return ang_nil();
-    }
     const char* src = ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
 

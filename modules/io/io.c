@@ -6,10 +6,6 @@
 #include "Angara.h"
 
 AngaraObject Angara_io_write(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ang_is_i64(args[0]) || !ang_is_obj(args[1])) {
-        ang_api->throw_error("write(stream_id, content) expects an integer and a string.");
-        return ang_nil();
-    }
 
     int64_t stream_id = ang_as_i64(args[0]);
     const char* content = ang_api->as_cstr(args[1]);
@@ -29,10 +25,6 @@ AngaraObject Angara_io_write(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_io_println(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !ang_is_i64(args[0]) || !ang_is_obj(args[1])) {
-        ang_api->throw_error("println(stream_id, content) expects an integer and a string.");
-        return ang_nil();
-    }
 
     int64_t stream_id = ang_as_i64(args[0]);
     const char* content = ang_api->as_cstr(args[1]);
@@ -53,10 +45,6 @@ AngaraObject Angara_io_println(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_io_flush(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_i64(args[0])) {
-        ang_api->throw_error("flush(stream_id) expects an integer stream ID.");
-        return ang_nil();
-    }
 
     int64_t stream_id = ang_as_i64(args[0]);
     if (stream_id == 1) fflush(stdout);
@@ -66,10 +54,6 @@ AngaraObject Angara_io_flush(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_io_read_line(int arg_count, AngaraObject* args) {
-    if (arg_count != 0) {
-        ang_api->throw_error("read_line() expects no arguments.");
-        return ang_nil();
-    }
 
     char* line_buf = NULL;
     size_t line_buf_size = 0;
@@ -91,10 +75,6 @@ AngaraObject Angara_io_read_line(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_io_read_all(int arg_count, AngaraObject* args) {
-    if (arg_count != 0) {
-        ang_api->throw_error("read_all() expects no arguments.");
-        return ang_nil();
-    }
 
     size_t capacity = 4096;
     size_t total_read = 0;
@@ -126,38 +106,22 @@ AngaraObject Angara_io_read_all(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_io_print(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_obj(args[0])) {
-        ang_api->throw_error("print(content) expects one string argument.");
-        return ang_nil();
-    }
     fprintf(stdout, "%s", ang_api->as_cstr(args[0]));
     return ang_nil();
 }
 
 AngaraObject Angara_io_println_auto(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_obj(args[0])) {
-        ang_api->throw_error("println_auto(content) expects one string argument.");
-        return ang_nil();
-    }
     fputs(ang_api->as_cstr(args[0]), stdout);
     fputc('\n', stdout);
     return ang_nil();
 }
 
 AngaraObject Angara_io_eprint(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_obj(args[0])) {
-        ang_api->throw_error("eprint(content) expects one string argument.");
-        return ang_nil();
-    }
     fprintf(stderr, "%s", ang_api->as_cstr(args[0]));
     return ang_nil();
 }
 
 AngaraObject Angara_io_eprintln(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !ang_is_obj(args[0])) {
-        ang_api->throw_error("eprintln(content) expects one string argument.");
-        return ang_nil();
-    }
     fputs(ang_api->as_cstr(args[0]), stderr);
     fputc('\n', stderr);
     return ang_nil();

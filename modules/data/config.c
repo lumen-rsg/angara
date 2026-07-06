@@ -128,10 +128,6 @@ static AngaraObject parse_toml_value(const char* val_str) {
 }
 
 AngaraObject Angara_config_parse_ini(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("parse_ini(text) expects a string.");
-        return ang_nil();
-    }
 
     const char* text = ang_api->as_cstr(args[0]);
     size_t text_len = ang_api->str_len(args[0]);
@@ -192,10 +188,6 @@ AngaraObject Angara_config_parse_ini(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_config_stringify_ini(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_REC(args[0])) {
-        ang_api->throw_error("stringify_ini(record) expects a record.");
-        return ang_nil();
-    }
 
     size_t cap = 4096;
     size_t len = 0;
@@ -234,10 +226,6 @@ AngaraObject Angara_config_stringify_ini(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_config_parse_toml(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("parse_toml(text) expects a string.");
-        return ang_nil();
-    }
 
     const char* text = ang_api->as_cstr(args[0]);
     size_t text_len = ang_api->str_len(args[0]);
@@ -371,10 +359,6 @@ AngaraObject Angara_config_parse_toml(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_config_parse_dotenv(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("parse_dotenv(text) expects a string.");
-        return ang_nil();
-    }
 
     const char* text = ang_api->as_cstr(args[0]);
     size_t text_len = ang_api->str_len(args[0]);
@@ -428,10 +412,6 @@ AngaraObject Angara_config_parse_dotenv(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_config_stringify_dotenv(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_REC(args[0])) {
-        ang_api->throw_error("stringify_dotenv(record) expects a record.");
-        return ang_nil();
-    }
 
     size_t cap = 4096;
     size_t len = 0;

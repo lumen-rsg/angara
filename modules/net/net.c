@@ -34,10 +34,6 @@ static void finalize_tcp_conn(void* data) {
 }
 
 AngaraObject Angara_net_tcp_connect(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !IS_STR(args[0]) || !ang_is_i64(args[1])) {
-        ang_api->throw_error("tcp_connect(host, port, timeout_ms?) expects a string and an i64.");
-        return ang_nil();
-    }
 
     const char* host = ang_api->as_cstr(args[0]);
     int port = (int)ang_as_i64(args[1]);
@@ -113,10 +109,6 @@ AngaraObject Angara_net_tcp_connect(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_TcpConn_send(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !IS_STR(args[1])) {
-        ang_api->throw_error("send(data) expects a string.");
-        return ang_nil();
-    }
     TcpConn* conn = (TcpConn*)ang_api->native_instance_data(args[0]);
     if (!conn || conn->fd < 0) return ang_i64(-1);
 
@@ -452,10 +444,6 @@ AngaraObject Angara_net_udp_socket(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_UdpSocket_send_to(int arg_count, AngaraObject* args) {
-    if (arg_count < 4 || !IS_STR(args[1]) || !IS_STR(args[2]) || !ang_is_i64(args[3])) {
-        ang_api->throw_error("send_to(data, host, port) expects string, string, i64.");
-        return ang_nil();
-    }
     UdpSock* us = (UdpSock*)ang_api->native_instance_data(args[0]);
     if (!us || us->fd < 0) return ang_i64(-1);
 
@@ -525,10 +513,6 @@ AngaraObject Angara_UdpSocket_close(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_net_resolve(int arg_count, AngaraObject* args) {
-    if (arg_count < 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("resolve(hostname) expects a string.");
-        return ang_nil();
-    }
 
     struct addrinfo hints, *result;
     memset(&hints, 0, sizeof(hints));

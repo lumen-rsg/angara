@@ -9,10 +9,6 @@
 
 
 AngaraObject Angara_hash_fnv1a(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("fnv1a(data) expects one string argument.");
-        return ang_nil();
-    }
     const unsigned char* data = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -26,10 +22,6 @@ AngaraObject Angara_hash_fnv1a(int arg_count, AngaraObject* args) {
 
 
 AngaraObject Angara_hash_djb2(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("djb2(data) expects one string argument.");
-        return ang_nil();
-    }
     const unsigned char* data = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -57,10 +49,6 @@ static void init_crc32_table(void) {
 }
 
 AngaraObject Angara_hash_crc32(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("crc32(data) expects one string argument.");
-        return ang_nil();
-    }
     if (!crc32_table_init) init_crc32_table();
 
     const unsigned char* data = (const unsigned char*)ang_api->as_cstr(args[0]);
@@ -149,10 +137,6 @@ static void md5_final(unsigned char digest[16], MD5_CTX* ctx) {
 }
 
 AngaraObject Angara_hash_md5(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("md5(data) expects one string argument.");
-        return ang_nil();
-    }
     const unsigned char* data = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -241,10 +225,6 @@ static void sha256_final(unsigned char digest[32], SHA256_CTX* ctx) {
 }
 
 AngaraObject Angara_hash_sha256(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("sha256(data) expects one string argument.");
-        return ang_nil();
-    }
     const unsigned char* data = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -261,10 +241,6 @@ AngaraObject Angara_hash_sha256(int arg_count, AngaraObject* args) {
 
 
 AngaraObject Angara_hash_crc16(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("crc16(data) expects one string argument.");
-        return ang_nil();
-    }
     const unsigned char* data = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -339,10 +315,6 @@ static void sha1_final(unsigned char digest[20], SHA1_CTX* ctx) {
 }
 
 AngaraObject Angara_hash_sha1(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("sha1(data) expects one string argument.");
-        return ang_nil();
-    }
     const unsigned char* data = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -359,10 +331,6 @@ AngaraObject Angara_hash_sha1(int arg_count, AngaraObject* args) {
 
 
 AngaraObject Angara_hash_hmac_sha256(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("hmac_sha256(data, key) expects two string arguments.");
-        return ang_nil();
-    }
     const unsigned char* data = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t data_len = ang_api->str_len(args[0]);
     const unsigned char* key = (const unsigned char*)ang_api->as_cstr(args[1]);
@@ -407,10 +375,6 @@ AngaraObject Angara_hash_hmac_sha256(int arg_count, AngaraObject* args) {
 
 
 AngaraObject Angara_hash_hash_file(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("hash_file(algorithm, path) expects two string arguments.");
-        return ang_nil();
-    }
     const char* algo = ang_api->as_cstr(args[0]);
     const char* path = ang_api->as_cstr(args[1]);
 

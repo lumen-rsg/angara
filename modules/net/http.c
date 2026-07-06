@@ -64,10 +64,6 @@ AngaraObject Angara_http_request(int arg_count, AngaraObject args[]) {
     CURLcode res = CURLE_OK;
     struct curl_slist* headers = NULL;
 
-    if (arg_count != 1 || !IS_REC(args[0])) {
-        ang_api->throw_error("http.request() requires one record argument.");
-        return ang_nil();
-    }
     AngaraObject options = args[0];
 
     CURL* curl_handle = curl_easy_init();

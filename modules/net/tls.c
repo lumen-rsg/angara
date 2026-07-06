@@ -48,10 +48,6 @@ static void finalize_tls_conn(void* data) {
 }
 
 AngaraObject Angara_tls_connect(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !IS_STR(args[0]) || !ang_is_i64(args[1])) {
-        ang_api->throw_error("tls.connect(host, port, options?) expects string, i64.");
-        return ang_nil();
-    }
     init_ssl();
 
     const char* host = ang_api->as_cstr(args[0]);
@@ -189,10 +185,6 @@ static void finalize_tls_listener(void* data) {
 }
 
 AngaraObject Angara_tls_listen(int arg_count, AngaraObject* args) {
-    if (arg_count < 3 || !ang_is_i64(args[0]) || !IS_STR(args[1]) || !IS_STR(args[2])) {
-        ang_api->throw_error("tls.listen(port, cert_file, key_file) expects i64, string, string.");
-        return ang_nil();
-    }
     init_ssl();
 
     int port = (int)ang_as_i64(args[0]);

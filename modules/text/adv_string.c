@@ -117,10 +117,6 @@ static size_t utf8_codepoint_offset(const unsigned char* s, size_t len, int64_t 
    ========================================================================= */
 
 AngaraObject Angara_adv_string_get(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !ang_is_i64(args[1])) {
-        ang_api->throw_error("get(string, index) expects a string and an integer.");
-        return ang_nil();
-    }
     const unsigned char* chars = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     int64_t index = ang_as_i64(args[1]);
@@ -141,10 +137,6 @@ AngaraObject Angara_adv_string_get(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_substring(int arg_count, AngaraObject* args) {
-    if (arg_count != 3 || !IS_STR(args[0]) || !ang_is_i64(args[1]) || !ang_is_i64(args[2])) {
-        ang_api->throw_error("substring(string, start, end) expects a string and two integers.");
-        return ang_nil();
-    }
     const unsigned char* chars = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     int64_t start_idx = ang_as_i64(args[1]);
@@ -168,26 +160,16 @@ AngaraObject Angara_adv_string_substring(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_adv_string_is_digit(int arg_count, AngaraObject* args) {
     /* ASCII-only: digits are single-byte in UTF-8 so this is already correct */
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("is_digit(char) expects a string."); return ang_nil();
-    }
     if (ang_api->str_len(args[0]) != 1) return ang_bool(false);
     return ang_bool(isdigit((unsigned char)ang_api->as_cstr(args[0])[0]));
 }
 
 AngaraObject Angara_adv_string_is_whitespace(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("is_whitespace(char) expects a string."); return ang_nil();
-    }
     if (ang_api->str_len(args[0]) != 1) return ang_bool(false);
     return ang_bool(isspace((unsigned char)ang_api->as_cstr(args[0])[0]));
 }
 
 AngaraObject Angara_adv_string_pad_end(int arg_count, AngaraObject* args) {
-    if (arg_count != 3 || !IS_STR(args[0]) || !ang_is_i64(args[1]) || !IS_STR(args[2])) {
-        ang_api->throw_error("pad_end(string, i64, string) expects (string, i64, string).");
-        return ang_nil();
-    }
     const char* base = ang_api->as_cstr(args[0]);
     size_t base_len = ang_api->str_len(args[0]);
     int64_t target = ang_as_i64(args[1]);
@@ -205,9 +187,6 @@ AngaraObject Angara_adv_string_pad_end(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_to_uppercase(int arg_count, AngaraObject args[]) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("to_uppercase() requires one string."); return ang_nil();
-    }
     const unsigned char* src = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -245,9 +224,6 @@ AngaraObject Angara_adv_string_to_uppercase(int arg_count, AngaraObject args[]) 
 }
 
 AngaraObject Angara_adv_string_to_lowercase(int arg_count, AngaraObject args[]) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("to_lowercase() requires one string."); return ang_nil();
-    }
     const unsigned char* src = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -281,9 +257,6 @@ AngaraObject Angara_adv_string_to_lowercase(int arg_count, AngaraObject args[]) 
 }
 
 AngaraObject Angara_adv_string_trim(int arg_count, AngaraObject args[]) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("trim() requires one string."); return ang_nil();
-    }
     const char* start = ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     const char* end = start + len - 1;
@@ -294,10 +267,6 @@ AngaraObject Angara_adv_string_trim(int arg_count, AngaraObject args[]) {
 }
 
 AngaraObject Angara_adv_string_contains(int arg_count, AngaraObject args[]) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("contains(haystack, needle) expects two strings.");
-        return ang_nil();
-    }
     return ang_bool(strstr(ang_api->as_cstr(args[0]), ang_api->as_cstr(args[1])) != NULL);
 }
 
@@ -335,10 +304,6 @@ AngaraObject Angara_adv_string_join(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_replace(int arg_count, AngaraObject* args) {
-    if (arg_count != 3 || !IS_STR(args[0]) || !IS_STR(args[1]) || !IS_STR(args[2])) {
-        ang_api->throw_error("replace(source, search, replacement) expects three strings.");
-        return ang_nil();
-    }
     const char* source = ang_api->as_cstr(args[0]);
     const char* search = ang_api->as_cstr(args[1]);
     const char* repl = ang_api->as_cstr(args[2]);
@@ -392,10 +357,6 @@ AngaraObject Angara_adv_string_last_index_of(int arg_count, AngaraObject* args) 
 }
 
 AngaraObject Angara_adv_string_split(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("split(string, delimiter) expects two strings.");
-        return ang_nil();
-    }
     const char* src = ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
     const char* delim = ang_api->as_cstr(args[1]);
@@ -443,10 +404,6 @@ AngaraObject Angara_adv_string_split(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_starts_with(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("starts_with(string, prefix) expects two strings.");
-        return ang_nil();
-    }
     const char* src = ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
     const char* prefix = ang_api->as_cstr(args[1]);
@@ -456,10 +413,6 @@ AngaraObject Angara_adv_string_starts_with(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_ends_with(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("ends_with(string, suffix) expects two strings.");
-        return ang_nil();
-    }
     const char* src = ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
     const char* suffix = ang_api->as_cstr(args[1]);
@@ -469,10 +422,6 @@ AngaraObject Angara_adv_string_ends_with(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_repeat(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !ang_is_i64(args[1])) {
-        ang_api->throw_error("repeat(string, n) expects a string and an integer.");
-        return ang_nil();
-    }
     const char* src = ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
     int64_t n = ang_as_i64(args[1]);
@@ -491,10 +440,6 @@ AngaraObject Angara_adv_string_repeat(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_reverse(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("reverse(string) expects one string.");
-        return ang_nil();
-    }
     const unsigned char* src = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -534,10 +479,6 @@ AngaraObject Angara_adv_string_reverse(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_count(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("count(string, substr) expects two strings.");
-        return ang_nil();
-    }
     const char* haystack = ang_api->as_cstr(args[0]);
     const char* needle = ang_api->as_cstr(args[1]);
     size_t nlen = strlen(needle);
@@ -549,10 +490,6 @@ AngaraObject Angara_adv_string_count(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_pad_start(int arg_count, AngaraObject* args) {
-    if (arg_count != 3 || !IS_STR(args[0]) || !ang_is_i64(args[1]) || !IS_STR(args[2])) {
-        ang_api->throw_error("pad_start(string, i64, string) expects (string, i64, string).");
-        return ang_nil();
-    }
     const char* base = ang_api->as_cstr(args[0]);
     size_t base_len = ang_api->str_len(args[0]);
     int64_t target = ang_as_i64(args[1]);
@@ -570,10 +507,6 @@ AngaraObject Angara_adv_string_pad_start(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_to_i64(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("to_i64(string) expects one string.");
-        return ang_nil();
-    }
     const char* s = ang_api->as_cstr(args[0]);
     char* end;
     int64_t val = strtoll(s, &end, 10);
@@ -582,10 +515,6 @@ AngaraObject Angara_adv_string_to_i64(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_to_f64(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("to_f64(string) expects one string.");
-        return ang_nil();
-    }
     const char* s = ang_api->as_cstr(args[0]);
     char* end;
     double val = strtod(s, &end);
@@ -594,10 +523,6 @@ AngaraObject Angara_adv_string_to_f64(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_chars(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("chars(string) expects one string.");
-        return ang_nil();
-    }
     const unsigned char* src = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     AngaraObject list = ang_api->list_new();
@@ -616,9 +541,6 @@ AngaraObject Angara_adv_string_chars(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_is_alpha(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("is_alpha(s) expects one string."); return ang_nil();
-    }
     const unsigned char* s = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     if (len == 0) return ang_bool(false);
@@ -638,9 +560,6 @@ AngaraObject Angara_adv_string_is_alpha(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_is_alnum(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("is_alnum(s) expects one string."); return ang_nil();
-    }
     const unsigned char* s = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     if (len == 0) return ang_bool(false);
@@ -660,10 +579,6 @@ AngaraObject Angara_adv_string_is_alnum(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_levenshtein(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("levenshtein(a, b) expects two strings.");
-        return ang_nil();
-    }
     const unsigned char* a = (const unsigned char*)ang_api->as_cstr(args[0]);
     const unsigned char* b = (const unsigned char*)ang_api->as_cstr(args[1]);
     size_t la = ang_api->str_len(args[0]);
@@ -725,10 +640,6 @@ AngaraObject Angara_adv_string_levenshtein(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_adv_string_format(int arg_count, AngaraObject* args) {
     /* args[0] = format string, args[1..] = values to substitute */
-    if (arg_count < 1 || !IS_STR(args[0])) {
-        ang_api->throw_error("format(fmt, ...) expects a format string.");
-        return ang_nil();
-    }
 
     const char* fmt = ang_api->as_cstr(args[0]);
     size_t fmt_len = ang_api->str_len(args[0]);

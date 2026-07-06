@@ -8,10 +8,6 @@
 #define IS_STR(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)
 
 AngaraObject Angara_regex_match(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("regex.match(pattern, text) expects two string arguments.");
-        return ang_nil();
-    }
     const char* pattern = ang_api->as_cstr(args[0]);
     const char* text = ang_api->as_cstr(args[1]);
 
@@ -30,10 +26,6 @@ AngaraObject Angara_regex_match(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_regex_find(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("regex.find(pattern, text) expects two string arguments.");
-        return ang_nil();
-    }
     const char* pattern = ang_api->as_cstr(args[0]);
     const char* text = ang_api->as_cstr(args[1]);
     size_t text_len = ang_api->str_len(args[1]);
@@ -111,10 +103,6 @@ AngaraObject Angara_regex_find(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_regex_replace(int arg_count, AngaraObject* args) {
-    if (arg_count != 3 || !IS_STR(args[0]) || !IS_STR(args[1]) || !IS_STR(args[2])) {
-        ang_api->throw_error("regex.replace(pattern, text, replacement) expects three string arguments.");
-        return ang_nil();
-    }
     const char* pattern = ang_api->as_cstr(args[0]);
     const char* text = ang_api->as_cstr(args[1]);
     const char* replacement = ang_api->as_cstr(args[2]);
@@ -217,10 +205,6 @@ AngaraObject Angara_regex_replace(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_regex_split(int arg_count, AngaraObject* args) {
-    if (arg_count < 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("regex.split(pattern, text, max_splits?) expects at least two string arguments.");
-        return ang_nil();
-    }
     const char* pattern = ang_api->as_cstr(args[0]);
     const char* text = ang_api->as_cstr(args[1]);
     size_t text_len = ang_api->str_len(args[1]);
@@ -294,10 +278,6 @@ AngaraObject Angara_regex_split(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_regex_test(int arg_count, AngaraObject* args) {
-    if (arg_count != 2 || !IS_STR(args[0]) || !IS_STR(args[1])) {
-        ang_api->throw_error("regex.test(pattern, text) expects two string arguments.");
-        return ang_nil();
-    }
     const char* pattern = ang_api->as_cstr(args[0]);
     const char* text = ang_api->as_cstr(args[1]);
 
