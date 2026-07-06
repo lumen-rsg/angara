@@ -18,8 +18,7 @@
 | ID | Issue |
 |---|---|
 | LIB-1 | AMQP/MQTT TLS — secure schemes parsed but TLS not configured on rabbitmq-c / mosquitto connections. |
-| LIB-7 | ~~Native-call arg-type validation — module dispatcher should emit runtime type guards from DSL type-strings.~~ ✅ Complete (2026-07-06) |
-| LIB-10 | CLI/arg parser (subcommands, help generation); YAML / protobuf / msgpack serialisation; big integers. |
+| LIB-10 | CLI/arg parser (subcommands, help generation); YAML / protobuf / msgpack serialisation; ~~big integers~~ (done: native module `bigint` via GMP, `modules/math/bigint.c`). |
 
 ---
 

@@ -56,6 +56,8 @@ ARCHIVE_CFLAGS := $(shell pkg-config --cflags libarchive zlib 2>/dev/null)
 ARCHIVE_LIBS  := $(shell pkg-config --libs libarchive zlib 2>/dev/null)
 SQLITE_CFLAGS := $(shell pkg-config --cflags sqlite3 2>/dev/null)
 SQLITE_LIBS   := $(shell pkg-config --libs sqlite3 2>/dev/null)
+GMP_CFLAGS    := $(shell pkg-config --cflags gmp 2>/dev/null)
+GMP_LIBS      := $(shell pkg-config --libs gmp 2>/dev/null)
 
 ifeq ($(UNAME_S),Darwin)
     ifeq ($(LWS_CFLAGS),)
@@ -87,6 +89,7 @@ MINIMAL_MODS := $(filter-out \
 	build/modules/http.$(SO_EXT) \
 	build/modules/archive.$(SO_EXT) \
 	build/modules/sqlite.$(SO_EXT) \
+	build/modules/bigint.$(SO_EXT) \
 	build/modules/matter.$(SO_EXT) \
 	build/modules/jwt.$(SO_EXT) \
 	build/modules/rpc.$(SO_EXT) \
@@ -179,6 +182,11 @@ build/obj/modules/data/sqlite.o: modules/data/sqlite.c
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CC]  $(RESET) %s (SQLITE)\n" "$<"
 	@$(CC) $(CFLAGS) $(SQLITE_CFLAGS) -c $< -o $@
+
+build/obj/modules/math/bigint.o: modules/math/bigint.c
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CC]  $(RESET) %s (GMP)\n" "$<"
+	@$(CC) $(CFLAGS) $(GMP_CFLAGS) -c $< -o $@
 
 build/obj/modules/crypto/jwt.o: modules/crypto/jwt.c
 	@mkdir -p $(@D)
@@ -276,6 +284,11 @@ build/modules/sqlite.$(SO_EXT): build/obj/modules/data/sqlite.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (SQLITE3)\n" "$@"
 	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(SQLITE_LIBS) -o $@
+
+build/modules/bigint.$(SO_EXT): build/obj/modules/math/bigint.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (GMP)\n" "$@"
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(GMP_LIBS) -o $@
 
 build/modules/redis.$(SO_EXT): build/obj/modules/data/redis.o
 	@mkdir -p $(@D)
