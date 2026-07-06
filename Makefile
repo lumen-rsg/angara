@@ -391,14 +391,14 @@ install: install_libraries install_executables
 	@printf "$(BOLD)$(GREEN)>>> Full Installation Complete <<<$(RESET)\n"
 
 install_libraries: $(MOD_OUTS)
-	@printf "$(MAGENTA)[IN] $(RESET) Installing Modules to %s\n" "$(INSTALL_MOD_DIR)"
-	@mkdir -p $(INSTALL_MOD_DIR)
-	@cp build/modules/*.$(SO_EXT) $(INSTALL_MOD_DIR)/
+	@printf "$(MAGENTA)[IN] $(RESET) Installing Modules to %s\n" "$(DESTDIR)$(INSTALL_MOD_DIR)"
+	@mkdir -p $(DESTDIR)$(INSTALL_MOD_DIR)
+	@cp build/modules/*.$(SO_EXT) $(DESTDIR)$(INSTALL_MOD_DIR)/
 
 install_executables: $(ANGC_OUT)
-	@printf "$(CYAN)[IN] $(RESET) Installing Executable to %s\n" "$(INSTALL_BIN_DIR)"
-	@mkdir -p $(INSTALL_BIN_DIR)
-	@cp $(ANGC_OUT) $(INSTALL_BIN_DIR)/
+	@printf "$(CYAN)[IN] $(RESET) Installing Executable to %s\n" "$(DESTDIR)$(INSTALL_BIN_DIR)"
+	@mkdir -p $(DESTDIR)$(INSTALL_BIN_DIR)
+	@cp $(ANGC_OUT) $(DESTDIR)$(INSTALL_BIN_DIR)/
 
 ifeq ($(NVIM_RUNTIME),)
     NVIM_RUNTIME := $(HOME)/.local/share/nvim/site
@@ -474,4 +474,4 @@ clean:
 	@rm -rf build
 	@find . -name '*.d' -path '*/build/*' -delete 2>/dev/null || true
 
--include build/obj/**/*.d
+-include $(shell find build/obj -name '*.d' 2>/dev/null)

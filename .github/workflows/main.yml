@@ -4,11 +4,7 @@ name: Continuous Build and Release
 
 on:
   push:
-    branches:
-      - stable
   pull_request:
-    branches:
-      - stable
 
 jobs:
   build:
@@ -106,18 +102,18 @@ jobs:
 
       # ── Stage artifacts (only on push to stable, not PRs) ──
       - name: Stage Artifacts
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/stable'
         run: |
           mkdir -p release_artifacts/modules
           cp build/angc release_artifacts/
           cp build/modules/*.${{ matrix.ext }} release_artifacts/modules/ 2>/dev/null || true
 
       - name: Archive Release
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/stable'
         run: tar -czvf ${{ matrix.artifact }}.tar.gz -C release_artifacts .
 
       - name: Upload Artifact
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/stable'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -125,7 +121,7 @@ jobs:
 
   release:
     needs: build
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/stable'
     runs-on: ubuntu-latest
 
     permissions:
@@ -167,3 +163,59 @@ jobs:
           files: |
             angara-linux-x64.tar.gz
             angara-macos-arm64.tar.gz
+
+  sanitizers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config git clang cmake \
+                      llvm-dev libcurl4-openssl-dev libwebsockets-dev libssl-dev \
+                      libmosquitto-dev libcjson-dev libarchive-dev zlib1g-dev \
+                      libsqlite3-dev
+
+      - name: Install rabbitmq-c v0.14.0
+        run: |
+          git clone --branch v0.14.0 https://github.com/alanxz/rabbitmq-c.git
+          cd rabbitmq-c
+          cmake -B build -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_SHARED_LIBS=ON \
+                         -DRABBITMQ_C_BUILD_TESTS=OFF -DRABBITMQ_C_BUILD_EXAMPLES=OFF
+          cmake --build build -j$(nproc)
+          sudo cmake --install build
+
+      - name: Build with Sanitizers
+        env:
+          CC: clang
+          CXX: clang++
+          EXTRA_CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+        run: make -j$(nproc) all
+
+      - name: Build Modules with Sanitizers
+        env:
+          CC: clang
+          CXX: clang++
+          EXTRA_CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+        run: make -j$(nproc) modules
+
+      - name: Run C++ Unit Tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: make test-cpp
+
+      - name: Run Chaperone Tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: make test-chaperone
+
+      - name: Run Language Tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: bash tests/lang/run_tests.sh
