@@ -18,7 +18,15 @@ namespace angara {
                     do {
                         Token val = consume(TokenType::NUMBER_INT,
                             "Expected integer parameter index.", "E394");
-                        out.insert(std::stoi(val.lexeme));
+                        int idx;
+                        try {
+                            idx = std::stoi(val.lexeme);
+                        } catch (const std::out_of_range&) {
+                            throw error(val, "Parameter index '" + val.lexeme + "' is too large.", "E394");
+                        } catch (const std::invalid_argument&) {
+                            throw error(val, "Invalid parameter index '" + val.lexeme + "'.", "E394");
+                        }
+                        out.insert(idx);
                     } while (match({TokenType::COMMA}));
                 }
                 consume(TokenType::RIGHT_PAREN, "Expected ')' after parameter list.", "E395");
@@ -37,7 +45,14 @@ namespace angara {
                     bool neg = match({TokenType::MINUS});
                     Token val = consume(TokenType::NUMBER_INT, "Expected an integer value in @on_throw(...).", "E394");
                     consume(TokenType::RIGHT_PAREN, "Expected ')' after @on_throw value.", "E395");
-                    int64_t v = std::stoll(val.lexeme);
+                    int64_t v;
+                    try {
+                        v = std::stoll(val.lexeme);
+                    } catch (const std::out_of_range&) {
+                        throw error(val, "Value '" + val.lexeme + "' in @on_throw is too large.", "E394");
+                    } catch (const std::invalid_argument&) {
+                        throw error(val, "Invalid value '" + val.lexeme + "' in @on_throw.", "E394");
+                    }
                     pending_on_throw = neg ? -v : v;
                 } else if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "consumes") {
                     advance();

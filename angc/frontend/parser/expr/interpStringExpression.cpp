@@ -48,7 +48,13 @@ namespace angara {
                             hex += body[i++];
                         }
                         if (!hex.empty()) {
-                            current_literal += static_cast<char>(std::stoi(hex, nullptr, 16));
+                            try {
+                                current_literal += static_cast<char>(std::stoi(hex, nullptr, 16));
+                            } catch (const std::out_of_range&) {
+                                // hex escape value too large — truncate silently
+                            } catch (const std::invalid_argument&) {
+                                // ignore malformed hex
+                            }
                         }
                         break;
                     }
@@ -73,7 +79,14 @@ namespace angara {
                             }
                         }
                         if (!hex.empty()) {
-                            unsigned long cp = std::stoul(hex, nullptr, 16);
+                            unsigned long cp = 0;
+                            try {
+                                cp = std::stoul(hex, nullptr, 16);
+                            } catch (const std::out_of_range&) {
+                                // code point too large for unsigned long — skip
+                            } catch (const std::invalid_argument&) {
+                                // malformed — skip
+                            }
                             if (cp <= 0x10FFFF && !(cp >= 0xD800 && cp <= 0xDFFF)) {
                                 // UTF-8 encode.
                                 if (cp <= 0x7F) {

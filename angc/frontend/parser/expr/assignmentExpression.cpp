@@ -11,7 +11,11 @@ namespace angara {
                    TokenType::LSHIFT_EQUAL, TokenType::RSHIFT_EQUAL})) {
 
             Token op = previous();
+            if (++m_recursionDepth > 256) {
+                throw error(op, "Maximum recursion depth exceeded — too many chained assignments.", "E248");
+            }
             std::shared_ptr<Expr> value = assignment();
+            --m_recursionDepth;
 
             // LANG-10: destructuring assignment — (a, b) = expr
             if (auto* tuple = dynamic_cast<TupleExpr*>(expr.get())) {

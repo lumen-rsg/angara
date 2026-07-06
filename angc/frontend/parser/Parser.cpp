@@ -90,7 +90,14 @@ namespace angara {
                 } else {
                     Token size_token = consume(TokenType::NUMBER_INT, "Expected array size after '['.", "E109");
                     consume(TokenType::RIGHT_BRACKET, "Expected ']' after array size.", "E110");
-                    int arr_size = std::stoi(size_token.lexeme);
+                    int arr_size;
+                    try {
+                        arr_size = std::stoi(size_token.lexeme);
+                    } catch (const std::out_of_range&) {
+                        throw error(size_token, "Array size '" + size_token.lexeme + "' is too large.", "E109");
+                    } catch (const std::invalid_argument&) {
+                        throw error(size_token, "Invalid array size '" + size_token.lexeme + "'.", "E109");
+                    }
                     base_type = std::make_shared<FixedArrayTypeExpr>(base_type, arr_size);
                 }
             }

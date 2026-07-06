@@ -1,6 +1,7 @@
 #include "Lexer.h"
 #include <sstream>
 #include <utility>
+#include <cerrno>
 
 namespace angara {
 
@@ -200,7 +201,19 @@ namespace angara {
                         break;
                     }
                 }
-                char octal_char = static_cast<char>(strtol(octal_str.c_str(), nullptr, 8));
+                char octal_char = 0;
+                {
+                    errno = 0;
+                    long val = strtol(octal_str.c_str(), nullptr, 8);
+                    if (errno == ERANGE) {
+                        m_errorHandler.report(
+                            Token(diag_type, "", m_line, m_column, m_filename),
+                            "Octal escape sequence '\\" + octal_str + "' is out of range.", "E004"
+                        );
+                    } else {
+                        octal_char = static_cast<char>(val);
+                    }
+                }
                 out << octal_char;
                 break;
             }
@@ -220,7 +233,19 @@ namespace angara {
                         "Incomplete hex escape sequence '\\x'.", "E004"
                     );
                 } else {
-                    char hex_char = static_cast<char>(strtol(hex_str.c_str(), nullptr, 16));
+                    char hex_char = 0;
+                    {
+                        errno = 0;
+                        long val = strtol(hex_str.c_str(), nullptr, 16);
+                        if (errno == ERANGE) {
+                            m_errorHandler.report(
+                                Token(diag_type, "", m_line, m_column, m_filename),
+                                "Hex escape sequence '\\x" + hex_str + "' is out of range.", "E004"
+                            );
+                        } else {
+                            hex_char = static_cast<char>(val);
+                        }
+                    }
                     out << hex_char;
                 }
                 break;
@@ -291,8 +316,24 @@ namespace angara {
                 }
 
                 if (valid) {
-                    unsigned long cp = std::stoul(hex_str, nullptr, 16);
-                    if (cp > 0x10FFFF) {
+                    unsigned long cp = 0;
+                    try {
+                        cp = std::stoul(hex_str, nullptr, 16);
+                    } catch (const std::out_of_range&) {
+                        m_errorHandler.report(
+                            Token(diag_type, "", m_line, m_column, m_filename),
+                            "Unicode code point U+" + hex_str + " is too large.", "E005"
+                        );
+                        valid = false;
+                    } catch (const std::invalid_argument&) {
+                        m_errorHandler.report(
+                            Token(diag_type, "", m_line, m_column, m_filename),
+                            "Invalid Unicode escape sequence '\\" + std::string(1, escaped) +
+                                hex_str + "'.", "E005"
+                        );
+                        valid = false;
+                    }
+                    if (valid && cp > 0x10FFFF) {
                         m_errorHandler.report(
                             Token(diag_type, "", m_line, m_column, m_filename),
                             "Invalid Unicode code point U+" + hex_str +

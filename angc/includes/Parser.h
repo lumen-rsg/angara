@@ -298,5 +298,6 @@ namespace angara {
         int m_current = 0;
         ErrorHandler &m_errorHandler;
         bool m_panicMode = false;
+        int m_recursionDepth = 0;
     };
 }
