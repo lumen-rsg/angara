@@ -16,19 +16,17 @@
 #include <netdb.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <pthread.h>
 #include "Angara.h"
 
 #define IS_STR(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)
 #define IS_REC(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_RECORD)
 
-static int ssl_initialized = 0;
+static pthread_once_t ssl_once = PTHREAD_ONCE_INIT;
 
 static void init_ssl(void) {
-    if (!ssl_initialized) {
-        SSL_load_error_strings();
-        OpenSSL_add_ssl_algorithms();
-        ssl_initialized = 1;
-    }
+    SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
 }
 
 /* ---- TlsConn (client) ---- */
@@ -48,7 +46,7 @@ static void finalize_tls_conn(void* data) {
 }
 
 AngaraObject Angara_tls_connect(int arg_count, AngaraObject* args) {
-    init_ssl();
+    pthread_once(&ssl_once, init_ssl);
 
     const char* host = ang_api->as_cstr(args[0]);
     int port = (int)ang_as_i64(args[1]);
@@ -185,7 +183,7 @@ static void finalize_tls_listener(void* data) {
 }
 
 AngaraObject Angara_tls_listen(int arg_count, AngaraObject* args) {
-    init_ssl();
+    pthread_once(&ssl_once, init_ssl);
 
     int port = (int)ang_as_i64(args[0]);
     const char* cert_file = ang_api->as_cstr(args[1]);

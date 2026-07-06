@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <errno.h>
 #include <sys/stat.h>
 #include "Angara.h"
@@ -36,6 +37,10 @@ AngaraObject Angara_archive_gzip_decompress(int arg_count, AngaraObject* args) {
     const uint8_t* data = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t data_len = ang_api->str_len(args[0]);
 
+    if (data_len > SIZE_MAX / 4) {
+        ang_api->throw_error("gzip_decompress: data too large.");
+        return ang_nil();
+    }
     size_t dest_len = data_len * 4;
     if (arg_count >= 2 && ang_is_i64(args[1])) {
         dest_len = (size_t)ang_as_i64(args[1]);
@@ -88,6 +93,10 @@ AngaraObject Angara_archive_zlib_decompress(int arg_count, AngaraObject* args) {
     const uint8_t* data = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t data_len = ang_api->str_len(args[0]);
 
+    if (data_len > SIZE_MAX / 4) {
+        ang_api->throw_error("zlib_decompress: data too large.");
+        return ang_nil();
+    }
     size_t dest_len = data_len * 4;
     if (arg_count >= 2 && ang_is_i64(args[1])) {
         dest_len = (size_t)ang_as_i64(args[1]);

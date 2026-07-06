@@ -33,11 +33,11 @@ AngaraObject Angara_fs_read_file(int arg_count, AngaraObject* args) {
     char* buffer = (char*)malloc(file_size + 1);
     if (!buffer) { fclose(file); ang_api->throw_error("Failed to allocate memory."); return ang_nil(); }
 
-    fread(buffer, sizeof(char), file_size, file);
-    buffer[file_size] = '\0';
+    size_t bytes_read = fread(buffer, sizeof(char), file_size, file);
+    buffer[bytes_read] = '\0';
     fclose(file);
 
-    return ang_api->string_no_copy(buffer, file_size);
+    return ang_api->string_no_copy(buffer, bytes_read);
 }
 
 AngaraObject Angara_fs_write_file(int arg_count, AngaraObject* args) {

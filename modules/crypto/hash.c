@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <pthread.h>
 #include "Angara.h"
 
 #define IS_STR(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)
@@ -34,7 +35,7 @@ AngaraObject Angara_hash_djb2(int arg_count, AngaraObject* args) {
 
 
 static uint32_t crc32_table[256];
-static int crc32_table_init = 0;
+static pthread_once_t crc32_once = PTHREAD_ONCE_INIT;
 
 static void init_crc32_table(void) {
     for (uint32_t i = 0; i < 256; i++) {
@@ -45,11 +46,10 @@ static void init_crc32_table(void) {
         }
         crc32_table[i] = crc;
     }
-    crc32_table_init = 1;
 }
 
 AngaraObject Angara_hash_crc32(int arg_count, AngaraObject* args) {
-    if (!crc32_table_init) init_crc32_table();
+    pthread_once(&crc32_once, init_crc32_table);
 
     const unsigned char* data = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
