@@ -50,7 +50,7 @@ public:
     /// @param builder      IR builder for generating instructions.
     /// @param freestanding If true, generates stubs instead of libc-dependent implementations.
     RuntimeBuilder(llvm::LLVMContext& context, llvm::Module& module, llvm::IRBuilder<>& builder,
-                   bool freestanding = false);
+                   bool freestanding = false, unsigned jmp_buf_size = 1024);
 
     /// Destructor — defined in RuntimeBuilder.cpp where GarbageCollector is complete.
     ~RuntimeBuilder();
@@ -335,6 +335,7 @@ private:
     llvm::FunctionCallee m_fn_gc_safepoint;
 
     bool m_freestanding = false;
+    unsigned m_jmp_buf_size = 1024;   ///< Safe minimum jmp_buf size for the target (see LLVMBackend::getJmpBufSize)
 };
 
 } // namespace angara

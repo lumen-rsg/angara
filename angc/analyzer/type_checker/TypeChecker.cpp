@@ -215,12 +215,14 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
                 defineEnumHeader(*enum_stmt);
             }
         }
+    if (m_hadError) return false;
 
     for (const auto& stmt : statements) {
         if (auto data_stmt = std::dynamic_pointer_cast<const DataStmt>(stmt)) {
             defineDataHeader(*data_stmt);
         }
     }
+    if (m_hadError) return false;
 
     for (const auto& stmt : statements) {
         if (auto contract_stmt = std::dynamic_pointer_cast<const ContractStmt>(stmt)) {

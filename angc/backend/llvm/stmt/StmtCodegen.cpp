@@ -471,7 +471,7 @@ void LLVMBackend::cgTry(const TryStmt& s) {
     auto* afterAll = llvm::BasicBlock::Create(*ctx,"after_try",fn);
 
     auto* frameType = llvm::StructType::create(*ctx,
-        {llvm::ArrayType::get(llvm::Type::getInt8Ty(*ctx),512),
+        {llvm::ArrayType::get(llvm::Type::getInt8Ty(*ctx), getJmpBufSize(targetTriple)),
          llvm::PointerType::get(*ctx, 0)}, "EF");
     auto* frame = builder->CreateAlloca(frameType);
 

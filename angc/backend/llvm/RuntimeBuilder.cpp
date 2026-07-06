@@ -7,8 +7,8 @@ using namespace llvm;
 
 namespace angara {
 
-RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>& builder, bool freestanding)
-    : m_ctx(context), m_module(module), m_builder(builder), m_freestanding(freestanding) {
+RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>& builder, bool freestanding, unsigned jmp_buf_size)
+    : m_ctx(context), m_module(module), m_builder(builder), m_freestanding(freestanding), m_jmp_buf_size(jmp_buf_size) {
 }
 
 RuntimeBuilder::~RuntimeBuilder() = default;

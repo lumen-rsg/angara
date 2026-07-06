@@ -11,6 +11,7 @@
 #include <llvm/Passes/PassBuilder.h>
 #include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/DIBuilder.h>
+#include <llvm/Bitcode/BitcodeWriter.h>
 #include <iostream>
 #include <filesystem>
 
@@ -18,8 +19,26 @@ namespace angara {
 
 LLVMBackend::~LLVMBackend() = default;
 
-LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir, bool debug, bool emit_llvm)
-    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm) {
+unsigned LLVMBackend::getJmpBufSize(const llvm::Triple& target) {
+    // jmp_buf size varies by architecture and C library. Using an undersized
+    // buffer causes stack corruption on setjmp/longjmp. These values include
+    // headroom for the signal mask and, on ARM64, pointer authentication (PAC).
+    llvm::StringRef arch = target.getArchName();
+    if (target.isAArch64() || arch == "aarch64_be" || arch == "aarch64_32")
+        return 712;   // ARM64 with PAC can need up to ~704 bytes
+    if (target.isX86_64() || target.isX86())
+        return 256;   // x86/x86-64 glibc jmp_buf ~200 bytes; round up
+    if (target.isARM() || target.isThumb())
+        return 256;   // ARM32 glibc jmp_buf ~128-256 bytes
+    if (target.isRISCV())
+        return 512;   // RISC-V jmp_buf similar to ARM64 in some ABIs
+    if (target.isPPC() || target.isPPC64())
+        return 512;   // PowerPC jmp_buf can be large
+    return 1024;      // conservative fallback for unknown targets
+}
+
+LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir, bool debug, bool emit_llvm, bool lto)
+    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm), m_lto(lto) {
     ctx = std::make_unique<llvm::LLVMContext>();
     mod = std::make_unique<llvm::Module>("angara_module", *ctx);
     builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
@@ -33,7 +52,7 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
         llvm::TargetOptions opt;
         // RT-6: PIC relocation model + Small code model — must match the emitter
         // (below) so the DataLayout and emitted code agree.
-        if (auto tm = std::unique_ptr<llvm::TargetMachine>(t->createTargetMachine(targetTriple,"generic","",opt,llvm::Reloc::PIC_,llvm::CodeModel::Small)))
+        if (auto tm = std::unique_ptr<llvm::TargetMachine>(t->createTargetMachine(targetTriple,llvm::sys::getHostCPUName().str(),"",opt,llvm::Reloc::PIC_,llvm::CodeModel::Small)))
             mod->setDataLayout(tm->createDataLayout());
     }
 
@@ -53,7 +72,7 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
         m_di_cu = diCU;
     }
 
-    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding);
+    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding, getJmpBufSize(targetTriple));
     rt->generateRuntime();
     objType = rt->getAngaraObjType();
 
@@ -155,7 +174,7 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     if (!tgt) { std::cerr<<"No target: "<<le<<"\n"; return false; }
     llvm::TargetOptions opt;
     auto tm = std::unique_ptr<llvm::TargetMachine>(
-        tgt->createTargetMachine(targetTriple, "generic", "", opt,
+        tgt->createTargetMachine(targetTriple, llvm::sys::getHostCPUName().str(), "", opt,
                                  llvm::Reloc::PIC_, llvm::CodeModel::Small));
     if (!tm) { std::cerr<<"No TM\n"; return false; }
 
@@ -170,8 +189,10 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
         pb.registerFunctionAnalyses(fam);
         pb.registerLoopAnalyses(lam);
         pb.crossRegisterProxies(lam, fam, cgam, mam);
-        llvm::ModulePassManager mpm = pb.buildPerModuleDefaultPipeline(
-            m_debug ? llvm::OptimizationLevel::O0 : llvm::OptimizationLevel::O2);
+        auto optLevel = m_debug ? llvm::OptimizationLevel::O0 : llvm::OptimizationLevel::O2;
+        llvm::ModulePassManager mpm = m_lto
+            ? pb.buildLTOPreLinkDefaultPipeline(optLevel)
+            : pb.buildPerModuleDefaultPipeline(optLevel);
         mpm.run(*mod, mam);
     }
 
@@ -181,11 +202,21 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     }
 
     {
-        llvm::legacy::PassManager pm;
-        llvm::raw_fd_ostream dest(base+".o",ec,llvm::sys::fs::OF_None);
-        if (ec) { std::cerr<<"Open err: "<<ec.message()<<"\n"; return false; }
-        if (tm->addPassesToEmitFile(pm,dest,nullptr,llvm::CodeGenFileType::ObjectFile)) { std::cerr<<"Emit err\n"; return false; }
-        pm.run(*mod); dest.flush(); dest.close();
+        if (m_lto) {
+            // LTO: emit LLVM bitcode so the linker can perform cross-module optimization.
+            llvm::raw_fd_ostream dest(base+".o", ec, llvm::sys::fs::OF_None);
+            if (ec) { std::cerr<<"Open err: "<<ec.message()<<"\n"; return false; }
+            llvm::WriteBitcodeToFile(*mod, dest);
+            dest.flush(); dest.close();
+        } else {
+            llvm::legacy::PassManager pm;
+            llvm::raw_fd_ostream dest(base+".o", ec, llvm::sys::fs::OF_None);
+            if (ec) { std::cerr<<"Open err: "<<ec.message()<<"\n"; return false; }
+            if (tm->addPassesToEmitFile(pm, dest, nullptr, llvm::CodeGenFileType::ObjectFile)) {
+                std::cerr<<"Emit err\n"; return false;
+            }
+            pm.run(*mod); dest.flush(); dest.close();
+        }
     }
     objPath = base+".o";
     return true;
@@ -319,6 +350,7 @@ llvm::Value* LLVMBackend::callRt(llvm::FunctionCallee c, const std::vector<llvm:
 llvm::Value* LLVMBackend::callRtByName(const std::string& name, const std::vector<llvm::Value*>& a) {
     auto* fn = mod->getFunction(name);
     if (fn) return builder->CreateCall(fn, a);
+    std::cerr << "[LLVMBackend] callRtByName: runtime function '" << name << "' not found — returning nil" << std::endl;
     return makeNil();
 }
 
@@ -912,7 +944,7 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
         // RT-1: wrap the callback invocation in a setjmp/try so a throw lands
         // inside the trampoline (not across C frames). Mirrors cgTry exactly.
         auto* frameType = llvm::StructType::create(*ctx,
-            {llvm::ArrayType::get(llvm::Type::getInt8Ty(*ctx), 512),
+            {llvm::ArrayType::get(llvm::Type::getInt8Ty(*ctx), getJmpBufSize(targetTriple)),
              llvm::PointerType::get(*ctx, 0)}, "EF");
         auto* frame = builder->CreateAlloca(frameType);
         auto* frame_raw = builder->CreateBitCast(frame, llvm::PointerType::get(*ctx, 0));

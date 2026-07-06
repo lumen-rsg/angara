@@ -42,7 +42,8 @@ namespace angara {
                     bool freestanding = false,
                     bool dump_ir = false,
                     bool debug = false,
-                    bool emit_llvm = false);
+                    bool emit_llvm = false,
+                    bool lto = false);
 
         /// Releases LLVM objects (cleanup at process exit).
         ~LLVMBackend();
@@ -293,6 +294,11 @@ namespace angara {
         static LocalKind ffiKindForType(const std::shared_ptr<Type>& type);
         /// FFI: whether a type can be marshalled directly to C.
         static bool isFFIMarshallable(const std::shared_ptr<Type>& type);
+        /// Returns the minimum safe jmp_buf size (in bytes) for the given target triple.
+        /// The C library's jmp_buf size varies by architecture: ~200 bytes on x86-64,
+        /// up to ~712 bytes on ARM64 with pointer authentication. Using an undersized
+        /// buffer causes stack corruption on setjmp/longjmp.
+        static unsigned getJmpBufSize(const llvm::Triple& target);
         /// Returns the raw LLVM type for a given LocalKind.
         llvm::Type* llvmTypeForLocalKind(LocalKind kind);
         /// Boxes a raw LLVM value into an AngaraObject.
@@ -418,6 +424,7 @@ namespace angara {
         bool m_dump_ir = false;
         bool m_emit_llvm = false;
         bool m_debug = false;
+        bool m_lto = false;
 
         // Debug info (DWARF) generation
         std::unique_ptr<llvm::DIBuilder> m_di_builder;

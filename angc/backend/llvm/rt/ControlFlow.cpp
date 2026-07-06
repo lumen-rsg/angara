@@ -261,7 +261,7 @@ void RuntimeBuilder::generateExceptionOps() {
 
         IRBuilder<> bu(unwind_bb);
         auto* frame_type = StructType::create(m_ctx, {
-            ArrayType::get(i8_ty, 512),
+            ArrayType::get(i8_ty, m_jmp_buf_size),
             i8_ptr
         }, "ExceptionFrame");
 
@@ -288,7 +288,7 @@ void RuntimeBuilder::generateExceptionOps() {
         auto* frame_arg = fn->arg_begin();
 
         auto* frame_type = StructType::create(m_ctx, {
-            ArrayType::get(i8_ty, 512),
+            ArrayType::get(i8_ty, m_jmp_buf_size),
             i8_ptr
         }, "ExceptionFrame");
 
@@ -313,7 +313,7 @@ void RuntimeBuilder::generateExceptionOps() {
         IRBuilder<> b(entry);
 
         auto* frame_type = StructType::create(m_ctx, {
-            ArrayType::get(i8_ty, 512),
+            ArrayType::get(i8_ty, m_jmp_buf_size),
             i8_ptr
         }, "ExceptionFrame");
 
