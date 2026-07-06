@@ -35,6 +35,7 @@ void RuntimeBuilder::generateRuntime() {
     generateConversions();
     generateDeepClone();
     generateClosureOps();
+    generateDeferOps();       // M19: must run before generateExceptionOps
     generateExceptionOps();
     generateThreadOps();
     generateMiscOps();
@@ -189,6 +190,23 @@ void RuntimeBuilder::generateTypes() {
         false, GlobalValue::InternalLinkage,
         ConstantAggregateZero::get(m_angara_obj_type),
         "__ang_current_exception");
+
+    // Defer stack for throw_error resource cleanup (M19).
+    // Fixed-size stack of {fn_ptr, arg_ptr} pairs; drained in LIFO order.
+    auto* defer_entry_ty = StructType::create(m_ctx, {
+        PointerType::get(m_ctx, 0),
+        PointerType::get(m_ctx, 0)
+    }, "DeferEntry");
+    m_g_defer_stack = new GlobalVariable(
+        m_module, ArrayType::get(defer_entry_ty, 16),
+        false, GlobalValue::InternalLinkage,
+        ConstantAggregateZero::get(ArrayType::get(defer_entry_ty, 16)),
+        "__ang_defer_stack");
+    m_g_defer_count = new GlobalVariable(
+        m_module, Type::getInt32Ty(m_ctx),
+        false, GlobalValue::InternalLinkage,
+        ConstantInt::get(Type::getInt32Ty(m_ctx), 0),
+        "__ang_defer_count");
 }
 
 void RuntimeBuilder::declareCLibFunctions() {
@@ -288,6 +306,80 @@ void RuntimeBuilder::declareCLibFunctions() {
             b.CreateMemSet(s, b.CreateTrunc(c, i8_ty), b.CreateSExt(n, i64_ty), Align(1));
             b.CreateRet(s);
         }
+    }
+}
+
+void RuntimeBuilder::generateDeferOps() {
+    auto* void_ty = Type::getVoidTy(m_ctx);
+    auto* i32_ty  = Type::getInt32Ty(m_ctx);
+    auto* ptr_ty  = PointerType::get(m_ctx, 0);
+
+    auto* defer_entry_ty = StructType::getTypeByName(m_ctx, "DeferEntry");
+    auto* defer_stack_ty = ArrayType::get(defer_entry_ty, 16);
+
+    // __ang_api_defer_push(fn_ptr, arg_ptr)
+    {
+        auto* ft = FunctionType::get(void_ty, {ptr_ty, ptr_ty}, false);
+        auto* fn = createRuntimeFunc("__ang_api_defer_push", ft);
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+        auto* fn_ptr = fn->arg_begin();
+        auto* arg_ptr = fn->arg_begin() + 1;
+
+        auto* count = b.CreateLoad(i32_ty, m_g_defer_count, "count");
+        auto* overflow = b.CreateICmpUGE(count, ConstantInt::get(i32_ty, 16));
+        auto* overflow_bb = BasicBlock::Create(m_ctx, "overflow", fn);
+        auto* push_bb = BasicBlock::Create(m_ctx, "push", fn);
+        b.CreateCondBr(overflow, overflow_bb, push_bb);
+
+        b.SetInsertPoint(overflow_bb);
+        b.CreateRetVoid();
+
+        b.SetInsertPoint(push_bb);
+        auto* slot = b.CreateGEP(defer_stack_ty, m_g_defer_stack,
+            {ConstantInt::get(i32_ty, 0), count});
+        auto* fn_slot = b.CreateStructGEP(defer_entry_ty, slot, 0);
+        b.CreateStore(fn_ptr, fn_slot);
+        auto* arg_slot = b.CreateStructGEP(defer_entry_ty, slot, 1);
+        b.CreateStore(arg_ptr, arg_slot);
+        auto* new_count = b.CreateAdd(count, ConstantInt::get(i32_ty, 1));
+        b.CreateStore(new_count, m_g_defer_count);
+        b.CreateRetVoid();
+    }
+
+    // __ang_api_defer_run()
+    {
+        auto* ft = FunctionType::get(void_ty, {}, false);
+        auto* fn = createRuntimeFunc("__ang_api_defer_run", ft);
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+
+        auto* loop_bb = BasicBlock::Create(m_ctx, "loop", fn);
+        auto* pop_bb  = BasicBlock::Create(m_ctx, "pop", fn);
+        auto* exit_bb = BasicBlock::Create(m_ctx, "exit", fn);
+        b.CreateBr(loop_bb);
+
+        b.SetInsertPoint(loop_bb);
+        auto* count = b.CreateLoad(i32_ty, m_g_defer_count, "count");
+        auto* done = b.CreateICmpEQ(count, ConstantInt::get(i32_ty, 0));
+        b.CreateCondBr(done, exit_bb, pop_bb);
+
+        b.SetInsertPoint(pop_bb);
+        auto* idx = b.CreateSub(count, ConstantInt::get(i32_ty, 1));
+        b.CreateStore(idx, m_g_defer_count);
+        auto* slot = b.CreateGEP(defer_stack_ty, m_g_defer_stack,
+            {ConstantInt::get(i32_ty, 0), idx});
+        auto* fn_slot = b.CreateStructGEP(defer_entry_ty, slot, 0);
+        auto* fn_ptr_val = b.CreateLoad(ptr_ty, fn_slot);
+        auto* arg_slot = b.CreateStructGEP(defer_entry_ty, slot, 1);
+        auto* arg_ptr_val = b.CreateLoad(ptr_ty, arg_slot);
+
+        auto* call_ty = FunctionType::get(void_ty, {ptr_ty}, false);
+        b.CreateCall(call_ty, fn_ptr_val, {arg_ptr_val});
+        b.CreateBr(loop_bb);
+
+        b.SetInsertPoint(exit_bb);
+        b.CreateRetVoid();
     }
 }
 

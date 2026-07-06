@@ -458,7 +458,11 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateRetVoid();
     }
 
-    std::vector<Type*> api_fields(31, ptr_ty);
+    // M19: defer_push and defer_run are defined in generateDeferOps().
+    auto* fn_defer_push = m_module.getFunction("__ang_api_defer_push");
+    auto* fn_defer_run  = m_module.getFunction("__ang_api_defer_run");
+
+    std::vector<Type*> api_fields(33, ptr_ty);
     auto* api_type = StructType::create(m_ctx, api_fields, "AngaraAPI");
 
     std::vector<Constant*> fields = {
@@ -493,6 +497,8 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         fn_future_state,
         fn_future_result,
         fn_future_set_loop,
+        fn_defer_push,
+        fn_defer_run,
     };
 
     auto* api_const = ConstantStruct::get(api_type, fields);

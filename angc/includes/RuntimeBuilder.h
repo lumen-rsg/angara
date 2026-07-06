@@ -210,6 +210,9 @@ private:
     void generateDeepClone();
     /// Generates closure allocation and the generic __ang_call dispatcher.
     void generateClosureOps();
+    /// M19: Generates the defer stack and defer_push/defer_run functions for
+    /// throw_error resource cleanup. Must run before generateExceptionOps.
+    void generateDeferOps();
     /// Generates exception creation, throw (longjmp), and try/catch frame management.
     void generateExceptionOps();
     /// Generates thread spawn, join, mutex, and lock/unlock operations.
@@ -306,6 +309,10 @@ private:
 
     llvm::GlobalVariable* m_g_exception_chain = nullptr;
     llvm::GlobalVariable* m_g_current_exception = nullptr;
+
+    // M19: defer stack for throw_error resource cleanup
+    llvm::GlobalVariable* m_g_defer_stack = nullptr;
+    llvm::GlobalVariable* m_g_defer_count = nullptr;
 
     llvm::GlobalVariable* m_api_vtable = nullptr;
 

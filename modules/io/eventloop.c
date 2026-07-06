@@ -21,6 +21,7 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include "Angara.h"
 
 #define IS_STR(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)
@@ -738,6 +739,7 @@ typedef struct {
     pthread_mutex_t mutex;
     pthread_cond_t  not_empty;
     pthread_cond_t  not_full;
+    atomic_int     refcount;   // number of live handles (sender + receiver)
 } Channel;
 
 static size_t next_pow2(size_t v) {
@@ -761,6 +763,7 @@ static Channel* channel_new(size_t cap) {
     pthread_mutex_init(&ch->mutex, NULL);
     pthread_cond_init(&ch->not_empty, NULL);
     pthread_cond_init(&ch->not_full, NULL);
+    atomic_init(&ch->refcount, 2);  // one for sender, one for receiver
     return ch;
 }
 
@@ -794,7 +797,10 @@ static void finalize_sender(void* data) {
         pthread_cond_broadcast(&h->ch->not_empty);
         pthread_cond_broadcast(&h->ch->not_full);
         pthread_mutex_unlock(&h->ch->mutex);
-        channel_free(h->ch);
+        // Last handle to finalize frees the shared Channel
+        if (atomic_fetch_sub(&h->ch->refcount, 1) == 1) {
+            channel_free(h->ch);
+        }
         h->ch = NULL;
     }
     free(h);
@@ -802,6 +808,13 @@ static void finalize_sender(void* data) {
 
 static void finalize_receiver(void* data) {
     ChannelHandle* h = (ChannelHandle*)data;
+    if (h->ch) {
+        // Last handle to finalize frees the shared Channel
+        if (atomic_fetch_sub(&h->ch->refcount, 1) == 1) {
+            channel_free(h->ch);
+        }
+        h->ch = NULL;
+    }
     free(h);
 }
 

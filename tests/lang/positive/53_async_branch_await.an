@@ -1,0 +1,99 @@
+// H11 investigation: async with await in both branches of if/else.
+// Verifies the state machine correctly resumes in the right control-flow context.
+// All futures resolve synchronously — no event loop needed.
+// exit: 0
+attach io;
+
+async func identity(x as i64) -> i64 {
+    return x;
+}
+
+// Await in both branches of if/else — each branch has a different await.
+async func branch_await(cond as bool) -> i64 {
+    if (cond) {
+        let a = await identity(42);
+        return a;
+    } else {
+        let b = await identity(99);
+        return b;
+    }
+}
+
+// Await in if-branch only (else branch has no await).
+async func if_only_await(cond as bool) -> i64 {
+    if (cond) {
+        let a = await identity(77);
+        return a;
+    } else {
+        return 0;
+    }
+}
+
+// Nested if/else with awaits at different nesting levels.
+async func nested_branch_await(outer as bool, inner as bool) -> i64 {
+    if (outer) {
+        let a = await identity(10);
+        if (inner) {
+            let b = await identity(20);
+            return a + b;
+        }
+        return a;
+    } else {
+        let c = await identity(30);
+        return c;
+    }
+}
+
+// Multi-await chain in if-branch, single await in else-branch
+// (asymmetric branch awaits — different counts per branch).
+async func asymmetric_await(cond as bool) -> i64 {
+    if (cond) {
+        let a = await identity(1);
+        let b = await identity(2);
+        return a + b;
+    } else {
+        let c = await identity(100);
+        return c;
+    }
+}
+
+export func main() -> i64 {
+    // Test 1: if/else branch await (then-branch)
+    let f1 = branch_await(true);
+    drop f1;
+
+    // Test 2: if/else branch await (else-branch)
+    let f2 = branch_await(false);
+    drop f2;
+
+    // Test 3: if-only await (then-branch with await, else without)
+    let f3 = if_only_await(true);
+    drop f3;
+
+    // Test 4: if-only await (else-branch, no await)
+    let f4 = if_only_await(false);
+    drop f4;
+
+    // Test 5: nested branch awaits (outer=true, inner=true)
+    let f5 = nested_branch_await(true, true);
+    drop f5;
+
+    // Test 6: nested branch awaits (outer=true, inner=false)
+    let f6 = nested_branch_await(true, false);
+    drop f6;
+
+    // Test 7: nested branch awaits (outer=false)
+    let f7 = nested_branch_await(false, false);
+    drop f7;
+
+    // Test 8: asymmetric branch awaits (then-branch has 2 awaits, else has 1)
+    let f8 = asymmetric_await(true);
+    drop f8;
+
+    // Test 9: asymmetric branch awaits (else-branch)
+    let f9 = asymmetric_await(false);
+    drop f9;
+
+    io.println(1, "OK: async branch awaits passed");
+    return 0;
+}

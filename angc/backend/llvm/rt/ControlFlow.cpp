@@ -251,6 +251,8 @@ void RuntimeBuilder::generateExceptionOps() {
         b.CreateCondBr(is_null, abort_bb, unwind_bb);
 
         IRBuilder<> ba(abort_bb);
+        // M19: drain defer stack before terminating
+        ba.CreateCall(m_module.getFunction("__ang_api_defer_run"), {});
         auto* msg = ba.CreateGlobalString(
             "\033[1m\033[31m-> FATAL\033[0m\n"
             "\033[1m\033[31m   Unhandled exception was thrown but wasn't caught by any exception handlers. "
@@ -260,6 +262,8 @@ void RuntimeBuilder::generateExceptionOps() {
         ba.CreateUnreachable();
 
         IRBuilder<> bu(unwind_bb);
+        // M19: drain defer stack before longjmp (cleans up C resources on error paths)
+        bu.CreateCall(m_module.getFunction("__ang_api_defer_run"), {});
         auto* frame_type = StructType::create(m_ctx, {
             ArrayType::get(i8_ty, m_jmp_buf_size),
             i8_ptr

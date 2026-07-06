@@ -177,7 +177,23 @@ struct AngaraAPI {
     int32_t      (*future_state)(AngaraObject future);       ///< Returns frame.state (-1=resolved)
     AngaraObject (*future_result)(AngaraObject future);      ///< Returns frame.result
     void         (*future_set_loop)(AngaraObject future, void* loop);  ///< Sets frame.loop
+
+    // --- Defer mechanism (M19: throw_error resource cleanup) ---
+    void (*defer_push)(void(*fn)(void*), void* arg);  ///< Register cleanup action (LIFO)
+    void (*defer_run)(void);                           ///< Execute and clear all deferred actions
 };
+
+/// Register a cleanup action to run when throw_error is called.
+/// Actions execute in LIFO order. Use for C resources (malloc, fds, etc.)
+/// that must be freed even on error paths.
+///
+/// Example:
+///   char* buf = malloc(1024);
+///   ang_defer(free, buf);
+///   // ... buf will be freed even if throw_error is called ...
+///
+/// The defer stack has a fixed capacity of 16 entries per throw cycle.
+#define ang_defer(fn, arg) ang_api->defer_push((void(*)(void*))(fn), (void*)(arg))
 
 // =============================================================================
 // §5  Module ABI — Export Table
