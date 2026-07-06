@@ -528,8 +528,21 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
                 auto& rtype = rt_it->second;
                 if (isInteger(ltype) && isInteger(rtype)) {
                     bool unsign = isUnsignedIntType(ltype) || isUnsignedIntType(rtype);
-                    return makeI64(unsign ? builder->CreateUDiv(getI64(l), getI64(r))
-                                          : builder->CreateSDiv(getI64(l), getI64(r)));
+                    // H12: runtime zero-check before integer division
+                    auto* rval = getI64(r);
+                    auto* zero = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0);
+                    auto* is_zero = builder->CreateICmpEQ(rval, zero);
+                    auto* parent_fn = builder->GetInsertBlock()->getParent();
+                    auto* err_bb = llvm::BasicBlock::Create(*ctx, "div_zero_err", parent_fn);
+                    auto* ok_bb = llvm::BasicBlock::Create(*ctx, "div_zero_ok", parent_fn);
+                    builder->CreateCondBr(is_zero, err_bb, ok_bb);
+                    builder->SetInsertPoint(err_bb);
+                    auto* err_msg = builder->CreateGlobalString("division by zero");
+                    callRtByName("__ang_api_throw_error", {err_msg});
+                    builder->CreateUnreachable();
+                    builder->SetInsertPoint(ok_bb);
+                    return makeI64(unsign ? builder->CreateUDiv(getI64(l), rval)
+                                          : builder->CreateSDiv(getI64(l), rval));
                 }
                 if (isFloat(ltype) || isFloat(rtype)) {
                     auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
@@ -563,6 +576,20 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             fdivBB = builder->GetInsertBlock();
             builder->CreateBr(mdivBB);
             builder->SetInsertPoint(idivBB);
+            // H12: runtime zero-check before integer division
+            {
+                auto* rval = getI64(r);
+                auto* zero = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0);
+                auto* is_zero = builder->CreateICmpEQ(rval, zero);
+                auto* err_bb = llvm::BasicBlock::Create(*ctx, "div_zero_err", fn);
+                auto* ok_bb = llvm::BasicBlock::Create(*ctx, "div_zero_ok", fn);
+                builder->CreateCondBr(is_zero, err_bb, ok_bb);
+                builder->SetInsertPoint(err_bb);
+                auto* err_msg = builder->CreateGlobalString("division by zero");
+                callRtByName("__ang_api_throw_error", {err_msg});
+                builder->CreateUnreachable();
+                builder->SetInsertPoint(ok_bb);
+            }
             auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
             auto rt2 = m_type_checker.getExpressionTypes().find(e.right.get());
             bool unsigned_div = (lt != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(lt->second)) ||
@@ -583,8 +610,21 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
                 auto& rtype = rt_it->second;
                 if (isInteger(ltype) && isInteger(rtype)) {
                     bool unsign = isUnsignedIntType(ltype) || isUnsignedIntType(rtype);
-                    return makeI64(unsign ? builder->CreateURem(getI64(l), getI64(r))
-                                          : builder->CreateSRem(getI64(l), getI64(r)));
+                    // H12: runtime zero-check before integer modulo
+                    auto* rval = getI64(r);
+                    auto* zero = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0);
+                    auto* is_zero = builder->CreateICmpEQ(rval, zero);
+                    auto* parent_fn = builder->GetInsertBlock()->getParent();
+                    auto* err_bb = llvm::BasicBlock::Create(*ctx, "mod_zero_err", parent_fn);
+                    auto* ok_bb = llvm::BasicBlock::Create(*ctx, "mod_zero_ok", parent_fn);
+                    builder->CreateCondBr(is_zero, err_bb, ok_bb);
+                    builder->SetInsertPoint(err_bb);
+                    auto* err_msg = builder->CreateGlobalString("modulo by zero");
+                    callRtByName("__ang_api_throw_error", {err_msg});
+                    builder->CreateUnreachable();
+                    builder->SetInsertPoint(ok_bb);
+                    return makeI64(unsign ? builder->CreateURem(getI64(l), rval)
+                                          : builder->CreateSRem(getI64(l), rval));
                 }
                 if (isFloat(ltype) || isFloat(rtype)) {
                     auto* ld = isFloat(ltype) ? getF64(l) : builder->CreateSIToFP(getI64(l), f64_ty);
@@ -618,6 +658,20 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
             fmodBB = builder->GetInsertBlock();
             builder->CreateBr(mmodBB);
             builder->SetInsertPoint(imodBB);
+            // H12: runtime zero-check before integer modulo
+            {
+                auto* rval = getI64(r);
+                auto* zero = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0);
+                auto* is_zero = builder->CreateICmpEQ(rval, zero);
+                auto* err_bb = llvm::BasicBlock::Create(*ctx, "mod_zero_err", fn);
+                auto* ok_bb = llvm::BasicBlock::Create(*ctx, "mod_zero_ok", fn);
+                builder->CreateCondBr(is_zero, err_bb, ok_bb);
+                builder->SetInsertPoint(err_bb);
+                auto* err_msg = builder->CreateGlobalString("modulo by zero");
+                callRtByName("__ang_api_throw_error", {err_msg});
+                builder->CreateUnreachable();
+                builder->SetInsertPoint(ok_bb);
+            }
             auto lt = m_type_checker.getExpressionTypes().find(e.left.get());
             auto rt2 = m_type_checker.getExpressionTypes().find(e.right.get());
             bool unsigned_mod = (lt != m_type_checker.getExpressionTypes().end() && isUnsignedIntType(lt->second)) ||
@@ -634,8 +688,40 @@ llvm::Value* LLVMBackend::cgBinary(const Binary& e) {
         case TokenType::AMPERSAND: return makeI64(builder->CreateAnd(getI64(l),getI64(r)));
         case TokenType::PIPE:      return makeI64(builder->CreateOr(getI64(l),getI64(r)));
         case TokenType::CARET:     return makeI64(builder->CreateXor(getI64(l),getI64(r)));
-        case TokenType::LSHIFT:    return makeI64(builder->CreateShl(getI64(l),getI64(r)));
-        case TokenType::RSHIFT:    return makeI64(builder->CreateAShr(getI64(l),getI64(r)));
+        case TokenType::LSHIFT: {
+            // H12: runtime bounds-check — shift amount must be < 64
+            auto* lval = getI64(l);
+            auto* rval = getI64(r);
+            auto* bitwidth = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 64);
+            auto* is_overflow = builder->CreateICmpUGE(rval, bitwidth);
+            auto* parent_fn = builder->GetInsertBlock()->getParent();
+            auto* err_bb = llvm::BasicBlock::Create(*ctx, "shl_overflow_err", parent_fn);
+            auto* ok_bb = llvm::BasicBlock::Create(*ctx, "shl_overflow_ok", parent_fn);
+            builder->CreateCondBr(is_overflow, err_bb, ok_bb);
+            builder->SetInsertPoint(err_bb);
+            auto* err_msg = builder->CreateGlobalString("shift amount out of range");
+            callRtByName("__ang_api_throw_error", {err_msg});
+            builder->CreateUnreachable();
+            builder->SetInsertPoint(ok_bb);
+            return makeI64(builder->CreateShl(lval, rval));
+        }
+        case TokenType::RSHIFT: {
+            // H12: runtime bounds-check — shift amount must be < 64
+            auto* lval = getI64(l);
+            auto* rval = getI64(r);
+            auto* bitwidth = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 64);
+            auto* is_overflow = builder->CreateICmpUGE(rval, bitwidth);
+            auto* parent_fn = builder->GetInsertBlock()->getParent();
+            auto* err_bb = llvm::BasicBlock::Create(*ctx, "shr_overflow_err", parent_fn);
+            auto* ok_bb = llvm::BasicBlock::Create(*ctx, "shr_overflow_ok", parent_fn);
+            builder->CreateCondBr(is_overflow, err_bb, ok_bb);
+            builder->SetInsertPoint(err_bb);
+            auto* err_msg = builder->CreateGlobalString("shift amount out of range");
+            callRtByName("__ang_api_throw_error", {err_msg});
+            builder->CreateUnreachable();
+            builder->SetInsertPoint(ok_bb);
+            return makeI64(builder->CreateAShr(lval, rval));
+        }
         case TokenType::LESS:
         case TokenType::LESS_EQUAL:
         case TokenType::GREATER:
