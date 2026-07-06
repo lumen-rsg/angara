@@ -271,10 +271,9 @@ void Chaperone::analyzeExpr(Context& ctx,
         const auto& effective_args = (rit != resolved_all.end())
                                      ? rit->second : call->arguments;
 
-        for (const auto& arg : effective_args)
-            analyzeExpr(ctx, arg, state);
-
-        // Interprocedural: determine the callee name.
+        // Interprocedural: determine the callee name and summary BEFORE
+        // analyzing arguments, so we can detect LambdaExpr arguments in
+        // Borrowed positions (L21: closure-as-borrowed-argument).
         // For method calls (o.m()), look up the object's type to build a
         // class-qualified key (e.g., "Buf.init") — C3 prevents name collisions
         // between same-named methods in different classes.
@@ -323,6 +322,23 @@ void Chaperone::analyzeExpr(Context& ctx,
                         summary = &cs_it->second;
                 }
             }
+        }
+
+        // Analyze each argument. L21: when a LambdaExpr is passed to a
+        // Borrowed parameter position (or to an unknown function, which
+        // defaults to Borrow), treat it like an IIFE — the closure is consumed
+        // synchronously by the callee and cannot outlive its captures.
+        for (size_t i = 0; i < effective_args.size(); i++) {
+            bool lambda_is_borrowed = false;
+            if (dynamic_cast<const LambdaExpr*>(effective_args[i].get())) {
+                if (!summary) {
+                    // Unknown function — conservative default is Borrow.
+                    lambda_is_borrowed = true;
+                } else if (i < summary->size() && (*summary)[i] == ParamBehavior::Borrowed) {
+                    lambda_is_borrowed = true;
+                }
+            }
+            analyzeExpr(ctx, effective_args[i], state, /*is_callee=*/lambda_is_borrowed);
         }
 
         if (summary) {

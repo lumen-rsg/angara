@@ -1,0 +1,29 @@
+// Chaperone positive test — closure passed as borrowed argument (L21).
+// A closure that is passed to a function whose parameter is Borrowed
+// should NOT trigger E505 when it captures a tracked Live variable.
+// This extends the IIFE logic: the closure is consumed synchronously
+// by the callee and cannot outlive its captures.
+//
+// exit: 42
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+// call_with borrows its function argument — it calls f and returns
+// the result without storing or escaping f.
+func call_with(f as function() -> i64) -> i64 {
+    return f();
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    // Closure captures b, passed to call_with which borrows it.
+    // call_with calls the closure synchronously — no escape.
+    let result = call_with(func() -> i64 { return b.get(); });
+    drop b;
+    return result;
+}
