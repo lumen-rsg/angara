@@ -1,0 +1,70 @@
+// Interface file for the 'time' native module.
+// Documents the type signatures of all exported functions and classes.
+//
+// Usage: attach time;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/system/ alongside time.c.
+
+// --- Constants / Zero-argument functions ---
+
+// Current time as Unix timestamp (UTC), in seconds as f64.
+export func now() -> f64;
+
+// Current time as local timestamp, in seconds as f64.
+export func now_local() -> f64;
+
+// Current time as Unix timestamp, in seconds as i64.
+export func unix() -> i64;
+
+// Convert Unix timestamp (i64 seconds) to f64 timestamp.
+export func from_unix(seconds as i64) -> f64;
+
+// Monotonic clock (not affected by system time changes), in seconds as f64.
+export func monotonic() -> f64;
+
+// Timezone offset from UTC, in seconds as i64.
+export func timezone_offset() -> i64;
+
+// Timezone name as string (e.g., "EST", "PST").
+export func timezone_name() -> string;
+
+// --- Operations ---
+
+// Sleep for the given number of seconds (fractional).
+export func sleep(seconds as f64) -> nil;
+
+// Format a timestamp as ISO 8601 string (UTC).
+export func format_iso(timestamp as f64) -> string;
+
+// Format a timestamp using a strftime-compatible format string (UTC).
+export func format(timestamp as f64, fmt as string) -> string;
+
+// Format a timestamp using a strftime-compatible format string (local time).
+export func format_local(timestamp as f64, fmt as string) -> string;
+
+// Parse a time string with the given format, returning an optional f64 timestamp.
+// Returns nil if parsing fails.
+export func parse(time_str as string, fmt as string) -> f64?;
+
+// --- Date parts ---
+
+// record DateParts { year, month, day, hour, minute, second, weekday, yday: i64 }
+// Break a timestamp into its components (UTC).
+export func date_parts(timestamp as f64) -> record;
+
+// record DatePartsLocal { year, month, day, hour, minute, second, weekday, yday, isdst: i64 }
+// Break a timestamp into its components (local timezone).
+export func date_parts_local(timestamp as f64) -> record;
+
+// --- Stopwatch class ---
+// A high-resolution timer for measuring elapsed time.
+
+export class Stopwatch {
+    // Returns elapsed time in seconds since creation or last reset.
+    export func elapsed() -> f64;
+
+    // Resets the stopwatch to zero.
+    export func reset() -> nil;
+}

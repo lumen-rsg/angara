@@ -1,0 +1,37 @@
+// Interface file for the 'io' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach io;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/io/ alongside io.c.
+//
+// Stream IDs: 1 = stdout, 2 = stderr
+
+// Write content to a stream (no trailing newline).
+export func write(stream_id as i64, content as string) -> nil;
+
+// Write content to a stream with a trailing newline.
+export func println(stream_id as i64, content as string) -> nil;
+
+// Flush a stream's output buffer.
+export func flush(stream_id as i64) -> nil;
+
+// Read a single line from stdin. Returns the line without the trailing newline.
+export func read_line() -> string;
+
+// Read all remaining input from stdin until EOF.
+export func read_all() -> string;
+
+// Write to stdout (stream 1). Convenience wrapper for write(1, content).
+export func print(content as string) -> nil;
+
+// Write to stdout with trailing newline. Convenience wrapper for println(1, content).
+export func println_auto(content as string) -> nil;
+
+// Write to stderr (stream 2). Convenience wrapper for write(2, content).
+export func eprint(content as string) -> nil;
+
+// Write to stderr with trailing newline. Convenience wrapper for println(2, content).
+export func eprintln(content as string) -> nil;

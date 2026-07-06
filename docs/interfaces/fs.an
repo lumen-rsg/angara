@@ -1,0 +1,51 @@
+// Interface file for the 'fs' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach fs;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/fs/ alongside fs.c.
+
+// --- File I/O ---
+export func read_file(path as string) -> string;
+export func write_file(path as string, content as string) -> nil;
+export func append_file(path as string, content as string) -> nil;
+
+// --- File operations ---
+export func remove_file(path as string) -> nil;
+export func copy_file(src as string, dst as string) -> nil;
+export func rename_path(old as string, new as string) -> nil;
+
+// --- Directory operations ---
+export func create_dir(path as string) -> nil;
+export func remove_dir(path as string) -> nil;
+
+// list_dir returns a list of entry names (strings) in the directory.
+export func list_dir(path as string) -> list<string>;
+
+// --- Symlinks ---
+export func create_symlink(target as string, link as string) -> nil;
+export func create_hardlink(target as string, link as string) -> nil;
+
+// --- File metadata ---
+export func exists(path as string) -> bool;
+export func is_file(path as string) -> bool;
+export func is_dir(path as string) -> bool;
+export func is_symlink(path as string) -> bool;
+export func file_size(path as string) -> i64;
+
+// file_info returns a record with fields: size (i64), is_file (bool),
+// is_dir (bool), is_symlink (bool), mode (i64), modified (f64), accessed (f64).
+export func file_info(path as string) -> record;
+
+// --- Permissions ---
+export func chmod(path as string, mode as i64) -> nil;
+
+// --- Path utilities ---
+export func canonical(path as string) -> string;   // Resolve to absolute path
+export func temp_dir() -> string;                   // Get system temp directory
+
+// --- Install ---
+// Copies src to dst and sets permissions. Returns nil on success.
+export func install(src as string, dst as string, mode as i64) -> nil;

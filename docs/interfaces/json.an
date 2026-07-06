@@ -1,0 +1,19 @@
+// Interface file for the 'json' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach json;
+//
+// Note: This is a documentation interface file. The compiler currently
+// resolves native modules from .so files directly. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/data/ alongside json.c.
+
+// parse(json_str: string) -> any
+// Parses a JSON string into an Angara value.
+// Returns: record for objects, list for arrays, f64 for numbers,
+//          string for strings, bool for booleans, nil for null.
+export func parse(json_str as string) -> any;
+
+// stringify(value: any) -> string
+// Converts an Angara value to its JSON string representation.
+export func stringify(value as any) -> string;

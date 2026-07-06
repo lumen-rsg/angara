@@ -1,0 +1,73 @@
+// Interface file for the 'math' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach math;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/math/ alongside math.c.
+
+// --- Constants ---
+export func PI() -> f64;         // π ≈ 3.141592653589793
+export func E() -> f64;          // e ≈ 2.718281828459045
+export func TAU() -> f64;        // τ = 2π ≈ 6.283185307179586
+export func INF() -> f64;        // Positive infinity
+export func NAN() -> f64;        // Not-a-Number
+export func MAX_I64() -> i64;    // Maximum i64 value
+export func MIN_I64() -> i64;    // Minimum i64 value
+export func MAX_F64() -> f64;    // Maximum f64 value
+export func EPSILON() -> f64;    // Machine epsilon for f64
+
+// --- Unary float functions (f64 -> f64) ---
+export func abs_f64(x as f64) -> f64;
+export func sqrt(x as f64) -> f64;        // Square root
+export func cbrt(x as f64) -> f64;        // Cube root
+export func exp(x as f64) -> f64;         // e^x
+export func log(x as f64) -> f64;         // Natural logarithm
+export func log2(x as f64) -> f64;        // Base-2 logarithm
+export func log10(x as f64) -> f64;       // Base-10 logarithm
+export func sin(x as f64) -> f64;
+export func cos(x as f64) -> f64;
+export func tan(x as f64) -> f64;
+export func asin(x as f64) -> f64;        // Arc sine
+export func acos(x as f64) -> f64;        // Arc cosine
+export func atan(x as f64) -> f64;        // Arc tangent
+export func ceil(x as f64) -> f64;        // Round up
+export func floor(x as f64) -> f64;       // Round down
+export func round(x as f64) -> f64;       // Round to nearest
+export func trunc(x as f64) -> f64;       // Truncate toward zero
+export func to_radians(deg as f64) -> f64;
+export func to_degrees(rad as f64) -> f64;
+
+// --- Float predicates (f64 -> i64/bool) ---
+export func sign(x as f64) -> i64;        // -1, 0, or 1
+export func is_nan(x as f64) -> bool;
+export func is_infinite(x as f64) -> bool;
+
+// --- Binary float functions (f64, f64 -> f64) ---
+export func pow(base as f64, exp as f64) -> f64;
+export func atan2(y as f64, x as f64) -> f64;
+export func hypot(x as f64, y as f64) -> f64;   // sqrt(x² + y²)
+export func min(a as f64, b as f64) -> f64;
+export func max(a as f64, b as f64) -> f64;
+
+// --- Ternary float functions (f64, f64, f64 -> f64) ---
+export func clamp(value as f64, lo as f64, hi as f64) -> f64;
+export func lerp(a as f64, b as f64, t as f64) -> f64;  // Linear interpolation
+
+// --- Integer functions ---
+export func abs_i64(x as i64) -> i64;     // Absolute value
+export func gcd(a as i64, b as i64) -> i64;      // Greatest common divisor
+export func lcm(a as i64, b as i64) -> i64;      // Least common multiple
+export func factorial(n as i64) -> i64;          // n! (n <= 20)
+export func fibonacci(n as i64) -> i64;          // nth Fibonacci number
+export func is_prime(n as i64) -> bool;          // Primality test
+
+// --- List-based statistics (list<f64> -> f64) ---
+export func sum(values as list<f64>) -> f64;
+export func mean(values as list<f64>) -> f64;         // Arithmetic mean
+export func median(values as list<f64>) -> f64;       // Median (requires sorted input)
+export func variance(values as list<f64>) -> f64;     // Sample variance (n-1)
+export func std_dev(values as list<f64>) -> f64;      // Standard deviation
+export func min_by(values as list<f64>) -> f64;       // Minimum element value
+export func max_by(values as list<f64>) -> f64;       // Maximum element value

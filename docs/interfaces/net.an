@@ -1,0 +1,93 @@
+// Interface file for the 'net' native module.
+// Documents the type signatures of all exported functions and classes.
+//
+// Usage: attach net;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/net/ alongside net.c.
+
+// --- Module-level functions ---
+
+// Connect to a TCP host:port. Returns a TcpConn or throws on failure.
+// timeout_ms is optional (nil = default timeout).
+export func tcp_connect(host as string, port as i64, timeout_ms as i64?) -> TcpConn;
+
+// Start a TCP listener on host:port. host is optional (nil = all interfaces).
+// backlog is optional (nil = system default).
+export func tcp_listen(host as string?, port as i64, backlog as i64?) -> TcpListener;
+
+// Create a UDP socket. port is optional (-1 or nil = unbound).
+export func udp_socket(port as i64?) -> UdpSocket;
+
+// Resolve a hostname to a list of IP address strings.
+export func resolve(hostname as string) -> list<string>;
+
+// Reverse DNS lookup: resolve an IP address to a hostname.
+export func reverse_lookup(addr as string) -> string;
+
+// Parse an "addr:port" string into a record { addr: string, port: i64 }.
+// Returns nil if parsing fails.
+export func parse_addr(addr_and_port as string) -> record?;
+
+// --- TcpConn class ---
+
+export class TcpConn {
+    // Send data. Returns the number of bytes sent.
+    export func send(data as string) -> i64;
+
+    // Receive data. buf_size is optional (nil = 4096).
+    // Returns nil if the connection is closed.
+    export func recv(buf_size as i64?) -> string?;
+
+    // Receive a line (up to newline). timeout_ms is optional (nil = 5000ms).
+    // Returns nil on timeout or connection close.
+    export func recv_line(timeout_ms as i64?) -> string?;
+
+    // Set the socket timeout in milliseconds.
+    export func set_timeout(timeout_ms as i64) -> nil;
+
+    // Close the connection.
+    export func close() -> nil;
+
+    // Check if the connection is still active.
+    export func is_connected() -> bool;
+
+    // Get the underlying file descriptor.
+    export func fileno() -> i64;
+}
+
+// --- TcpListener class ---
+
+export class TcpListener {
+    // Accept an incoming connection. timeout_ms is optional (nil = blocking).
+    // Returns nil if no connection arrives within the timeout.
+    export func accept(timeout_ms as i64?) -> TcpConn?;
+
+    // Accept and return raw record { fd: i64, addr: string, port: i64 }.
+    // Returns nil on timeout.
+    export func accept_raw(timeout_ms as i64?) -> record?;
+
+    // Get the port this listener is bound to.
+    export func port() -> i64;
+
+    // Close the listener.
+    export func close() -> nil;
+}
+
+// --- UdpSocket class ---
+
+export class UdpSocket {
+    // Send data to a specific host:port. Returns bytes sent.
+    export func send_to(data as string, host as string, port as i64) -> i64;
+
+    // Receive data. buf_size is optional (nil = 65536).
+    // Returns record { data: string, addr: string, port: i64 } or nil on failure.
+    export func recv_from(buf_size as i64?) -> record?;
+
+    // Enable or disable broadcast mode.
+    export func set_broadcast(broadcast as bool) -> nil;
+
+    // Close the socket.
+    export func close() -> nil;
+}
