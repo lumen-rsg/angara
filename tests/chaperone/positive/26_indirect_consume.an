@@ -1,0 +1,28 @@
+// Chaperone positive test — H10: indirect call through function pointer
+// to a consuming function. The Chaperone resolves the alias and correctly
+// transitions the argument to Dropped, so no double-drop is flagged.
+//
+// Previously, indirect calls defaulted to Borrow, meaning the caller would
+// still think the argument is Live and a subsequent drop would be a silent
+// double-free. Now the alias is tracked and the call is correctly recognized
+// as consuming.
+//
+// exit: 0
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+// Regular function: drops (consumes) tracked param.
+func consume_buf(b as Buf) -> nil {
+    drop b;
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let f = consume_buf;   // f aliases consume_buf
+    f(b);                   // indirect call — correctly consumes b
+    // b is now Dropped — no double-drop, no error
+    return 0;
+}

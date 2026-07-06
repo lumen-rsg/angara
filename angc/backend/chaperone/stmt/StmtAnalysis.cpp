@@ -448,6 +448,18 @@ void Chaperone::analyzeStmt(Context& ctx,
                 ctx.borrows[var->name.lexeme] = move_src;
             }
         }
+
+        // H10: function pointer alias tracking. When a variable is initialized
+        // with a direct function reference (e.g. `let f = borrow;`), record the
+        // alias so that indirect calls through the variable resolve to the
+        // aliased function's summary instead of defaulting to Borrow.
+        if (var->initializer) {
+            if (auto* vve = dynamic_cast<const VarExpr*>(var->initializer.get())) {
+                if (ctx.summaries.count(vve->name.lexeme)) {
+                    ctx.function_aliases[var->name.lexeme] = vve->name.lexeme;
+                }
+            }
+        }
         return;
     }
 

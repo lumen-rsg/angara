@@ -1,0 +1,28 @@
+// Chaperone negative test — H10: indirect call through function pointer
+// to a consuming function, followed by a double-drop.
+//
+// When a function pointer variable is assigned a direct function reference
+// (e.g. `let f = consume_buf;`), the Chaperone now tracks the alias and
+// resolves indirect calls through the variable to the aliased function's
+// summary. Previously, all indirect calls defaulted to Borrow, so calling
+// a consuming function through a pointer silently caused a double-free.
+//
+// expect: E503
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+// Regular function: drops (consumes) tracked param.
+func consume_buf(b as Buf) -> nil {
+    drop b;
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let f = consume_buf;   // f is now an alias for consume_buf
+    f(b);                   // indirect call — Chaperone resolves through alias
+    drop b;                 // E503: b was already dropped by consume_buf
+    return 0;
+}

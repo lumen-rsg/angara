@@ -203,6 +203,18 @@ void Chaperone::analyzeExpr(Context& ctx,
                 // are non-tracked declarations like `let i as i64`; skip them.)
                 tit->second = State::Live;
             }
+
+            // H10: function pointer alias tracking for reassignments.
+            // When a variable is reassigned to a direct function reference
+            // (e.g. `f = borrow;`), update the alias so indirect calls
+            // through the variable resolve to the correct summary.
+            if (asgn->value) {
+                if (auto* vve = dynamic_cast<const VarExpr*>(asgn->value.get())) {
+                    if (ctx.summaries.count(vve->name.lexeme)) {
+                        ctx.function_aliases[tgt->name.lexeme] = vve->name.lexeme;
+                    }
+                }
+            }
             return;
         }
 
@@ -362,11 +374,27 @@ void Chaperone::analyzeExpr(Context& ctx,
             }
         }
 
-        // H9: If no summary was found by name or closure lookup, check the
-        // callee's FunctionType for @consumes/@escape annotations. These are
-        // propagated through module boundaries (attach), so a foreign function
-        // declared in another module with @consumes(0) will have its annotations
-        // available here via the type checker.
+        // If no summary was found by name or closure lookup, try function
+        // pointer alias resolution (H10) and then FunctionType annotations (H9).
+        if (!summary) {
+            // H10: function pointer alias resolution. When the callee is a
+            // variable that was assigned a direct function reference
+            // (e.g. `let f = consume_buf;` recorded in function_aliases),
+            // resolve the indirect call through the alias to use the
+            // aliased function's summary.
+            if (auto* ve = dynamic_cast<const VarExpr*>(call->callee.get())) {
+                auto alias_it = ctx.function_aliases.find(ve->name.lexeme);
+                if (alias_it != ctx.function_aliases.end()) {
+                    auto sum_it2 = ctx.summaries.find(alias_it->second);
+                    if (sum_it2 != ctx.summaries.end()) {
+                        summary = &sum_it2->second;
+                    }
+                }
+            }
+        }
+
+        // H9: If no summary was found by name, closure, or alias lookup, check
+        // the callee's FunctionType for @consumes/@escape annotations.
         if (!summary) {
             auto tit = ctx.tc.getExpressionTypes().find(call->callee.get());
             if (tit != ctx.tc.getExpressionTypes().end() && tit->second &&

@@ -81,6 +81,12 @@ private:
         // creates a unique FunctionType that flows through variable assignments,
         // giving a stable lookup key for closure call sites.
         std::map<const struct Type*, FunctionSummary> closure_summaries;
+        // H10: function pointer aliases. When a variable is assigned a direct
+        // function reference (e.g. `let f = borrow;`), record that the variable
+        // is an alias for that function. Indirect calls through the variable
+        // then resolve to the aliased function's summary instead of defaulting
+        // to Borrow. Key: variable name → Value: function name.
+        std::map<std::string, std::string> function_aliases;
         bool in_unsafe = false;
         // During the interprocedural fixed-point convergence passes, suppress
         // diagnostics (they'd duplicate); emit only on the final pass.
