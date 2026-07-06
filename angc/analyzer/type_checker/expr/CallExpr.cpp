@@ -225,6 +225,17 @@ namespace angara {
                 }
             }
 
+            // M8: full body re-check with concrete type arguments.
+            // After substituting TYPE_PARAM → concrete types in the signature,
+            // re-type-check the generic function body to catch any errors that
+            // the TYPE_PARAM placeholders may have hidden.
+            if (is_generic_fn && !inferred_args.empty() && !callee_key.empty()) {
+                if (!recheck_generic_body(callee_key, inferred_args, expr.paren)) {
+                    pushAndSave(&expr, m_type_error);
+                    return {};
+                }
+            }
+
             check_function_call(expr, check_type, arg_types, arg_exprs_ptr);
             if (!m_hadError) {
                 result_type = check_type->return_type;
@@ -572,6 +583,105 @@ namespace angara {
             return validate_substituted_type(ft->return_type, token);
         }
         return true;
+    }
+
+    // M8: re-check a generic function body with concrete type arguments.
+    // This is called at each call site after type arg inference to verify
+    // that the body remains type-correct with the concrete types (not just
+    // the TYPE_PARAM placeholders used during the initial check).
+    bool TypeChecker::recheck_generic_body(
+            const std::string& func_name,
+            const std::map<std::string, std::shared_ptr<Type>>& type_args,
+            const Token& error_token)
+    {
+        (void)error_token; // reserved for future call-site error reporting
+        auto stmt_it = m_generic_func_stmts.find(func_name);
+        if (stmt_it == m_generic_func_stmts.end()) return true;
+        const auto& stmt = stmt_it->second;
+        if (!stmt->body || stmt->body->empty()) return true;
+
+        // Save critical state for restoration after re-check
+        auto saved_type_params = m_active_type_params;
+        auto saved_bounds = m_active_type_param_bounds;
+        bool saved_had_error = m_hadError;
+        m_hadError = false;
+
+        // Set concrete types as the active type parameters
+        for (const auto& tp : stmt->type_params) {
+            auto it = type_args.find(tp.lexeme);
+            if (it != type_args.end()) {
+                m_active_type_params[tp.lexeme] = it->second;
+            }
+        }
+        // Clear bounds — trait conformance was already verified by M9
+        m_active_type_param_bounds.clear();
+
+        // Push a fresh scope and re-declare parameters with concrete types
+        m_symbols.enterScope();
+
+        // Build substituted function type for parameter declarations
+        auto symbol = m_symbols.resolve(stmt->name.lexeme);
+        std::shared_ptr<FunctionType> orig_func_type;
+        if (symbol && symbol->type->kind == TypeKind::FUNCTION) {
+            orig_func_type = std::dynamic_pointer_cast<FunctionType>(symbol->type);
+        }
+
+        // Re-declare 'this' if needed
+        if (stmt->has_this && m_current_class) {
+            Token this_token(TokenType::THIS, "this", stmt->name.line, 0);
+            m_symbols.declare(this_token,
+                std::make_shared<InstanceType>(m_current_class), true);
+        }
+
+        // Push the return type for return-statement checking
+        if (orig_func_type) {
+            auto ret = substituteTypeArgs(orig_func_type->return_type, type_args);
+            m_function_return_types.push(ret);
+        } else {
+            m_function_return_types.push(m_type_nil);
+        }
+
+        // Re-declare parameters with substituted concrete types
+        for (size_t i = 0; i < stmt->params.size(); ++i) {
+            const auto& param = stmt->params[i];
+            std::shared_ptr<Type> param_type;
+            if (orig_func_type && i < orig_func_type->param_types.size()) {
+                param_type = substituteTypeArgs(
+                    orig_func_type->param_types[i], type_args);
+            } else {
+                param_type = m_type_any;
+            }
+            if (!param.destructure_names.empty()) {
+                if (param_type->kind == TypeKind::TUPLE) {
+                    auto tup = std::dynamic_pointer_cast<TupleType>(param_type);
+                    for (size_t j = 0; j < param.destructure_names.size() &&
+                                       j < tup->element_types.size(); ++j) {
+                        m_symbols.declare(param.destructure_names[j],
+                                         tup->element_types[j], true);
+                    }
+                }
+            } else {
+                m_symbols.declare(param.name, param_type, true);
+            }
+        }
+
+        // Re-visit body statements with concrete types
+        for (const auto& bodyStmt : (*stmt->body)) {
+            bodyStmt->accept(*this, bodyStmt);
+            if (m_hadError) break;
+        }
+
+        // Restore state
+        m_function_return_types.pop();
+        exitScopeAndWarn();
+        m_active_type_params = saved_type_params;
+        m_active_type_param_bounds = saved_bounds;
+
+        bool recheck_ok = !m_hadError;
+        if (m_hadError) saved_had_error = true;
+        m_hadError = saved_had_error;
+
+        return recheck_ok;
     }
 
 }

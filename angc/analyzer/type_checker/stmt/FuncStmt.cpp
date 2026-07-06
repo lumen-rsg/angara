@@ -278,6 +278,17 @@ namespace angara {
             bodyStmt->accept(*this, bodyStmt);
         }
 
+        // M8: store generic function ASTs for later body re-checking at call
+        // sites. Only store if the body type-checked without errors — if the
+        // initial check already failed there's no need to re-check.
+        if (!stmt->type_params.empty() && !m_hadError) {
+            std::string key = stmt->name.lexeme;
+            if (stmt->has_this && m_current_class) {
+                key = m_current_class->name + "." + stmt->name.lexeme;
+            }
+            m_generic_func_stmts[key] = stmt;
+        }
+
         // TS-6: definite-return check. If the function declares a non-nil return
         // type, every control-flow path must end in a `return` (or `throw`).
         // Skip when this function already reported an error (avoid cascades).

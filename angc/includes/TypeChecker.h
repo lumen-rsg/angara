@@ -200,6 +200,15 @@ namespace angara {
         bool validate_substituted_type(const std::shared_ptr<Type>& type,
                                        const Token& token);
 
+        /// M8: re-check a generic function body with concrete type arguments
+        /// substituted for type parameters. Called at each monomorphized call
+        /// site to catch body-level type errors that TYPE_PARAM permissiveness
+        /// may have hidden during the initial type-check. Returns true if the
+        /// body passes re-checking (no new errors).
+        bool recheck_generic_body(const std::string& func_name,
+                                  const std::map<std::string, std::shared_ptr<Type>>& type_args,
+                                  const Token& error_token);
+
         /// TS-1: does the concrete `subject` type adopt the `iface` (a TraitType
         /// or ContractType)? Returns false for non-instance subjects. Used to
         /// decide whether a concrete value may flow into a trait/contract slot.
@@ -281,7 +290,7 @@ namespace angara {
         std::stack<std::shared_ptr<Type>> m_function_return_types;
         std::shared_ptr<ClassType> m_current_class = nullptr;
         std::map<const Symbol*, std::shared_ptr<Type>> m_narrowed_types;
-        std::map<std::string, std::shared_ptr<TypeParameterType>> m_active_type_params;
+        std::map<std::string, std::shared_ptr<Type>> m_active_type_params;
         // TS-1/C4: active generic-body bounds — type-param name -> the TraitType
         // it's bound to (e.g. T -> Drawable for `func f<T: Drawable>`). Lets a
         // generic body resolve `x.draw()` against the bound and dispatch via the
@@ -302,6 +311,10 @@ namespace angara {
         // Populated in defineFunctionHeader; used by call sites to verify
         // that inferred concrete type args satisfy their declared bounds.
         std::map<std::string, std::map<std::string, std::shared_ptr<TraitType>>> m_function_type_param_bounds;
+
+        // M8: stored generic function ASTs for full body re-checking at call
+        // sites. Keyed by function name (or "Class.method" for methods).
+        std::map<std::string, std::shared_ptr<const FuncStmt>> m_generic_func_stmts;
 
         // LANG-11: function_name -> vector of default expressions indexed by param position.
         // nullptr entries mean no default for that parameter.
