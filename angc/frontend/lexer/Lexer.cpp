@@ -109,11 +109,13 @@ namespace angara {
     void Lexer::addToken(TokenType type) {
         std::string text = m_source.substr(m_start, m_current - m_start);
         int token_col = m_column - static_cast<int>(text.length());
+        if (token_col < 0) token_col = 0;
         m_tokens.emplace_back(type, std::move(text), m_line, token_col, m_filename);
     }
 
     void Lexer::addToken(TokenType type, const std::string &literal) {
         int token_col = m_column - (m_current - m_start);
+        if (token_col < 0) token_col = 0;
         m_tokens.emplace_back(type, literal, m_line, token_col, m_filename);
     }
 

@@ -271,7 +271,7 @@ namespace angara {
 
     Parser::ParseError Parser::error(const Token &token, const std::string &message, const std::string &code) {
         if (m_panicMode) {
-            return ParseError("");
+            return ParseError("panic mode");
         }
 
         m_panicMode = true;

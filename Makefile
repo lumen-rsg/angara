@@ -79,7 +79,7 @@ ANGC_SRCS := $(shell find angc -name "*.cpp")
 ANGC_OBJS := $(patsubst %.cpp,build/obj/%.o,$(ANGC_SRCS))
 ANGC_OUT  := build/angc
 
-.PHONY: all logo clean install uninstall install_vim uninstall_vim test test-cpp test-chaperone test-lang
+.PHONY: all logo clean install uninstall lint install_vim uninstall_vim test test-cpp test-chaperone test-lang
 
 all: logo $(ANGC_OUT)
 	@printf "$(BOLD)$(GREEN)>>> Build Completed Successfully <<<$(RESET)\n"
@@ -479,5 +479,11 @@ clean:
 	@printf "$(RED)[CL] $(RESET) Cleaning build directory...\n"
 	@rm -rf build
 	@find . -name '*.d' -path '*/build/*' -delete 2>/dev/null || true
+
+lint:
+	@printf "$(CYAN)[LT] $(RESET) Running clang-tidy...\n"
+	@clang-tidy --config-file=.clang-tidy angc/**/*.cpp -- $(CXXFLAGS) 2>/dev/null || true
+	@clang-tidy --config-file=.clang-tidy modules/**/*.c -- $(CFLAGS) 2>/dev/null || true
+	@printf "$(BOLD)$(GREEN)>>> Lint Complete <<<$(RESET)\n"
 
 -include $(shell find build/obj -name '*.d' 2>/dev/null)

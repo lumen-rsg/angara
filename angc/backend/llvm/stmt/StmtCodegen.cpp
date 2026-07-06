@@ -17,7 +17,7 @@ void LLVMBackend::cgStmt(const std::shared_ptr<Stmt>& s) {
     else if (auto* p = dynamic_cast<const ForInStmt*>(s.get())) { setDebugLoc(p->keyword); cgForIn(*p); }
     else if (auto* p = dynamic_cast<const ReturnStmt*>(s.get())) { setDebugLoc(p->keyword); cgReturn(*p); }
     else if (auto* p = dynamic_cast<const BreakStmt*>(s.get())) {
-        setDebugLoc(0, 0);
+        setDebugLoc(p->keyword);
         if (loopExit) {
             // BUG-5: pop try frames pushed inside this loop before leaving it,
             // so a later throw can't longjmp into a stale frame.
@@ -30,7 +30,7 @@ void LLVMBackend::cgStmt(const std::shared_ptr<Stmt>& s) {
         }
     }
     else if (auto* p = dynamic_cast<const ContinueStmt*>(s.get())) {
-        setDebugLoc(0, 0);
+        setDebugLoc(p->keyword);
         if (loopContinue) {
             // BUG-5: continue re-enters the loop body; a try started in this
             // iteration must be popped so the next iteration is clean.
