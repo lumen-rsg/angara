@@ -19,16 +19,16 @@ namespace angara {
             }
 
         if (!isTruthy(condition_type)) {
-            error(Token(), "Ternary condition must be a truthy type, but got '" +
+            error(expr.op, "Ternary condition must be a truthy type, but got '" +
                            condition_type->toString() + "'.", "E380");
             pushAndSave(&expr, m_type_error);
             return {};
         }
 
-        if (!sameType(then_type, else_type)) {
-            error(Token(), "Type mismatch in ternary expression. The 'then' branch has type '" +
+        if (!check_type_compatibility(then_type, else_type)) {
+            error(expr.op, "Type mismatch in ternary expression. The 'then' branch has type '" +
                            then_type->toString() + "', but the 'else' branch has type '" +
-                           else_type->toString() + "'. Both branches must return the same type.", "E381");
+                           else_type->toString() + "'. Both branches must return compatible types.", "E381");
             pushAndSave(&expr, m_type_error);
             return {};
         }

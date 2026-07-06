@@ -242,15 +242,17 @@ namespace angara {
     };
 
     struct TernaryExpr : Expr {
-        TernaryExpr(std::shared_ptr<Expr> condition, std::shared_ptr<Expr> thenBranch, std::shared_ptr<Expr> elseBranch)
+        TernaryExpr(std::shared_ptr<Expr> condition, std::shared_ptr<Expr> thenBranch, std::shared_ptr<Expr> elseBranch,
+                    Token op)
                 : condition(std::move(condition)), thenBranch(std::move(thenBranch)),
-                  elseBranch(std::move(elseBranch)) {}
+                  elseBranch(std::move(elseBranch)), op(std::move(op)) {}
 
         std::any accept(ExprVisitor &visitor) const override { return visitor.visit(*this); }
 
         const std::shared_ptr<Expr> condition;
         const std::shared_ptr<Expr> thenBranch;
         const std::shared_ptr<Expr> elseBranch;
+        const Token op;
     };
 
 // Represents the 'this' keyword
