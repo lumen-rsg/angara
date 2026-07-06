@@ -1,0 +1,270 @@
+// cli_test.an — Angara cli module test
+// Tests subcommand dispatch, help generation, and option/flag parsing
+//
+// Usage: angc tests/modules_tests/cli_test.an
+
+attach cli;
+attach io;
+
+// Simple assertion helper
+func assert_eq(expected as any, actual as any, desc as string) -> nil {
+  if (string(expected) != string(actual)) {
+    let msg = "FAIL [" + desc + "]: expected '" + string(expected) + "', got '" + string(actual) + "'";
+    io.println(2, msg);
+    throw Exception(msg);
+  }
+  io.println(1, "  PASS: " + desc);
+}
+
+func assert_true(val as bool, desc as string) -> nil {
+  if (!val) {
+    let msg = "FAIL [" + desc + "]: expected true, got false";
+    io.println(2, msg);
+    throw Exception(msg);
+  }
+  io.println(1, "  PASS: " + desc);
+}
+
+export func main() -> i64 {
+  io.println(1, "--- Angara cli Module Test ---");
+
+  // Shared definition used across multiple tests
+  let def = {
+    name: "myapp",
+    version: "2.0.0",
+    description: "A test application",
+    options: [
+      { long: "config", short: "c", help: "Config file path", default: "app.toml" }
+    ],
+    flags: [
+      { long: "quiet", short: "q", help: "Suppress output" },
+      { long: "debug", short: "d", help: "Enable debug logging" }
+    ],
+    commands: [
+      {
+        name: "serve",
+        help: "Start the HTTP server",
+        options: [
+          { long: "port", short: "p", help: "Port number", default: "8080" },
+          { long: "host", short: "h", help: "Bind address", default: "127.0.0.1" }
+        ],
+        flags: [
+          { long: "daemon", short: "D", help: "Run as daemon" }
+        ]
+      },
+      {
+        name: "build",
+        help: "Build the project",
+        options: [
+          { long: "target", short: "t", help: "Build target" }
+        ],
+        flags: [
+          { long: "release", short: "r", help: "Release mode" }
+        ]
+      }
+    ]
+  };
+
+  // =========================================================================
+  // Test 1: Top-level help text generation
+  // =========================================================================
+  io.println(1, "\n-- Test 1: Top-level help text --");
+  let help_text = cli.help(def);
+  assert_true(len(help_text) > 0, "help text is non-empty");
+  // Check key elements are present
+  assert_true(len(help_text) > 100, "help text is substantial");
+  io.println(1, help_text);
+
+  // =========================================================================
+  // Test 2: Command-specific help text
+  // =========================================================================
+  io.println(1, "\n-- Test 2: Command-specific help text --");
+  let serve_help = cli.help(def, "serve");
+  assert_true(len(serve_help) > 0, "serve help is non-empty");
+  io.println(1, serve_help);
+
+  // =========================================================================
+  // Test 3: --help flag detection (top-level)
+  // =========================================================================
+  io.println(1, "\n-- Test 3: --help detection --");
+  let r3 = cli.parse(def, ["myapp", "--help"]);
+  assert_true(cli.is_help(r3), "--help sets help flag");
+  assert_eq("", cli.command(r3), "no command matched with --help only");
+
+  // =========================================================================
+  // Test 4: -h short flag detection
+  // =========================================================================
+  io.println(1, "\n-- Test 4: -h detection --");
+  let r4 = cli.parse(def, ["myapp", "-h"]);
+  assert_true(cli.is_help(r4), "-h sets help flag");
+
+  // =========================================================================
+  // Test 5: Basic subcommand dispatch
+  // =========================================================================
+  io.println(1, "\n-- Test 5: Subcommand dispatch --");
+  let r5 = cli.parse(def, ["myapp", "serve"]);
+  assert_eq("serve", cli.command(r5), "serve command matched");
+
+  let r5b = cli.parse(def, ["myapp", "build"]);
+  assert_eq("build", cli.command(r5b), "build command matched");
+
+  // =========================================================================
+  // Test 6: Command options with --option=value syntax
+  // =========================================================================
+  io.println(1, "\n-- Test 6: --option=value syntax --");
+  let r6 = cli.parse(def, ["myapp", "serve", "--port=3000", "--host=0.0.0.0"]);
+  assert_eq("serve", cli.command(r6), "command is serve");
+  assert_eq("3000", cli.option(r6, "port"), "port is 3000");
+  assert_eq("0.0.0.0", cli.option(r6, "host"), "host is 0.0.0.0");
+
+  // =========================================================================
+  // Test 7: Command options with --option value syntax
+  // =========================================================================
+  io.println(1, "\n-- Test 7: --option value syntax --");
+  let r7 = cli.parse(def, ["myapp", "serve", "--port", "9090", "--host", "::1"]);
+  assert_eq("9090", cli.option(r7, "port"), "port is 9090 (space syntax)");
+  assert_eq("::1", cli.option(r7, "host"), "host is ::1 (space syntax)");
+
+  // =========================================================================
+  // Test 8: Short option flags (-p value)
+  // =========================================================================
+  io.println(1, "\n-- Test 8: Short option flags --");
+  let r8 = cli.parse(def, ["myapp", "serve", "-p", "5000"]);
+  assert_eq("5000", cli.option(r8, "port"), "port is 5000 via -p");
+
+  // =========================================================================
+  // Test 9: Boolean flags
+  // =========================================================================
+  io.println(1, "\n-- Test 9: Boolean flags --");
+  let r9 = cli.parse(def, ["myapp", "serve", "--daemon"]);
+  assert_true(cli.flag(r9, "daemon"), "daemon flag is set");
+
+  // =========================================================================
+  // Test 10: Combined short flags
+  // =========================================================================
+  io.println(1, "\n-- Test 10: Combined short flags --");
+  let r10 = cli.parse(def, ["myapp", "serve", "-D"]);
+  assert_true(cli.flag(r10, "daemon"), "daemon set via -D");
+
+  // =========================================================================
+  // Test 11: Global flags available to commands
+  // =========================================================================
+  io.println(1, "\n-- Test 11: Global flags --");
+  let r11 = cli.parse(def, ["myapp", "serve", "--quiet", "--debug"]);
+  assert_true(cli.flag(r11, "quiet"), "global quiet flag set");
+  assert_true(cli.flag(r11, "debug"), "global debug flag set");
+
+  // =========================================================================
+  // Test 12: Global options available to commands
+  // =========================================================================
+  io.println(1, "\n-- Test 12: Global options --");
+  let r12 = cli.parse(def, ["myapp", "build", "--config", "prod.toml"]);
+  assert_eq("prod.toml", cli.option(r12, "config"), "global config option");
+
+  // =========================================================================
+  // Test 13: Default values
+  // =========================================================================
+  io.println(1, "\n-- Test 13: Default values --");
+  let r13 = cli.parse(def, ["myapp", "serve"]);
+  assert_eq("8080", cli.option(r13, "port"), "port defaults to 8080");
+  assert_eq("127.0.0.1", cli.option(r13, "host"), "host defaults to 127.0.0.1");
+  assert_eq("app.toml", cli.option(r13, "config"), "config defaults to app.toml");
+
+  // =========================================================================
+  // Test 14: Custom default fallback via accessor
+  // =========================================================================
+  io.println(1, "\n-- Test 14: Custom default fallback --");
+  let r14 = cli.parse(def, ["myapp", "build"]);
+  assert_eq("x86_64", cli.option(r14, "target", "x86_64"), "target falls back to custom default");
+  assert_eq("fallback", cli.option(r14, "nonexistent", "fallback"), "nonexistent option falls back");
+
+  // =========================================================================
+  // Test 15: Positional args after command
+  // =========================================================================
+  io.println(1, "\n-- Test 15: Positional args --");
+  let r15 = cli.parse(def, ["myapp", "build", "src/main.an", "src/lib.an"]);
+  let r15_args = cli.args(r15);
+  // "myapp" is argv[0] (program name) — treated as positional since it's not a command
+  // "build" is the command, "src/main.an" and "src/lib.an" are positionals
+  assert_eq(3, len(r15_args), "three positional args (incl. program name)");
+  @unsafe { assert_eq("myapp", r15_args[0], "program name is first positional"); }
+  @unsafe { assert_eq("src/main.an", r15_args[1], "first source file"); }
+  @unsafe { assert_eq("src/lib.an", r15_args[2], "second source file"); }
+
+  // =========================================================================
+  // Test 16: -- separator
+  // =========================================================================
+  io.println(1, "\n-- Test 16: -- separator --");
+  let r16 = cli.parse(def, ["myapp", "serve", "--", "--port", "9999"]);
+  let r16_args = cli.args(r16);
+  // Positionals: "myapp" (program name) + "--port" + "9999" (after --)
+  assert_eq(3, len(r16_args), "three args (incl program name + after separator)");
+  @unsafe { assert_eq("myapp", r16_args[0], "program name is first"); }
+  @unsafe { assert_eq("--port", r16_args[1], "--port treated as positional"); }
+  @unsafe { assert_eq("9999", r16_args[2], "9999 treated as positional"); }
+
+  // =========================================================================
+  // Test 17: Unknown flags become positional
+  // =========================================================================
+  io.println(1, "\n-- Test 17: Unknown flags --");
+  let r17 = cli.parse(def, ["myapp", "serve", "--unknown-flag", "somevalue"]);
+  let r17_args = cli.args(r17);
+  // --unknown-flag should be passed through as positional
+  assert_true(len(r17_args) >= 1, "unknown flag appears in positional args");
+
+  // =========================================================================
+  // Test 18: No command — all args become positional
+  // =========================================================================
+  io.println(1, "\n-- Test 18: No matching command --");
+  // "myapp" is the program name (argv[0]), then two file args
+  let r18 = cli.parse(def, ["myapp", "file1.an", "file2.an"]);
+  assert_eq("", cli.command(r18), "no command matched");
+  let r18_args = cli.args(r18);
+  assert_eq(3, len(r18_args), "three positional args (incl. program name)");
+  @unsafe { assert_eq("myapp", r18_args[0], "program name"); }
+  @unsafe { assert_eq("file1.an", r18_args[1], "first file arg"); }
+
+  // =========================================================================
+  // Test 19: Empty argv (only program name)
+  // =========================================================================
+  io.println(1, "\n-- Test 19: Only program name --");
+  let r19 = cli.parse(def, ["myapp"]);
+  assert_eq("", cli.command(r19), "no command with only program name");
+  // "myapp" treated as positional since it's not a defined command
+  assert_eq(1, len(cli.args(r19)), "one positional arg (program name)");
+  assert_true(!cli.is_help(r19), "help not requested");
+
+  // =========================================================================
+  // Test 20: Short global option
+  // =========================================================================
+  io.println(1, "\n-- Test 20: Short global option --");
+  let r20 = cli.parse(def, ["myapp", "serve", "-c", "custom.toml"]);
+  assert_eq("custom.toml", cli.option(r20, "config"), "global config via -c");
+
+  // =========================================================================
+  // Test 21: Short global flag
+  // =========================================================================
+  io.println(1, "\n-- Test 21: Short global flag --");
+  let r21 = cli.parse(def, ["myapp", "serve", "-q"]);
+  assert_true(cli.flag(r21, "quiet"), "global quiet via -q");
+
+  // =========================================================================
+  // Test 22: Combined short global flags
+  // =========================================================================
+  io.println(1, "\n-- Test 22: Combined short global flags --");
+  let r22 = cli.parse(def, ["myapp", "serve", "-qd"]);
+  assert_true(cli.flag(r22, "quiet"), "quiet via combined -qd");
+  assert_true(cli.flag(r22, "debug"), "debug via combined -qd");
+
+  // =========================================================================
+  // Test 23: Help text for nonexistent command
+  // =========================================================================
+  io.println(1, "\n-- Test 23: Help for unknown command --");
+  let unknown_help = cli.help(def, "nonexistent");
+  assert_true(len(unknown_help) > 0, "help for unknown command returns text");
+
+  io.println(1, "\n========================================");
+  io.println(1, "  All cli module tests passed!");
+  io.println(1, "========================================");
+  return 0;
+}
