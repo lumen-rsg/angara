@@ -364,6 +364,7 @@ build/modules/config.$(SO_EXT): build/obj/modules/data/config.o
 build/modules/sort.$(SO_EXT): build/obj/modules/data/sort.o
 build/modules/args.$(SO_EXT): build/obj/modules/data/args.o
 build/modules/cli.$(SO_EXT): build/obj/modules/data/cli.o
+build/modules/protobuf.$(SO_EXT): build/obj/modules/data/protobuf.o
 build/modules/yaml.$(SO_EXT): build/obj/modules/data/yaml.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (YAML)\n" "$@"
@@ -380,7 +381,7 @@ build/modules/watch.$(SO_EXT) \
 build/modules/adv_string.$(SO_EXT) build/modules/regex.$(SO_EXT) build/modules/encoding.$(SO_EXT) \
 build/modules/hash.$(SO_EXT) build/modules/uuid.$(SO_EXT) build/modules/random.$(SO_EXT) \
 build/modules/csv.$(SO_EXT) build/modules/config.$(SO_EXT) build/modules/sort.$(SO_EXT) \
-build/modules/args.$(SO_EXT) build/modules/cli.$(SO_EXT) build/modules/assert.$(SO_EXT) build/modules/calltest.$(SO_EXT):
+build/modules/args.$(SO_EXT) build/modules/cli.$(SO_EXT) build/modules/protobuf.$(SO_EXT) build/modules/assert.$(SO_EXT) build/modules/calltest.$(SO_EXT):
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@

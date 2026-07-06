@@ -1,0 +1,246 @@
+// Protobuf module roundtrip test: encode → decode and verify.
+//
+// Protobuf uses numeric field IDs, so record keys are strings like "1", "2", …
+//
+attach protobuf;
+attach io;
+
+// --- Helpers ---
+
+func assert_equal(expected as any, actual as any, description as string) -> nil {
+  if (string(expected) != string(actual)) {
+    let msg = "Assertion Failed [" + description + "]: Expected '" +
+              string(expected) + "', but got '" + string(actual) + "'.";
+    throw Exception(msg);
+  }
+}
+
+// --- Main ---
+
+func main() -> i64 {
+  io.println(1, "--- Angara Protobuf Module Test ---");
+
+  // -------------------------------------------------------------------
+  // Test 1:  Encode and decode basic scalar types.
+  // -------------------------------------------------------------------
+  try {
+    let original as record = {
+      "1": "hello world",
+      "2": 42,
+      "3": true,
+      "4": 3.14,
+      // "5" is nil — should be omitted from the wire format
+      "5": nil,
+    };
+
+    let encoded as string = protobuf.encode(original);
+    io.println(1, "\n-> Test 1: Basic scalars");
+    io.println(1, "  Encoded " + string(len(encoded)) + " bytes.");
+
+    let decoded as record = protobuf.decode(encoded);
+
+    // Field 1: string
+    assert_equal(original["1"], decoded["1"], "field 1 (string)");
+    io.println(1, "  field 1 (string):      OK");
+
+    // Field 2: i64
+    assert_equal(original["2"], decoded["2"], "field 2 (i64)");
+    io.println(1, "  field 2 (i64):         OK");
+
+    // Field 3: bool — decoded as i64 (varints are not distinguishable
+    // without a schema).
+    assert_equal(1, decoded["3"], "field 3 (bool→i64)");
+    io.println(1, "  field 3 (bool→i64):    OK");
+
+    // Field 4: f64
+    assert_equal(original["4"], decoded["4"], "field 4 (f64)");
+    io.println(1, "  field 4 (f64):         OK");
+
+    // Field 5 (nil) should NOT appear in decoded
+    let field5 = decoded["5"];
+    @unsafe {
+      if (field5 != nil) {
+        throw Exception("nil field 5 should not have been encoded but it appears in decoded!");
+      }
+    }
+    io.println(1, "  field 5 (nil skipped): OK");
+
+  } catch (e as Exception) {
+    io.println(2, "\n  [FAIL] Test 1: " + e.message);
+    return 1;
+  }
+
+  // -------------------------------------------------------------------
+  // Test 2:  Nested record (sub-message).
+  // -------------------------------------------------------------------
+  try {
+    let original as record = {
+      "1": {
+        "1": "nested name",
+        "2": 99,
+      },
+      "2": "outer string",
+    };
+
+    let encoded as string = protobuf.encode(original);
+    io.println(1, "\n-> Test 2: Nested record");
+    io.println(1, "  Encoded " + string(len(encoded)) + " bytes.");
+
+    let decoded as record = protobuf.decode(encoded);
+
+    let inner_orig as record = original["1"];
+    let inner_dec  as record = decoded["1"];
+
+    assert_equal(inner_orig["1"], inner_dec["1"], "nested field 1 (string)");
+    assert_equal(inner_orig["2"], inner_dec["2"], "nested field 2 (i64)");
+    assert_equal(original["2"], decoded["2"], "outer field 2");
+
+    io.println(1, "  nested message: OK");
+    io.println(1, "  outer string:   OK");
+
+  } catch (e as Exception) {
+    io.println(2, "\n  [FAIL] Test 2: " + e.message);
+    return 1;
+  }
+
+  // -------------------------------------------------------------------
+  // Test 3:  Repeated fields (list → repeated field entries).
+  // -------------------------------------------------------------------
+  try {
+    let original as record = {
+      "1": ["alpha", "beta", "gamma"],
+      "2": 42,
+    };
+
+    let encoded as string = protobuf.encode(original);
+    io.println(1, "\n-> Test 3: Repeated fields (list)");
+    io.println(1, "  Encoded " + string(len(encoded)) + " bytes.");
+
+    let decoded as record = protobuf.decode(encoded);
+
+    // Field 1 should be a list
+    let repeated as list<any> = decoded["1"];
+    assert_equal(3, len(repeated), "repeated field length");
+    assert_equal("alpha", repeated[0], "repeated[0]");
+    assert_equal("beta",  repeated[1], "repeated[1]");
+    assert_equal("gamma", repeated[2], "repeated[2]");
+    io.println(1, "  repeated strings: OK");
+
+    // Field 2 should still be a scalar
+    assert_equal(original["2"], decoded["2"], "field 2 (scalar)");
+    io.println(1, "  scalar field:     OK");
+
+  } catch (e as Exception) {
+    io.println(2, "\n  [FAIL] Test 3: " + e.message);
+    return 1;
+  }
+
+  // -------------------------------------------------------------------
+  // Test 4:  Negative numbers and large values.
+  // -------------------------------------------------------------------
+  try {
+    let original as record = {
+      "1": -1,
+      "2": -1000,
+      "3": 9223372036854775807,  // near max i64
+    };
+
+    let encoded as string = protobuf.encode(original);
+    io.println(1, "\n-> Test 4: Negative / large values");
+    io.println(1, "  Encoded " + string(len(encoded)) + " bytes.");
+
+    let decoded as record = protobuf.decode(encoded);
+
+    assert_equal(original["1"], decoded["1"], "field 1 (negative -1)");
+    assert_equal(original["2"], decoded["2"], "field 2 (negative -1000)");
+    assert_equal(original["3"], decoded["3"], "field 3 (large positive)");
+
+    io.println(1, "  negative values: OK");
+    io.println(1, "  large values:    OK");
+
+  } catch (e as Exception) {
+    io.println(2, "\n  [FAIL] Test 4: " + e.message);
+    return 1;
+  }
+
+  // -------------------------------------------------------------------
+  // Test 5:  Decode error on invalid data.
+  // -------------------------------------------------------------------
+  try {
+    let invalid = "this is not protobuf data";
+    let result = protobuf.decode(invalid);
+    io.println(2, "\n  [FAIL] Test 5: Should have thrown on invalid data, got: " +
+               string(result));
+    return 1;
+  } catch (e as Exception) {
+    io.println(1, "\n-> Test 5: Invalid data error");
+    io.println(1, "  Caught expected error: " + e.message);
+  }
+
+  // -------------------------------------------------------------------
+  // Test 6:  Encode error on non-record input (use 'any' to bypass
+  //          compile-time type checking and hit the runtime guard).
+  // -------------------------------------------------------------------
+  try {
+    let bad as any = "not a record";
+    let result = protobuf.encode(bad);
+    io.println(2, "\n  [FAIL] Test 6: Should have thrown on non-record, got: " +
+               string(result));
+    return 1;
+  } catch (e as Exception) {
+    io.println(1, "\n-> Test 6: Non-record encode error");
+    io.println(1, "  Caught expected error: " + e.message);
+  }
+
+  // -------------------------------------------------------------------
+  // Test 7:  Empty record.
+  // -------------------------------------------------------------------
+  try {
+    let empty as record = {};
+    let encoded as string = protobuf.encode(empty);
+    io.println(1, "\n-> Test 7: Empty record");
+    io.println(1, "  Encoded " + string(len(encoded)) + " bytes.");
+
+    let decoded as record = protobuf.decode(encoded);
+    io.println(1, "  empty roundtrip: OK");
+
+  } catch (e as Exception) {
+    io.println(2, "\n  [FAIL] Test 7: " + e.message);
+    return 1;
+  }
+
+  // -------------------------------------------------------------------
+  // Test 8:  List of records (repeated nested messages).
+  // -------------------------------------------------------------------
+  try {
+    let original as record = {
+      "1": [
+        {"1": "first"},
+        {"1": "second"},
+      ],
+    };
+
+    let encoded as string = protobuf.encode(original);
+    io.println(1, "\n-> Test 8: Repeated nested messages");
+    io.println(1, "  Encoded " + string(len(encoded)) + " bytes.");
+
+    let decoded as record = protobuf.decode(encoded);
+
+    let items as list<any> = decoded["1"];
+    assert_equal(2, len(items), "repeated messages length");
+
+    let first as record  = items[0];
+    let second as record = items[1];
+    assert_equal("first",  first["1"],  "first[1]");
+    assert_equal("second", second["1"], "second[1]");
+
+    io.println(1, "  repeated nested: OK");
+
+  } catch (e as Exception) {
+    io.println(2, "\n  [FAIL] Test 8: " + e.message);
+    return 1;
+  }
+
+  io.println(1, "\n--- All protobuf tests passed! ---");
+  return 0;
+}
