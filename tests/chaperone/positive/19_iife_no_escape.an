@@ -1,0 +1,21 @@
+// Chaperone positive test — IIFE (immediately-invoked function expression).
+// L21: A closure that is called inline via `func(){...}()` does not escape, so
+// capturing a tracked Live variable should NOT trigger E505. The IIFE runs and
+// returns synchronously — the capture is a safe borrow.
+//
+// exit: 42
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    // IIFE: closure is called immediately, cannot outlive b.
+    let result = func() -> i64 { return b.get(); }();
+    drop b;
+    return result;
+}

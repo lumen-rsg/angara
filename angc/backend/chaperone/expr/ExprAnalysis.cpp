@@ -87,7 +87,7 @@ void Chaperone::checkEscapeIntoContainer(Context& ctx,
 
 // analyzeExpr
 void Chaperone::analyzeExpr(Context& ctx,
-    const std::shared_ptr<Expr>& expr, StateMap& state)
+    const std::shared_ptr<Expr>& expr, StateMap& state, bool is_callee)
 {
     if (!expr) return;
 
@@ -263,7 +263,7 @@ void Chaperone::analyzeExpr(Context& ctx,
     // CallExpr: walk callee + all arguments, then transition tracked args
     // based on the callee's interprocedural summary.
     if (auto* call = dynamic_cast<const CallExpr*>(expr.get())) {
-        analyzeExpr(ctx, call->callee, state);
+        analyzeExpr(ctx, call->callee, state, /*is_callee=*/true);
 
         // LANG-11: use resolved (reordered + defaults-filled) args when available.
         const auto& resolved_all = ctx.tc.getResolvedArgs();
@@ -479,6 +479,52 @@ void Chaperone::analyzeExpr(Context& ctx,
         std::set<std::string> referenced;
         for (const auto& s : lam->body)
             collectVarRefs(s, referenced);
+
+        // L21: When a LambdaExpr is the callee of a CallExpr (IIFE — immediately-
+        // invoked function expression), the closure is called and discarded inline.
+        // It cannot outlive the captured variables, so we skip the E505 Escaped
+        // transition and treat captures as safe synchronous borrows. The body
+        // is still analyzed for memory safety (C4), but captured variables are
+        // seeded as Live rather than Escaped in the lambda's state map.
+        if (is_callee) {
+            // IIFE: captures are safe — no E505, no Escaped transition.
+            // Seed captures as Escaped in the lambda state to prevent false
+            // E501 leak reports inside the body (the captured vars don't need
+            // to be dropped inside the lambda — they belong to the outer scope).
+            // Still analyze the body for internal memory errors (leaks of
+            // lambda-owned values, UAF, double-drops, etc.).
+            StateMap lambda_state;
+            for (const auto& name : referenced)
+                lambda_state[name] = State::Escaped;
+
+            // H2: seed lambda params.
+            auto lam_type_it = ctx.tc.getExpressionTypes().find(expr.get());
+            std::set<std::string> saved_params;
+            std::swap(saved_params, ctx.current_params);
+            if (lam_type_it != ctx.tc.getExpressionTypes().end() && lam_type_it->second &&
+                lam_type_it->second->kind == TypeKind::FUNCTION) {
+                auto* fn_type = static_cast<const FunctionType*>(lam_type_it->second.get());
+                for (size_t i = 0; i < lam->param_names.size() && i < fn_type->param_types.size(); i++) {
+                    if (fn_type->param_types[i] && isTrackedTypeObj(ctx, *fn_type->param_types[i])) {
+                        lambda_state[lam->param_names[i].lexeme] = State::Live;
+                        ctx.current_params.insert(lam->param_names[i].lexeme);
+                    }
+                }
+            }
+
+            bool terminates = false;
+            for (const auto& s : lam->body) {
+                analyzeStmt(ctx, s, lambda_state, terminates);
+                if (terminates) break;
+            }
+            // Restore current_params.
+            std::swap(saved_params, ctx.current_params);
+            // IIFE: captured vars did not escape, so outer state unchanged.
+            return;
+        }
+
+        // Non-IIFE: the closure may outlive captures — emit E505 and transition
+        // captured Live variables to Escaped.
         for (const auto& name : referenced) {
             auto it = state.find(name);
             if (it != state.end() && it->second == State::Live) {

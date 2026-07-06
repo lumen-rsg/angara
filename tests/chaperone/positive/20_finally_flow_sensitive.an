@@ -1,0 +1,52 @@
+// Chaperone positive test — finally{} flow-sensitive drop detection.
+// L25: The Chaperone now recursively scans the finally block to find drops
+// that are guaranteed on every path. Drops inside nested blocks and if/else
+// branches are recognized. The throw inside the try body should NOT flag
+// E501 for these variables — the finally guarantees they are dropped.
+//
+// exit: 42
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let a = Buf(1);
+    let b = Buf(2);
+    let c = Buf(3);
+    let d = Buf(4);
+    try {
+        // Simulate a condition that always throws in test context.
+        // In a real program, this would be a fallible operation.
+        throw Exception("test");
+    } catch (e) {
+        // unused
+    } finally {
+        // Direct top-level drop — always recognized (old behavior).
+        drop d;
+
+        // Nested block with drop — now recognized (L25 fix).
+        {
+            drop a;
+        }
+
+        // if/else with drop in both branches — now recognized (L25 fix).
+        if (true) {
+            drop b;
+        } else {
+            drop b;
+        }
+
+        // if/else with drop in both branches (asymmetric but both cover c).
+        if (false) {
+            drop c;
+        } else {
+            drop c;
+        }
+    }
+    // All four Bufs were dropped in the finally block.
+    return 42;
+}

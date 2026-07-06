@@ -164,7 +164,7 @@ private:
     /// tracked argument states based on callee summaries (interprocedural).
     static void analyzeExpr(Context& ctx,
         const std::shared_ptr<struct Expr>& expr,
-        StateMap& state);
+        StateMap& state, bool is_callee = false);
 
     /// E505: flag a tracked Live value escaping into an untracked container.
     /// @param container_type  Optional resolved type of the container; if tracked,

@@ -257,6 +257,61 @@ void Chaperone::analyzeScopedStmt(Context& ctx,
 }
 
 
+// S8: Recursively collect variable names that are guaranteed to be dropped on
+// every control-flow path through a statement. Used to populate the
+// `finally_protected` set — a throw inside a try whose finally block
+// guarantees to drop a variable should not false-flag that variable as a leak.
+//
+// The logic is the dual of definitelyReturns(): a drop is guaranteed iff it
+// appears on every path.
+//   BlockStmt — sequential; drops executed before later statements are
+//               guaranteed regardless of what follows.
+//   IfStmt with else — intersection of both branches.
+//   IfStmt without else, loops — empty (not guaranteed to execute).
+//   TryStmt — the finally block's guaranteed drops (finally runs on every path).
+static std::set<std::string> collectGuaranteedDrops(const std::shared_ptr<Stmt>& stmt)
+{
+    std::set<std::string> result;
+    if (!stmt) return result;
+
+    if (auto* blk = dynamic_cast<const BlockStmt*>(stmt.get())) {
+        for (const auto& s : blk->statements)
+            for (const auto& name : collectGuaranteedDrops(s))
+                result.insert(name);
+        return result;
+    }
+
+    if (auto* d = dynamic_cast<const DropStmt*>(stmt.get())) {
+        result.insert(d->name.lexeme);
+        return result;
+    }
+
+    if (auto* ifs = dynamic_cast<const IfStmt*>(stmt.get())) {
+        if (!ifs->elseBranch) return result; // no else → not guaranteed
+        auto then_drops = collectGuaranteedDrops(ifs->thenBranch);
+        auto else_drops = collectGuaranteedDrops(ifs->elseBranch);
+        for (const auto& name : then_drops)
+            if (else_drops.count(name))
+                result.insert(name);
+        return result;
+    }
+
+    // TryStmt: the finally block runs on every exit path (normal, catch, throw),
+    // so its guaranteed drops are always included.
+    // The try and catch bodies are NOT guaranteed (try may throw early;
+    // catch may not execute).
+    if (auto* tr = dynamic_cast<const TryStmt*>(stmt.get())) {
+        if (tr->finallyBlock)
+            return collectGuaranteedDrops(tr->finallyBlock);
+        return result;
+    }
+
+    // Loops (while/for/for-in): body may execute zero times → nothing guaranteed.
+    // ReturnStmt, ThrowStmt, ExpressionStmt, VarDeclStmt, etc.: contribute no drops.
+    return result;
+}
+
+
 void Chaperone::analyzeStmt(Context& ctx,
     const std::shared_ptr<Stmt>& stmt, StateMap& state, bool& terminates,
     std::set<std::string>* declared_names)
@@ -647,11 +702,12 @@ void Chaperone::analyzeStmt(Context& ctx,
         // on exit (finally protection is scoped to this try).
         std::set<std::string> protected_snapshot = ctx.finally_protected;
         if (tryS->finallyBlock) {
-            std::set<std::string> dropped;
-            if (auto* fblk = dynamic_cast<const BlockStmt*>(tryS->finallyBlock.get()))
-                for (const auto& s : fblk->statements)
-                    if (auto* d = dynamic_cast<const DropStmt*>(s.get()))
-                        dropped.insert(d->name.lexeme);
+            // S8: Use flow-sensitive recursive scan to find drops that are
+            // guaranteed on every path through the finally block (not just
+            // top-level DropStmts). Drops inside nested blocks and if/else
+            // branches are recognized; drops inside loops or if-without-else
+            // are correctly excluded (not guaranteed to execute).
+            std::set<std::string> dropped = collectGuaranteedDrops(tryS->finallyBlock);
             ctx.finally_protected.insert(dropped.begin(), dropped.end());
         }
 

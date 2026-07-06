@@ -138,7 +138,7 @@ jobs:
           name: angara-macos-arm64
 
       - name: Generate Release Tag
-        run: echo "TAG_NAME=v$(date +'%Y.%m.%d')-${{ github.sha }}" >> $GITHUB_ENV
+        run: echo "TAG_NAME=v$(date +%s)-${{ github.sha }}" >> $GITHUB_ENV
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

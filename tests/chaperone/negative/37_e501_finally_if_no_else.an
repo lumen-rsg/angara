@@ -1,0 +1,27 @@
+// Chaperone negative test — E501: leak inside try whose finally has a drop
+// inside an if-without-else (not guaranteed — the if may not take the branch).
+// L25: The recursive scan correctly excludes if-without-else drops from the
+// guaranteed set, so the throw inside the try still flags E501 for `b`.
+//
+// expect: E501
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    try {
+        throw Exception("error");
+    } catch (e) {
+        // unused
+    } finally {
+        // Drop in if without else: not guaranteed on every path.
+        if (false) {
+            drop b;
+        }
+    }
+    // b leaks here — the finally's if branch wasn't taken.
+    return 0;
+}
