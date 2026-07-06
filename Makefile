@@ -39,8 +39,19 @@ LLVM_SYSTEM_LIBS := $(shell $(LLVM_CONFIG) --system-libs 2>/dev/null)
 CC  := clang
 CXX := clang++
 
-CFLAGS   := -fPIC -Wall -Wextra -g -MMD -MP -Iangc/includes
-CXXFLAGS := -std=c++23 -fPIC -Wall -Wextra -g -MMD -MP -Wno-trigraphs -Iangc/includes $(EXTRA_CXXFLAGS)
+# Build mode: debug (default) or release.
+#   make BUILD=release
+BUILD ?= debug
+ifeq ($(BUILD),release)
+    OPT_FLAGS := -O2 -DNDEBUG
+    DBG_FLAGS :=
+else
+    OPT_FLAGS := -O0
+    DBG_FLAGS := -g
+endif
+
+CFLAGS   := -fPIC -Wall -Wextra $(OPT_FLAGS) $(DBG_FLAGS) -MMD -MP -Iangc/includes
+CXXFLAGS := -std=c++23 -fPIC -Wall -Wextra $(OPT_FLAGS) $(DBG_FLAGS) -MMD -MP -Wno-trigraphs -Iangc/includes $(EXTRA_CXXFLAGS)
 
 CURL_CFLAGS := $(shell pkg-config --cflags libcurl 2>/dev/null)
 CURL_LIBS   := $(shell pkg-config --libs libcurl 2>/dev/null)
@@ -478,7 +489,6 @@ test: test-cpp test-chaperone test-lang
 clean:
 	@printf "$(RED)[CL] $(RESET) Cleaning build directory...\n"
 	@rm -rf build
-	@find . -name '*.d' -path '*/build/*' -delete 2>/dev/null || true
 
 lint:
 	@printf "$(CYAN)[LT] $(RESET) Running clang-tidy...\n"
