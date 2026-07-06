@@ -200,8 +200,9 @@ AngaraObject Angara_archive_zip_extract(int arg_count, AngaraObject* args) {
             /* skip entries that attempt path traversal */
             continue;
         }
-        char* fullpath = (char*)malloc(strlen(destdir) + strlen(pathname) + 2);
-        snprintf(fullpath, strlen(destdir) + strlen(pathname) + 2, "%s/%s", destdir, pathname);
+        size_t path_len = strlen(destdir) + strlen(pathname) + 2;
+        char* fullpath = (char*)malloc(path_len);
+        snprintf(fullpath, path_len, "%s/%s", destdir, pathname);
         archive_entry_set_pathname(entry, fullpath);
 
         char* last_slash = strrchr(fullpath, '/');
@@ -294,8 +295,9 @@ AngaraObject Angara_archive_tar_extract(int arg_count, AngaraObject* args) {
             /* skip entries that attempt path traversal */
             continue;
         }
-        char* fullpath = (char*)malloc(strlen(destdir) + strlen(pathname) + 2);
-        snprintf(fullpath, strlen(destdir) + strlen(pathname) + 2, "%s/%s", destdir, pathname);
+        size_t path_len = strlen(destdir) + strlen(pathname) + 2;
+        char* fullpath = (char*)malloc(path_len);
+        snprintf(fullpath, path_len, "%s/%s", destdir, pathname);
         archive_entry_set_pathname(entry, fullpath);
 
         char* last_slash = strrchr(fullpath, '/');

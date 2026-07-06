@@ -130,7 +130,9 @@ AngaraObject Angara_process_exec(int arg_count, AngaraObject* args) {
 
     char chunk[4096];
     ssize_t n;
-    while ((n = read(stdout_pipe[0], chunk, sizeof(chunk))) > 0) {
+    while ((n = read(stdout_pipe[0], chunk, sizeof(chunk))) > 0 ||
+           (n == -1 && errno == EINTR)) {
+        if (n <= 0) continue;
         if (output_len + (size_t)n >= output_cap) {
             output_cap = (output_len + (size_t)n) * 2;
             char* new_output = (char*)realloc(output, output_cap);
@@ -225,7 +227,9 @@ AngaraObject Angara_process_run(int arg_count, AngaraObject* args) {
 
     char tmp[4096];
     ssize_t n;
-    while ((n = read(stdout_pipe[0], tmp, sizeof(tmp))) > 0) {
+    while ((n = read(stdout_pipe[0], tmp, sizeof(tmp))) > 0 ||
+           (n == -1 && errno == EINTR)) {
+        if (n <= 0) continue;
         if (out_len + (size_t)n >= out_cap) {
             out_cap = (out_len + (size_t)n) * 2;
             char* nb = (char*)realloc(out_buf, out_cap);
@@ -241,7 +245,9 @@ AngaraObject Angara_process_run(int arg_count, AngaraObject* args) {
     size_t err_len = 0, err_cap = 4096;
     err_buf = (char*)malloc(err_cap);
 
-    while ((n = read(stderr_pipe[0], tmp, sizeof(tmp))) > 0) {
+    while ((n = read(stderr_pipe[0], tmp, sizeof(tmp))) > 0 ||
+           (n == -1 && errno == EINTR)) {
+        if (n <= 0) continue;
         if (err_len + (size_t)n >= err_cap) {
             err_cap = (err_len + (size_t)n) * 2;
             char* nb = (char*)realloc(err_buf, err_cap);
@@ -376,7 +382,8 @@ AngaraObject Angara_Process_write(int arg_count, AngaraObject* args) {
 
     const char* data = ang_api->as_cstr(args[1]);
     size_t len = ang_api->str_len(args[1]);
-    write(pd->stdin_fd, data, len);
+    ssize_t written = write(pd->stdin_fd, data, len);
+    (void)written;  /* best-effort write; caller can check with wait/exit status */
     return ang_nil();
 }
 
@@ -398,7 +405,10 @@ AngaraObject Angara_Process_read_stdout(int arg_count, AngaraObject* args) {
     if (buf_size == 0) buf_size = 4096;
 
     char* buf = (char*)malloc(buf_size);
-    ssize_t n = read(pd->stdout_fd, buf, buf_size);
+    ssize_t n;
+    do {
+        n = read(pd->stdout_fd, buf, buf_size);
+    } while (n == -1 && errno == EINTR);
     if (n <= 0) { free(buf); return ang_nil(); }
     return ang_api->string_no_copy(buf, (size_t)n);
 }
@@ -412,7 +422,10 @@ AngaraObject Angara_Process_read_stderr(int arg_count, AngaraObject* args) {
     if (buf_size == 0) buf_size = 4096;
 
     char* buf = (char*)malloc(buf_size);
-    ssize_t n = read(pd->stderr_fd, buf, buf_size);
+    ssize_t n;
+    do {
+        n = read(pd->stderr_fd, buf, buf_size);
+    } while (n == -1 && errno == EINTR);
     if (n <= 0) { free(buf); return ang_nil(); }
     return ang_api->string_no_copy(buf, (size_t)n);
 }

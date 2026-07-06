@@ -256,6 +256,9 @@ namespace angara {
     }
 
     Token Parser::peek() const {
+        if (m_current >= static_cast<int>(m_tokens.size())) {
+            return Token{TokenType::EOF_TOKEN, "", 0, 0};
+        }
         return m_tokens[m_current];
     }
 
