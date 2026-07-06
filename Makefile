@@ -79,7 +79,7 @@ ANGC_SRCS := $(shell find angc -name "*.cpp")
 ANGC_OBJS := $(patsubst %.cpp,build/obj/%.o,$(ANGC_SRCS))
 ANGC_OUT  := build/angc
 
-.PHONY: all logo clean install install_vim uninstall_vim test test-cpp test-chaperone test-lang
+.PHONY: all logo clean install uninstall install_vim uninstall_vim test test-cpp test-chaperone test-lang
 
 all: logo $(ANGC_OUT)
 	@printf "$(BOLD)$(GREEN)>>> Build Completed Successfully <<<$(RESET)\n"
@@ -399,6 +399,12 @@ install_executables: $(ANGC_OUT)
 	@printf "$(CYAN)[IN] $(RESET) Installing Executable to %s\n" "$(DESTDIR)$(INSTALL_BIN_DIR)"
 	@mkdir -p $(DESTDIR)$(INSTALL_BIN_DIR)
 	@cp $(ANGC_OUT) $(DESTDIR)$(INSTALL_BIN_DIR)/
+
+uninstall:
+	@printf "$(RED)[RM] $(RESET) Uninstalling Angara...\n"
+	@rm -f $(DESTDIR)$(INSTALL_BIN_DIR)/angc
+	@rm -rf $(DESTDIR)$(INSTALL_MOD_DIR)
+	@printf "$(BOLD)$(GREEN)>>> Uninstall Complete <<<$(RESET)\n"
 
 ifeq ($(NVIM_RUNTIME),)
     NVIM_RUNTIME := $(HOME)/.local/share/nvim/site

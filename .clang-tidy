@@ -24,7 +24,7 @@ Checks: >
 
 WarningsAsErrors: ''
 
-HeaderFilterRegex: 'angc/includes/.*\.h'
+HeaderFilterRegex: 'angc/.*\.(h|cpp)$'
 
 CheckOptions:
   - key: readability-namespace-comments

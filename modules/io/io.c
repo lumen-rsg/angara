@@ -5,15 +5,18 @@
 
 #include "Angara.h"
 
+#define STREAM_STDOUT 1
+#define STREAM_STDERR 2
+
 AngaraObject Angara_io_write(int arg_count, AngaraObject* args) {
 
     int64_t stream_id = ang_as_i64(args[0]);
     const char* content = ang_api->as_cstr(args[1]);
 
     FILE* stream = NULL;
-    if (stream_id == 1) {
+    if (stream_id == STREAM_STDOUT) {
         stream = stdout;
-    } else if (stream_id == 2) {
+    } else if (stream_id == STREAM_STDERR) {
         stream = stderr;
     } else {
         ang_api->throw_error("Invalid stream ID for write(). Use 1 for stdout or 2 for stderr.");

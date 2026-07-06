@@ -162,19 +162,26 @@ namespace angara {
             // 1. Check variadic flag
             if (this->is_variadic != other.is_variadic) return false;
 
-            // 2. Check arity
+            // 2. Check foreign / intrinsic flags
+            if (this->is_foreign != other.is_foreign) return false;
+            if (this->is_intrinsic != other.is_intrinsic) return false;
+
+            // 3. Check @on_throw value
+            if (this->on_throw_value != other.on_throw_value) return false;
+
+            // 4. Check arity
             if (this->param_types.size() != other.param_types.size()) {
                 return false;
             }
 
-            // 3. Check each parameter's type (TS-4: structural identity, not string)
+            // 5. Check each parameter's type (TS-4: structural identity, not string)
             for (size_t i = 0; i < this->param_types.size(); ++i) {
                 if (!sameType(this->param_types[i], other.param_types[i])) {
                     return false;
                 }
             }
 
-            // 4. Check the return type
+            // 6. Check the return type
             if (!sameType(this->return_type, other.return_type)) {
                 return false;
             }

@@ -635,7 +635,7 @@ namespace angara {
         if (isAtEnd()) {
             m_errorHandler.report(
                 Token(TokenType::RAW_STRING, body, m_line, m_column, m_filename),
-                "Unterminated raw string literal.", "E007"
+                "Unterminated raw string literal.", "E008"
             );
             return;
         }
@@ -680,7 +680,7 @@ namespace angara {
         if (isAtEnd()) {
             m_errorHandler.report(
                 Token(TokenType::BYTE_STRING, "", m_line, m_column, m_filename),
-                "Unterminated byte string literal.", "E007"
+                "Unterminated byte string literal.", "E009"
             );
             return;
         }

@@ -143,6 +143,9 @@ namespace angara {
         if (type->kind == TypeKind::ERROR) {
             return false;
         }
+        if (type->kind == TypeKind::NIL) {
+            return false;
+        }
 
         return true;
     }
