@@ -58,6 +58,11 @@ SQLITE_CFLAGS := $(shell pkg-config --cflags sqlite3 2>/dev/null)
 SQLITE_LIBS   := $(shell pkg-config --libs sqlite3 2>/dev/null)
 GMP_CFLAGS    := $(shell pkg-config --cflags gmp 2>/dev/null)
 GMP_LIBS      := $(shell pkg-config --libs gmp 2>/dev/null)
+YAML_CFLAGS   := $(shell pkg-config --cflags yaml-0.1 2>/dev/null)
+YAML_LIBS     := $(shell pkg-config --libs yaml-0.1 2>/dev/null)
+ifeq ($(YAML_LIBS),)
+    YAML_LIBS := -l:libyaml-0.so.2
+endif
 
 ifeq ($(UNAME_S),Darwin)
     ifeq ($(LWS_CFLAGS),)
@@ -202,6 +207,11 @@ build/obj/modules/net/rpc.o: modules/net/rpc.c
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CC]  $(RESET) %s (RPC)\n" "$<"
 	@$(CC) $(CFLAGS) -Imodules/data -c $< -o $@
+
+build/obj/modules/data/yaml.o: modules/data/yaml.c
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CC]  $(RESET) %s (YAML)\n" "$<"
+	@$(CC) $(CFLAGS) -Imodules/data $(YAML_CFLAGS) -c $< -o $@
 
 build/obj/modules/data/json_bridge.o: modules/data/json_bridge.cpp
 	@mkdir -p $(@D)
@@ -353,6 +363,10 @@ build/modules/csv.$(SO_EXT): build/obj/modules/data/csv.o
 build/modules/config.$(SO_EXT): build/obj/modules/data/config.o
 build/modules/sort.$(SO_EXT): build/obj/modules/data/sort.o
 build/modules/args.$(SO_EXT): build/obj/modules/data/args.o
+build/modules/yaml.$(SO_EXT): build/obj/modules/data/yaml.o
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (YAML)\n" "$@"
+	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(YAML_LIBS) -o $@
 build/modules/assert.$(SO_EXT): build/obj/modules/testing/assert.o
 build/modules/calltest.$(SO_EXT): build/obj/modules/testing/calltest.o
 

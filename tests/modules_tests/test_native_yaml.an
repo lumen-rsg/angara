@@ -1,0 +1,94 @@
+// Import the yaml and io modules.
+attach yaml;
+attach io;
+
+// A sample YAML configuration document.
+// It includes a string, an integer, a float, a boolean, null, a list, and nested objects.
+const CONFIG_YAML as string = """
+appName: Ulumina Core
+version: 1.0
+enabled: true
+logLevel: null
+features:
+  - FFI
+  - Enums
+  - Pattern Matching
+owner:
+  name: Root Administrator
+  id: 9001
+""";
+
+const INVALID_YAML as string = """
+appName: "Broken YAML
+version: 0.2
+  - bad indent
+""";
+
+export func main() -> i64 {
+  io.println(1, "--- Angara YAML Module Test ---");
+
+  // --- Test Case 1: Successful Parse and Data Access ---
+  io.println(1, "\n-> Testing successful YAML parsing...");
+  try {
+    // The `parse` function returns `any`. We know it's a record, so we assert the type.
+    let config as record = yaml.parse(CONFIG_YAML);
+
+    io.println(1, "  YAML parsed successfully.");
+
+    // Access fields from the generic record.
+    let app_name as string = config["appName"];
+    let version as f64 = config["version"];
+    let is_enabled as bool = config["enabled"];
+    let log_level = config["logLevel"];  // should be null
+    let features as list<any> = config["features"];
+
+    io.println(1, "  App Name: " + app_name);
+    io.println(1, "  Version: " + string(version));
+    io.println(1, "  Enabled: " + string(is_enabled));
+
+    // Check null — use @unsafe for `any` comparisons
+    @unsafe {
+      if (log_level != nil) {
+        io.println(2, "  [ERROR] logLevel should be nil, but it was not!");
+        return 1;
+      }
+    }
+    io.println(1, "  Log Level is nil: OK");
+
+    // Iterate through the list
+    io.println(1, "  Features:");
+    for (feature in features) {
+      if (feature is string) {
+        io.println(1, "    - " + feature);
+      }
+    }
+
+    // Access nested object
+    let owner as record = config["owner"];
+    let owner_name as string = owner["name"];
+    let owner_id as i64 = owner["id"];
+    io.println(1, "  Owner: " + owner_name + " (#" + string(owner_id) + ")");
+
+  } catch (e as Exception) {
+    io.println(2, "  [UNEXPECTED ERROR] Failed to parse valid YAML: " + e.message);
+    return 1;
+  }
+
+  // --- Test Case 2: Handling a Parse Error ---
+  io.println(1, "\n-> Testing YAML parse error handling...");
+  try {
+    let broken = yaml.parse(INVALID_YAML);
+
+    // This line should not be reached.
+    io.println(2, "  [ERROR] The program failed to throw an exception for invalid YAML! Got: " + string(broken));
+    return 1;
+
+  } catch (e as Exception) {
+    // This block SHOULD be reached.
+    io.println(1, "  Successfully caught expected error.");
+    io.println(1, "  Error message: " + e.message);
+  }
+
+  io.println(1, "\n--- Test Complete ---");
+  return 0;
+}

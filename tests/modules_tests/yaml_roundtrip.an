@@ -1,0 +1,115 @@
+// This program performs a round-trip test of the `yaml` module.
+// 1. Creates a complex Angara record.
+// 2. Serializes it to a YAML string using `yaml.stringify`.
+// 3. Parses the YAML string back into an Angara record using `yaml.parse`.
+// 4. Verifies that the final record is identical to the original.
+
+attach yaml;
+attach io;
+
+// A helper function to assert that two values are equal.
+// It will throw an exception if the check fails.
+func assert_equal(expected as any, actual as any, description as string) -> nil {
+  if (string(expected) != string(actual)) {
+    let err_msg = "Assertion Failed [" + description + "]: Expected '" + string(expected) + "', but got '" + string(actual) + "'.";
+    throw Exception(err_msg);
+  }
+}
+
+export func main() -> i64 {
+  io.println(1, "--- Angara `yaml` Module Round-Trip Test ---");
+
+  // 1. Create the original, complex Angara record.
+  let original_data as record = {
+    appName: "Ulumina Control System",
+    version: 1.2,
+    isEnabled: true,
+    lastCheck: nil,
+    permissions: [
+      "READ_LOGS",
+      "WRITE_CONFIG",
+      "REBOOT_SYSTEM"
+    ],
+    owner: {
+      name: "Root Administrator",
+      id: 9001
+    }
+  };
+
+  io.println(1, "\n-> Step 1: Original Angara data created.");
+
+  try {
+    // 2. Serialize the Angara record to a YAML string.
+    let yaml_string as string = yaml.stringify(original_data);
+    io.println(1, "\n-> Step 2: Serialized to YAML string:");
+    io.println(1, "---");
+    io.println(1, yaml_string + "---");
+
+    // 3. Parse the YAML string back into a new Angara record.
+    let parsed_data as record = yaml.parse(yaml_string);
+    io.println(1, "\n-> Step 3: Parsed YAML string back into an Angara record.");
+
+    // 4. Verify the contents of the new record, field by field.
+    io.println(1, "\n-> Step 4: Verifying contents of the new record...");
+
+    // Test top-level fields
+    assert_equal(original_data["appName"], parsed_data["appName"], "appName");
+    assert_equal(original_data["version"], parsed_data["version"], "version");
+    assert_equal(original_data["isEnabled"], parsed_data["isEnabled"], "isEnabled");
+    assert_equal(original_data["lastCheck"], parsed_data["lastCheck"], "lastCheck");
+
+    // Test nested object
+    let original_owner as record = original_data["owner"];
+    let parsed_owner as record = parsed_data["owner"];
+    assert_equal(original_owner["name"], parsed_owner["name"], "owner.name");
+    assert_equal(original_owner["id"], parsed_owner["id"], "owner.id");
+
+    // Test array
+    let original_perms as list<any> = original_data["permissions"];
+    let parsed_perms as list<any> = parsed_data["permissions"];
+    assert_equal(len(original_perms), len(parsed_perms), "permissions length");
+    assert_equal(original_perms[0], parsed_perms[0], "permissions[0]");
+    assert_equal(original_perms[1], parsed_perms[1], "permissions[1]");
+    assert_equal(original_perms[2], parsed_perms[2], "permissions[2]");
+
+    // --- Additional YAML-specific tests ---
+    io.println(1, "\n-> Step 5: Testing YAML-specific features...");
+
+    // Test integers (YAML should preserve integer type, not convert to float)
+    let int_test_yaml as string = "answer: 42\n";
+    let int_data as record = yaml.parse(int_test_yaml);
+    let answer = int_data["answer"];
+    io.println(1, "  Integer 42 parsed as type: " + string(typeof(answer)));
+    assert_equal(answer, 42, "integer 42");
+
+    // Test booleans
+    let bool_test_yaml as string = "active: true\ninactive: false\n";
+    let bool_data as record = yaml.parse(bool_test_yaml);
+    assert_equal(bool_data["active"], true, "bool true");
+    assert_equal(bool_data["inactive"], false, "bool false");
+
+    // Test null
+    let null_test_yaml as string = "value: null\n";
+    let null_data as record = yaml.parse(null_test_yaml);
+    assert_equal(null_data["value"], nil, "null value");
+
+    // Test empty record stringify/parse
+    let empty as record = {};
+    let empty_yaml as string = yaml.stringify(empty);
+    io.println(1, "  Empty record YAML: '" + empty_yaml + "'");
+
+    // Test empty list stringify/parse
+    let empty_list as list<any> = [];
+    let empty_list_yaml as string = yaml.stringify(empty_list);
+    io.println(1, "  Empty list YAML: '" + empty_list_yaml + "'");
+
+    io.println(1, "\n--- All assertions passed! YAML round-trip successful. ---");
+
+  } catch (e as Exception) {
+    io.println(2, "\n--- TEST FAILED ---");
+    io.println(2, "An exception occurred during the test: " + e.message);
+    return 1;
+  }
+
+  return 0;
+}
