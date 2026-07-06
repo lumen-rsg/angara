@@ -1731,7 +1731,7 @@ llvm::BasicBlock* LLVMBackend::emitNativeTypeGuard(
     };
 
     Value* cond = nullptr;
-    bool    used_heap_check = false; // true when the check already branched to err_bb on tag!=OBJ
+    bool    fully_handled    = false; // true when the case already branched to next_bb/err_bb
 
     if (!expected) {
         cond = ConstantInt::getTrue(*ctx);
@@ -1744,7 +1744,6 @@ llvm::BasicBlock* LLVMBackend::emitNativeTypeGuard(
                 else if (name == "bool")cond = emitTagCheck(TAG_BOOL);
                 else if (name == "string") {
                     cond = emitHeapTypeCheck(OBJ_STRING);
-                    used_heap_check = true;
                 }
                 else cond = ConstantInt::getTrue(*ctx); // unknown primitive — skip
                 break;
@@ -1754,21 +1753,54 @@ llvm::BasicBlock* LLVMBackend::emitNativeTypeGuard(
                 break;
             case TypeKind::LIST:
                 cond = emitHeapTypeCheck(OBJ_LIST);
-                used_heap_check = true;
                 break;
             case TypeKind::RECORD:
                 cond = emitHeapTypeCheck(OBJ_RECORD);
-                used_heap_check = true;
                 break;
-            case TypeKind::INSTANCE:
-                // Native class instance — OBJ_NATIVE_INSTANCE
-                cond = emitHeapTypeCheck(OBJ_NATIVE_INSTANCE);
-                used_heap_check = true;
+            case TypeKind::INSTANCE: {
+                // Native class instance — check OBJ_NATIVE_INSTANCE + class name.
+                auto inst = std::dynamic_pointer_cast<InstanceType>(expected);
+                std::string expected_class_name = inst->class_type->name;
+
+                // Step 1: tag == OBJ ?
+                auto* is_obj = emitTagCheck(TAG_OBJ);
+                auto* obj_bb = BasicBlock::Create(*ctx, "inst.ck", fn);
+                builder->CreateCondBr(is_obj, obj_bb, err_bb);
+                builder->SetInsertPoint(obj_bb);
+
+                // Step 2: obj_type == OBJ_NATIVE_INSTANCE ?
+                auto* payload = builder->CreateExtractValue(arg_val, {1});
+                auto* ptr = builder->CreateIntToPtr(payload, llvm::PointerType::get(*ctx, 0));
+                auto* hdr_ptr = builder->CreateBitCast(ptr, llvm::PointerType::get(i32_ty, 0));
+                auto* obj_type = builder->CreateLoad(i32_ty, hdr_ptr);
+                auto* is_native = builder->CreateICmpEQ(obj_type, ConstantInt::get(i32_ty, OBJ_NATIVE_INSTANCE));
+                auto* name_bb = BasicBlock::Create(*ctx, "name.ck", fn);
+                builder->CreateCondBr(is_native, name_bb, err_bb);
+                builder->SetInsertPoint(name_bb);
+
+                // Step 3: class name matches via strcmp ?
+                auto* native_inst_type = rt->getNativeInstanceType();
+                auto* inst_ptr = builder->CreateBitCast(ptr, llvm::PointerType::get(native_inst_type, 0));
+                // struct AngaraNativeInstance { ObjHeader, i8* data, i8* finalize, i8* name }
+                auto* name_field_ptr = builder->CreateStructGEP(native_inst_type, inst_ptr, 3);
+                auto* actual_name = builder->CreateLoad(llvm::PointerType::get(*ctx, 0), name_field_ptr);
+                auto* expected_name_global = builder->CreateGlobalString(expected_class_name);
+                auto* expected_name_ptr = builder->CreateBitCast(expected_name_global, llvm::PointerType::get(*ctx, 0));
+                auto* strcmp_fn = mod->getFunction("strcmp");
+                llvm::Value* cmp_result = nullptr;
+                if (strcmp_fn)
+                    cmp_result = builder->CreateCall(strcmp_fn, {actual_name, expected_name_ptr});
+                else
+                    cmp_result = ConstantInt::get(i32_ty, 0); // no strcmp — skip name check
+                auto* name_match = builder->CreateICmpEQ(cmp_result, ConstantInt::get(i32_ty, 0));
+                builder->CreateCondBr(name_match, next_bb, err_bb);
+
+                fully_handled = true;
                 break;
+            }
             case TypeKind::FUTURE:
                 // Futures are stored as native instances at runtime
                 cond = emitHeapTypeCheck(OBJ_NATIVE_INSTANCE);
-                used_heap_check = true;
                 break;
             case TypeKind::OPTIONAL: {
                 auto opt = std::dynamic_pointer_cast<OptionalType>(expected);
@@ -1783,7 +1815,6 @@ llvm::BasicBlock* LLVMBackend::emitNativeTypeGuard(
                 // Instead, handle inner check inline for simplicity.
                 auto inner_kind = opt->wrapped_type->kind;
                 Value* inner_cond = nullptr;
-                bool inner_heap = false;
                 if (inner_kind == TypeKind::PRIMITIVE) {
                     auto& iname = std::dynamic_pointer_cast<PrimitiveType>(opt->wrapped_type)->name;
                     if (iname == "i64")      inner_cond = emitTagCheck(TAG_I64);
@@ -1791,35 +1822,21 @@ llvm::BasicBlock* LLVMBackend::emitNativeTypeGuard(
                     else if (iname == "bool")inner_cond = emitTagCheck(TAG_BOOL);
                     else if (iname == "string") {
                         inner_cond = emitHeapTypeCheck(OBJ_STRING);
-                        inner_heap = true;
                     }
                     else inner_cond = ConstantInt::getTrue(*ctx);
                 } else if (inner_kind == TypeKind::LIST) {
                     inner_cond = emitHeapTypeCheck(OBJ_LIST);
-                    inner_heap = true;
                 } else if (inner_kind == TypeKind::RECORD) {
                     inner_cond = emitHeapTypeCheck(OBJ_RECORD);
-                    inner_heap = true;
                 } else if (inner_kind == TypeKind::INSTANCE || inner_kind == TypeKind::FUTURE) {
                     inner_cond = emitHeapTypeCheck(OBJ_NATIVE_INSTANCE);
-                    inner_heap = true;
                 } else {
                     inner_cond = ConstantInt::getTrue(*ctx);
                 }
-                // After the inner check, the builder is at either:
-                // - the inner check block (simple tag check), or
-                // - the heap.ck block (heap type check)
-                // In both cases we need to branch to next_bb or err_bb.
-                if (!inner_heap) {
-                    builder->CreateCondBr(inner_cond, next_bb, err_bb);
-                } else {
-                    // emitHeapTypeCheck already branched on tag!=OBJ to err_bb;
-                    // we still need to branch on obj_type match.
-                    builder->CreateCondBr(inner_cond, next_bb, err_bb);
-                }
-                // Set insert point to next_bb for the caller.
-                builder->SetInsertPoint(next_bb);
-                return next_bb;
+                // Branch on the inner check result.
+                builder->CreateCondBr(inner_cond, next_bb, err_bb);
+                fully_handled = true;
+                break;
             }
             default:
                 cond = ConstantInt::getTrue(*ctx);
@@ -1827,12 +1844,10 @@ llvm::BasicBlock* LLVMBackend::emitNativeTypeGuard(
         }
     }
 
-    // Branch to success or error (unless already handled, e.g. by optional).
-    if (!used_heap_check) {
-        builder->CreateCondBr(cond, next_bb, err_bb);
-    } else {
+    // Branch to success or error (unless the case already handled branching).
+    if (!fully_handled) {
         // emitHeapTypeCheck already branched on tag!=OBJ to err_bb;
-        // we still need the final branch on the obj_type comparison.
+        // we still need the final branch on the obj_type / tag comparison.
         builder->CreateCondBr(cond, next_bb, err_bb);
     }
 
