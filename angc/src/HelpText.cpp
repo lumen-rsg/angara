@@ -11,6 +11,10 @@ void print_help() {
     std::cout << "  angc publish                Build and copy targets to publish directory\n";
     std::cout << "  angc init                   Initialize a new project (interactive)\n";
     std::cout << "  angc init <template>        Initialize from a template (app, lib, embedded, gui)\n";
+    std::cout << "  angc package install        Install project dependencies from lockfile\n";
+    std::cout << "  angc package add <pkg>[@v]  Add a dependency to the project\n";
+    std::cout << "  angc package remove <pkg>   Remove a dependency from the project\n";
+    std::cout << "  angc package update         Update dependency lockfile\n";
     std::cout << "  angc check <file.an>        Lex, parse, and typecheck (no codegen)\n";
     std::cout << "  angc <file.an>              Compile a single source file\n";
     std::cout << "\n" << CLR_BOLD << "Commands:" << CLR_RESET << "\n";
@@ -20,6 +24,7 @@ void print_help() {
     std::cout << "  clean     Remove .angara/build directory\n";
     std::cout << "  publish   Build and copy artifacts to a publish folder\n";
     std::cout << "  init      Create a new project interactively\n";
+    std::cout << "  package   Manage project dependencies and packages\n";
     std::cout << "  modules   List installed native modules\n";
     std::cout << "  fmt       Format source files (-w to write in place)\n";
     std::cout << "  watch     Watch for file changes and rebuild\n";

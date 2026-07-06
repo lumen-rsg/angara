@@ -111,6 +111,7 @@ int CLI::handleRepl() {
         if (cmd == "test")     return handleTest(args);
         if (cmd == "clean")    return handleClean(args);
         if (cmd == "publish")  return handlePublish(args);
+        if (cmd == "package")  return handlePackage(args);
         if (cmd == "modules")  { list_modules(); return 0; }
         if (cmd == "check")    return handleCheck(args);
         if (cmd == "fmt")      return handleFmt(args);

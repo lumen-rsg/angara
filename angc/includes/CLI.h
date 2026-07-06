@@ -79,6 +79,7 @@ private:
     int handleRun(const std::vector<std::string>& args);
     int handleClean(const std::vector<std::string>& args);
     int handlePublish(const std::vector<std::string>& args);
+    int handlePackage(const std::vector<std::string>& args);
 
     // Other commands
     int handleFmt(std::vector<std::string> args);

@@ -42,10 +42,10 @@ CXX := clang++
 CFLAGS   := -fPIC -Wall -Wextra -g -MMD -MP -Iangc/includes
 CXXFLAGS := -std=c++23 -fPIC -Wall -Wextra -g -MMD -MP -Wno-trigraphs -Iangc/includes $(EXTRA_CXXFLAGS)
 
-LDFLAGS_BIN := $(LLVM_LDFLAGS) $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS)
-
 CURL_CFLAGS := $(shell pkg-config --cflags libcurl 2>/dev/null)
 CURL_LIBS   := $(shell pkg-config --libs libcurl 2>/dev/null)
+
+LDFLAGS_BIN := $(LLVM_LDFLAGS) $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS) $(CURL_LIBS)
 LWS_CFLAGS  := $(shell pkg-config --cflags libwebsockets openssl 2>/dev/null)
 LWS_LIBS    := $(shell pkg-config --libs libwebsockets openssl 2>/dev/null)
 AMQP_CFLAGS := $(shell pkg-config --cflags librabbitmq 2>/dev/null)

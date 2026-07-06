@@ -2,6 +2,7 @@
 
 #include "ConfigParser.h"
 #include "CompilerDriver.h"
+#include "PackageManager.h"
 #include <string>
 #include <vector>
 #include <set>
@@ -52,6 +53,11 @@ namespace angara {
         /// TOOL-2: forces a full rebuild, ignoring the incremental cache.
         void set_force_rebuild(bool v) { m_force_rebuild = v; }
 
+        /// Returns the resolved packages (available after a successful build).
+        const std::vector<ResolvedPackage>& get_resolved_packages() const {
+            return m_resolved_packages;
+        }
+
     private:
         const std::string m_native_lib_path;
         const std::string m_std_lib_path;
@@ -67,7 +73,17 @@ namespace angara {
         int m_jobs = 0;
         bool m_force_rebuild = false;
 
+        // TOOL-1: package manager integration.
+        std::string m_packages_dir;
+        PackageManager m_pkg_manager;
+        std::vector<ResolvedPackage> m_resolved_packages;
+
         std::vector<std::string> m_built_artifacts;
+
+        /// Resolves and installs the dependencies declared in a project config.
+        /// Populates m_resolved_packages on success.
+        bool resolve_dependencies(const ProjectConfig& config,
+                                  const std::string& project_dir);
 
         /// Compiles a single project: pre-build, native modules, Angara source, linking, post-build.
         /// @param config          The project configuration.

@@ -45,6 +45,12 @@ namespace angara {
         int opt_level = 0;
     };
 
+    /// A versioned dependency specification (from the .abs dependencies list).
+    struct DependencySpec {
+        std::string name;
+        std::string version_constraint = "*";  // "*" means any version
+    };
+
     /// Full configuration for a single project within a workspace.
     struct ProjectConfig {
         std::string name;
@@ -54,7 +60,7 @@ namespace angara {
         std::string description;
         ProjectType type;
         std::string entry_point;
-        std::vector<std::string> dependencies;
+        std::vector<DependencySpec> dependencies;
         std::vector<NativeModuleConfig> native_modules;
         BuildStep pre_build;
         BuildStep post_build;

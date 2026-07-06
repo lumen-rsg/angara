@@ -128,7 +128,19 @@ namespace angara {
                     else currentProject.type = ProjectType::APP;
                 }
                 else if (key == "dependencies") {
-                    currentProject.dependencies = parse_list(value);
+                    auto raw_list = parse_list(value);
+                    for (const auto& item : raw_list) {
+                        DependencySpec spec;
+                        size_t at_pos = item.find('@');
+                        if (at_pos != std::string::npos) {
+                            spec.name = item.substr(0, at_pos);
+                            spec.version_constraint = item.substr(at_pos + 1);
+                        } else {
+                            spec.name = item;
+                            spec.version_constraint = "*";
+                        }
+                        currentProject.dependencies.push_back(spec);
+                    }
                 }
                 else if (key == "freestanding") {
                     currentProject.freestanding = (value == "true" || value == "1" || value == "yes");

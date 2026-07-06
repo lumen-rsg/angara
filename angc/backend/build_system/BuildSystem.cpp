@@ -17,7 +17,9 @@ namespace angara {
 
     BuildSystem::BuildSystem()
         : m_native_lib_path(angara_home() + "/modules"),
-          m_std_lib_path(angara_home() + "/src/modules")
+          m_std_lib_path(angara_home() + "/src/modules"),
+          m_packages_dir(angara_home() + "/packages"),
+          m_pkg_manager(m_packages_dir)
     {}
 
     static constexpr const char* SO_EXT = ANGARA_SO_EXT;
@@ -371,9 +373,21 @@ namespace angara {
             return false;
         }
 
+        // TOOL-1: resolve and install package dependencies.
+        if (!resolve_dependencies(config, project_root)) {
+            return false;
+        }
+
         CompilerDriver driver;
         driver.set_paths(m_std_lib_path, m_native_lib_path);
         driver.set_workspace_projects(project_entries);
+
+        // TOOL-1: add package source directories to compiler search paths.
+        for (const auto& pkg : m_resolved_packages) {
+            if (!pkg.source_modules.empty()) {
+                driver.add_package_search_path(pkg.src_path);
+            }
+        }
 
         if (!m_target_triple.empty()) driver.set_target(m_target_triple);
         else if (!config.profile.target.empty()) driver.set_target(config.profile.target);
@@ -521,6 +535,46 @@ namespace angara {
         return true;
     }
 
+    // ── TOOL-1: resolve_dependencies ────────────────────────────────────────
+    // Calls the package manager to resolve version constraints, download
+    // packages, and update the lockfile.  Populates m_resolved_packages.
+
+    bool BuildSystem::resolve_dependencies(const ProjectConfig& config,
+                                            const std::string& project_dir) {
+        if (config.dependencies.empty()) return true;
+
+        std::cout << "   " << CLR_CYAN << "[PK] " << CLR_RESET
+                  << "Resolving " << config.dependencies.size() << " package(s)...\n";
+
+        m_resolved_packages = m_pkg_manager.resolve_and_install(
+            config.dependencies, project_dir);
+
+        if (m_resolved_packages.empty() && !config.dependencies.empty()) {
+            // Resolution failed — but don't fail the build; deps might be
+            // satisfied by system-installed modules or workspace projects.
+            std::cout << "   " << CLR_YELLOW << "[WARN] " << CLR_RESET
+                      << "Package resolution incomplete — falling back to local modules.\n";
+            return true;
+        }
+
+        for (const auto& pkg : m_resolved_packages) {
+            std::cout << "     " << CLR_GREEN << "[OK] " << CLR_RESET
+                      << pkg.name << " v" << pkg.version.to_string();
+            if (!pkg.source_modules.empty()) {
+                std::cout << CLR_GRAY << " (source: "
+                          << pkg.source_modules.size() << " module"
+                          << (pkg.source_modules.size() > 1 ? "s" : "") << ")"
+                          << CLR_RESET;
+            }
+            if (pkg.has_native) {
+                std::cout << CLR_GRAY << " (native)" << CLR_RESET;
+            }
+            std::cout << "\n";
+        }
+
+        return true;
+    }
+
     bool BuildSystem::link_artifacts(const ProjectConfig& config,
                                      const std::set<std::string>& object_files,
                                      const std::vector<std::string>& discovered_libs,
@@ -557,14 +611,28 @@ namespace angara {
         cmd << " -I" << angara::shell_escape(project_root);
         cmd << " -L" << angara::shell_escape(m_native_lib_path);
 
+        // TOOL-1: add package library paths for native packages.
+        for (const auto& pkg : m_resolved_packages) {
+            if (pkg.has_native) {
+                cmd << " -L" << angara::shell_escape(pkg.lib_path);
+            }
+        }
+
         fs::path local_mod_dir = fs::path(m_build_dir) / "modules";
         if (fs::exists(local_mod_dir)) {
             cmd << " -L" << angara::shell_escape(local_mod_dir.string());
         }
 
         std::set<std::string> all_libs;
-        for (const auto& lib : config.dependencies) all_libs.insert(lib);
+        for (const auto& dep : config.dependencies) all_libs.insert(dep.name);
         for (const auto& lib : discovered_libs) all_libs.insert(lib);
+
+        // TOOL-1: add native package link flags.
+        for (const auto& pkg : m_resolved_packages) {
+            if (pkg.has_native) {
+                all_libs.insert(pkg.name);
+            }
+        }
 
         for (const auto& mod : config.native_modules) {
             for (const auto& lib : mod.link_libs) all_libs.insert(lib);

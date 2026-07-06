@@ -61,7 +61,7 @@ namespace angara {
                  << "name = " << name << "\n"
                  << "type = app\n"
                  << "entry = main.an\n"
-                 << "dependencies = [io]\n\n"
+                 << "dependencies = [io@^1.0.0]\n\n"
                  << "[profile]\n"
                  << "mode = debug\n"
                  << "opt = 0\n";
@@ -208,7 +208,7 @@ namespace angara {
                  << "name = " << name << "\n"
                  << "type = app\n"
                  << "entry = main.an\n"
-                 << "dependencies = [imgui]\n\n"
+                 << "dependencies = [imgui@^1.0.0]\n\n"
                  << "[native-module]\n"
                  << "name = imgui\n"
                  << "sources = [imgui_glue.cpp]\n"

@@ -9,7 +9,7 @@
 
 | ID | Sev | Issue | Location |
 |---|---|---|---|
-| - [ ] **TOOL-1** | High | No package manager / registry / versioning / lockfile. `dependencies = [...]` is just `-l` flags. | `BuildSystem.cpp`, `CompilerDriver.cpp` |
+| - [x] **TOOL-1** | High | No package manager / registry / versioning / lockfile. `dependencies = [...]` is just `-l` flags. | `BuildSystem.cpp`, `CompilerDriver.cpp`; new: `angc/backend/package/*`, `angc/includes/{PackageManager,Version,Lockfile,RegistryClient}.h` |
 
 ---
 

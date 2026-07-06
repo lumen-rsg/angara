@@ -183,6 +183,13 @@ namespace angara {
         inline void set_build_dir(const std::string& dir) { m_build_dir = dir; }
         inline const std::string& get_build_dir() const { return m_build_dir; }
 
+        /// TOOL-1: adds a directory to search for .an source packages.
+        /// These paths are searched BEFORE the standard library path,
+        /// allowing packages to shadow/override stdlib modules.
+        inline void add_package_search_path(const std::string& path) {
+            m_package_search_paths.push_back(path);
+        }
+
     protected:
         /// Prints a log line, temporarily clearing the progress bar.
         void log_step(const std::string& message);
@@ -197,6 +204,9 @@ namespace angara {
 
         std::string m_angara_module_path;
         std::string m_native_module_path;
+
+        // TOOL-1: additional search paths for .an packages.
+        std::vector<std::string> m_package_search_paths;
 
         std::map<std::string, std::shared_ptr<ModuleType>> m_module_cache;
         std::vector<std::string> m_compilation_stack;

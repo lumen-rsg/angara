@@ -269,6 +269,15 @@ namespace angara {
                     }
                 }
                 if (found_path.empty()) {
+                    // TOOL-1: search package paths before stdlib.
+                    for (const auto& pkg_path : m_package_search_paths) {
+                        if (auto p = find_candidate(fs::path(pkg_path), path_or_id)) {
+                            found_path = *p;
+                            break;
+                        }
+                    }
+                }
+                if (found_path.empty()) {
                     if (auto p = find_candidate(fs::path(m_angara_module_path), path_or_id))
                         found_path = *p;
                 }
@@ -827,6 +836,15 @@ namespace angara {
                 for (auto const& [name, entry_file] : m_project_entries) {
                     fs::path proj_dir = fs::path(entry_file).parent_path();
                     if (auto p = find_candidate(proj_dir, path_or_id)) {
+                        found_path = *p;
+                        break;
+                    }
+                }
+            }
+            if (found_path.empty()) {
+                // TOOL-1: search package paths before stdlib.
+                for (const auto& pkg_path : m_package_search_paths) {
+                    if (auto p = find_candidate(fs::path(pkg_path), path_or_id)) {
                         found_path = *p;
                         break;
                     }
