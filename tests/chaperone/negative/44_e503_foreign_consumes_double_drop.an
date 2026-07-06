@@ -1,0 +1,23 @@
+// Chaperone negative test — H9: foreign function @consumes(0) marks arg Dropped.
+// sqlite3_close() is a canonical FFI consumer: it takes ownership of the db
+// handle and frees it. Without @consumes(0), the Chaperone defaults to Borrow
+// and the caller thinks it still owns `db` — causing a silent double-free.
+// With @consumes(0), the Chaperone transitions `db` to Dropped, and a subsequent
+// `drop db` triggers E503 (double-drop).
+//
+// expect: E503
+
+class Db {
+    let handle as i64;
+    func init(this) { this.handle = 0; }
+}
+
+@consumes(0)
+foreign func sqlite3_close(db as Db) -> nil;
+
+export func main() -> i64 {
+    let db = Db();
+    sqlite3_close(db);  // db consumed here by the foreign function
+    drop db;             // E503: double-drop — db was already consumed
+    return 0;
+}

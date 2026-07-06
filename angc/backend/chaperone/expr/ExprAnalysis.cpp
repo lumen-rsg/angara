@@ -340,6 +340,7 @@ void Chaperone::analyzeExpr(Context& ctx,
         // Look up the summary: first by function name, then by closure
         // FunctionType (H2). For method calls, also try the bare method name.
         const FunctionSummary* summary = nullptr;
+        FunctionSummary temp_summary;  // H9: built from FunctionType annotations
         auto sum_it = ctx.summaries.find(callee_name);
         if (sum_it == ctx.summaries.end() && !method_name.empty())
             sum_it = ctx.summaries.find(method_name);
@@ -357,6 +358,32 @@ void Chaperone::analyzeExpr(Context& ctx,
                     auto cs_it = ctx.closure_summaries.find(tit->second.get());
                     if (cs_it != ctx.closure_summaries.end())
                         summary = &cs_it->second;
+                }
+            }
+        }
+
+        // H9: If no summary was found by name or closure lookup, check the
+        // callee's FunctionType for @consumes/@escape annotations. These are
+        // propagated through module boundaries (attach), so a foreign function
+        // declared in another module with @consumes(0) will have its annotations
+        // available here via the type checker.
+        if (!summary) {
+            auto tit = ctx.tc.getExpressionTypes().find(call->callee.get());
+            if (tit != ctx.tc.getExpressionTypes().end() && tit->second &&
+                tit->second->kind == TypeKind::FUNCTION) {
+                auto* ft = dynamic_cast<const FunctionType*>(tit->second.get());
+                if (ft && (!ft->consumes_params.empty() || !ft->escape_params.empty())) {
+                    size_t n_params = ft->param_types.size();
+                    temp_summary.resize(n_params, ParamBehavior::Borrowed);
+                    for (int idx : ft->consumes_params) {
+                        if (idx >= 0 && static_cast<size_t>(idx) < n_params)
+                            temp_summary[idx] = ParamBehavior::Dropped;
+                    }
+                    for (int idx : ft->escape_params) {
+                        if (idx >= 0 && static_cast<size_t>(idx) < n_params)
+                            temp_summary[idx] = ParamBehavior::Escaped;
+                    }
+                    summary = &temp_summary;
                 }
             }
         }

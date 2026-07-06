@@ -1,0 +1,27 @@
+// Chaperone positive test — H9: @consumes(0) annotation explicitly marks a
+// parameter as consumed. The function body drops the param (matching the
+// annotation), and the caller relies on the annotation-driven summary to
+// avoid dropping the already-consumed argument. No leak, no double-drop.
+//
+// Unlike test 35 (variadic double-drop) which relies purely on body inference,
+// this test uses an explicit @consumes(0) annotation — the H9 mechanism for
+// foreign functions — applied here to a regular function to verify the
+// annotation → summary → call-site transition pipeline.
+//
+// exit: 0
+
+class Db {
+    let handle as i64;
+    func init(this) { this.handle = 0; }
+}
+
+@consumes(0)
+func close_db(db as Db) -> nil {
+    drop db;  // body matches the annotation
+}
+
+export func main() -> i64 {
+    let db = Db();
+    close_db(db);  // db consumed via @consumes(0) — no drop needed
+    return 0;       // no leak: close_db took ownership
+}

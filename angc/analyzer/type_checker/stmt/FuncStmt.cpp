@@ -129,6 +129,12 @@ namespace angara {
             function_type->is_intrinsic = true;
         }
 
+        // H9: propagate @consumes / @escape annotations to the FunctionType
+        // so they survive module boundaries (attach). The Chaperone uses
+        // these to apply ownership transitions at call sites.
+        function_type->consumes_params = stmt.consumes_params;
+        function_type->escape_params = stmt.escape_params;
+
         if (stmt.is_foreign || stmt.is_intrinsic) {
             if (auto conflicting = m_symbols.declare(stmt.name, function_type, true)) {
                 error(stmt.name, "Symbol '" + stmt.name.lexeme + "' is already declared.", "E270");

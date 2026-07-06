@@ -339,32 +339,36 @@ change, only the escape annotations get more precise):**
   rule-breaking. This is the universal opt-out.
 - **`ref<T>`** — a non-owning borrow (see "The `ref<T>` borrow check" below).
 
-> **Not yet implemented** (tracked as future work in `AUDIT-CHAPERONE.md`):
-> - **`@consumes` / `@escape`** — annotations on foreign/module declarations to
->   mark that a callee frees or stores an argument. Today **all** foreign/module
->   calls default to **borrow** (the argument stays `Live`) with no way to mark
->   otherwise. Correct for ~90% of FFI (`io.println`, `string()`, …) but
->   imprecise for `sqlite3_close`-style consuming calls.
+> **Not yet implemented**:
 > - **`@manual`** — annotation to exclude a variable from tracking. Today the
 >   only opt-out is `@unsafe`.
 > - **`Rc<T>` / `weak<T>`** — explicit ARC for genuinely shared ownership. Not
 >   present; model shared ownership with `ref<T>` + manual lifecycle for now.
+>
+> **Implemented** (v5.1, 2026-07-07):
+> - **`@consumes` / `@escape`** — annotations on foreign/module declarations to
+>   mark that a callee frees or stores an argument. Stored on `FunctionType` so
+>   they propagate across module boundaries (`attach`). At call sites, the
+>   Chaperone uses the annotation to transition arguments to `Dropped` or
+>   `Escaped`. Without annotations, foreign/module calls still default to
+>   **borrow** (conservative).
 
 ### FFI interaction
 
 **Foreign functions** (`foreign func`) and **native module functions**
-(`attach`) are opaque — the Chaperone can't analyze their bodies. With no
-annotations implemented yet, the rule is uniform:
+(`attach`) are opaque — the Chaperone can't analyze their bodies. With
+`@consumes`/`@escape` annotations now implemented, the rules are:
 
 | Call kind | Argument transition | Return transition |
 |---|---|---|
-| foreign / module (any) | **Borrow** — stays `Live` | If tracked type → new `Live` |
+| foreign / module (no annotation) | **Borrow** — stays `Live` | If tracked type → new `Live` |
+| foreign / module `@consumes(i)` | **Dropped** — ownership transferred to callee | If tracked type → new `Live` |
+| foreign / module `@escape(i)` | **Escaped** — ownership escapes via callee | If tracked type → new `Live` |
 
 **Module C-API signatures** (`"o->o"`, `"s?->n"`, etc.): the Chaperone reads
 the type string — `o` params are tracked (default: borrow), `s`/`i`/`n`/`b`/`d`
-are untracked. Until `@consumes`/`@escape` land, a module function that frees
-or stores an `o` argument is treated as borrowing it — keep that in mind when
-wrapping C APIs that take ownership.
+are untracked. Use `@consumes`/`@escape` on the foreign function declaration
+to mark `o` arguments that are freed or stored by the C API.
 
 ## Diagnostics
 

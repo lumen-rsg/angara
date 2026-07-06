@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 #include <map>
+#include <set>
 #include <sstream>
 #include "Token.h"
 
@@ -133,6 +134,14 @@ namespace angara {
         // defineFunctionHeader so the FFI trampoline knows what C value to
         // return if the callback throws (instead of longjmping across C frames).
         std::optional<int64_t> on_throw_value;
+
+        // H9: @consumes(i, ...) — param indices consumed (dropped) by this
+        // function. Propagated through module boundaries so the Chaperone
+        // can apply ownership transitions for attached foreign functions.
+        std::set<int> consumes_params;
+        // H9: @escape(i, ...) — param indices whose ownership escapes this
+        // function. Propagated through module boundaries.
+        std::set<int> escape_params;
 
         // Update constructor to accept the flag, defaulting to false.
         FunctionType(std::vector<std::shared_ptr<Type>> params, std::shared_ptr<Type> ret, bool is_variadic = false)
@@ -726,6 +735,8 @@ namespace angara {
                     nf->is_foreign = f->is_foreign;
                     nf->is_intrinsic = f->is_intrinsic;
                     nf->on_throw_value = f->on_throw_value;  // RT-1
+                    nf->consumes_params = f->consumes_params;  // H9
+                    nf->escape_params = f->escape_params;      // H9
                     return nf;
                 }
                 case TypeKind::POINTER: {
@@ -980,6 +991,9 @@ namespace angara {
                 auto nf = std::make_shared<FunctionType>(np, nr, f->is_variadic);
                 nf->is_foreign = f->is_foreign;
                 nf->is_intrinsic = f->is_intrinsic;
+                nf->on_throw_value = f->on_throw_value;  // RT-1
+                nf->consumes_params = f->consumes_params;  // H9
+                nf->escape_params = f->escape_params;      // H9
                 return nf;
             }
             case TypeKind::POINTER: {
