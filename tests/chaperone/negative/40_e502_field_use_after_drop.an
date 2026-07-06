@@ -1,0 +1,30 @@
+// Chaperone negative test — E502 (field use-after-free, H8)
+// After dropping a tracked field, reading it (or calling a method
+// on it) is a use-after-free. The Chaperone must detect this and
+// emit E502, mirroring the variable-level UAF check.
+//
+// expect: E502
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+class Holder {
+    let inner as Buf;
+    func init(this) {
+        this.inner = Buf(1);
+    }
+    public:
+    func use_after_drop(this) -> i64 {
+        drop this.inner;
+        return this.inner.get();   // E502: field was dropped, cannot read
+    }
+}
+
+export func main() -> i64 {
+    let h = Holder();
+    return h.use_after_drop();
+}

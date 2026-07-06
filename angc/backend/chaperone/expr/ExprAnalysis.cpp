@@ -399,9 +399,37 @@ void Chaperone::analyzeExpr(Context& ctx,
         return;
     }
 
-    // GetExpr (x.field): walk the object.
+    // GetExpr (x.field): walk the object, then check field UAF (H8).
     if (auto* get = dynamic_cast<const GetExpr*>(expr.get())) {
         analyzeExpr(ctx, get->object, state);
+
+        // H8: field-level use-after-free / use-after-move detection.
+        // Mirrors the VarExpr UAF check (E502/E507) for field keys.
+        std::string field_key;
+        if (dynamic_cast<const ThisExpr*>(get->object.get())) {
+            field_key = "this." + get->name.lexeme;
+        } else if (auto* ove = dynamic_cast<const VarExpr*>(get->object.get())) {
+            field_key = ove->name.lexeme + "." + get->name.lexeme;
+        }
+
+        if (!field_key.empty()) {
+            auto it = state.find(field_key);
+            if (it != state.end()) {
+                if (it->second == State::Dropped) {
+                    diag(ctx, get->name,
+                        "\xf0\x9f\x92\x80 Dead reference — field `" +
+                        get->name.lexeme + "` was dropped but is used here. "
+                        "The molecule has already been released.",
+                        "E502");
+                } else if (it->second == State::Moved) {
+                    diag(ctx, get->name,
+                        "\xf0\x9f\x93\xa4 Moved molecule — field `" +
+                        get->name.lexeme + "` had its ownership transferred "
+                        "and is used here.",
+                        "E507");
+                }
+            }
+        }
         return;
     }
 
