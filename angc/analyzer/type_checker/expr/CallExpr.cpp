@@ -160,6 +160,36 @@ namespace angara {
                     }
                     auto sub_ret = substituteTypeArgs(func_type->return_type, inferred_args);
                     check_type = std::make_shared<FunctionType>(sub_params, sub_ret, func_type->is_variadic);
+
+                    // M9: verify that each inferred concrete type arg satisfies its
+                    // declared trait bound (e.g. render<T: Drawable>(42) should fail
+                    // because i64 does not conform to Drawable). This mirrors the
+                    // existing check for generic data/class/enum instantiation at
+                    // TypeChecker.cpp:457-462.
+                    auto tp_bounds_it = m_function_type_param_bounds.find(callee_key);
+                    if (tp_bounds_it == m_function_type_param_bounds.end()) {
+                        // For method calls (GetExpr), callee_key is "Class.method"
+                        // but the map is keyed by just the method name. Try the
+                        // suffix after the last dot as a fallback.
+                        auto dot_pos = callee_key.rfind('.');
+                        if (dot_pos != std::string::npos) {
+                            tp_bounds_it = m_function_type_param_bounds.find(
+                                callee_key.substr(dot_pos + 1));
+                        }
+                    }
+                    if (tp_bounds_it != m_function_type_param_bounds.end()) {
+                        for (const auto& [tp_name, concrete_type] : inferred_args) {
+                            auto bound_it = tp_bounds_it->second.find(tp_name);
+                            if (bound_it != tp_bounds_it->second.end() &&
+                                !conformsToTrait(concrete_type, bound_it->second)) {
+                                error(expr.paren,
+                                      "Type argument '" + concrete_type->toString() +
+                                      "' does not satisfy the bound '" + tp_name + ": " +
+                                      bound_it->second->toString() + "'.",
+                                      "E391");
+                            }
+                        }
+                    }
                 }
                 // TS-1/C4: if the callee has trait-bounded params, record which
                 // args must be boxed into trait objects at the call site (so the

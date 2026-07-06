@@ -12,10 +12,11 @@
 
 static void throw_fs_error(const char* message, const char* path) {
     const char* error_reason = strerror(errno);
-    char* full_message = (char*)malloc(strlen(message) + strlen(path) + strlen(error_reason) + 10);
-    sprintf(full_message, "%s '%s': %s", message, path, error_reason);
+    // M19: use a static buffer to avoid a malloc leak — throw_error is
+    // __noreturn__ (calls longjmp), so the old free() after it was dead code.
+    static char full_message[1024];
+    snprintf(full_message, sizeof(full_message), "%s '%s': %s", message, path, error_reason);
     ang_api->throw_error(full_message);
-    free(full_message);
 }
 
 #define IS_STR(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)

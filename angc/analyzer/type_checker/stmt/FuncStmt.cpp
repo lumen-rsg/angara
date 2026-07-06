@@ -53,8 +53,11 @@ namespace angara {
 
         // TS-1/C4: record this function's param-bounds (param index -> bound
         // TraitType) so call sites can box bounded args into trait objects.
+        // M9: also record type_param_name -> bound TraitType so call sites
+        // can verify that inferred concrete type args satisfy their bounds.
         {
             std::map<size_t, std::shared_ptr<TraitType>> bounds;
+            std::map<std::string, std::shared_ptr<TraitType>> tp_bounds;
             for (size_t i = 0; i < stmt.params.size(); ++i) {
                 if (stmt.params[i].type) {
                     if (auto st = std::dynamic_pointer_cast<const SimpleType>(stmt.params[i].type)) {
@@ -62,7 +65,9 @@ namespace angara {
                         if (bit != stmt.type_param_bounds.end()) {
                             if (auto bsym = m_symbols.resolve(bit->second.lexeme)) {
                                 if (bsym->type && bsym->type->kind == TypeKind::TRAIT) {
-                                    bounds[i] = std::dynamic_pointer_cast<TraitType>(bsym->type);
+                                    auto trait = std::dynamic_pointer_cast<TraitType>(bsym->type);
+                                    bounds[i] = trait;
+                                    tp_bounds[st->name.lexeme] = trait;
                                 }
                             }
                         }
@@ -70,6 +75,7 @@ namespace angara {
                 }
             }
             if (!bounds.empty()) m_function_bounds[stmt.name.lexeme] = std::move(bounds);
+            if (!tp_bounds.empty()) m_function_type_param_bounds[stmt.name.lexeme] = std::move(tp_bounds);
         }
 
         std::shared_ptr<Type> return_type = m_type_nil;

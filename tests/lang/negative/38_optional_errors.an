@@ -1,0 +1,15 @@
+// M21: negative tests for optional types (?, ?., ??, nil).
+// These features had zero negative test coverage.
+// expect: E363
+// expect: E333
+
+export func main() -> i64 {
+    // E363: ?? with non-optional left-hand side
+    let x = 42 ?? 0;
+
+    // E333: accessing property on optional without ?.
+    let opt as string? = "hello";
+    let n = opt.length;
+
+    return 0;
+}

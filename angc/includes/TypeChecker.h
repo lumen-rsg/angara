@@ -291,6 +291,10 @@ namespace angara {
         // call sites can determine which args to box without a Symbol->FuncStmt
         // back-reference.
         std::map<std::string, std::map<size_t, std::shared_ptr<TraitType>>> m_function_bounds;
+        // M9: function_name -> (type_param_name -> bound TraitType).
+        // Populated in defineFunctionHeader; used by call sites to verify
+        // that inferred concrete type args satisfy their declared bounds.
+        std::map<std::string, std::map<std::string, std::shared_ptr<TraitType>>> m_function_type_param_bounds;
 
         // LANG-11: function_name -> vector of default expressions indexed by param position.
         // nullptr entries mean no default for that parameter.

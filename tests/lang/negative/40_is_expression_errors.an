@@ -1,0 +1,22 @@
+// M21: negative tests for 'is' type-checking expressions.
+// These features had zero negative test coverage.
+// expect: E384
+
+class A {
+public:
+    func init(this) -> nil { }
+}
+
+class B {
+public:
+    func init(this) -> nil { }
+}
+
+export func main() -> i64 {
+    let a = A();
+
+    // E384: A instance can never be B — unrelated class hierarchy
+    let result = a is B;
+
+    return 0;
+}

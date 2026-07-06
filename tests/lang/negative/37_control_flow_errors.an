@@ -1,0 +1,31 @@
+// M21: negative tests for control-flow features (if, while, for, break, continue).
+// These features had zero negative test coverage.
+// expect: E258
+// expect: E260
+// expect: E262
+// expect: E311
+// expect: E312
+
+export func main() -> i64 {
+    // E258: non-truthy if condition (nil is not truthy)
+    if (nil) {
+        return 1;
+    }
+
+    // E260: non-truthy while condition (nil is not truthy)
+    while (nil) {
+        break;
+    }
+
+    // E262: non-iterable for-in expression
+    for (i in 42) {
+    }
+
+    // E311: break outside loop
+    break;
+
+    // E312: continue outside loop
+    continue;
+
+    return 0;
+}

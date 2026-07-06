@@ -1,0 +1,33 @@
+// M9: a generic function call with a concrete type arg that does NOT satisfy
+// expect: E391
+// the declared trait bound must be rejected (e.g. <T: Drawable> called with i64).
+trait Drawable { func draw(this) -> nil; }
+
+class Box {
+public:
+    let w as i64;
+    func init(this, w as i64) { this.w = w; }
+    func draw(this) -> nil { }
+}
+
+// Generic function with a bounded type param.
+func render<T: Drawable>(x as T) -> nil {
+    x.draw();
+}
+
+// Marker trait — satisfied by any type.
+trait Hashable {}
+func hash_it<T: Hashable>(x as T) -> nil { }
+
+export func main() -> i64 {
+    // i64 does NOT satisfy Drawable (no draw() method). Should emit E391.
+    render(42);  // E391
+
+    // i64 satisfies the marker trait Hashable — no error expected.
+    hash_it(42);
+
+    // Box satisfies Drawable — no error expected.
+    render(Box(1));
+
+    return 0;
+}

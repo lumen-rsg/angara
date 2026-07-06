@@ -87,6 +87,10 @@ namespace angara {
         void set_emit_llvm(bool val) { m_emit_llvm = val; }
         bool is_emit_llvm() const { return m_emit_llvm; }
 
+        /// Enables or disables LTO (Link-Time Optimization).
+        void set_lto(bool val) { m_lto = val; }
+        bool is_lto() const { return m_lto; }
+
         /// Enables or disables debug mode (O0 optimization + DWARF debug info).
         void set_debug(bool val) { m_debug = val; }
         bool is_debug() const { return m_debug; }
@@ -226,6 +230,7 @@ namespace angara {
         bool m_quiet = false;
         bool m_dump_ir = false;
         bool m_emit_llvm = false;
+        bool m_lto = false;
         bool m_debug = false;
         int m_dwarf_version = 0;   // 0 = auto-detect by platform
         bool m_werror = false;

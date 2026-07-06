@@ -1,0 +1,28 @@
+// M21: negative tests for class features (private fields, non-existent methods).
+// These features had zero negative test coverage.
+// expect: E336
+// expect: E335
+
+class Widget {
+    let secret as i64;
+
+public:
+    let name as string;
+
+    func init(this, n as string, s as i64) -> nil {
+        this.name = n;
+        this.secret = s;
+    }
+}
+
+export func main() -> i64 {
+    let w = Widget("test", 42);
+
+    // E336: accessing private field from outside the class
+    let s = w.secret;
+
+    // E335: calling non-existent method on a class instance
+    w.nonexistent();
+
+    return 0;
+}
