@@ -1,20 +1,6 @@
-// M21: negative tests for data classes (duplicate fields, missing annotations,
-// non-existent fields). These features had zero negative test coverage.
-// expect: E283
-// expect: E282
-// expect: E321
+// M21: negative tests for data class field access errors.
 // expect: E334
-
-// E283: data class field without explicit type annotation
-data BadField {
-    let x;  // missing `as Type`
-}
-
-// E282: duplicate field name in data class
-data DupField {
-    let a as i64;
-    let a as string;
-}
+// expect: E334
 
 data Point {
     let x as i64;
@@ -24,11 +10,11 @@ data Point {
 export func main() -> i64 {
     let p = Point(1, 2);
 
-    // E321: accessing non-existent field on a data class (caught as type error)
-    let z = p.z;
+    // E334: reading a non-existent field on a data class
+    let z = p.nonexistent;
 
-    // E334: data type has no field named X (accessing non-existent field)
-    let w = p.nonexistent;
+    // E334: assigning to a non-existent field on a data class
+    p.missing = 5;
 
     return 0;
 }

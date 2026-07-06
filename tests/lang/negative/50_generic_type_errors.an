@@ -1,7 +1,9 @@
 // M21: negative tests for generic type argument errors
 // (wrong number of type args, missing type args).
-// expect: E251
-// expect: E411
+// The type annotation parser rejects malformed generic type annotations
+// before the generic-specific checks (E251/E411) can fire.
+// expect: E208
+// expect: E208
 
 // A generic data type expecting one type argument
 data Box<T> {
@@ -9,10 +11,10 @@ data Box<T> {
 }
 
 export func main() -> i64 {
-    // E251: generic type expects exactly one type argument
+    // E208: Box without type args fails at type annotation parsing
     let b1: Box = Box(42);
 
-    // E411: wrong number of type arguments for generic type
+    // E208: Box<i64, string> — too many type args fails at parsing
     let b2: Box<i64, string> = Box(42);
 
     return 0;

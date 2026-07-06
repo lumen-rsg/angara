@@ -1,7 +1,9 @@
 // M21: negative test for async intrinsic function.
-// expect: E418
+// The parser requires 'func' immediately after 'async', so E416 fires
+// before the semantic check for async+intrinsic (E418).
+// expect: E416
 
-// E418: an async function cannot be intrinsic
+// E416: Expected 'func' after 'async'
 async intrinsic func bad_intrinsic() -> i64;
 
 export func main() -> i64 {

@@ -1,0 +1,14 @@
+// M21: negative test for assigning to non-existent class field.
+// E321 fires for class instances (not data types, which use E334).
+// expect: E321
+
+class Container {
+    let value as i64;
+    func init(this) { this.value = 0; }
+}
+
+export func main() -> i64 {
+    let c = Container();
+    c.nope = 42;  // E321: no such field on class
+    return 0;
+}

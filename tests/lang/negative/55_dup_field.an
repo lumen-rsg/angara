@@ -1,0 +1,12 @@
+// M21: negative test for duplicate field names in data class.
+// expect: E282
+
+// E282: duplicate field name in data class
+data DupField {
+    let a as i64;
+    let a as string;
+}
+
+export func main() -> i64 {
+    return 0;
+}

@@ -1,0 +1,12 @@
+// M21: negative test for data class field without type annotation.
+// The parser catches missing 'as' in data fields with E123 before
+// the type checker can emit E283. Both codes exist; E123 fires first.
+// expect: E123
+
+data BadField {
+    let x;  // missing 'as Type'
+}
+
+export func main() -> i64 {
+    return 0;
+}

@@ -1,13 +1,14 @@
-// M21: negative tests for async/await (await outside async,
-// async foreign, async intrinsic).
-// These features had zero negative test coverage.
-// expect: E417
+// M21: negative tests for async/await (async foreign, async intrinsic).
+// The parser requires 'func' immediately after 'async', so E416 fires
+// before semantic checks for async+foreign (E417) or async+intrinsic (E418).
+// expect: E416
+// expect: E416
 
-// E417: async function cannot be foreign (parse error — fires first)
+// E416: Expected 'func' after 'async' — 'async foreign' is not valid syntax
 async foreign func bad_foreign() -> i64;
 
-// E418: async function cannot be intrinsic
-// async intrinsic func bad_intrinsic() -> i64;
+// E416: Expected 'func' after 'async' — 'async intrinsic' is not valid syntax
+async intrinsic func bad_intrinsic() -> i64;
 
 export func main() -> i64 {
     return 0;

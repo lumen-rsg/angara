@@ -1,0 +1,9 @@
+// M21: negative test for pointer dereference on non-pointer type.
+// E379: *x on an i64 value (not a pointer) triggers a type error.
+// expect: E379
+
+export func main() -> i64 {
+    let x = 42;
+    let y = *x;  // dereferencing a non-pointer value
+    return 0;
+}

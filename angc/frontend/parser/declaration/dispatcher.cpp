@@ -113,6 +113,7 @@ namespace angara {
                     if (func_decl->body) {
                         throw error(func_decl->name, "A foreign function cannot have a body — its implementation comes from an external library.", "E130");
                     }
+                    func_decl->is_exported = is_exported;
                     func_decl->is_foreign = true;
                     if (pending_on_throw) {
                         func_decl->on_throw_value = pending_on_throw;
