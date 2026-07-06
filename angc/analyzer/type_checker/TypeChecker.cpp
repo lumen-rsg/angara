@@ -659,6 +659,74 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
                 std::dynamic_pointer_cast<ListType>(concrete)->element_type,
                 inferred
             );
+        } else if (pattern->kind == TypeKind::OPTIONAL && concrete->kind == TypeKind::OPTIONAL) {
+            extract_type_args(
+                std::dynamic_pointer_cast<OptionalType>(pattern)->wrapped_type,
+                std::dynamic_pointer_cast<OptionalType>(concrete)->wrapped_type,
+                inferred
+            );
+        } else if (pattern->kind == TypeKind::REF && concrete->kind == TypeKind::REF) {
+            extract_type_args(
+                std::dynamic_pointer_cast<RefType>(pattern)->inner_type,
+                std::dynamic_pointer_cast<RefType>(concrete)->inner_type,
+                inferred
+            );
+        } else if (pattern->kind == TypeKind::FUTURE && concrete->kind == TypeKind::FUTURE) {
+            extract_type_args(
+                std::dynamic_pointer_cast<FutureType>(pattern)->inner_type,
+                std::dynamic_pointer_cast<FutureType>(concrete)->inner_type,
+                inferred
+            );
+        } else if (pattern->kind == TypeKind::TUPLE && concrete->kind == TypeKind::TUPLE) {
+            auto p_tup = std::dynamic_pointer_cast<TupleType>(pattern);
+            auto c_tup = std::dynamic_pointer_cast<TupleType>(concrete);
+            if (p_tup->element_types.size() == c_tup->element_types.size()) {
+                for (size_t i = 0; i < p_tup->element_types.size(); ++i) {
+                    extract_type_args(p_tup->element_types[i], c_tup->element_types[i], inferred);
+                }
+            }
+        } else if (pattern->kind == TypeKind::FUNCTION && concrete->kind == TypeKind::FUNCTION) {
+            auto p_fn = std::dynamic_pointer_cast<FunctionType>(pattern);
+            auto c_fn = std::dynamic_pointer_cast<FunctionType>(concrete);
+            if (p_fn->param_types.size() == c_fn->param_types.size()) {
+                for (size_t i = 0; i < p_fn->param_types.size(); ++i) {
+                    extract_type_args(p_fn->param_types[i], c_fn->param_types[i], inferred);
+                }
+                extract_type_args(p_fn->return_type, c_fn->return_type, inferred);
+            }
+        } else if (pattern->kind == TypeKind::RECORD && concrete->kind == TypeKind::RECORD) {
+            auto p_rec = std::dynamic_pointer_cast<RecordType>(pattern);
+            auto c_rec = std::dynamic_pointer_cast<RecordType>(concrete);
+            for (const auto& [name, p_field_type] : p_rec->fields) {
+                auto it = c_rec->fields.find(name);
+                if (it != c_rec->fields.end()) {
+                    extract_type_args(p_field_type, it->second, inferred);
+                }
+            }
+        } else if (pattern->kind == TypeKind::POINTER && concrete->kind == TypeKind::POINTER) {
+            auto p_ptr = std::dynamic_pointer_cast<PointerType>(pattern);
+            auto c_ptr = std::dynamic_pointer_cast<PointerType>(concrete);
+            if (p_ptr->depth == c_ptr->depth) {
+                extract_type_args(p_ptr->pointee_type, c_ptr->pointee_type, inferred);
+            }
+        } else if (pattern->kind == TypeKind::FIXED_ARRAY && concrete->kind == TypeKind::FIXED_ARRAY) {
+            auto p_arr = std::dynamic_pointer_cast<FixedArrayType>(pattern);
+            auto c_arr = std::dynamic_pointer_cast<FixedArrayType>(concrete);
+            if (p_arr->size == c_arr->size) {
+                extract_type_args(p_arr->element_type, c_arr->element_type, inferred);
+            }
+        } else if (pattern->kind == TypeKind::RAW_ARRAY && concrete->kind == TypeKind::RAW_ARRAY) {
+            extract_type_args(
+                std::dynamic_pointer_cast<RawArrayType>(pattern)->element_type,
+                std::dynamic_pointer_cast<RawArrayType>(concrete)->element_type,
+                inferred
+            );
+        } else if (pattern->kind == TypeKind::VECTOR && concrete->kind == TypeKind::VECTOR) {
+            auto p_vec = std::dynamic_pointer_cast<VectorType>(pattern);
+            auto c_vec = std::dynamic_pointer_cast<VectorType>(concrete);
+            if (p_vec->size == c_vec->size) {
+                extract_type_args(p_vec->element_type, c_vec->element_type, inferred);
+            }
         }
     }
 

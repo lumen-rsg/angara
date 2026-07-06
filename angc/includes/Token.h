@@ -75,7 +75,7 @@ namespace angara {
     };
 
     struct Token {
-        TokenType type;
+        TokenType type = TokenType::EOF_TOKEN;
         std::string lexeme;
         int line{};
         int column{};

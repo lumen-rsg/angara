@@ -186,7 +186,7 @@ namespace angara {
                         try {
                             auto expr = sub_parser.expression();
                             segments.push_back({"", expr});
-                        } catch (...) {
+                        } catch (const ParseError&) {
                             // Error already reported by the sub-parser.
                             segments.push_back({"", std::make_shared<Literal>(
                                 Token(TokenType::NIL, "nil", tok.line, tok.column, tok.file))});
