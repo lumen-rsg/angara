@@ -1,0 +1,9 @@
+// M21: negative test for async intrinsic function.
+// expect: E418
+
+// E418: an async function cannot be intrinsic
+async intrinsic func bad_intrinsic() -> i64;
+
+export func main() -> i64 {
+    return 0;
+}

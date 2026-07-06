@@ -1,0 +1,24 @@
+// M21: negative tests for collection operations (wrong element type,
+// non-integer index, iterating non-iterables).
+// These features had zero negative test coverage.
+// expect: E315
+// expect: E345
+// expect: E262
+
+export func main() -> i64 {
+    // E315: assigning wrong type to a list element
+    let l = [1, 2, 3];
+    l[0] = "hello";
+
+    // E345: using a non-integer as list index
+    let idx = "zero";
+    let v = l[idx];
+
+    // E262: iterating over a non-iterable type (i64 is not iterable)
+    let n = 42;
+    for (x in n) {
+        let _ = x;
+    }
+
+    return 0;
+}

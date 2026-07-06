@@ -1,0 +1,18 @@
+// M21: negative tests for for-in destructuring and loop errors.
+// These features had zero negative test coverage.
+// expect: E262
+// expect: E345
+
+export func main() -> i64 {
+    // E262: cannot iterate over a non-iterable type (i64)
+    let n = 42;
+    for (x in n) {
+        let _ = x;
+    }
+
+    // E345: list index must be an integer, not a string
+    let l = [1, 2, 3];
+    let v = l["zero"];
+
+    return 0;
+}

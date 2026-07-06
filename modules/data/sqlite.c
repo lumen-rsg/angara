@@ -53,6 +53,7 @@ AngaraObject Angara_SqliteDb_execute(int arg_count, AngaraObject* args) {
     if (rc != SQLITE_OK) {
         char buf[512];
         snprintf(buf, sizeof(buf), "sqlite execute: %s", sqlite3_errmsg(dbc->db));
+        sqlite3_finalize(stmt);  /* M19: free prepared statement before throw */
         ang_api->throw_error(buf);
         return ang_nil();
     }
@@ -180,6 +181,7 @@ AngaraObject Angara_SqliteDb_run(int arg_count, AngaraObject* args) {
     if (rc != SQLITE_OK) {
         char buf[512];
         snprintf(buf, sizeof(buf), "sqlite run: %s", sqlite3_errmsg(dbc->db));
+        sqlite3_finalize(stmt);  /* M19: free prepared statement before throw */
         ang_api->throw_error(buf);
         return ang_nil();
     }

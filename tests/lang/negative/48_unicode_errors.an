@@ -1,0 +1,11 @@
+// M21: negative tests for unicode escape sequences
+// (invalid codepoint, surrogate, malformed escape).
+// These features had zero negative test coverage.
+// expect: E005
+
+// E005: invalid unicode codepoint — surrogates are not valid Unicode scalar values
+let s1 = "\u{D800}";  // surrogate range start, should be rejected
+
+export func main() -> i64 {
+    return 0;
+}

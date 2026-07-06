@@ -1,0 +1,19 @@
+// M21: negative tests for built-in functions (wrong arg count/types).
+// These features had zero negative test coverage.
+// expect: E331
+// expect: E332
+// expect: E275
+
+export func main() -> i64 {
+    // E331: wrong number of arguments to built-in (len expects 1 arg)
+    let a = len();
+
+    // E332: type mismatch for argument (typeof on incompatible type)
+    // Actually, typeof should accept any value. Let's test string() with too many args
+    let b = string(1, 2, 3);
+
+    // E275: type mismatch in variable initialization
+    let c as i64 = "hello";
+
+    return 0;
+}

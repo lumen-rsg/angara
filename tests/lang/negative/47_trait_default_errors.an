@@ -1,0 +1,29 @@
+// M21: negative tests for trait default method bodies
+// (default body with wrong return type, missing required method).
+// These features had zero negative test coverage.
+// expect: E304
+// expect: E306
+
+trait Worker {
+    func work(this) -> i64 { return 0; }   // default body
+    func name(this) -> string;              // required
+}
+
+// E304: class does not implement required trait method `name`
+class LazyWorker uses Worker {
+    // missing name() — should trigger E304
+}
+
+trait Calculator {
+    func compute(this) -> i64 { return 0; }
+}
+
+// E306: return type mismatch — overridden method returns wrong type
+class BadCalc uses Calculator {
+public:
+    func compute(this) -> string { return "wrong"; }
+}
+
+export func main() -> i64 {
+    return 0;
+}

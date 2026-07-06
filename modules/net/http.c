@@ -81,8 +81,15 @@ AngaraObject Angara_http_request(int arg_count, AngaraObject args[]) {
     AngaraObject tls_obj  = ang_api->record_get(options, "tls");
 
     if (!IS_STR(url_obj)) {
+        /* M19: clean up before throw_error — throw_error is __noreturn__,
+           so the old `goto cleanup` after it was dead code. */
+        curl_easy_cleanup(curl_handle);
+        if (headers) curl_slist_free_all(headers);
+        ang_api->decref(url_obj); ang_api->decref(method_obj);
+        ang_api->decref(headers_obj); ang_api->decref(body_obj); ang_api->decref(tls_obj);
+        free(chunk.buffer);
         ang_api->throw_error("http.request options must include 'url' (string).");
-        goto cleanup;
+        return ang_nil();
     }
     const char* url = ang_api->as_cstr(url_obj);
     const char* method = IS_STR(method_obj) ? ang_api->as_cstr(method_obj) : "GET";
@@ -121,9 +128,16 @@ AngaraObject Angara_http_request(int arg_count, AngaraObject args[]) {
 
     res = curl_easy_perform(curl_handle);
     if (res != CURLE_OK) {
+        /* M19: clean up before throw_error — throw_error is __noreturn__,
+           so the old `goto cleanup` after it was dead code. */
+        curl_easy_cleanup(curl_handle);
+        if (headers) curl_slist_free_all(headers);
+        ang_api->decref(url_obj); ang_api->decref(method_obj);
+        ang_api->decref(headers_obj); ang_api->decref(body_obj); ang_api->decref(tls_obj);
+        free(chunk.buffer);
         char buf[256]; snprintf(buf, 256, "http.request failed: %s", curl_easy_strerror(res));
         ang_api->throw_error(buf);
-        goto cleanup;
+        return ang_nil();
     }
 
     {
@@ -208,11 +222,13 @@ static AngaraObject http_simple_request(const char* method, const char* url,
 
     CURLcode res = curl_easy_perform(curl_handle);
     if (res != CURLE_OK) {
-        char buf[256]; snprintf(buf, 256, "http %s failed: %s", method, curl_easy_strerror(res));
-        ang_api->throw_error(buf);
+        /* M19: clean up before throw_error — throw_error is __noreturn__,
+           so the old cleanup after it was dead code. */
         curl_easy_cleanup(curl_handle);
         if (headers) curl_slist_free_all(headers);
         free(chunk.buffer);
+        char buf[256]; snprintf(buf, 256, "http %s failed: %s", method, curl_easy_strerror(res));
+        ang_api->throw_error(buf);
         return ang_nil();
     }
 

@@ -102,7 +102,19 @@ AngaraObject Angara_amqp_connect(int arg_count, AngaraObject* args) {
         ang_api->throw_error(ci.ssl ? "TLS connect failed." : "TCP connect failed.");
         return ang_nil();
     }
-    check_reply(amqp_login(conn->conn, ci.vhost, 0, 131072, 0, AMQP_SASL_METHOD_PLAIN, ci.user, ci.password), "Login");
+    {
+        /* M19: check login reply before wrapping in native_instance —
+           if login fails we must clean up conn + url_copy before throwing. */
+        amqp_rpc_reply_t login_reply = amqp_login(conn->conn, ci.vhost, 0, 131072, 0,
+                                                  AMQP_SASL_METHOD_PLAIN, ci.user, ci.password);
+        if (login_reply.reply_type != AMQP_RESPONSE_NORMAL) {
+            amqp_destroy_connection(conn->conn);
+            free(conn);
+            free(url_copy);
+            check_reply(login_reply, "Login");  /* will throw */
+            return ang_nil();
+        }
+    }
     conn->is_connected = true; free(url_copy);
     return ang_api->native_instance_new(conn, finalize_connection, "Connection");
 }
@@ -114,7 +126,16 @@ AngaraObject Angara_Connection_channel(int arg_count, AngaraObject* args) {
     ch->conn_data = conn; ch->connection_obj = args[0];
     conn->channel_count++; ch->id = conn->channel_count;
     amqp_channel_open(conn->conn, ch->id);
-    check_reply(amqp_get_rpc_reply(conn->conn), "Channel open");
+    {
+        /* M19: check channel-open reply before wrapping in native_instance —
+           if it fails we must free the allocated ChannelData before throwing. */
+        amqp_rpc_reply_t ch_reply = amqp_get_rpc_reply(conn->conn);
+        if (ch_reply.reply_type != AMQP_RESPONSE_NORMAL) {
+            free(ch);
+            check_reply(ch_reply, "Channel open");  /* will throw */
+            return ang_nil();
+        }
+    }
     ang_api->incref(args[0]);
     return ang_api->native_instance_new(ch, finalize_channel, "Channel");
 }

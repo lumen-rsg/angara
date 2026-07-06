@@ -192,6 +192,8 @@ AngaraObject Angara_process_run(int arg_count, AngaraObject* args) {
 
     pid_t pid = fork();
     if (pid < 0) {
+        /* M19: free each strdup'd argv element before the array */
+        for (int i = 0; i < argc_build; i++) free(argv[i]);
         free(argv);
         if (stdout_pipe[0] >= 0) { close(stdout_pipe[0]); close(stdout_pipe[1]); }
         if (stderr_pipe[0] >= 0) { close(stderr_pipe[0]); close(stderr_pipe[1]); }
@@ -337,6 +339,8 @@ AngaraObject Angara_process_spawn(int arg_count, AngaraObject* args) {
 
     pid_t pid = fork();
     if (pid < 0) {
+        /* M19: free each strdup'd argv element before the array */
+        for (int i = 0; i < argc_build; i++) free(argv[i]);
         free(argv);
         close(in_pipe[0]); close(in_pipe[1]);
         close(out_pipe[0]); close(out_pipe[1]);

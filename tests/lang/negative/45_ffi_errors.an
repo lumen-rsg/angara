@@ -1,0 +1,18 @@
+// M21: negative tests for FFI (foreign export, pointer dereference).
+// These features had zero negative test coverage.
+// expect: E271
+// expect: E379
+
+// E271: a foreign function cannot be exported
+export foreign func bad_export() -> i64;
+
+// Helper to test pointer deref
+foreign func malloc(size as i64) -> ptr;
+
+export func main() -> i64 {
+    // E379: pointer dereference is only valid for FFI pointer types
+    let x = 42;
+    let y = ^x;  // dereferencing a non-pointer value
+
+    return 0;
+}

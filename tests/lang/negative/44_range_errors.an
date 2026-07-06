@@ -1,0 +1,14 @@
+// M21: negative tests for range expressions (non-integer bounds).
+// These features had zero negative test coverage.
+// expect: E396
+// expect: E397
+
+export func main() -> i64 {
+    // E396: range start must be an integer
+    let r1 = "a"..5;
+
+    // E397: range end must be an integer
+    let r2 = 0.."z";
+
+    return 0;
+}

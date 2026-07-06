@@ -11,6 +11,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <poll.h>
+#include <sys/time.h>
 #include "Angara.h"
 
 #define IS_STR(v)  (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)
@@ -144,11 +145,24 @@ AngaraObject Angara_TcpConn_recv_line(int arg_count, AngaraObject* args) {
     size_t len = 0;
     char* buf = (char*)malloc(cap);
 
+    /* M18: track elapsed time so the timeout applies to the whole
+       line-read operation, not per-byte. */
+    struct timeval start;
+    gettimeofday(&start, NULL);
+
     while (1) {
+        /* calculate remaining time in the overall budget */
+        struct timeval now;
+        gettimeofday(&now, NULL);
+        long elapsed_ms = (now.tv_sec - start.tv_sec) * 1000L
+                        + (now.tv_usec - start.tv_usec) / 1000L;
+        int remaining_ms = timeout_ms - (int)elapsed_ms;
+        if (remaining_ms <= 0) break;
+
         struct pollfd pfd;
         pfd.fd = conn->fd;
         pfd.events = POLLIN;
-        int pret = poll(&pfd, 1, timeout_ms);
+        int pret = poll(&pfd, 1, remaining_ms);
         if (pret <= 0) break;
 
         char c;

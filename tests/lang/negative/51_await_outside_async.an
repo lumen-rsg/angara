@@ -1,0 +1,12 @@
+// M21: negative test for await outside async function.
+// expect: E419
+
+func helper() -> i64 {
+    return 42;
+}
+
+export func main() -> i64 {
+    // E419: await can only be used inside an async func body
+    let x = await helper();
+    return x;
+}
