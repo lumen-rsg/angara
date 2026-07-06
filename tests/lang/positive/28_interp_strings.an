@@ -1,4 +1,5 @@
 // Test 19: String interpolation (LANG-3)
+// exit: 0
 attach io;
 
 export func main() -> i64 {

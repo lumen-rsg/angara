@@ -1,4 +1,5 @@
 attach io;
+// exit: 0
 
 // LANG-12: Basic alias to primitive
 type UserId = i64;

@@ -1,4 +1,5 @@
 // LIB-4: async I/O futures — verify compilation and create_timer regression.
+// exit: 0
 attach io;
 attach eventloop;
 

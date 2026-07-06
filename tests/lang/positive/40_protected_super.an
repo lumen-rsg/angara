@@ -1,4 +1,5 @@
 // LANG-14: protected super access test
+// exit: 0
 // Tests that super.method() works for protected methods,
 // and that super access to private methods is still blocked.
 

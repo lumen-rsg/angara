@@ -1,4 +1,5 @@
 // TS-1: trait objects — dynamic dispatch through a trait interface. A value
+// exit: 0
 // viewed as `Drawable` carries its concrete method via a per-(class,trait)
 // vtable, so d.draw() calls the right implementation at runtime.
 attach io;

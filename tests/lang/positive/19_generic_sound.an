@@ -1,4 +1,5 @@
 // TS-2 Phase 1: sound generics — bodies check correctly, call sites infer.
+// exit: 0
 attach io;
 
 // Generic function: identity. Body is sound (T -> T) so it type-checks.

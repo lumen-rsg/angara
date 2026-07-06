@@ -1,4 +1,5 @@
 // TS-7c positive case: a plausible `is` downcast (optional unwrap) type-checks.
+// exit: 0
 attach io;
 
 func main() -> i64 {

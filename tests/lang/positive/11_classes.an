@@ -1,4 +1,5 @@
 // Test 11: Classes with methods, constructor, and inheritance
+// exit: 0
 attach io;
 
 class Animal {

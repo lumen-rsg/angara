@@ -1,4 +1,5 @@
 // Test ang_api->call() — invoke Angara closures from native C code.
+// exit: 0
 attach io;
 attach calltest;
 

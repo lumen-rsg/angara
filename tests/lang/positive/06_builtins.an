@@ -1,4 +1,5 @@
 // Test 06: Built-in functions (typeof, len, string, i64, f64)
+// exit: 0
 attach io;
 
 export func main() -> i64 {

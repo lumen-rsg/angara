@@ -1,4 +1,5 @@
 // Test HTTP server callbacks: on_request compiles and runs.
+// exit: 0
 attach io;
 attach http_server;
 

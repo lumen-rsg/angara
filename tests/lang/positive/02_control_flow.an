@@ -1,4 +1,7 @@
 // Test 02: Control flow statements (if/else, while, for, break, continue, ternary)
+// exit: 0
+// stdout: medium
+// stdout: five
 attach io;
 
 export func main() -> i64 {

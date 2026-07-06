@@ -1,4 +1,5 @@
 // Test 04: Data classes (value objects with automatic constructors)
+// exit: 0
 attach io;
 
 // Simple data class

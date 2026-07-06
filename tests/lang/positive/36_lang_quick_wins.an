@@ -1,4 +1,5 @@
 // LANG-16: nested generics compile (>> splitting).
+// exit: 0
 // LANG-17: IIFE (lambda expression statement).
 // LANG-18: trailing commas in various positions.
 attach io;

@@ -1,4 +1,5 @@
 // Test 07: Foreign function interface (FFI)
+// exit: 0
 attach io;
 
 // Modern FFI: declare the C function signature directly with `foreign func`.

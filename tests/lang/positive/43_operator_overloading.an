@@ -1,4 +1,5 @@
 // LANG-13: Operator overloading — opEquals and opCmp for user-defined classes
+// exit: 0
 attach io;
 
 class Point {

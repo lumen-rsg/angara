@@ -1,4 +1,5 @@
 // LANG-8: Generic enum test
+// exit: 0
 // Tests: enum Result<T,E>, enum Option<T>, basic usage patterns
 
 attach io;

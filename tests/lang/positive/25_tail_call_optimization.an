@@ -1,4 +1,5 @@
 // RT-3: tail-call optimization. A self-recursive function in tail position
+// exit: 0
 // (the recursive call is the direct return value) is compiled as a tail call,
 // so deep recursion doesn't blow the stack. sumto(1,000,000) returns cleanly.
 attach io;

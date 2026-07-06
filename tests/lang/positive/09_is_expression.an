@@ -1,4 +1,5 @@
 // Test 09: Type checking with `is` expression
+// exit: 0
 attach io;
 
 export func main() -> i64 {

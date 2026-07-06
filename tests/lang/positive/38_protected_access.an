@@ -1,4 +1,5 @@
 // LANG-14: protected access level — positive test
+// exit: 0
 // Tests that:
 //  - protected fields are accessible from subclasses via `this`
 //  - protected methods are accessible from subclasses via `this`

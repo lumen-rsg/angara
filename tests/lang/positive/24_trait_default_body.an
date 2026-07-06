@@ -1,4 +1,5 @@
 // TS-1 Phase D: default trait method bodies. A trait method may carry a default
+// exit: 0
 // implementation; a class that doesn't override it gets the default via the
 // vtable, and a class that does override gets its own.
 attach io;

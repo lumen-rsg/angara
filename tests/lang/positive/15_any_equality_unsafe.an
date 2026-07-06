@@ -1,4 +1,5 @@
 // TS-7b positive case: comparing `any` with a typed value is allowed inside @unsafe.
+// exit: 0
 attach io;
 
 func main() -> i64 {

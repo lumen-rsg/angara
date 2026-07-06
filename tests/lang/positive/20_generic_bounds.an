@@ -1,4 +1,5 @@
 // TS-2 Phase 2: generic bounds `<T: Trait>`. A marker trait is satisfied by
+// exit: 0
 // any type; a method-bearing trait requires the type-arg to conform.
 attach io;
 

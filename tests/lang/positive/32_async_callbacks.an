@@ -1,4 +1,5 @@
 // Test async callbacks: set_timeout + run (no explicit close to avoid
+// exit: 0
 // native method-call mangling issue).
 attach io;
 attach eventloop;

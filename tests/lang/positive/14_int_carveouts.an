@@ -1,4 +1,5 @@
 // TS-3 positive cases: the narrowing policy's carve-outs.
+// exit: 0
 attach io;
 
 func main() -> i64 {

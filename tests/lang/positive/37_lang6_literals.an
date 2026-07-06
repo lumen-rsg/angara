@@ -1,4 +1,5 @@
 // LANG-6: Raw strings, byte strings, float exponents, numeric suffixes, octal.
+// exit: 0
 attach io;
 
 export func main() -> i64 {

@@ -1,4 +1,5 @@
 // Test 05: Lists and collections
+// exit: 0
 attach io;
 
 export func main() -> i64 {

@@ -1,4 +1,5 @@
 // LANG-1: ranges — `start..end` (exclusive) and `start...end` (inclusive).
+// exit: 0
 // For-in over a range generates a zero-allocation C-style loop.
 attach io;
 

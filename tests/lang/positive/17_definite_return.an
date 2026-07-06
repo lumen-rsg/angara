@@ -1,4 +1,5 @@
 // TS-6 positive case: a function whose branches all return type-checks cleanly.
+// exit: 0
 attach io;
 
 func classify(x as i64) -> string {

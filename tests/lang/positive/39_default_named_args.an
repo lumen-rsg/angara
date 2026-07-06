@@ -1,4 +1,5 @@
 attach io;
+// exit: 0
 
 // Basic default arguments
 func greet(name as string = "World", times as i64 = 1) -> string {

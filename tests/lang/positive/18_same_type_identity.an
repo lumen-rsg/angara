@@ -1,4 +1,5 @@
 // TS-4 positive: legitimate same-type comparisons round-trip cleanly through
+// exit: 0
 // every site that now uses sameType(): assign, return, ==, ternary, match arms,
 // list-element unify. Same-module nominal types are still identical to themselves.
 attach io;

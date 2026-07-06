@@ -1,4 +1,7 @@
 // Test 12: Try/catch exception handling and throw
+// exit: 0
+// stdout: caught:
+// stdout: Exceptions passed
 attach io;
 
 func risky(x as i64) -> i64 {

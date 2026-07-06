@@ -1,4 +1,5 @@
 // TS-1/C4: generic-body trait dispatch. A generic function bounded by a trait
+// exit: 0
 // can call the trait's methods on its type-param argument — dispatch goes
 // through the vtable (the bounded arg is boxed at the call site). This closes
 // the TS-2 Phase 2d deferral.

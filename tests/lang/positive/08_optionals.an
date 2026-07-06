@@ -1,4 +1,5 @@
 // Test 08: Optional types and nil
+// exit: 0
 attach io;
 
 export func main() -> i64 {

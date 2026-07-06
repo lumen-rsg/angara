@@ -1,4 +1,5 @@
 // LANG-5: Unicode escape sequences (\u{...}, \uXXXX, \UXXXXXXXX).
+// exit: 0
 //
 // These work in string literals, char literals, and interpolated strings.
 // Three forms accepted:

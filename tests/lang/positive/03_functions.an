@@ -1,4 +1,5 @@
 // Test 03: Functions, lambdas, closures, and higher-order functions
+// exit: 0
 attach io;
 
 // Simple function with parameters

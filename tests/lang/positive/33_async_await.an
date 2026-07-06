@@ -1,4 +1,5 @@
 // LIB-4 Stage S: async/await with state machine suspension.
+// exit: 0
 // Tests async→async chains with synchronous resolution
 // (no event loop needed — all futures resolve immediately).
 attach io;

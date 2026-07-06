@@ -1,4 +1,8 @@
 // Test 01: Basic types, variables, and arithmetic expressions
+// exit: 0
+// stdout: hello world
+// stdout: false
+// stdout: -42
 attach io;
 
 export func main() -> i64 {

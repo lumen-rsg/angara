@@ -1,4 +1,5 @@
 // Test 10: Enums (simple enum without explicit values)
+// exit: 0
 attach io;
 
 enum Color {

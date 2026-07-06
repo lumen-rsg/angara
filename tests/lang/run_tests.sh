@@ -68,7 +68,13 @@ for test_file in "$SCRIPT_DIR/positive/"*.an; do
     test_name="$(basename "$test_file" .an)"
     binary="$TMPDIR_TEST/${test_name}"
 
-    printf "  ${BOLD}${test_name}${RESET}: "
+    # Read expected runtime exit code from `// exit: N` (default 0).
+    # Read expected stdout substrings from `// stdout: <pattern>` (optional, may repeat).
+    expect_exit=$(strip_ansi < "$test_file" | /bin/grep -oE "exit: -?[0-9]+" | head -1 | awk '{print $2}' || true)
+    [ -z "$expect_exit" ] && expect_exit=0
+    mapfile -t expect_stdout < <(strip_ansi < "$test_file" | /bin/grep -oP 'stdout:\s*\K.*' || true)
+
+    printf "  ${BOLD}${test_name}${RESET} ${DIM}(exit $expect_exit)${RESET}: "
 
     compile_output=$("$ANGC" "$test_file" -o "$binary" 2>&1) && compile_rc=$? || compile_rc=$?
 
@@ -98,17 +104,33 @@ for test_file in "$SCRIPT_DIR/positive/"*.an; do
 
     run_output=$("$actual_binary" 2>&1) && run_rc=$? || run_rc=$?
 
-    if [ $run_rc -ne 0 ]; then
+    # Check exit code against expected.
+    if [ "$run_rc" != "$expect_exit" ]; then
         if [ $run_rc -eq 139 ]; then
-            printf "${RED}SEGFAULT${RESET} (runtime exit 139)\n"
+            printf "${RED}SEGFAULT${RESET} (expected exit $expect_exit)\n"
             BUGS+=("BUG [$test_name]: Runtime segfault")
         elif [ $run_rc -eq 134 ]; then
-            printf "${RED}ABORT${RESET} (runtime exit 134)\n"
-            BUGS+=("BUG [$test_name]: Runtime abort (assertion?)")
+            printf "${RED}ABORT${RESET} (expected exit $expect_exit)\n"
+            BUGS+=("BUG [$test_name]: Runtime abort")
         else
-            printf "${RED}RUNTIME ERROR${RESET} (exit $run_rc)\n"
-            BUGS+=("BUG [$test_name]: Runtime error (exit $run_rc)")
+            printf "${RED}WRONG EXIT${RESET} (got $run_rc, expected $expect_exit)\n"
+            BUGS+=("BUG [$test_name]: Exit code $run_rc, expected $expect_exit")
         fi
+        FAIL=$((FAIL + 1))
+        continue
+    fi
+
+    # Check stdout patterns if any are declared.
+    stdout_fail=0
+    for pattern in "${expect_stdout[@]}"; do
+        if ! echo "$run_output" | grep -qF -- "$pattern"; then
+            printf "${RED}STDOUT MISMATCH${RESET} (missing: '%s')\n" "$pattern"
+            BUGS+=("BUG [$test_name]: Expected stdout to contain '$pattern'")
+            stdout_fail=1
+            break
+        fi
+    done
+    if [ $stdout_fail -eq 1 ]; then
         FAIL=$((FAIL + 1))
         continue
     fi

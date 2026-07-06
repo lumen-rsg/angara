@@ -1,4 +1,5 @@
 // LANG-4: char type + single-quote char literals ('a').
+// exit: 0
 //
 // Model: char is a 32-bit unsigned integer (a Unicode code point) that also
 // renders as a glyph. 'A'+1 == 66 (promotes to i64), 'A'==65 is true, and a

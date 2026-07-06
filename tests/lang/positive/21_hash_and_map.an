@@ -1,4 +1,5 @@
 // TS-2 Phase 2: the hash() builtin and deep == enable associative collections.
+// exit: 0
 // This is a self-contained exercise of the primitives (the full Map<K,V>/Set<T>
 // API lives in modules/collections/collections.an). Demonstrates: hash()
 // consistency, deep list equality, and a tiny inline string->value map built
