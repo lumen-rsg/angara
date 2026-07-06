@@ -18,6 +18,8 @@
 #include <sys/epoll.h>
 #include <sys/timerfd.h>
 #include <sys/eventfd.h>
+#include <fcntl.h>
+#include <sys/socket.h>
 #include <pthread.h>
 #include "Angara.h"
 
@@ -54,10 +56,23 @@ typedef struct {
     void*         loop;        // offset 56 (field 5: owning event loop)
 } FutureFrame;
 
+/* Future kinds (LIB-4 I/O integration) */
+#define FUTURE_KIND_TIMER  1
+#define FUTURE_KIND_READ   2
+#define FUTURE_KIND_WRITE  3
+#define FUTURE_KIND_ACCEPT 4
+
+/* Unified I/O future — timer, read, write, or accept.
+   The FutureFrame header must be first (codegen accesses it by offset).
+   For ACCEPT, no flex buffer is allocated (sizeof(IOFuture) only). */
 typedef struct {
-    FutureFrame   header;      // standard frame header
-    int           tfd;         // timerfd for this timer future
-} TimerFuture;
+    FutureFrame   header;      // 64 bytes: standard layout
+    int           kind;        // FUTURE_KIND_*
+    int           fd;          // timerfd or I/O fd
+    size_t        count;       // read: buffer size; write: total len
+    size_t        offset;      // write: bytes written so far
+    char          buf[];       // flexible array: read buffer or write data copy
+} IOFuture;
 
 
 /* =========================================================================
@@ -137,16 +152,16 @@ typedef struct {
     int         stop_efd;     /* eventfd for loop.stop() wake-up */
     CbRegistry  cbs;          /* fd → callback */
     int         running;      /* 1 while loop.run() is active */
-    /* Timer futures (LIB-4 Stage S-2) */
-    TimerFuture** timer_futs;  /* active timer futures array */
-    size_t       timer_count;
-    size_t       timer_cap;
+    /* Pending futures (timer + I/O) */
+    IOFuture**  pending;      /* active futures array */
+    size_t      pending_count;
+    size_t      pending_cap;
 } LoopData;
 
 static void finalize_loop(void* data) {
     LoopData* l = (LoopData*)data;
     cb_registry_free(&l->cbs);
-    if (l->timer_futs) free(l->timer_futs);
+    if (l->pending) free(l->pending);
     if (l->stop_efd >= 0) close(l->stop_efd);
     if (l->epfd >= 0) close(l->epfd);
     free(l);
@@ -358,28 +373,86 @@ AngaraObject Angara_Loop_run(int arg_count, AngaraObject* args) {
                 continue;
             }
 
-            /* LIB-4 Stage S-2: check if this fd belongs to a timer future */
+            /* LIB-4: check if this fd belongs to a pending future */
             {
-                TimerFuture* tf = NULL;
-                for (size_t ti = 0; ti < l->timer_count; ti++) {
-                    if (l->timer_futs[ti] && l->timer_futs[ti]->tfd == fd) {
-                        tf = l->timer_futs[ti];
+                IOFuture* fut = NULL;
+                for (size_t pi = 0; pi < l->pending_count; pi++) {
+                    if (l->pending[pi] && l->pending[pi]->fd == fd) {
+                        fut = l->pending[pi];
                         break;
                     }
                 }
-                if (tf) {
-                    uint64_t exp = 0;
-                    read(fd, &exp, sizeof(exp));
-                    tf->header.state = -1;  /* resolved */
-                    /* Cascade waker if set */
-                    if (tf->header.waker_fn) {
-                        void (*fn)(void*) = (void(*)(void*))tf->header.waker_fn;
-                        fn(tf->header.waker_ctx);
+                if (fut) {
+                    int remove_fd = 1;
+                    switch (fut->kind) {
+                    case FUTURE_KIND_TIMER: {
+                        uint64_t exp = 0;
+                        read(fd, &exp, sizeof(exp));
+                        fut->header.state = -1;
+                        break;
                     }
-                    /* Cleanup */
-                    epoll_ctl(l->epfd, EPOLL_CTL_DEL, fd, NULL);
-                    close(fd);
-                    tf->tfd = -1;
+                    case FUTURE_KIND_READ: {
+                        ssize_t nr = read(fd, fut->buf, fut->count);
+                        if (nr > 0) {
+                            fut->header.result = ang_api->string_len(fut->buf, (size_t)nr);
+                        } else {
+                            fut->header.result = ang_api->string_len("", 0);
+                        }
+                        fut->header.state = -1;
+                        break;
+                    }
+                    case FUTURE_KIND_WRITE: {
+                        ssize_t nw = write(fd, fut->buf + fut->offset,
+                                           fut->count - fut->offset);
+                        if (nw > 0) {
+                            fut->offset += (size_t)nw;
+                        }
+                        if (fut->offset >= fut->count) {
+                            fut->header.result = ang_i64((int64_t)fut->count);
+                            fut->header.state = -1;
+                        } else {
+                            /* Partial write — re-arm and keep waiting */
+                            struct epoll_event ev;
+                            ev.events = EPOLLOUT | EPOLLONESHOT;
+                            ev.data.fd = fd;
+                            epoll_ctl(l->epfd, EPOLL_CTL_MOD, fd, &ev);
+                            remove_fd = 0;
+                        }
+                        break;
+                    }
+                    case FUTURE_KIND_ACCEPT: {
+                        int new_fd = accept(fd, NULL, NULL);
+                        fut->header.result = new_fd >= 0
+                            ? ang_i64((int64_t)new_fd) : ang_i64(-1);
+                        fut->header.state = -1;
+                        /* Don't close the listener fd */
+                        remove_fd = 0;
+                        break;
+                    }
+                    }
+                    if (fut->header.state == -1) {
+                        /* Cascade waker */
+                        if (fut->header.waker_fn) {
+                            void (*fn)(void*) = (void(*)(void*))fut->header.waker_fn;
+                            fn(fut->header.waker_ctx);
+                        }
+                    }
+                    /* Cleanup fd registration */
+                    if (remove_fd) {
+                        epoll_ctl(l->epfd, EPOLL_CTL_DEL, fd, NULL);
+                    }
+                    if (fut->header.state == -1 && remove_fd) {
+                        /* Resolved and fd removed: close fd, remove from pending */
+                        close(fd);
+                        fut->fd = -1;
+                        /* Shift array to remove */
+                        for (size_t pi2 = 0; pi2 < l->pending_count; pi2++) {
+                            if (l->pending[pi2] == fut) {
+                                l->pending[pi2] = l->pending[--l->pending_count];
+                                break;
+                            }
+                        }
+                    }
                     continue;
                 }
             }
@@ -484,35 +557,52 @@ AngaraObject Angara_Loop_close(int arg_count, AngaraObject* args) {
 
 
 /* =========================================================================
-   LIB-4 Stage S-2: Timer future — leaf future that suspends and is
-   resolved by the event loop when a timerfd fires.
+   LIB-4: Unified I/O futures — timer, read, write, accept.
    ========================================================================= */
 
-static void finalize_timer_future(void* data) {
-    TimerFuture* tf = (TimerFuture*)data;
-    if (tf->tfd >= 0) close(tf->tfd);
-    free(tf);
+/* Helper: add an IOFuture to the loop's pending array */
+static void pending_add(LoopData* l, IOFuture* f) {
+    if (l->pending_count >= l->pending_cap) {
+        size_t new_cap = l->pending_cap ? l->pending_cap * 2 : 4;
+        l->pending = (IOFuture**)realloc(l->pending, new_cap * sizeof(IOFuture*));
+        l->pending_cap = new_cap;
+    }
+    l->pending[l->pending_count++] = f;
 }
 
+/* Helper: allocate and init an IOFuture with the standard header */
+static IOFuture* future_alloc(LoopData* l, int kind, size_t extra) {
+    IOFuture* f = (IOFuture*)calloc(1, sizeof(IOFuture) + extra);
+    f->kind = kind;
+    f->header.state = 0;
+    f->header.loop = l;
+    return f;
+}
+
+static void finalize_io_future(void* data) {
+    IOFuture* f = (IOFuture*)data;
+    if (f->fd >= 0 && f->kind != FUTURE_KIND_ACCEPT) close(f->fd);
+    free(f);
+}
+
+/* loop.create_timer(ms, value) → Future<T> */
 AngaraObject Angara_Loop_create_timer(int arg_count, AngaraObject* args) {
-    /* loop.create_timer(ms, value) → Future<T> */
     LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
     if (!l || arg_count < 3) return ang_nil();
 
     int64_t ms = ang_is_i64(args[1]) ? ang_as_i64(args[1]) : 0;
     AngaraObject value = args[2];
 
-    TimerFuture* tf = (TimerFuture*)calloc(1, sizeof(TimerFuture));
-    tf->header.state = 0;        /* pending */
-    tf->header.result = value;
-    tf->header.loop = l;
+    IOFuture* f = future_alloc(l, FUTURE_KIND_TIMER, 0);
+    f->header.result = value;
 
     int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
     if (tfd < 0) {
-        free(tf);
+        free(f);
         ang_api->throw_error("loop.create_timer: timerfd_create failed.");
         return ang_nil();
     }
+    f->fd = tfd;
 
     struct itimerspec its;
     its.it_value.tv_sec     = ms / 1000;
@@ -520,40 +610,103 @@ AngaraObject Angara_Loop_create_timer(int arg_count, AngaraObject* args) {
     its.it_interval.tv_sec  = 0;
     its.it_interval.tv_nsec = 0;
     timerfd_settime(tfd, 0, &its, NULL);
-    tf->tfd = tfd;
 
-    /* Register with epoll */
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLET;
     ev.data.fd = tfd;
     epoll_ctl(l->epfd, EPOLL_CTL_ADD, tfd, &ev);
 
-    /* Track in loop's timer future list */
-    if (l->timer_count >= l->timer_cap) {
-        size_t new_cap = l->timer_cap ? l->timer_cap * 2 : 4;
-        l->timer_futs = (TimerFuture**)realloc(l->timer_futs, new_cap * sizeof(TimerFuture*));
-        l->timer_cap = new_cap;
-    }
-    l->timer_futs[l->timer_count++] = tf;
-
-    return ang_api->native_instance_new(tf, finalize_timer_future, "Future");
+    pending_add(l, f);
+    return ang_api->native_instance_new(f, finalize_io_future, "Future");
 }
 
+/* loop.read(fd, count) → Future<string> */
+AngaraObject Angara_Loop_read(int arg_count, AngaraObject* args) {
+    LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
+    if (!l || arg_count < 3) return ang_nil();
+
+    int fd = (int)ang_as_i64(args[1]);
+    int64_t count = ang_as_i64(args[2]);
+    if (count <= 0 || count > 1048576) count = 1024;  /* clamp */
+
+    IOFuture* f = future_alloc(l, FUTURE_KIND_READ, (size_t)count);
+    f->fd = fd;
+    f->count = (size_t)count;
+
+    /* Set non-blocking */
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags >= 0) fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+    struct epoll_event ev;
+    ev.events = EPOLLIN | EPOLLONESHOT;
+    ev.data.fd = fd;
+    epoll_ctl(l->epfd, EPOLL_CTL_ADD, fd, &ev);
+
+    pending_add(l, f);
+    return ang_api->native_instance_new(f, finalize_io_future, "Future");
+}
+
+/* loop.write(fd, data) → Future<i64> */
+AngaraObject Angara_Loop_write(int arg_count, AngaraObject* args) {
+    LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
+    if (!l || arg_count < 3) return ang_nil();
+
+    int fd = (int)ang_as_i64(args[1]);
+    const char* ptr = ang_api->as_cstr(args[2]);
+    size_t len = ang_api->str_len(args[2]);
+
+    IOFuture* f = future_alloc(l, FUTURE_KIND_WRITE, len);
+    f->fd = fd;
+    f->count = len;
+    f->offset = 0;
+    if (len > 0) memcpy(f->buf, ptr, len);
+
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags >= 0) fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+    struct epoll_event ev;
+    ev.events = EPOLLOUT | EPOLLONESHOT;
+    ev.data.fd = fd;
+    epoll_ctl(l->epfd, EPOLL_CTL_ADD, fd, &ev);
+
+    pending_add(l, f);
+    return ang_api->native_instance_new(f, finalize_io_future, "Future");
+}
+
+/* loop.accept(fd) → Future<i64> */
+AngaraObject Angara_Loop_accept(int arg_count, AngaraObject* args) {
+    LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
+    if (!l || arg_count < 2) return ang_nil();
+
+    int fd = (int)ang_as_i64(args[1]);
+
+    IOFuture* f = future_alloc(l, FUTURE_KIND_ACCEPT, 0);
+    f->fd = fd;
+
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags >= 0) fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+    struct epoll_event ev;
+    ev.events = EPOLLIN | EPOLLONESHOT;
+    ev.data.fd = fd;
+    epoll_ctl(l->epfd, EPOLL_CTL_ADD, fd, &ev);
+
+    pending_add(l, f);
+    return ang_api->native_instance_new(f, finalize_io_future, "Future");
+}
+
+/* loop.run_until(future) → T */
 AngaraObject Angara_Loop_run_until(int arg_count, AngaraObject* args) {
-    /* loop.run_until(future) → T — blocks until future resolves, returns result */
     LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
     if (!l || arg_count < 2) return ang_nil();
 
     AngaraObject future = args[1];
     if (ang_is_nil(future)) return ang_nil();
 
-    /* Set the loop pointer on the future's frame so waker chain routes through us */
     ang_api->future_set_loop(future, l);
 
-    /* Poll until resolved */
     for (;;) {
         if (ang_api->future_state(future) == -1) break;
-        /* Run one iteration of the event loop (10ms poll) */
         AngaraObject run_args[2] = { args[0], ang_i64(10) };
         Angara_Loop_run(2, run_args);
     }
@@ -787,9 +940,12 @@ static const AngaraMethodDef LOOP_METHODS[] = {
     {"stop",         (AngaraMethodFn)Angara_Loop_stop,         "->n"},
     {"poll",         (AngaraMethodFn)Angara_Loop_poll,         "i?->l<{}>"},
     {"close",        (AngaraMethodFn)Angara_Loop_close,        "->n"},
-    /* LIB-4 Stage S-2 */
+    /* LIB-4 Stage S-2 / I/O */
     {"create_timer", (AngaraMethodFn)Angara_Loop_create_timer, "ii->f<i>"},
     {"run_until",    (AngaraMethodFn)Angara_Loop_run_until,    "a->a"},
+    {"read",         (AngaraMethodFn)Angara_Loop_read,         "ii->f<s>"},
+    {"write",        (AngaraMethodFn)Angara_Loop_write,        "is->f<i>"},
+    {"accept",       (AngaraMethodFn)Angara_Loop_accept,       "i->f<i>"},
     {NULL, NULL, NULL}
 };
 
