@@ -1,5 +1,6 @@
 // TS-3: implicit integer narrowing must be rejected in safe code.
 // `n` is i64; assigning/returning it to a u8 loses data without an explicit cast.
+// expect: E265
 func narrow(n as i64) -> u8 {
     return n;  // E265: narrowing i64 -> u8
 }

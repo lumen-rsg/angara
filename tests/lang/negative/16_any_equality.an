@@ -1,4 +1,5 @@
 // TS-7b: comparing a typed value with `any` is unsound and rejected in safe code.
+// expect: E383
 attach io;
 
 func main() -> nil {

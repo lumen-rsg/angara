@@ -1,4 +1,5 @@
 // LANG-13 negative: operator overloading error cases
+// expect: E420
 attach io;
 
 // Class with opCmp that has wrong return type (should be i64)

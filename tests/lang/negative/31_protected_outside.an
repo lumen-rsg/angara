@@ -1,5 +1,6 @@
 // LANG-14: protected access level — negative test
 // Tests that protected members are NOT accessible from outside the class hierarchy.
+// expect: E336
 
 attach io;
 

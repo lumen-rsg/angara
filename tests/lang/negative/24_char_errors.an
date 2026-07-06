@@ -1,4 +1,5 @@
 // LANG-4: char literal / type error cases (each should fail to compile).
+// expect: E016
 
 // 1. Empty char literal.
 let a = '';

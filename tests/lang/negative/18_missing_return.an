@@ -1,5 +1,6 @@
 // TS-6: a non-void function must return on every control-flow path.
 // Here the `if` has no else, so the path where x <= 0 falls off the end.
+// expect: E387
 func half_sign(x as i64) -> i64 {
     if (x > 0) {
         return x;

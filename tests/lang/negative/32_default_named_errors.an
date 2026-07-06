@@ -1,5 +1,7 @@
 attach io;
 
+// expect: E413
+
 // E410: Default value type mismatch
 func bad_default(a as i64 = "hello") -> i64 {
     return a;

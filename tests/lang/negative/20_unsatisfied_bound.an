@@ -1,5 +1,6 @@
 // TS-2 Phase 2: a type argument that doesn't satisfy its declared bound errors.
 // NoDraw has no draw() method, so it does not satisfy `T: Drawable`.
+// expect: E391
 trait Drawable { func draw(this) -> nil; }
 class NoDraw {
 public:

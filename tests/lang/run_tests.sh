@@ -124,9 +124,17 @@ for test_file in "$SCRIPT_DIR/negative/"*.an; do
     test_name="$(basename "$test_file" .an)"
     binary="$TMPDIR_TEST/${test_name}"
 
-    printf "  ${BOLD}${test_name}${RESET}: "
+    # Read the expected error code from `// expect: Exxx` header (optional).
+    # When present, the test must produce that specific diagnostic code.
+    # When absent, fall back to legacy behaviour (any error is acceptable).
+    expected=$(strip_ansi < "$test_file" | /bin/grep -oE "expect: [A-Z][0-9]+" | head -1 | awk '{print $2}' || true)
+
+    printf "  ${BOLD}${test_name}${RESET}"
+    [ -n "$expected" ] && printf " ${DIM}(expect $expected)${RESET}"
+    printf ": "
 
     compile_output=$("$ANGC" "$test_file" -o "$binary" 2>&1) && compile_rc=$? || compile_rc=$?
+    clean=$(echo "$compile_output" | strip_ansi)
 
     if [ $compile_rc -eq 0 ]; then
         printf "${RED}MISSING ERROR${RESET} (compiled but should have failed)\n"
@@ -139,13 +147,31 @@ for test_file in "$SCRIPT_DIR/negative/"*.an; do
         printf "${RED}CRASH${RESET} (crashed instead of reporting error)\n"
         BUGS+=("BUG [$test_name]: Compiler crash instead of error message")
         FAIL=$((FAIL + 1))
-    elif echo "$compile_output" | strip_ansi | grep -qi "error"; then
-        error_line=$(echo "$compile_output" | strip_ansi | grep -i "error" | head -1)
-        printf "${GREEN}CAUGHT${RESET} %s\n" "$error_line"
-        PASS=$((PASS + 1))
+        continue
+    fi
+
+    if [ -n "$expected" ]; then
+        # Specific error-code validation (M23).
+        if echo "$clean" | /bin/grep -qE "\\b${expected}\\b"; then
+            error_line=$(echo "$clean" | /bin/grep -E "\\b${expected}\\b" | head -1)
+            printf "${GREEN}CAUGHT${RESET} %s\n" "$error_line"
+            PASS=$((PASS + 1))
+        else
+            printf "${RED}WRONG CODE${RESET} (expected $expected, not found in output)\n"
+            echo "$clean" | /bin/grep -iE "error" | head -2 | sed 's/^/         /'
+            BUGS+=("BUG [$test_name]: Expected $expected but it did not appear")
+            FAIL=$((FAIL + 1))
+        fi
     else
-        printf "${GREEN}CAUGHT${RESET} (non-zero exit)\n"
-        PASS=$((PASS + 1))
+        # Legacy behaviour: accept any error output.
+        if echo "$clean" | grep -qi "error"; then
+            error_line=$(echo "$clean" | grep -i "error" | head -1)
+            printf "${GREEN}CAUGHT${RESET} %s\n" "$error_line"
+            PASS=$((PASS + 1))
+        else
+            printf "${GREEN}CAUGHT${RESET} (non-zero exit)\n"
+            PASS=$((PASS + 1))
+        fi
     fi
 done
 

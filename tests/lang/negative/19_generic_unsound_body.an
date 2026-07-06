@@ -1,6 +1,7 @@
 // TS-2 Phase 1: a generic function body must be type-checked. Previously the
 // TYPE_PARAM=>compatible-with-anything rule made `return x` (x: T) pass into an
 // i64 return. Now it correctly errors — T is not provably i64.
+// expect: E265
 func bad<T>(x as T) -> i64 {
     return x;   // E265: returning 'T' into an 'i64' return
 }

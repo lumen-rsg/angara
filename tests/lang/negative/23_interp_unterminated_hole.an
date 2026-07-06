@@ -1,5 +1,6 @@
 // Negative test 23: unterminated expression hole in interpolated string.
-// The '{' opens a hole that is never closed — must error E400.
+// The '{' opens a hole that is never closed — must error E399.
+// expect: E399
 attach io;
 
 export func main() -> i64 {

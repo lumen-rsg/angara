@@ -1,5 +1,7 @@
 attach io;
 
+// expect: E248
+
 // E248: Duplicate alias name (conflict with existing symbol)
 type X = i64;
 type X = string;                                // E248 already declared

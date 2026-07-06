@@ -1,5 +1,6 @@
 // Negative Test 01: Type errors - should produce compilation errors
 // This file intentionally contains type errors to verify the type checker
+// expect: E275
 
 // Error: assigning string to i64
 export func main() -> i64 {

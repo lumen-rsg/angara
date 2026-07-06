@@ -1,5 +1,5 @@
 // Negative test for LANG-7 match patterns
-// expect: E402
+// expect: E405
 
 enum Foo {
     Bar(i64, string)

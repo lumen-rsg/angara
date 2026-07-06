@@ -1,4 +1,5 @@
 // LANG-6: Negative tests — errors for invalid raw strings, octal, exponents, suffixes.
+// expect: E002
 attach io;
 
 export func main() -> i64 {

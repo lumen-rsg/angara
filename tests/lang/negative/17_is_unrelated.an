@@ -1,5 +1,6 @@
 // TS-7c: `x is UnrelatedType` where the target can never describe the object's
 // runtime type must be rejected.
+// expect: E384
 func main() -> nil {
     let n as i64 = 42;
     if (n is string) {  // E384: i64 can never be string

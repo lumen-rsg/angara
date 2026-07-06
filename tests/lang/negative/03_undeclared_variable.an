@@ -1,4 +1,5 @@
 // Negative Test 03: Undeclared variable - should produce compilation error
+// expect: E377
 attach io;
 
 export func main() -> i64 {

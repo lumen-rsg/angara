@@ -1,4 +1,5 @@
 // Negative Test 02: Return type mismatch - should produce compilation error
+// expect: E265
 
 func get_number() -> i64 {
     return "not a number";

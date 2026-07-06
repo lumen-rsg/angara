@@ -1,5 +1,6 @@
 // LANG-8: Generic enum negative tests
 // Tests: error cases for generic enums
+// expect: E411
 
 enum Result<T, E> {
     Ok(T),
