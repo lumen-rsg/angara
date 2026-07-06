@@ -18,7 +18,7 @@
 | ID | Issue |
 |---|---|
 | LIB-1 | AMQP/MQTT TLS — secure schemes parsed but TLS not configured on rabbitmq-c / mosquitto connections. |
-| LIB-4 | Futures / promises / async-await — language-level support (async func, await, Future<T> type). **[IN PROGRESS]** Basic implementation done (Stages 1–4 + 6): `Future<T>` owned type, `async func` declarations, `await` expressions, Chaperone ownership tracking (E501/E502/E507). Remaining: full state-machine suspension (Stage 5), event-loop integration, combinators (Stage 7). Module renamed `async`→`eventloop` to avoid keyword conflict. |
+| LIB-4 | Futures / promises / async-await — language-level support (async func, await, Future<T> type). **[IN PROGRESS]** Stages 1–6, S-1, S-2 complete: `Future<T>` type, `async func`/`await`, Chaperone tracking, state-machine codegen with separate `$resume` function, waker chain, event-loop integration (`loop.create_timer`, `loop.run_until`). Remaining: I/O future integration, combinators (Stage 7). |
 | LIB-7 | Native-call arg-type validation — module dispatcher should emit runtime type guards from DSL type-strings. |
 | LIB-10 | CLI/arg parser (subcommands, help generation); YAML / protobuf / msgpack serialisation; big integers. |
 

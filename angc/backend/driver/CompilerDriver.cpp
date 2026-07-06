@@ -100,6 +100,12 @@ namespace angara {
                     consume('}');
                     return std::make_shared<RecordType>(std::map<std::string, std::shared_ptr<Type>>{});
                 }
+                case 'f': {
+                    consume('<');
+                    auto inner_type = parse_optional();
+                    consume('>');
+                    return std::make_shared<FutureType>(inner_type);
+                }
                 default:
                     throw std::runtime_error("Invalid type character '" + std::string(1, c) + "' in type string.");
             }

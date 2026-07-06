@@ -2962,37 +2962,113 @@ llvm::Value* LLVMBackend::cgInterpString(const InterpStringExpr& e) {
     return acc ? acc : makeStr("");
 }
 
-// LIB-4: await expression — state machine suspension point.
-// Evaluates the future, extracts the resolved result from the frame,
-// and advances the state counter for potential future suspension.
+// LIB-4 Stage S: await expression — state machine suspension point.
+// On initial run: checks if child is resolved. If yes, extracts result and
+// continues. If no, registers waker and suspends.
+// On resume: the dispatch switch jumps to a retry block that re-extracts
+// the now-resolved result and continues.
 llvm::Value* LLVMBackend::cgAwait(const AwaitExpr& e) {
     if (!m_in_async_function) {
         return cg(e.future);
     }
 
-    // Evaluate the future expression (a native instance wrapping a frame)
+    int cur_idx = m_async_await_idx;
+    int resume_state = cur_idx + 1;
+    auto* fn = builder->GetInsertBlock()->getParent();
+
+    // Evaluate the future expression
     auto* future_val = cg(e.future);
 
-    // Extract the result from the future's frame.
-    // The future is a native instance; its data pointer points to the frame struct.
-    // Frame layout: { i32 state, AngaraObject result, AngaraObject awaited, ...params }
-    auto* frame_ptr = callRtByName("__ang_api_native_instance_data", {future_val});
-    auto* frame_ty = m_current_async_frame_type;
-    auto* typed_frame = builder->CreateBitCast(frame_ptr, frame_ty->getPointerTo());
-    auto* result_ptr = builder->CreateStructGEP(frame_ty, typed_frame, 1);
-    auto* result = builder->CreateLoad(objType, result_ptr, "await_result");
+    // Extract the child's frame via native_instance_data
+    auto* child_frame_ptr = callRtByName("__ang_api_native_instance_data", {future_val});
+    auto* child_typed = builder->CreateBitCast(child_frame_ptr,
+        llvm::PointerType::get(*ctx, 0));
 
-    // Update frame state for potential future suspension
-    int next_state = m_async_await_idx + 1;
-    auto* fn_frame = builder->CreateBitCast(m_current_async_frame,
-        m_current_async_frame_type->getPointerTo());
-    auto* state_p = builder->CreateStructGEP(m_current_async_frame_type, fn_frame, 0);
-    builder->CreateStore(llvm::ConstantInt::get(m_async_state_ty, next_state), state_p);
+    // ---- Create all basic blocks ----
+    auto* resolved_bb = llvm::BasicBlock::Create(*ctx, "await_resolved", fn);
+    auto* pending_bb  = llvm::BasicBlock::Create(*ctx, "await_pending", fn);
+    auto* retry_bb    = llvm::BasicBlock::Create(*ctx, "await_retry", fn);
+    auto* cont_bb     = llvm::BasicBlock::Create(*ctx, "await_cont", fn);
 
-    // Advance the await index
-    m_async_await_idx = next_state;
+    // ---- Check if child is resolved ----
+    auto* child_state_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+        child_typed, 0, "child_state_p");
+    auto* child_state = builder->CreateLoad(m_async_state_ty, child_state_ptr, "child_state");
+    auto* is_resolved = builder->CreateICmpEQ(child_state,
+        llvm::ConstantInt::get(m_async_state_ty, -1), "is_resolved");
+    builder->CreateCondBr(is_resolved, resolved_bb, pending_bb);
 
-    return result;
+    // ---- Resolved path (initial run, child already done) ----
+    builder->SetInsertPoint(resolved_bb);
+    auto* child_result_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+        child_typed, 1, "child_result_p");
+    auto* result = builder->CreateLoad(objType, child_result_ptr, "await_result");
+    builder->CreateBr(cont_bb);
+
+    // ---- Retry path (resume after suspension, child now resolved) ----
+    builder->SetInsertPoint(retry_bb);
+    // Re-evaluate the future expression and extract the result.
+    // The child is now resolved, so no state check needed.
+    auto* retry_future_val = cg(e.future);
+    auto* retry_frame_ptr = callRtByName("__ang_api_native_instance_data", {retry_future_val});
+    auto* retry_typed = builder->CreateBitCast(retry_frame_ptr,
+        llvm::PointerType::get(*ctx, 0));
+    auto* retry_result_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+        retry_typed, 1, "retry_result_p");
+    auto* retry_result = builder->CreateLoad(objType, retry_result_ptr, "retry_result");
+    builder->CreateBr(cont_bb);
+
+    // ---- Pending path: register waker, then suspend ----
+    builder->SetInsertPoint(pending_bb);
+    // Store the resume state for the dispatch switch
+    builder->CreateStore(llvm::ConstantInt::get(m_async_state_ty, resume_state),
+                         m_current_async_state_ptr);
+    // Store awaited future in own frame (field 2)
+    auto* own_typed = builder->CreateBitCast(m_current_async_frame,
+        llvm::PointerType::get(*ctx, 0));
+    auto* own_awaited_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+        own_typed, 2, "own_awaited_p");
+    builder->CreateStore(future_val, own_awaited_ptr);
+    // Register {&resume_fn, own_frame} as waker on child's frame (fields 3, 4)
+    auto* resume_fn_val = builder->CreateBitCast(m_current_async_resume_fn,
+        llvm::PointerType::get(*ctx, 0));
+    auto* child_waker_fn_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+        child_typed, 3, "child_wfn_p");
+    builder->CreateStore(resume_fn_val, child_waker_fn_ptr);
+    auto* child_waker_ctx_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+        child_typed, 4, "child_wctx_p");
+    builder->CreateStore(m_current_async_frame, child_waker_ctx_ptr);
+    builder->CreateBr(m_async_suspend_bb);
+
+    // ---- Wire up dispatch ----
+    // Store the retry block as the dispatch target for resume_state
+    if (cur_idx < (int)m_async_await_cont_bbs.size()) {
+        m_async_await_cont_bbs[cur_idx] = retry_bb;
+    }
+    // Update the dispatch switch to target the retry block for this state
+    if (m_async_dispatch_switch) {
+        auto* case_val = llvm::ConstantInt::get(m_async_state_ty, resume_state);
+        for (auto it = m_async_dispatch_switch->case_begin();
+             it != m_async_dispatch_switch->case_end(); ++it) {
+            if (it->getCaseValue() == case_val) {
+                it->setSuccessor(retry_bb);
+                break;
+            }
+        }
+    }
+
+    // ---- Continuation block with PHI node ----
+    // Both resolved_bb and retry_bb branch here with a result value.
+    // Use a PHI to merge the two SSA values so subsequent code sees one result.
+    builder->SetInsertPoint(cont_bb);
+    auto* phi = builder->CreatePHI(objType, 2, "await_val");
+    phi->addIncoming(result, resolved_bb);
+    phi->addIncoming(retry_result, retry_bb);
+
+    m_async_await_idx = resume_state;
+
+    // Return the PHI value — this is the result of the await expression
+    return phi;
 }
 
 }

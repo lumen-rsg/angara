@@ -152,14 +152,28 @@ namespace angara {
         void codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>& statements);
         void codegenGlobalVarDecl(const VarDeclStmt& stmt);
         void codegenFunctionDecl(const FuncStmt& stmt, const std::string& module_name);
-        /// LIB-4: codegen for async functions — allocates a Future<T> and wraps
-        /// the body in a resumable state machine.
+        /// LIB-4: codegen for async functions — wrapper allocates frame, calls resume.
         void codegenAsyncFuncDecl(const FuncStmt& stmt, const std::string& module_name);
+        /// LIB-4 Stage S: generate the resumable state machine (foo$resume).
+        void codegenAsyncResumeFunc(const FuncStmt& stmt, const std::string& module_name,
+                                    llvm::Function* wrapper_fn,
+                                    llvm::StructType* frame_struct_ty,
+                                    const std::vector<int>& param_field_idx,
+                                    const std::vector<const AwaitExpr*>& await_states,
+                                    const std::vector<std::pair<std::string, int>>& local_slots,
+                                    const std::shared_ptr<FunctionType>& sem_fn_type);
         /// LIB-4: walk the AST to collect all AwaitExpr nodes and assign state numbers.
         void collectAwaitStates(const std::shared_ptr<Expr>& expr,
                                 std::vector<const AwaitExpr*>& awaits);
         void collectAwaitStatesStmt(const std::shared_ptr<Stmt>& stmt,
                                      std::vector<const AwaitExpr*>& awaits);
+        /// LIB-4 Stage S: walk the body to collect VarDeclStmt nodes for frame slots.
+        void collectAsyncLocals(const std::shared_ptr<Stmt>& stmt,
+                                std::vector<std::pair<std::string, int>>& locals,
+                                int& next_slot);
+        void collectAsyncLocalsExpr(const std::shared_ptr<Expr>& expr,
+                                     std::vector<std::pair<std::string, int>>& locals,
+                                     int& next_slot);
         void codegenForeignFuncDecl(const FuncStmt& stmt);
         void codegenClassDecl(const ClassStmt& stmt);
         void codegenDataDecl(const DataStmt& stmt);
@@ -364,17 +378,27 @@ namespace angara {
 
         // LIB-4: async function codegen state
         bool m_in_async_function = false;
-        llvm::Value* m_current_async_frame = nullptr;       // future frame alloca (i8*)
+        llvm::Value* m_current_async_frame = nullptr;       // future frame (i8* from malloc)
         llvm::StructType* m_current_async_frame_type = nullptr;  // frame struct type
-        llvm::Value* m_current_async_state_ptr = nullptr;   // pointer to state field
-        llvm::Value* m_current_async_result_ptr = nullptr;  // pointer to result field
+        llvm::Value* m_current_async_state_ptr = nullptr;   // pointer to state field (GEP)
+        llvm::Value* m_current_async_result_ptr = nullptr;  // pointer to result field (GEP)
+        llvm::Value* m_current_async_waker_fn_ptr = nullptr; // pointer to waker_fn field (GEP)
+        llvm::Value* m_current_async_waker_ctx_ptr = nullptr; // pointer to waker_ctx field (GEP)
 
         // LIB-4 Stage 5: state machine suspension tracking
         int m_async_await_idx = 0;                          // current await index
-        std::vector<llvm::BasicBlock*> m_async_await_cont_bbs;  // continuation blocks
+        std::vector<llvm::BasicBlock*> m_async_await_cont_bbs;  // resume blocks (state N → BB)
         llvm::BasicBlock* m_async_suspend_bb = nullptr;     // suspend/return block
         llvm::BasicBlock* m_async_loop_bb = nullptr;        // loop dispatch block
         llvm::Type* m_async_state_ty = nullptr;             // i32 state type
+        llvm::Function* m_current_async_resume_fn = nullptr; // resume function for waker self-ref
+        llvm::SwitchInst* m_async_dispatch_switch = nullptr;  // dispatch switch for state machine
+
+        // LIB-4 Stage S: frame-based local storage for async functions
+        std::map<std::string, int> m_async_local_slots;     // var name → frame GEP index
+        int m_async_waker_fn_field_idx = 3;                 // frame field index of waker_fn
+        int m_async_waker_ctx_field_idx = 4;                // frame field index of waker_ctx
+        int m_async_loop_field_idx = 5;                     // frame field index of loop
 
         // Callback context: set by marshalAngaraToC for FUNCTION params (heap-allocated closure)
         llvm::Value* m_pending_callback_context = nullptr;

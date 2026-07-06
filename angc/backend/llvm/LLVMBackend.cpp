@@ -442,6 +442,17 @@ void LLVMBackend::emitGcTeardown(llvm::Value* state_ptr) {
 }
 
 llvm::Value* LLVMBackend::loadVar(const std::string& n) {
+    // LIB-4 Stage S: in async functions, load from frame slot (survives suspend/resume).
+    if (m_in_async_function) {
+        auto slot_it = m_async_local_slots.find(n);
+        if (slot_it != m_async_local_slots.end()) {
+            auto* typed_frame = builder->CreateBitCast(m_current_async_frame,
+                llvm::PointerType::get(*ctx, 0));
+            auto* field_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+                typed_frame, slot_it->second, n + "_p");
+            return builder->CreateLoad(objType, field_ptr, n);
+        }
+    }
     if (auto it=namedVals.find(n); it!=namedVals.end()) {
         auto kit = namedKinds.find(n);
         if (kit != namedKinds.end() && kit->second != LocalKind::BOXED) {
@@ -455,6 +466,18 @@ llvm::Value* LLVMBackend::loadVar(const std::string& n) {
     return makeNil();
 }
 void LLVMBackend::storeVar(const std::string& n, llvm::Value* v) {
+    // LIB-4 Stage S: in async functions, store to frame slot.
+    if (m_in_async_function) {
+        auto slot_it = m_async_local_slots.find(n);
+        if (slot_it != m_async_local_slots.end()) {
+            auto* typed_frame = builder->CreateBitCast(m_current_async_frame,
+                llvm::PointerType::get(*ctx, 0));
+            auto* field_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+                typed_frame, slot_it->second, n + "_p");
+            builder->CreateStore(v, field_ptr);
+            return;
+        }
+    }
     if (auto it=namedVals.find(n); it!=namedVals.end()) {
         auto kit = namedKinds.find(n);
         if (kit != namedKinds.end() && kit->second != LocalKind::BOXED) {

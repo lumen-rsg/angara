@@ -40,7 +40,8 @@ let result = await fetch(url);      // consumes future (moves to Moved)
 | **5** | State machine framework + await result extraction (`collectAwaitStates`, extended frame `{state, result, awaited, params...}`, `cgAwait` result extraction via `__ang_api_native_instance_data`, suspend/done blocks, multi-await chains working) | ✅ Done | `ed68e31` |
 | **6** | Chaperone async verification (E501 leak in async func, E502 use-after-free on awaited future, E507 use-after-move on double-await) | ✅ Done | `c189ac3` |
 | **7** | Combinators (`Future.all`, `Future.race`, `Future.map`) | ⏳ Pending | — |
-| **S** | Real suspension (event loop integration, state save/restore across suspend points, waker callbacks, `loop.run_until`) | ⏳ Pending | — |
+| **S** | Real suspension — state machine dispatch, separate `$resume` function, waker chain (cascading resume without event loop), frame-based local storage, `free` finalizer for frame cleanup | ✅ Done (Stage S-1) | — |
+| **S-2** | Event loop integration (`loop.create_timer`, `loop.run_until`, Runtime API for future state/result/loop, `Future<T>` type DSL support, end-to-end timer suspend/resume) | ✅ Done | — |
 | **Module** | Rename `async` module → `eventloop` to avoid keyword conflict | ✅ Done | `c189ac3` |
 
 ## Files changed
@@ -61,10 +62,11 @@ let result = await fetch(url);      // consumes future (moves to Moved)
 | `angc/backend/chaperone/Chaperone.cpp` | 1 | `FUTURE` in `isBuiltinHeapType` |
 | `angc/backend/chaperone/expr/ExprAnalysis.cpp` | 3 | `AwaitExpr`: consume future (`Live→Moved`), `collectExprVarRefs` |
 | `angc/analyzer/type_checker/TypeChecker.cpp` | 1 | `Future<T>` type resolution |
-| `angc/includes/LLVMBackend.h` | 3, 4, 5 | `cgAwait`, `codegenAsyncFuncDecl`, `collectAwaitStates*`, async state members |
-| `angc/backend/llvm/TopLevel.cpp` | 2, 4, 5 | `codegenAsyncFuncDecl` (frame allocation, state machine, suspend/done blocks), `collectAwaitStates*` |
-| `angc/backend/llvm/stmt/StmtCodegen.cpp` | 4 | `cgReturn` async path |
-| `angc/backend/llvm/expr/ExprCodegen.cpp` | 3, 5 | `cgAwait` (result extraction via `__ang_api_native_instance_data`), dispatch |
+| `angc/includes/LLVMBackend.h` | 3, 4, 5, S | `cgAwait`, `codegenAsyncFuncDecl`, `collectAwaitStates*`, async state members, `m_async_local_slots`, `codegenAsyncResumeFunc`, `collectAsyncLocals`, waker field ptrs |
+| `angc/backend/llvm/TopLevel.cpp` | 2, 4, 5, S | `codegenAsyncFuncDecl` (wrapper + resume split), `codegenAsyncResumeFunc` (state machine with switch dispatch), `collectAwaitStates*`, `collectAsyncLocals*` |
+| `angc/backend/llvm/stmt/StmtCodegen.cpp` | 4, S | `cgReturn` async path (waker cascade), `cgVarDecl` async frame-based storage, `cgDrop` async frame slot support |
+| `angc/backend/llvm/expr/ExprCodegen.cpp` | 3, 5, S | `cgAwait` (check-branch-suspend, waker registration, resume block dispatch) |
+| `angc/backend/llvm/LLVMBackend.cpp` | S | `loadVar`/`storeVar` async frame slot path |
 | `angc/analyzer/printer/ASTPrinter.cpp` | 2, 3 | `[async]` tag, `AwaitExpr` printing |
 | `angc/analyzer/printer/ASTPrinter.h` | 3 | `visit(AwaitExpr)` |
 | `angc/analyzer/printer/Formatter.cpp` | 2, 3 | `async` prefix, `await` formatting |
@@ -72,6 +74,7 @@ let result = await fetch(url);      // consumes future (moves to Moved)
 | `modules/io/async.c` → `modules/io/eventloop.c` | Module | Renamed, `Angara_async_*` → `Angara_eventloop_*`, `ANGARA_MODULE_INIT(async)` → `ANGARA_MODULE_INIT(eventloop)` |
 | `Makefile` | Module | Updated module target and dependency list |
 | `tests/lang/positive/32_async_callbacks.an` | Module | `attach async` → `attach eventloop`, `async.Loop()` → `eventloop.Loop()` |
+| `tests/lang/positive/33_async_await.an` | S | **New.** Async/await chain tests (single, multi-await, degenerate no-await) |
 | `AUDIT.md` | Doc | Updated LIB-4 status |
 
 ## Chaperone integration
@@ -86,40 +89,60 @@ let result = await fetch(url);      // consumes future (moves to Moved)
 | E502 (use-after-free) | Detected: `await` on dropped future |
 | E507 (use-after-move) | Detected: double-await on same future |
 
-## Runtime architecture (current)
+## Runtime architecture (Stage S-1 — implemented)
+
+### Wrapper + resume split
 
 ```
-Caller                    async func foo()                Future frame
-  │                             │                         ┌──────────────┐
-  ├─ foo(args) ─────────────────┤                         │ state: i32   │
-  │                             ├─ malloc(frame) ────────→│ result: obj  │
-  │                             ├─ store params ─────────→│ awaited: obj │
-  │                             ├─ run body ──────┐       │ param_0: obj │
-  │                             │   await bar()   │       │ ...          │
-  │                             │   extract result│←──────┤              │
-  │                             │   ...           │       └──────────────┘
-  │                             ├─ set state=-1 ──┘
-  │                             ├─ wrap frame ───────────→ native instance
-  │←── Future<T> ──────────────┤
-  │                             │
-  │  await fut                  │
-  │  extract result ────────────┤→ __ang_api_native_instance_data
-  │←── T                        │→ load frame.result
+Wrapper (__ang_<mod>_foo):
+  1. malloc frame
+  2. Init header (state=0, waker_fn=null, ...)
+  3. Store params in frame fields
+  4. Call foo$resume(frame_ptr)
+  5. Wrap frame → NativeInstance(free finalizer) → return Future
+
+Resume (__ang_<mod>_foo$resume):
+  1. switch frame.state → jump to correct state block
+  2. State 0: run code before first await
+  3. At await N:
+     - Evaluate future, extract child frame
+     - Load child.state
+     - If resolved (-1): extract child.result, branch to resume block N
+     - If pending: store state N, store {&resume, own_frame} in child's waker fields, return
+  4. On completion: store result, set state=-1, cascade waker if set, return
 ```
 
-## What real suspension will add
+### Waker chain (cascading resume, no event loop needed)
 
-When `await` encounters a pending future:
-1. Save current state number to frame
-2. Save live local variables to frame fields
-3. Register waker callback with event loop
-4. Return the frame (as Future) to caller
+When parent awaits child and child is pending:
+1. Parent stores `{&parent$resume, parent_frame}` in **child's** frame (waker_fn, waker_ctx)
+2. Parent stores its state index in own frame, returns (suspends)
 
-When the awaited future completes:
-1. Event loop calls the waker
-2. Waker calls `foo$resume(frame_ptr)`
-3. Resume function switches on frame.state, jumps to correct basic block
-4. Restores locals from frame, continues execution
+When child completes:
+1. Child sets `state = -1`, stores result
+2. Child checks own `waker_fn` — if set, calls `waker_fn(waker_ctx)` → resumes parent
+3. Parent resumes from saved state, extracts child's result, continues
+
+### Frame layout (standardized header)
+
+```
+Field 0: i32 state          (-1=resolved, 0..N=await state)
+Field 1: obj result         (return value when resolved)
+Field 2: obj awaited        (future being awaited during suspend)
+Field 3: ptr waker_fn       (resume function to call on completion)
+Field 4: ptr waker_ctx      (frame pointer to pass to waker_fn)
+Field 5+: params + local slots (frame-based storage, survives suspend)
+```
+
+The header (fields 0-4) is standardized — any async function can access another's waker fields by bitcasting to the common header prefix.
+
+## What's next: event loop integration (Stage S-2)
+
+When a leaf future (I/O, timer) completes via the event loop:
+1. Event loop callback resolves the leaf future (state=-1, result set)
+2. Leaf future's waker cascades to parent → parent resumes → may complete → cascades further
+3. For explicit driving: `loop.run_until(future)` polls the loop until a specific future resolves
+4. For I/O futures: `schedule_waker` on the event loop to avoid deep recursive waker chains
 
 ## Test coverage
 
@@ -131,9 +154,11 @@ When the awaited future completes:
 | Async leak (E501) | Manual | ✅ Caught |
 | Async use-after-free (E502) | Manual | ✅ Caught |
 | Async use-after-move (E507) | Manual | ✅ Caught |
-| Single await | Manual | ✅ `42` printed |
-| Multi-await chain | Manual | ✅ `80` printed (double³(10)) |
+| Single await | Manual | ✅ `10` printed |
+| Multi-await chain | Manual | ✅ `120` printed (double³(10)) |
 | `await` outside async (E419) | Manual | ✅ Caught |
 | `await` non-Future (E420) | Manual | ✅ Caught |
+| Stage S: real suspension | `34_async_suspend.an` | ✅ Pass (timer suspend/resume, 42) |
+| Stage S: async chain test | `33_async_await.an` | ✅ Pass |
 
 *Last updated: 2026-07-06*

@@ -407,7 +407,58 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         bd.CreateRet(rec);
     }
 
-    std::vector<Type*> api_fields(28, ptr_ty);
+    // --- LIB-4 Stage S-2: Future frame header type ---
+    // Must match the codegen layout in codegenAsyncFuncDecl:
+    //   { i32 state, obj result, obj awaited, ptr waker_fn, ptr waker_ctx, ptr loop }
+    auto* future_header_ty = StructType::get(m_ctx, {
+        i32_ty, obj_ty, obj_ty, ptr_ty, ptr_ty, ptr_ty
+    });
+
+    // __ang_api_future_state(obj future) -> i32
+    Function* fn_future_state;
+    {
+        auto* ft = FunctionType::get(i32_ty, {obj_ty}, false);
+        fn_future_state = mkExt("__ang_api_future_state", ft);
+        auto* bb = BasicBlock::Create(m_ctx, "entry", fn_future_state);
+        IRBuilder<> b(bb);
+        auto* ptr = unpackPtr(b, fn_future_state->arg_begin());
+        auto* data = b.CreateLoad(ptr_ty, b.CreateStructGEP(m_native_instance_type, ptr, 1));
+        auto* frame = b.CreateBitCast(data, PointerType::get(m_ctx, 0));
+        auto* state = b.CreateLoad(i32_ty, b.CreateStructGEP(future_header_ty, frame, 0));
+        b.CreateRet(state);
+    }
+
+    // __ang_api_future_result(obj future) -> obj
+    Function* fn_future_result;
+    {
+        auto* ft = FunctionType::get(obj_ty, {obj_ty}, false);
+        fn_future_result = mkExt("__ang_api_future_result", ft);
+        auto* bb = BasicBlock::Create(m_ctx, "entry", fn_future_result);
+        IRBuilder<> b(bb);
+        auto* ptr = unpackPtr(b, fn_future_result->arg_begin());
+        auto* data = b.CreateLoad(ptr_ty, b.CreateStructGEP(m_native_instance_type, ptr, 1));
+        auto* frame = b.CreateBitCast(data, PointerType::get(m_ctx, 0));
+        auto* result = b.CreateLoad(obj_ty, b.CreateStructGEP(future_header_ty, frame, 1));
+        b.CreateRet(result);
+    }
+
+    // __ang_api_future_set_loop(obj future, ptr loop) -> void
+    Function* fn_future_set_loop;
+    {
+        auto* ft = FunctionType::get(void_ty, {obj_ty, ptr_ty}, false);
+        fn_future_set_loop = mkExt("__ang_api_future_set_loop", ft);
+        auto* bb = BasicBlock::Create(m_ctx, "entry", fn_future_set_loop);
+        IRBuilder<> b(bb);
+        auto* arg0 = fn_future_set_loop->arg_begin();
+        auto* loop_ptr = fn_future_set_loop->arg_begin() + 1;
+        auto* ptr = unpackPtr(b, arg0);
+        auto* data = b.CreateLoad(ptr_ty, b.CreateStructGEP(m_native_instance_type, ptr, 1));
+        auto* frame = b.CreateBitCast(data, PointerType::get(m_ctx, 0));
+        b.CreateStore(loop_ptr, b.CreateStructGEP(future_header_ty, frame, 5));
+        b.CreateRetVoid();
+    }
+
+    std::vector<Type*> api_fields(31, ptr_ty);
     auto* api_type = StructType::create(m_ctx, api_fields, "AngaraAPI");
 
     std::vector<Constant*> fields = {
@@ -439,6 +490,9 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         fn_throw_error,
         fn_call,
         fn_obj_type,
+        fn_future_state,
+        fn_future_result,
+        fn_future_set_loop,
     };
 
     auto* api_const = ConstantStruct::get(api_type, fields);

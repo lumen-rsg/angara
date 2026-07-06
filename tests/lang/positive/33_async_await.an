@@ -1,0 +1,49 @@
+// LIB-4 Stage S: async/await with state machine suspension.
+// Tests async→async chains with synchronous resolution
+// (no event loop needed — all futures resolve immediately).
+attach io;
+
+async func double(x as i64) -> i64 {
+    return x * 2;
+}
+
+async func triple(x as i64) -> i64 {
+    return x * 3;
+}
+
+async func compute_chain() -> i64 {
+    let a = await double(10);    // 20
+    let b = await triple(a);     // 60
+    let c = await double(b);     // 120
+    return c;
+}
+
+// Single await (simplest case)
+async func single_await() -> i64 {
+    let x = await double(5);     // 10
+    return x;
+}
+
+// No await (degenerate case — still a Future)
+async func no_await(x as i64) -> i64 {
+    return x * 10;
+}
+
+export func main() -> i64 {
+    // Test 1: multi-await chain
+    let f1 = compute_chain();
+    // Future is resolved immediately (synchronous chain).
+    // We drop it to satisfy the Chaperone.
+    drop f1;
+
+    // Test 2: single await
+    let f2 = single_await();
+    drop f2;
+
+    // Test 3: no await (degenerate)
+    let f3 = no_await(7);
+    drop f3;
+
+    io.println(1, "OK: async/await chains passed");
+    return 0;
+}

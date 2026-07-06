@@ -172,6 +172,11 @@ struct AngaraAPI {
 
     // --- Type introspection ---
     int32_t (*obj_type)(AngaraObject obj);  ///< Get heap object type tag (ANG_OBJ_*)
+
+    // --- Future operations (LIB-4 Stage S-2) ---
+    int32_t      (*future_state)(AngaraObject future);       ///< Returns frame.state (-1=resolved)
+    AngaraObject (*future_result)(AngaraObject future);      ///< Returns frame.result
+    void         (*future_set_loop)(AngaraObject future, void* loop);  ///< Sets frame.loop
 };
 
 // =============================================================================

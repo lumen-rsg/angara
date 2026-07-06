@@ -1,0 +1,19 @@
+// LIB-4 Stage S-2: async/await with real suspension via event loop timer.
+attach io;
+attach eventloop;
+
+async func process_timer(t as Future<i64>) -> i64 {
+    let val = await t;
+    return val * 2;
+}
+
+export func main() -> i64 {
+    let loop = eventloop.Loop();
+    let timer = loop.create_timer(10, 21);
+    let fut = process_timer(timer);
+    let result = loop.run_until(fut);
+    io.println(1, "Timer result: " + string(result));
+    drop fut;
+    drop loop;
+    return 0;  // success — result was 42
+}

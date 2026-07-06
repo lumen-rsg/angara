@@ -139,6 +139,18 @@ void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
     }
 
     if (auto* fn = builder->GetInsertBlock()->getParent()) {
+        // LIB-4 Stage S: in async functions, use frame-based storage (no alloca).
+        if (m_in_async_function) {
+            auto slot_it = m_async_local_slots.find(s.name.lexeme);
+            if (slot_it != m_async_local_slots.end()) {
+                // Store directly to frame slot via storeVar (which routes to frame GEP)
+                namedKinds[s.name.lexeme] = LocalKind::BOXED;
+                if (var_type) namedTypes[s.name.lexeme] = var_type;
+                storeVar(s.name.lexeme, v);
+                return;
+            }
+            // Fallthrough: variable not in pre-scanned slots (shouldn't happen)
+        }
         auto* a = allocLocal(fn, s.name.lexeme, var_type);
         namedVals[s.name.lexeme] = a;
         if (var_type) {
@@ -373,28 +385,44 @@ void LLVMBackend::cgForIn(const ForInStmt& s) {
 }
 
 void LLVMBackend::cgReturn(const ReturnStmt& s) {
-    // LIB-4: async return — store value in future frame, mark resolved, branch to suspend
+    // LIB-4 Stage S: async return — store value in future frame, mark resolved,
+    // cascade waker if set, then branch to suspend (which returns).
     if (m_in_async_function) {
         auto* fn_frame = builder->CreateBitCast(m_current_async_frame,
             m_current_async_frame_type->getPointerTo());
         auto* result = s.value ? cg(s.value) : makeNil();
-        // Store result in frame
+        // Store result in frame (field 1)
         auto* res_ptr = builder->CreateStructGEP(m_current_async_frame_type, fn_frame, 1);
         builder->CreateStore(result, res_ptr);
         // Mark resolved (state = -1)
         auto* state_p = builder->CreateStructGEP(m_current_async_frame_type, fn_frame, 0);
         builder->CreateStore(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), -1), state_p);
-        // Branch to suspend block (which wraps and returns the future)
+
+        // Check for waker and cascade
+        auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
+        auto* wfn_p = builder->CreateStructGEP(m_current_async_frame_type, fn_frame, 3);
+        auto* wfn = builder->CreateLoad(ptr_ty, wfn_p, "wfn");
+        auto* has_waker = builder->CreateIsNotNull(wfn);
+
+        auto* fn = builder->GetInsertBlock()->getParent();
+        auto* wake_bb = llvm::BasicBlock::Create(*ctx, "ret_wake", fn);
+        auto* ret_bb = llvm::BasicBlock::Create(*ctx, "ret_suspend", fn);
+        builder->CreateCondBr(has_waker, wake_bb, ret_bb);
+
+        builder->SetInsertPoint(wake_bb);
+        auto* wctx_p = builder->CreateStructGEP(m_current_async_frame_type, fn_frame, 4);
+        auto* wctx = builder->CreateLoad(ptr_ty, wctx_p, "wctx");
+        auto* waker_ty = llvm::FunctionType::get(llvm::Type::getVoidTy(*ctx), {ptr_ty}, false);
+        builder->CreateCall(waker_ty, wfn, {wctx});
+        builder->CreateBr(ret_bb);
+
+        builder->SetInsertPoint(ret_bb);
+        // Branch to suspend block (which returns from resume function)
         if (m_async_suspend_bb) {
             builder->CreateBr(m_async_suspend_bb);
         } else {
-            // Fallback: wrap and return directly
             if (m_exc_chain_save) emitGcPopFrame();
-            auto* name_str = builder->CreateGlobalString("Future");
-            auto* null_fin = llvm::ConstantPointerNull::get(llvm::PointerType::get(*ctx, 0));
-            auto* future_obj = callRtByName("__ang_api_native_instance_new",
-                {m_current_async_frame, null_fin, name_str});
-            builder->CreateRet(future_obj);
+            builder->CreateRetVoid();
         }
         return;
     }
@@ -508,11 +536,29 @@ void LLVMBackend::cgTry(const TryStmt& s) {
 }
 
 void LLVMBackend::cgDrop(const DropStmt& s) {
-    auto it = namedVals.find(s.name.lexeme);
-    if (it == namedVals.end()) return;
+    llvm::Value* val = nullptr;
+    llvm::AllocaInst* alloca = nullptr;
+    bool is_async_slot = false;
 
-    auto* alloca = it->second;
-    auto* val = builder->CreateLoad(objType, alloca, "drop_val");
+    // LIB-4 Stage S: in async functions, load from frame slot.
+    if (m_in_async_function) {
+        auto slot_it = m_async_local_slots.find(s.name.lexeme);
+        if (slot_it != m_async_local_slots.end()) {
+            auto* typed_frame = builder->CreateBitCast(m_current_async_frame,
+                llvm::PointerType::get(*ctx, 0));
+            auto* field_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+                typed_frame, slot_it->second, s.name.lexeme + "_p");
+            val = builder->CreateLoad(objType, field_ptr, "drop_val");
+            is_async_slot = true;
+        }
+    }
+
+    if (!val) {
+        auto it = namedVals.find(s.name.lexeme);
+        if (it == namedVals.end()) return;
+        alloca = it->second;
+        val = builder->CreateLoad(objType, alloca, "drop_val");
+    }
 
     // Nil guard: if the value is nil (optional types or uninitialised),
     // there is nothing to deallocate.  Skip straight to invalidation.
@@ -599,6 +645,18 @@ void LLVMBackend::cgDrop(const DropStmt& s) {
 
     // --- After: invalidate the variable ---
     builder->SetInsertPoint(after_bb);
+    // LIB-4 Stage S: in async functions, store nil to frame slot.
+    if (is_async_slot) {
+        auto slot_it = m_async_local_slots.find(s.name.lexeme);
+        if (slot_it != m_async_local_slots.end()) {
+            auto* typed_frame = builder->CreateBitCast(m_current_async_frame,
+                llvm::PointerType::get(*ctx, 0));
+            auto* field_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+                typed_frame, slot_it->second, s.name.lexeme + "_p");
+            builder->CreateStore(makeNil(), field_ptr);
+            return;
+        }
+    }
     builder->CreateStore(makeNil(), alloca);
 }
 

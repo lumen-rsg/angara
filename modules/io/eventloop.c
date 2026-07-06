@@ -38,6 +38,29 @@ AngaraObject Angara_eventloop_CHANNEL(int c, AngaraObject* a)   { (void)c;(void)
 
 
 /* =========================================================================
+   Future frame — standard header layout (LIB-4 Stage S-2)
+   Must match the LLVM codegen frame layout:
+     { i32 state, AngaraObject result, AngaraObject awaited,
+       ptr waker_fn, ptr waker_ctx, ptr loop }
+   ========================================================================= */
+
+typedef struct {
+    int32_t       state;       // offset 0  (field 0: -1=resolved, >=0=pending)
+    int32_t       _pad;        // offset 4  (alignment padding)
+    AngaraObject  result;      // offset 8  (field 1: return value)
+    AngaraObject  awaited;     // offset 24 (field 2: awaited future)
+    void*         waker_fn;    // offset 40 (field 3: resume function)
+    void*         waker_ctx;   // offset 48 (field 4: parent frame)
+    void*         loop;        // offset 56 (field 5: owning event loop)
+} FutureFrame;
+
+typedef struct {
+    FutureFrame   header;      // standard frame header
+    int           tfd;         // timerfd for this timer future
+} TimerFuture;
+
+
+/* =========================================================================
    Callback registry — maps fd → callback closure
    ========================================================================= */
 
@@ -114,11 +137,16 @@ typedef struct {
     int         stop_efd;     /* eventfd for loop.stop() wake-up */
     CbRegistry  cbs;          /* fd → callback */
     int         running;      /* 1 while loop.run() is active */
+    /* Timer futures (LIB-4 Stage S-2) */
+    TimerFuture** timer_futs;  /* active timer futures array */
+    size_t       timer_count;
+    size_t       timer_cap;
 } LoopData;
 
 static void finalize_loop(void* data) {
     LoopData* l = (LoopData*)data;
     cb_registry_free(&l->cbs);
+    if (l->timer_futs) free(l->timer_futs);
     if (l->stop_efd >= 0) close(l->stop_efd);
     if (l->epfd >= 0) close(l->epfd);
     free(l);
@@ -330,6 +358,32 @@ AngaraObject Angara_Loop_run(int arg_count, AngaraObject* args) {
                 continue;
             }
 
+            /* LIB-4 Stage S-2: check if this fd belongs to a timer future */
+            {
+                TimerFuture* tf = NULL;
+                for (size_t ti = 0; ti < l->timer_count; ti++) {
+                    if (l->timer_futs[ti] && l->timer_futs[ti]->tfd == fd) {
+                        tf = l->timer_futs[ti];
+                        break;
+                    }
+                }
+                if (tf) {
+                    uint64_t exp = 0;
+                    read(fd, &exp, sizeof(exp));
+                    tf->header.state = -1;  /* resolved */
+                    /* Cascade waker if set */
+                    if (tf->header.waker_fn) {
+                        void (*fn)(void*) = (void(*)(void*))tf->header.waker_fn;
+                        fn(tf->header.waker_ctx);
+                    }
+                    /* Cleanup */
+                    epoll_ctl(l->epfd, EPOLL_CTL_DEL, fd, NULL);
+                    close(fd);
+                    tf->tfd = -1;
+                    continue;
+                }
+            }
+
             CbEntry* e = cb_registry_find(&l->cbs, fd);
             if (!e) continue;
 
@@ -426,6 +480,85 @@ AngaraObject Angara_Loop_close(int arg_count, AngaraObject* args) {
         if (l->epfd >= 0) { close(l->epfd); l->epfd = -1; }
     }
     return ang_nil();
+}
+
+
+/* =========================================================================
+   LIB-4 Stage S-2: Timer future — leaf future that suspends and is
+   resolved by the event loop when a timerfd fires.
+   ========================================================================= */
+
+static void finalize_timer_future(void* data) {
+    TimerFuture* tf = (TimerFuture*)data;
+    if (tf->tfd >= 0) close(tf->tfd);
+    free(tf);
+}
+
+AngaraObject Angara_Loop_create_timer(int arg_count, AngaraObject* args) {
+    /* loop.create_timer(ms, value) → Future<T> */
+    LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
+    if (!l || arg_count < 3) return ang_nil();
+
+    int64_t ms = ang_is_i64(args[1]) ? ang_as_i64(args[1]) : 0;
+    AngaraObject value = args[2];
+
+    TimerFuture* tf = (TimerFuture*)calloc(1, sizeof(TimerFuture));
+    tf->header.state = 0;        /* pending */
+    tf->header.result = value;
+    tf->header.loop = l;
+
+    int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if (tfd < 0) {
+        free(tf);
+        ang_api->throw_error("loop.create_timer: timerfd_create failed.");
+        return ang_nil();
+    }
+
+    struct itimerspec its;
+    its.it_value.tv_sec     = ms / 1000;
+    its.it_value.tv_nsec    = (ms % 1000) * 1000000L;
+    its.it_interval.tv_sec  = 0;
+    its.it_interval.tv_nsec = 0;
+    timerfd_settime(tfd, 0, &its, NULL);
+    tf->tfd = tfd;
+
+    /* Register with epoll */
+    struct epoll_event ev;
+    ev.events = EPOLLIN | EPOLLET;
+    ev.data.fd = tfd;
+    epoll_ctl(l->epfd, EPOLL_CTL_ADD, tfd, &ev);
+
+    /* Track in loop's timer future list */
+    if (l->timer_count >= l->timer_cap) {
+        size_t new_cap = l->timer_cap ? l->timer_cap * 2 : 4;
+        l->timer_futs = (TimerFuture**)realloc(l->timer_futs, new_cap * sizeof(TimerFuture*));
+        l->timer_cap = new_cap;
+    }
+    l->timer_futs[l->timer_count++] = tf;
+
+    return ang_api->native_instance_new(tf, finalize_timer_future, "Future");
+}
+
+AngaraObject Angara_Loop_run_until(int arg_count, AngaraObject* args) {
+    /* loop.run_until(future) → T — blocks until future resolves, returns result */
+    LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
+    if (!l || arg_count < 2) return ang_nil();
+
+    AngaraObject future = args[1];
+    if (ang_is_nil(future)) return ang_nil();
+
+    /* Set the loop pointer on the future's frame so waker chain routes through us */
+    ang_api->future_set_loop(future, l);
+
+    /* Poll until resolved */
+    for (;;) {
+        if (ang_api->future_state(future) == -1) break;
+        /* Run one iteration of the event loop (10ms poll) */
+        AngaraObject run_args[2] = { args[0], ang_i64(10) };
+        Angara_Loop_run(2, run_args);
+    }
+
+    return ang_api->future_result(future);
 }
 
 
@@ -654,6 +787,9 @@ static const AngaraMethodDef LOOP_METHODS[] = {
     {"stop",         (AngaraMethodFn)Angara_Loop_stop,         "->n"},
     {"poll",         (AngaraMethodFn)Angara_Loop_poll,         "i?->l<{}>"},
     {"close",        (AngaraMethodFn)Angara_Loop_close,        "->n"},
+    /* LIB-4 Stage S-2 */
+    {"create_timer", (AngaraMethodFn)Angara_Loop_create_timer, "ii->f<i>"},
+    {"run_until",    (AngaraMethodFn)Angara_Loop_run_until,    "a->a"},
     {NULL, NULL, NULL}
 };
 
