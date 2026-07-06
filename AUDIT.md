@@ -17,7 +17,7 @@
 
 | ID | Issue |
 |---|---|
-| LIB-1 | AMQP/MQTT TLS — secure schemes parsed but TLS not configured on rabbitmq-c / mosquitto connections. |
+| LIB-1 | ~~AMQP/MQTT TLS~~ (done: `modules/net/amqp.c`, `modules/net/mqtt.c`) — `amqps://` / `mqtts://` now configure TLS on rabbitmq-c / mosquitto connections with `verify`, `ca_bundle`, `client_cert`, `client_key` options. |
 | LIB-10 | ~~CLI/arg parser~~ (done: `modules/data/cli.c`); ~~YAML~~ (done: `modules/data/yaml.c`); ~~protobuf~~ (done: `modules/data/protobuf.c`); ~~msgpack~~ (done: `modules/data/msgpack.c`); ~~big integers~~ (done: `modules/math/bigint.c`). |
 
 ---

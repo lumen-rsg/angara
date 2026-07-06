@@ -1,4 +1,5 @@
 #include <rabbitmq-c/tcp_socket.h>
+#include <rabbitmq-c/ssl_socket.h>
 #include <rabbitmq-c/amqp.h>
 #include <rabbitmq-c/framing.h>
 #include <string.h>
@@ -39,18 +40,67 @@ static void check_reply(amqp_rpc_reply_t x, const char* ctx) {
 }
 
 AngaraObject Angara_amqp_connect(int arg_count, AngaraObject* args) {
-    if (arg_count != 1 || !IS_STR(args[0])) { ang_api->throw_error("connect(url) expects a string."); return ang_nil(); }
+    if (arg_count < 1 || arg_count > 2 || !IS_STR(args[0])) { ang_api->throw_error("connect(url, opts?) expects a string and optional record."); return ang_nil(); }
+    AngaraObject opts = (arg_count >= 2 && IS_REC(args[1])) ? args[1] : ang_nil();
+
     char* url_copy = strdup(ang_api->as_cstr(args[0]));
     struct amqp_connection_info ci;
     if (amqp_parse_url(url_copy, &ci)) { free(url_copy); ang_api->throw_error("Malformed AMQP URL."); return ang_nil(); }
     if (!ci.vhost || *ci.vhost == '\0') ci.vhost = "/";
 
     ConnectionData* conn = (ConnectionData*)malloc(sizeof(ConnectionData));
-    conn->conn = amqp_new_connection(); conn->socket = amqp_tcp_socket_new(conn->conn);
+    conn->conn = amqp_new_connection();
     conn->channel_count = 0; conn->is_connected = false;
-    if (!conn->socket) { free(url_copy); free(conn); ang_api->throw_error("TCP socket creation failed."); return ang_nil(); }
+
+    if (ci.ssl) {
+        /* --- TLS (amqps://) --- */
+        conn->socket = amqp_ssl_socket_new(conn->conn);
+        if (!conn->socket) { free(url_copy); free(conn); ang_api->throw_error("SSL socket creation failed."); return ang_nil(); }
+
+        if (IS_REC(opts)) {
+            AngaraObject v = ang_api->record_get(opts, "verify");
+            if (ang_is_bool(v)) {
+                amqp_ssl_socket_set_verify_peer(conn->socket, ang_as_bool(v));
+                amqp_ssl_socket_set_verify_hostname(conn->socket, ang_as_bool(v));
+            } else {
+                amqp_ssl_socket_set_verify_peer(conn->socket, 1);
+                amqp_ssl_socket_set_verify_hostname(conn->socket, 1);
+            }
+            ang_api->decref(v);
+
+            v = ang_api->record_get(opts, "ca_bundle");
+            if (IS_STR(v))
+                amqp_ssl_socket_set_cacert(conn->socket, ang_api->as_cstr(v));
+            else
+                amqp_ssl_socket_enable_default_verify_paths(conn->socket);
+            ang_api->decref(v);
+
+            v = ang_api->record_get(opts, "client_cert");
+            AngaraObject client_key = ang_api->record_get(opts, "client_key");
+            if (IS_STR(v) && IS_STR(client_key))
+                amqp_ssl_socket_set_key(conn->socket, ang_api->as_cstr(v), ang_api->as_cstr(client_key));
+            ang_api->decref(v);
+            ang_api->decref(client_key);
+
+            v = ang_api->record_get(opts, "client_key_pass");
+            if (IS_STR(v))
+                amqp_ssl_socket_set_key_passwd(conn->socket, ang_api->as_cstr(v));
+            ang_api->decref(v);
+        } else {
+            /* default: verify peer against system CA store */
+            amqp_ssl_socket_set_verify_peer(conn->socket, 1);
+            amqp_ssl_socket_set_verify_hostname(conn->socket, 1);
+        }
+    } else {
+        /* --- plain TCP (amqp://) --- */
+        conn->socket = amqp_tcp_socket_new(conn->conn);
+        if (!conn->socket) { free(url_copy); free(conn); ang_api->throw_error("TCP socket creation failed."); return ang_nil(); }
+    }
+
     if (amqp_socket_open(conn->socket, ci.host, ci.port)) {
-        free(url_copy); amqp_destroy_connection(conn->conn); free(conn); ang_api->throw_error("TCP connect failed."); return ang_nil();
+        free(url_copy); amqp_destroy_connection(conn->conn); free(conn);
+        ang_api->throw_error(ci.ssl ? "TLS connect failed." : "TCP connect failed.");
+        return ang_nil();
     }
     check_reply(amqp_login(conn->conn, ci.vhost, 0, 131072, 0, AMQP_SASL_METHOD_PLAIN, ci.user, ci.password), "Login");
     conn->is_connected = true; free(url_copy);
@@ -193,7 +243,7 @@ static const AngaraClassDef CHANNEL_CLASS_DEF = { "Channel", NULL, CHANNEL_METHO
 static const AngaraClassDef CONNECTION_CLASS_DEF = { "Connection", NULL, CONNECTION_METHODS };
 
 static const AngaraFuncDef AMQP_EXPORTS[] = {
-    {"connect",  Angara_amqp_connect, "s->Connection", &CONNECTION_CLASS_DEF},
+    {"connect",  Angara_amqp_connect, "s{}?->Connection", &CONNECTION_CLASS_DEF},
     {"_channel", NULL, "->Channel", &CHANNEL_CLASS_DEF},
     ANGARA_FUNC_END
 };

@@ -147,6 +147,7 @@ typedef struct {
     char username[128];
     char password[128];
     bool has_auth;
+    bool use_tls;
 } MqttUrlInfo;
 
 static int parse_mqtt_url(const char* url, MqttUrlInfo* info) {
@@ -155,7 +156,7 @@ static int parse_mqtt_url(const char* url, MqttUrlInfo* info) {
 
     const char* p = url;
     if (strncmp(p, "mqtt://", 7) == 0) p += 7;
-    else if (strncmp(p, "mqtts://", 8) == 0) { p += 8; info->port = 8883; }
+    else if (strncmp(p, "mqtts://", 8) == 0) { p += 8; info->port = 8883; info->use_tls = true; }
     else if (strncmp(p, "tcp://", 6) == 0) p += 6;
 
     const char* at = strchr(p, '@');
@@ -269,6 +270,48 @@ AngaraObject Angara_mqtt_connect(int arg_count, AngaraObject* args) {
     mosquitto_connect_callback_set(conn->mosq, on_connect);
     mosquitto_disconnect_callback_set(conn->mosq, on_disconnect);
     mosquitto_message_callback_set(conn->mosq, on_message);
+
+    /* --- TLS configuration (mqtts://) --- */
+    if (info.use_tls) {
+        bool verify = true;
+        const char *ca_bundle = NULL;
+        const char *client_cert = NULL;
+        const char *client_key = NULL;
+        AngaraObject v_verify = ang_nil(), v_ca = ang_nil(), v_cert = ang_nil(), v_key = ang_nil();
+
+        if (arg_count >= 2 && IS_REC(args[1])) {
+            v_verify = ang_api->record_get(args[1], "verify");
+            if (ang_is_bool(v_verify)) verify = ang_as_bool(v_verify);
+
+            v_ca = ang_api->record_get(args[1], "ca_bundle");
+            if (IS_STR(v_ca)) ca_bundle = ang_api->as_cstr(v_ca);
+
+            v_cert = ang_api->record_get(args[1], "client_cert");
+            if (IS_STR(v_cert)) client_cert = ang_api->as_cstr(v_cert);
+
+            v_key = ang_api->record_get(args[1], "client_key");
+            if (IS_STR(v_key)) client_key = ang_api->as_cstr(v_key);
+        }
+
+        if (!verify) {
+            mosquitto_tls_insecure_set(conn->mosq, true);
+            mosquitto_tls_opts_set(conn->mosq, 0, NULL, NULL);  /* SSL_VERIFY_NONE */
+        }
+
+        if (ca_bundle) {
+            mosquitto_tls_set(conn->mosq, ca_bundle, NULL, client_cert, client_key, NULL);
+        } else if (verify) {
+            mosquitto_int_option(conn->mosq, MOSQ_OPT_TLS_USE_OS_CERTS, 1);
+            mosquitto_tls_set(conn->mosq, NULL, NULL, client_cert, client_key, NULL);
+        } else {
+            mosquitto_tls_set(conn->mosq, NULL, NULL, client_cert, client_key, NULL);
+        }
+
+        ang_api->decref(v_verify);
+        ang_api->decref(v_ca);
+        ang_api->decref(v_cert);
+        ang_api->decref(v_key);
+    }
 
     conn->is_connected = true;
 
