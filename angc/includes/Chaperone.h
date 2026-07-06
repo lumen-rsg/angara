@@ -99,6 +99,11 @@ private:
         // referent is dropped/moved while a ref still aliases it, the ref
         // dangles (E509). Tracked within the current function's analysis.
         std::map<std::string, std::string> borrows;
+        // M11: names of variables whose ownership was transferred to another
+        // thread via spawn(). Used to distinguish thread-escaped variables from
+        // regular-escaped variables (e.g., returned to caller) so E510 can fire
+        // with a thread-specific diagnostic. Cleared per function.
+        std::set<std::string> thread_escaped;
         // M2: names of variables that were Live before entering the current
         // loop body. Used to detect conditional destruction inside loops:
         // if a pre-loop-Live variable is destroyed on one branch of an if/else

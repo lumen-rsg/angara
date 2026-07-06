@@ -1,0 +1,25 @@
+// Chaperone negative test — M11: spawn ownership transfer prevents double-drop.
+//
+// When a tracked value is passed to spawn(), ownership transfers to the new
+// thread. The Chaperone must detect that dropping it in the parent after spawn
+// is a double-free (E503).
+//
+// expect: E503
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+// Worker function that takes ownership and drops the buffer.
+func worker(b as Buf) -> nil {
+    drop b;
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let t = spawn(worker, b);
+    drop b;   // E503: ownership was transferred to spawned thread
+    t.join();
+    return 0;
+}

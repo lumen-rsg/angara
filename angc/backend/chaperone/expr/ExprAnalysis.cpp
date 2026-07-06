@@ -106,6 +106,15 @@ void Chaperone::analyzeExpr(Context& ctx,
                     "transferred to another variable and is used here. Read the new "
                     "owner instead.",
                     "E507");
+            } else if (it->second == State::Escaped &&
+                       ctx.thread_escaped.count(ve->name.lexeme)) {
+                // M11: variable was transferred to another thread via spawn().
+                diag(ctx, ve->name,
+                    "🧵 Thread escape — `" + ve->name.lexeme + "` had its ownership "
+                    "transferred to another thread via `spawn()`. Using it in the "
+                    "parent thread is a data race / use-after-transfer. Access the "
+                    "value through the spawned thread's lifecycle instead.",
+                    "E510");
             }
         }
         // S3: if this is a ref<T> being read, check its referent is still live.
@@ -347,6 +356,44 @@ void Chaperone::analyzeExpr(Context& ctx,
             }
             if (callee_name.empty())
                 callee_name = method_name;  // fallback: bare method name
+        }
+
+        // M11: spawn() transfers ownership of tracked arguments to a new thread.
+        // Detect spawn() calls early before the summary lookup and transition
+        // all tracked args (positions 1..N) to Escaped. The first argument (the
+        // closure/function) is not a data transfer. Record escaped vars in
+        // thread_escaped so E510 can fire on subsequent use in the parent thread.
+        if (callee_name == "spawn") {
+            for (size_t i = 0; i < effective_args.size(); i++) {
+                analyzeExpr(ctx, effective_args[i], state);
+            }
+            // Transition tracked Live args (positions 1..N) to Escaped.
+            for (size_t i = 1; i < effective_args.size(); i++) {
+                if (auto* ve = dynamic_cast<const VarExpr*>(effective_args[i].get())) {
+                    auto it = state.find(ve->name.lexeme);
+                    if (it != state.end() && it->second == State::Live) {
+                        it->second = State::Escaped;
+                        ctx.thread_escaped.insert(ve->name.lexeme);
+                    }
+                }
+            }
+            return;
+        }
+
+        // M11: Thread.join() — detect join calls and track the return value.
+        // When a Thread's join() returns a tracked type, the result variable
+        // becomes Live (ownership returns from the spawned thread).
+        // The spawn-to-join association is tracked through the closure summary.
+        if (method_name == "join" && !callee_name.empty() && callee_name != "join") {
+            // This is a method call: the callee_name is the object's variable name.
+            // Walk the join target (the Thread object) for UAF checks, walk args.
+            analyzeExpr(ctx, call->callee, state);
+            for (const auto& arg : effective_args)
+                analyzeExpr(ctx, arg, state);
+            // join() returns the spawned function's return type. If tracked,
+            // the VarDeclStmt handler will mark the result as Live.
+            // No summary-based argument transitions needed.
+            return;
         }
 
         // Look up the summary: first by function name, then by closure

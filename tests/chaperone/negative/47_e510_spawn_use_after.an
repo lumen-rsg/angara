@@ -1,0 +1,25 @@
+// Chaperone negative test — M11: E510 thread-escape detection.
+//
+// When a tracked value is passed to spawn(), ownership transfers to the new
+// thread. Using the variable in the parent thread after spawn is a data race
+// and should be flagged as E510.
+//
+// expect: E510
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+// Worker function that takes ownership and drops the buffer.
+func worker(b as Buf) -> nil {
+    drop b;
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let t = spawn(worker, b);
+    b.v = 100;   // E510: use after ownership transferred to thread
+    t.join();
+    return 0;
+}

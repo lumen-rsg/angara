@@ -19,7 +19,8 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
                                  const std::string& summary_key) {
     ctx.current_function = func.name.lexeme;
     StateMap state;
-    ctx.borrows.clear();   // S3: borrow map is per-function (reset each pass)
+    ctx.borrows.clear();        // S3: borrow map is per-function (reset each pass)
+    ctx.thread_escaped.clear(); // M11: thread-escape set is per-function
     ctx.current_params.clear();  // rebuilt below as tracked params register
 
     // Register tracked parameters. Prefer the resolved FunctionType from the
@@ -559,9 +560,17 @@ void Chaperone::analyzeStmt(Context& ctx,
                 "moved, or escaped. It's no longer live and cannot be dropped again.",
                 "E503");
         } else if (it->second == State::Escaped) {
-            diag(ctx, *diag_tok,
-                "\xe2\x9a\xa0\xef\xb8\x8f Cannot drop `" + key + "` — ownership was transferred.",
-                "E503");
+            if (ctx.thread_escaped.count(key)) {
+                diag(ctx, *diag_tok,
+                    "\xe2\x9a\xa0\xef\xb8\x8f Cannot drop `" + key + "` — ownership was "
+                    "transferred to another thread via `spawn()`. Dropping it here "
+                    "would double-free.",
+                    "E503");
+            } else {
+                diag(ctx, *diag_tok,
+                    "\xe2\x9a\xa0\xef\xb8\x8f Cannot drop `" + key + "` — ownership was transferred.",
+                    "E503");
+            }
         } else if (it->second == State::Moved) {
             diag(ctx, *diag_tok,
                 "\xe2\x9a\xa0\xef\xb8\x8f Double denaturation — `" + key + "` had its ownership "

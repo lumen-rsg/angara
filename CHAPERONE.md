@@ -382,6 +382,7 @@ to mark `o` arguments that are freed or stored by the C API.
 | **E506** | 🔄 Incomplete fold | Loop-body drop — variable dropped in loop without reassignment, double-free on iteration 2+. |
 | **E507** | 📤 Moved molecule | Use-after-move — a moved-from variable (source of `let x = y` / `x = y` of a tracked type, or `this.f = y` in a method) is read. Read the new owner instead. |
 | **E509** | 🔗 Dangling borrow | A `ref<T>` is read after its referent was dropped/moved — the borrow dangles and would read freed memory. |
+| **E510** | 🧵 Thread escape | A tracked allocation's ownership was transferred to another thread via `spawn()`. Using or dropping it in the parent thread is a data race / use-after-transfer / double-free. |
 | **W510** | (warning) | Variable handled differently on if/else branches. |
 
 > **E508** is reserved (unused). Diagnostic codes are fatal (halt compilation)
