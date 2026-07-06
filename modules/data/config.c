@@ -129,6 +129,7 @@ static AngaraObject parse_toml_value(const char* val_str) {
 
 AngaraObject Angara_config_parse_ini(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 1) { ang_api->throw_error("config.parse_ini: expected 1 argument"); return ang_nil(); }
     const char* text = ang_api->as_cstr(args[0]);
     size_t text_len = ang_api->str_len(args[0]);
 
@@ -189,6 +190,7 @@ AngaraObject Angara_config_parse_ini(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_config_stringify_ini(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 1) { ang_api->throw_error("config.stringify_ini: expected 1 argument"); return ang_nil(); }
     size_t cap = 4096;
     size_t len = 0;
     char* buf = (char*)malloc(cap);
@@ -227,6 +229,7 @@ AngaraObject Angara_config_stringify_ini(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_config_parse_toml(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 1) { ang_api->throw_error("config.parse_toml: expected 1 argument"); return ang_nil(); }
     const char* text = ang_api->as_cstr(args[0]);
     size_t text_len = ang_api->str_len(args[0]);
 
@@ -360,6 +363,7 @@ AngaraObject Angara_config_parse_toml(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_config_parse_dotenv(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 1) { ang_api->throw_error("config.parse_dotenv: expected 1 argument"); return ang_nil(); }
     const char* text = ang_api->as_cstr(args[0]);
     size_t text_len = ang_api->str_len(args[0]);
 
@@ -413,6 +417,7 @@ AngaraObject Angara_config_parse_dotenv(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_config_stringify_dotenv(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 1) { ang_api->throw_error("config.stringify_dotenv: expected 1 argument"); return ang_nil(); }
     size_t cap = 4096;
     size_t len = 0;
     char* buf = (char*)malloc(cap);

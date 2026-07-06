@@ -56,6 +56,7 @@ AngaraObject Angara_time_Stopwatch(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Stopwatch_elapsed(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Stopwatch.elapsed: expected 1 argument"); return ang_nil(); }
     StopwatchData* data = (StopwatchData*)ang_api->native_instance_data(args[0]);
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
@@ -63,6 +64,7 @@ AngaraObject Angara_Stopwatch_elapsed(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Stopwatch_reset(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Stopwatch.reset: expected 1 argument"); return ang_nil(); }
     StopwatchData* data = (StopwatchData*)ang_api->native_instance_data(args[0]);
     clock_gettime(CLOCK_MONOTONIC, &data->start_time);
     return ang_nil();

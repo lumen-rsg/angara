@@ -37,6 +37,7 @@ static void throw_assert_error(const char* type, AngaraObject actual, AngaraObje
 
 AngaraObject Angara_assert_that(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 2) { ang_api->throw_error("assert.that: expected 2 arguments"); return ang_nil(); }
     if (!ang_api->truthy(args[0])) {
         const char* msg = ang_api->as_cstr(args[1]);
         throw_assert_error(NULL, ang_nil(), ang_nil(), msg);
@@ -47,6 +48,7 @@ AngaraObject Angara_assert_that(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_assert_eq(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 3) { ang_api->throw_error("assert.eq: expected 3 arguments"); return ang_nil(); }
     if (!ang_api->equals(args[0], args[1])) {
         throw_assert_error("EQUAL", args[0], args[1], ang_api->as_cstr(args[2]));
     }
@@ -56,6 +58,7 @@ AngaraObject Angara_assert_eq(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_assert_ne(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 3) { ang_api->throw_error("assert.ne: expected 3 arguments"); return ang_nil(); }
     if (ang_api->equals(args[0], args[1])) {
         throw_assert_error("NOT EQUAL", args[0], args[1], ang_api->as_cstr(args[2]));
     }
@@ -65,6 +68,7 @@ AngaraObject Angara_assert_ne(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_assert_fail(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 1) { ang_api->throw_error("assert.fail: expected 1 argument"); return ang_nil(); }
     char buffer[1024];
     snprintf(buffer, 1024, "Explicit Failure: %s", ang_api->as_cstr(args[0]));
     ang_api->throw_error(buffer);
@@ -112,6 +116,7 @@ AngaraObject Angara_TestRunner_record(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_TestRunner_summary(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("TestRunner.summary: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     TestRunnerData* tr = (TestRunnerData*)ang_api->native_instance_data(args[0]);
     if (!tr) return ang_nil();
@@ -134,6 +139,7 @@ AngaraObject Angara_TestRunner_summary(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_TestRunner_results(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("TestRunner.results: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     TestRunnerData* tr = (TestRunnerData*)ang_api->native_instance_data(args[0]);
     if (!tr) return ang_nil();
@@ -150,6 +156,7 @@ AngaraObject Angara_TestRunner_results(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_TestRunner_report(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("TestRunner.report: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     TestRunnerData* tr = (TestRunnerData*)ang_api->native_instance_data(args[0]);
     if (!tr) return ang_nil();

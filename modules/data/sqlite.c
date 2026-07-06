@@ -23,6 +23,7 @@ static void finalize_db(void* data) {
 }
 
 AngaraObject Angara_sqlite_open(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("sqlite.open: expected 1 argument"); return ang_nil(); }
     const char* path = ang_api->as_cstr(args[0]);
 
     DbConn* dbc = (DbConn*)calloc(1, sizeof(DbConn));
@@ -41,6 +42,7 @@ AngaraObject Angara_sqlite_open(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_SqliteDb_execute(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("SqliteDb.execute: expected 3 arguments"); return ang_nil(); }
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (!dbc || !dbc->db) { ang_api->throw_error("execute: database is closed."); return ang_nil(); }
 
@@ -123,6 +125,7 @@ AngaraObject Angara_SqliteDb_execute(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_SqliteDb_query_one(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("SqliteDb.query_one: expected 3 arguments"); return ang_nil(); }
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (!dbc || !dbc->db) return ang_nil();
 
@@ -167,6 +170,7 @@ AngaraObject Angara_SqliteDb_query_one(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_SqliteDb_run(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("SqliteDb.run: expected 3 arguments"); return ang_nil(); }
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (!dbc || !dbc->db) { ang_api->throw_error("run: database is closed."); return ang_nil(); }
 
@@ -199,6 +203,7 @@ AngaraObject Angara_SqliteDb_run(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_SqliteDb_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("SqliteDb.close: expected 1 argument"); return ang_nil(); }
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (dbc && dbc->db) {
         sqlite3_close(dbc->db);
@@ -208,12 +213,14 @@ AngaraObject Angara_SqliteDb_close(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_SqliteDb_last_insert_id(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("SqliteDb.last_insert_id: expected 1 argument"); return ang_nil(); }
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (!dbc || !dbc->db) return ang_i64(-1);
     return ang_i64((int64_t)sqlite3_last_insert_rowid(dbc->db));
 }
 
 AngaraObject Angara_SqliteDb_changes(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("SqliteDb.changes: expected 1 argument"); return ang_nil(); }
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (!dbc || !dbc->db) return ang_i64(0);
     return ang_i64((int64_t)sqlite3_changes(dbc->db));
@@ -222,6 +229,7 @@ AngaraObject Angara_SqliteDb_changes(int arg_count, AngaraObject* args) {
 /* ---- transaction API ---- */
 
 AngaraObject Angara_SqliteDb_begin(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("SqliteDb.begin: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (!dbc || !dbc->db) { ang_api->throw_error("begin: database is closed."); return ang_nil(); }
@@ -236,6 +244,7 @@ AngaraObject Angara_SqliteDb_begin(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_SqliteDb_commit(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("SqliteDb.commit: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (!dbc || !dbc->db) { ang_api->throw_error("commit: database is closed."); return ang_nil(); }
@@ -250,6 +259,7 @@ AngaraObject Angara_SqliteDb_commit(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_SqliteDb_rollback(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("SqliteDb.rollback: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     DbConn* dbc = (DbConn*)ang_api->native_instance_data(args[0]);
     if (!dbc || !dbc->db) { ang_api->throw_error("rollback: database is closed."); return ang_nil(); }
@@ -287,6 +297,7 @@ static void finalize_pool(void* data) {
 }
 
 AngaraObject Angara_sqlite_pool(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("sqlite.pool: expected 2 arguments"); return ang_nil(); }
     const char* path = ang_api->as_cstr(args[0]);
     int64_t size = ang_as_i64(args[1]);
     if (size < 1) size = 1;
@@ -323,6 +334,7 @@ AngaraObject Angara_sqlite_pool(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_SqlitePool_acquire(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("SqlitePool.acquire: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     PoolData* p = (PoolData*)ang_api->native_instance_data(args[0]);
     if (!p) return ang_nil();
@@ -361,6 +373,7 @@ AngaraObject Angara_SqlitePool_release(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_SqlitePool_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("SqlitePool.close: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     PoolData* p = (PoolData*)ang_api->native_instance_data(args[0]);
     if (p) {

@@ -117,6 +117,7 @@ static size_t utf8_codepoint_offset(const unsigned char* s, size_t len, int64_t 
    ========================================================================= */
 
 AngaraObject Angara_adv_string_get(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("adv_string.get: expected 2 arguments"); return ang_nil(); }
     const unsigned char* chars = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     int64_t index = ang_as_i64(args[1]);
@@ -137,6 +138,7 @@ AngaraObject Angara_adv_string_get(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_substring(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("adv_string.substring: expected 3 arguments"); return ang_nil(); }
     const unsigned char* chars = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     int64_t start_idx = ang_as_i64(args[1]);
@@ -160,16 +162,19 @@ AngaraObject Angara_adv_string_substring(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_adv_string_is_digit(int arg_count, AngaraObject* args) {
     /* ASCII-only: digits are single-byte in UTF-8 so this is already correct */
+    if (arg_count < 1) { ang_api->throw_error("adv_string.is_digit: expected 1 argument"); return ang_nil(); }
     if (ang_api->str_len(args[0]) != 1) return ang_bool(false);
     return ang_bool(isdigit((unsigned char)ang_api->as_cstr(args[0])[0]));
 }
 
 AngaraObject Angara_adv_string_is_whitespace(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("adv_string.is_whitespace: expected 1 argument"); return ang_nil(); }
     if (ang_api->str_len(args[0]) != 1) return ang_bool(false);
     return ang_bool(isspace((unsigned char)ang_api->as_cstr(args[0])[0]));
 }
 
 AngaraObject Angara_adv_string_pad_end(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("adv_string.pad_end: expected 3 arguments"); return ang_nil(); }
     const char* base = ang_api->as_cstr(args[0]);
     size_t base_len = ang_api->str_len(args[0]);
     int64_t target = ang_as_i64(args[1]);
@@ -187,6 +192,7 @@ AngaraObject Angara_adv_string_pad_end(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_to_uppercase(int arg_count, AngaraObject args[]) {
+    if (arg_count < 1) { ang_api->throw_error("adv_string.to_uppercase: expected 1 argument"); return ang_nil(); }
     const unsigned char* src = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -224,6 +230,7 @@ AngaraObject Angara_adv_string_to_uppercase(int arg_count, AngaraObject args[]) 
 }
 
 AngaraObject Angara_adv_string_to_lowercase(int arg_count, AngaraObject args[]) {
+    if (arg_count < 1) { ang_api->throw_error("adv_string.to_lowercase: expected 1 argument"); return ang_nil(); }
     const unsigned char* src = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -257,6 +264,7 @@ AngaraObject Angara_adv_string_to_lowercase(int arg_count, AngaraObject args[]) 
 }
 
 AngaraObject Angara_adv_string_trim(int arg_count, AngaraObject args[]) {
+    if (arg_count < 1) { ang_api->throw_error("adv_string.trim: expected 1 argument"); return ang_nil(); }
     const char* start = ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     const char* end = start + len - 1;
@@ -267,6 +275,7 @@ AngaraObject Angara_adv_string_trim(int arg_count, AngaraObject args[]) {
 }
 
 AngaraObject Angara_adv_string_contains(int arg_count, AngaraObject args[]) {
+    if (arg_count < 2) { ang_api->throw_error("adv_string.contains: expected 2 arguments"); return ang_nil(); }
     return ang_bool(strstr(ang_api->as_cstr(args[0]), ang_api->as_cstr(args[1])) != NULL);
 }
 
@@ -304,6 +313,7 @@ AngaraObject Angara_adv_string_join(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_replace(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("adv_string.replace: expected 3 arguments"); return ang_nil(); }
     const char* source = ang_api->as_cstr(args[0]);
     const char* search = ang_api->as_cstr(args[1]);
     const char* repl = ang_api->as_cstr(args[2]);
@@ -357,6 +367,7 @@ AngaraObject Angara_adv_string_last_index_of(int arg_count, AngaraObject* args) 
 }
 
 AngaraObject Angara_adv_string_split(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("adv_string.split: expected 2 arguments"); return ang_nil(); }
     const char* src = ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
     const char* delim = ang_api->as_cstr(args[1]);
@@ -404,6 +415,7 @@ AngaraObject Angara_adv_string_split(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_starts_with(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("adv_string.starts_with: expected 2 arguments"); return ang_nil(); }
     const char* src = ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
     const char* prefix = ang_api->as_cstr(args[1]);
@@ -413,6 +425,7 @@ AngaraObject Angara_adv_string_starts_with(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_ends_with(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("adv_string.ends_with: expected 2 arguments"); return ang_nil(); }
     const char* src = ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
     const char* suffix = ang_api->as_cstr(args[1]);
@@ -422,6 +435,7 @@ AngaraObject Angara_adv_string_ends_with(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_repeat(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("adv_string.repeat: expected 2 arguments"); return ang_nil(); }
     const char* src = ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
     int64_t n = ang_as_i64(args[1]);
@@ -440,6 +454,7 @@ AngaraObject Angara_adv_string_repeat(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_reverse(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("adv_string.reverse: expected 1 argument"); return ang_nil(); }
     const unsigned char* src = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
 
@@ -479,6 +494,7 @@ AngaraObject Angara_adv_string_reverse(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_count(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("adv_string.count: expected 2 arguments"); return ang_nil(); }
     const char* haystack = ang_api->as_cstr(args[0]);
     const char* needle = ang_api->as_cstr(args[1]);
     size_t nlen = strlen(needle);
@@ -490,6 +506,7 @@ AngaraObject Angara_adv_string_count(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_pad_start(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("adv_string.pad_start: expected 3 arguments"); return ang_nil(); }
     const char* base = ang_api->as_cstr(args[0]);
     size_t base_len = ang_api->str_len(args[0]);
     int64_t target = ang_as_i64(args[1]);
@@ -507,6 +524,7 @@ AngaraObject Angara_adv_string_pad_start(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_to_i64(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("adv_string.to_i64: expected 1 argument"); return ang_nil(); }
     const char* s = ang_api->as_cstr(args[0]);
     char* end;
     int64_t val = strtoll(s, &end, 10);
@@ -515,6 +533,7 @@ AngaraObject Angara_adv_string_to_i64(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_to_f64(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("adv_string.to_f64: expected 1 argument"); return ang_nil(); }
     const char* s = ang_api->as_cstr(args[0]);
     char* end;
     double val = strtod(s, &end);
@@ -523,6 +542,7 @@ AngaraObject Angara_adv_string_to_f64(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_chars(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("adv_string.chars: expected 1 argument"); return ang_nil(); }
     const unsigned char* src = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     AngaraObject list = ang_api->list_new();
@@ -541,6 +561,7 @@ AngaraObject Angara_adv_string_chars(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_is_alpha(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("adv_string.is_alpha: expected 1 argument"); return ang_nil(); }
     const unsigned char* s = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     if (len == 0) return ang_bool(false);
@@ -560,6 +581,7 @@ AngaraObject Angara_adv_string_is_alpha(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_is_alnum(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("adv_string.is_alnum: expected 1 argument"); return ang_nil(); }
     const unsigned char* s = (const unsigned char*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     if (len == 0) return ang_bool(false);
@@ -579,6 +601,7 @@ AngaraObject Angara_adv_string_is_alnum(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_adv_string_levenshtein(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("adv_string.levenshtein: expected 2 arguments"); return ang_nil(); }
     const unsigned char* a = (const unsigned char*)ang_api->as_cstr(args[0]);
     const unsigned char* b = (const unsigned char*)ang_api->as_cstr(args[1]);
     size_t la = ang_api->str_len(args[0]);
@@ -641,6 +664,7 @@ AngaraObject Angara_adv_string_levenshtein(int arg_count, AngaraObject* args) {
 AngaraObject Angara_adv_string_format(int arg_count, AngaraObject* args) {
     /* args[0] = format string, args[1..] = values to substitute */
 
+    if (arg_count < 2) { ang_api->throw_error("adv_string.format: expected 2 arguments"); return ang_nil(); }
     const char* fmt = ang_api->as_cstr(args[0]);
     size_t fmt_len = ang_api->str_len(args[0]);
 

@@ -275,6 +275,7 @@ AngaraObject Angara_http_server_server(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_HttpServer_on_request(int arg_count, AngaraObject* args) {
     /* srv.on_request(callback) — callback receives {id, method, path, headers, body?}
+       if (arg_count < 2) { ang_api->throw_error("HttpServer.on_request: expected 2 arguments"); return ang_nil(); }
        and must return {status?, body?, headers?} or a plain string. */
     HttpServer* srv = (HttpServer*)ang_api->native_instance_data(args[0]);
     if (!srv) return ang_nil();
@@ -287,6 +288,7 @@ AngaraObject Angara_HttpServer_on_request(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_HttpServer_run(int arg_count, AngaraObject* args) {
     /* srv.run() — blocks, accepts connections, parses requests,
+       if (arg_count < 2) { ang_api->throw_error("HttpServer.run: expected 2 arguments"); return ang_nil(); }
        calls on_request callback, sends response. */
     (void)arg_count; (void)args;
     HttpServer* srv = (HttpServer*)ang_api->native_instance_data(args[0]);
@@ -476,6 +478,7 @@ AngaraObject Angara_HttpServer_poll(int arg_count, AngaraObject* args) {
 AngaraObject Angara_HttpServer_respond(int arg_count, AngaraObject* args) {
     /* srv.respond(req_id, status, body, headers?) */
 
+    if (arg_count < 5) { ang_api->throw_error("HttpServer.respond: expected 5 arguments"); return ang_nil(); }
     HttpServer* srv = (HttpServer*)ang_api->native_instance_data(args[0]);
     if (!srv) return ang_nil();
 
@@ -569,6 +572,7 @@ AngaraObject Angara_HttpServer_respond(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_HttpServer_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("HttpServer.close: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     HttpServer* srv = (HttpServer*)ang_api->native_instance_data(args[0]);
     if (srv) {

@@ -10,6 +10,7 @@
 
 AngaraObject Angara_io_write(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 2) { ang_api->throw_error("io.write: expected 2 arguments"); return ang_nil(); }
     int64_t stream_id = ang_as_i64(args[0]);
     const char* content = ang_api->as_cstr(args[1]);
 
@@ -29,6 +30,7 @@ AngaraObject Angara_io_write(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_io_println(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 2) { ang_api->throw_error("io.println: expected 2 arguments"); return ang_nil(); }
     int64_t stream_id = ang_as_i64(args[0]);
     const char* content = ang_api->as_cstr(args[1]);
 
@@ -49,6 +51,7 @@ AngaraObject Angara_io_println(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_io_flush(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 1) { ang_api->throw_error("io.flush: expected 1 argument"); return ang_nil(); }
     int64_t stream_id = ang_as_i64(args[0]);
     if (stream_id == 1) fflush(stdout);
     else if (stream_id == 2) fflush(stderr);
@@ -109,22 +112,26 @@ AngaraObject Angara_io_read_all(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_io_print(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("io.print: expected 1 argument"); return ang_nil(); }
     fprintf(stdout, "%s", ang_api->as_cstr(args[0]));
     return ang_nil();
 }
 
 AngaraObject Angara_io_println_auto(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("io.println_auto: expected 1 argument"); return ang_nil(); }
     fputs(ang_api->as_cstr(args[0]), stdout);
     fputc('\n', stdout);
     return ang_nil();
 }
 
 AngaraObject Angara_io_eprint(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("io.eprint: expected 1 argument"); return ang_nil(); }
     fprintf(stderr, "%s", ang_api->as_cstr(args[0]));
     return ang_nil();
 }
 
 AngaraObject Angara_io_eprintln(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("io.eprintln: expected 1 argument"); return ang_nil(); }
     fputs(ang_api->as_cstr(args[0]), stderr);
     fputc('\n', stderr);
     return ang_nil();

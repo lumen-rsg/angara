@@ -48,18 +48,21 @@ AngaraObject Angara_color_hidden(int ac, AngaraObject* a)    { return ansi_code(
 AngaraObject Angara_color_reset(int ac, AngaraObject* a) { return ansi_code("\033[0m"); }
 
 AngaraObject Angara_color_fg(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("color.fg: expected 1 argument"); return ang_nil(); }
     char buf[16];
     snprintf(buf, sizeof(buf), "\033[38;5;%dm", (int)ang_as_i64(args[0]));
     return ang_api->string(buf);
 }
 
 AngaraObject Angara_color_bg(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("color.bg: expected 1 argument"); return ang_nil(); }
     char buf[16];
     snprintf(buf, sizeof(buf), "\033[48;5;%dm", (int)ang_as_i64(args[0]));
     return ang_api->string(buf);
 }
 
 AngaraObject Angara_color_rgb_fg(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("color.rgb_fg: expected 3 arguments"); return ang_nil(); }
     char buf[24];
     snprintf(buf, sizeof(buf), "\033[38;2;%d;%d;%dm",
              (int)ang_as_i64(args[0]), (int)ang_as_i64(args[1]), (int)ang_as_i64(args[2]));
@@ -67,6 +70,7 @@ AngaraObject Angara_color_rgb_fg(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_color_rgb_bg(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("color.rgb_bg: expected 3 arguments"); return ang_nil(); }
     char buf[24];
     snprintf(buf, sizeof(buf), "\033[48;2;%d;%d;%dm",
              (int)ang_as_i64(args[0]), (int)ang_as_i64(args[1]), (int)ang_as_i64(args[2]));

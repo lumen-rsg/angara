@@ -170,6 +170,7 @@ AngaraObject Angara_websocket_connect(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_WebSocket_send(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("WebSocket.send: expected 2 arguments"); return ang_nil(); }
     if (!IS_STR(args[1])) return ang_nil();
     void* native = ang_api->native_instance_data(args[0]);
     NativeObjectHeader* h = (NativeObjectHeader*)native;
@@ -188,6 +189,7 @@ AngaraObject Angara_WebSocket_send(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_WebSocket_read(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("WebSocket.read: expected 1 argument"); return ang_nil(); }
     void* native = ang_api->native_instance_data(args[0]); NativeObjectHeader* h = (NativeObjectHeader*)native;
     ConcurrentQueue* q;
     if (h->type == NATIVE_TYPE_CLIENT) q = &((AngaraLwsClient*)native)->incoming_queue;
@@ -198,18 +200,21 @@ AngaraObject Angara_WebSocket_read(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_WebSocket_is_open(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("WebSocket.is_open: expected 1 argument"); return ang_nil(); }
     void* native = ang_api->native_instance_data(args[0]); NativeObjectHeader* h = (NativeObjectHeader*)native;
     if (h->type == NATIVE_TYPE_CLIENT) return ang_bool(((AngaraLwsClient*)native)->is_connected);
     return ang_bool(((AngaraLwsSession*)native)->is_connected);
 }
 
 AngaraObject Angara_WebSocket_get_id(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("WebSocket.get_id: expected 1 argument"); return ang_nil(); }
     void* native = ang_api->native_instance_data(args[0]); NativeObjectHeader* h = (NativeObjectHeader*)native;
     if (h->type == NATIVE_TYPE_CLIENT) return ang_api->string(((AngaraLwsClient*)native)->id);
     return ang_api->string(((AngaraLwsSession*)native)->id);
 }
 
 AngaraObject Angara_WebSocket_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("WebSocket.close: expected 1 argument"); return ang_nil(); }
     void* native = ang_api->native_instance_data(args[0]);
     if (!native) return ang_nil();
     NativeObjectHeader* h = (NativeObjectHeader*)native;
@@ -233,18 +238,21 @@ AngaraObject Angara_WebSocket_close(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_WebSocket_service(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("WebSocket.service: expected 1 argument"); return ang_nil(); }
     void* native = ang_api->native_instance_data(args[0]);
     if (((NativeObjectHeader*)native)->type == NATIVE_TYPE_CLIENT) { AngaraLwsClient* c = (AngaraLwsClient*)native; if(c->context) lws_service(c->context, 0); }
     return ang_nil();
 }
 
 AngaraObject Angara_Server_service(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Server.service: expected 1 argument"); return ang_nil(); }
     AngaraLwsServer* s = (AngaraLwsServer*)ang_api->native_instance_data(args[0]);
     if (s->context) lws_service(s->context, 0);
     return ang_nil();
 }
 
 AngaraObject Angara_Server_accept(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Server.accept: expected 1 argument"); return ang_nil(); }
     AngaraLwsServer* s = (AngaraLwsServer*)ang_api->native_instance_data(args[0]);
     AngaraObject* ptr = (AngaraObject*)queue_pop(&s->accept_queue);
     if (ptr) { AngaraObject o = *ptr; free(ptr); return o; }

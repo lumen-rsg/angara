@@ -57,6 +57,7 @@ static AngaraObject convert_json_handle_to_angara(JsonHandle handle) {
 
 AngaraObject Angara_json_parse(int arg_count, AngaraObject args[]) {
 
+    if (arg_count < 1) { ang_api->throw_error("json.parse: expected 1 argument"); return ang_nil(); }
     char* error_msg = NULL;
     JsonHandle handle = json_bridge_parse(ang_api->as_cstr(args[0]), &error_msg);
 
@@ -117,6 +118,7 @@ static JsonHandle convert_angara_to_json_handle(AngaraObject obj) {
 
 AngaraObject Angara_json_stringify(int arg_count, AngaraObject args[]) {
 
+    if (arg_count < 1) { ang_api->throw_error("json.stringify: expected 1 argument"); return ang_nil(); }
     JsonHandle handle = convert_angara_to_json_handle(args[0]);
     if (!handle) return ang_api->string("null");
 

@@ -77,6 +77,7 @@ static char** tokenize_command(const char* cmd, int* argc_out) {
 
 AngaraObject Angara_process_exec(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 1) { ang_api->throw_error("process.exec: expected 1 argument"); return ang_nil(); }
     const char* cmd = ang_api->as_cstr(args[0]);
 
     int argc = 0;
@@ -377,6 +378,7 @@ AngaraObject Angara_process_spawn(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Process_write(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("Process.write: expected 2 arguments"); return ang_nil(); }
     ProcessData* pd = (ProcessData*)ang_api->native_instance_data(args[0]);
     if (!pd || pd->stdin_fd < 0) return ang_nil();
 
@@ -388,6 +390,7 @@ AngaraObject Angara_Process_write(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Process_close_stdin(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Process.close_stdin: expected 1 argument"); return ang_nil(); }
     ProcessData* pd = (ProcessData*)ang_api->native_instance_data(args[0]);
     if (pd && pd->stdin_fd >= 0) {
         close(pd->stdin_fd);
@@ -431,6 +434,7 @@ AngaraObject Angara_Process_read_stderr(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Process_wait(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Process.wait: expected 1 argument"); return ang_nil(); }
     ProcessData* pd = (ProcessData*)ang_api->native_instance_data(args[0]);
     if (!pd || pd->exited) return ang_i64(pd->exit_code);
 
@@ -442,11 +446,13 @@ AngaraObject Angara_Process_wait(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Process_pid(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Process.pid: expected 1 argument"); return ang_nil(); }
     ProcessData* pd = (ProcessData*)ang_api->native_instance_data(args[0]);
     return ang_i64(pd ? (int64_t)pd->pid : -1);
 }
 
 AngaraObject Angara_Process_kill(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Process.kill: expected 1 argument"); return ang_nil(); }
     ProcessData* pd = (ProcessData*)ang_api->native_instance_data(args[0]);
     if (pd && pd->pid > 0 && !pd->exited) {
         kill(pd->pid, SIGTERM);
@@ -455,6 +461,7 @@ AngaraObject Angara_Process_kill(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Process_is_alive(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Process.is_alive: expected 1 argument"); return ang_nil(); }
     ProcessData* pd = (ProcessData*)ang_api->native_instance_data(args[0]);
     if (!pd || pd->exited) return ang_bool(false);
     int status;

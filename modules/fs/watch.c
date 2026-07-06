@@ -191,6 +191,7 @@ AngaraObject Angara_Watcher_poll(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Watcher_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Watcher.close: expected 1 argument"); return ang_nil(); }
     WatcherData* w = (WatcherData*)ang_api->native_instance_data(args[0]);
     if (w && w->fd >= 0) {
         close(w->fd);
@@ -394,6 +395,7 @@ AngaraObject Angara_Watcher_poll(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Watcher_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Watcher.close: expected 1 argument"); return ang_nil(); }
     WatcherData* w = (WatcherData*)ang_api->native_instance_data(args[0]);
     if (w) {
         for (size_t i = 0; i < w->count; i++) {

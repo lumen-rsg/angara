@@ -151,6 +151,7 @@ AngaraObject Angara_TlsConn_recv(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_TlsConn_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("TlsConn.close: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     TlsConn* c = (TlsConn*)ang_api->native_instance_data(args[0]);
     if (c) {
@@ -162,6 +163,7 @@ AngaraObject Angara_TlsConn_close(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_TlsConn_fileno(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("TlsConn.fileno: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     TlsConn* c = (TlsConn*)ang_api->native_instance_data(args[0]);
     return ang_i64(c ? c->fd : -1);
@@ -183,6 +185,7 @@ static void finalize_tls_listener(void* data) {
 }
 
 AngaraObject Angara_tls_listen(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("tls.listen: expected 3 arguments"); return ang_nil(); }
     pthread_once(&ssl_once, init_ssl);
 
     int port = (int)ang_as_i64(args[0]);
@@ -245,6 +248,7 @@ AngaraObject Angara_tls_listen(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_TlsListener_accept(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("TlsListener.accept: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     TlsListener* l = (TlsListener*)ang_api->native_instance_data(args[0]);
     if (!l || l->listen_fd < 0) return ang_nil();
@@ -269,6 +273,7 @@ AngaraObject Angara_TlsListener_accept(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_TlsListener_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("TlsListener.close: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     TlsListener* l = (TlsListener*)ang_api->native_instance_data(args[0]);
     if (l) {

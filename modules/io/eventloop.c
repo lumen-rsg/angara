@@ -334,6 +334,7 @@ AngaraObject Angara_Loop_clear(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_Loop_run(int arg_count, AngaraObject* args) {
     /* loop.run(timeout_ms?) — blocks, dispatches callbacks.
+       if (arg_count < 2) { ang_api->throw_error("Loop.run: expected 2 arguments"); return ang_nil(); }
        If timeout_ms is provided, returns after that many milliseconds.
        Otherwise blocks until loop.stop() is called. */
     LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
@@ -494,6 +495,7 @@ AngaraObject Angara_Loop_run(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Loop_stop(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Loop.stop: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
     if (l && l->stop_efd >= 0) {
@@ -547,6 +549,7 @@ AngaraObject Angara_Loop_poll(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Loop_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Loop.close: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     LoopData* l = (LoopData*)ang_api->native_instance_data(args[0]);
     if (l) {
@@ -866,6 +869,7 @@ AngaraObject Angara_Sender_try_send(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Sender_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Sender.close: expected 1 argument"); return ang_nil(); }
     ChannelHandle* h = (ChannelHandle*)ang_api->native_instance_data(args[0]);
     if (h && h->ch) {
         pthread_mutex_lock(&h->ch->mutex);
@@ -878,12 +882,14 @@ AngaraObject Angara_Sender_close(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Sender_fileno(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Sender.fileno: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     ChannelHandle* h = (ChannelHandle*)ang_api->native_instance_data(args[0]);
     return ang_i64(h && h->ch ? (int64_t)h->ch->efd : -1);
 }
 
 AngaraObject Angara_Receiver_recv(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Receiver.recv: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     ChannelHandle* h = (ChannelHandle*)ang_api->native_instance_data(args[0]);
     Channel* ch = h ? h->ch : NULL;
@@ -901,6 +907,7 @@ AngaraObject Angara_Receiver_recv(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Receiver_try_recv(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Receiver.try_recv: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     ChannelHandle* h = (ChannelHandle*)ang_api->native_instance_data(args[0]);
     Channel* ch = h ? h->ch : NULL;
@@ -916,12 +923,14 @@ AngaraObject Angara_Receiver_try_recv(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Receiver_fileno(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Receiver.fileno: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     ChannelHandle* h = (ChannelHandle*)ang_api->native_instance_data(args[0]);
     return ang_i64(h && h->ch ? (int64_t)h->ch->efd : -1);
 }
 
 AngaraObject Angara_Receiver_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Receiver.close: expected 1 argument"); return ang_nil(); }
     ChannelHandle* h = (ChannelHandle*)ang_api->native_instance_data(args[0]);
     if (h && h->ch && h->ch->efd >= 0) {
         uint64_t dummy;

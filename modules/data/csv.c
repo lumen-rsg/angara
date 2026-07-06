@@ -230,6 +230,7 @@ AngaraObject Angara_csv_stringify(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_csv_read_file(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 2) { ang_api->throw_error("csv.read_file: expected 2 arguments"); return ang_nil(); }
     const char* path = ang_api->as_cstr(args[0]);
     FILE* file = fopen(path, "rb");
     if (!file) {

@@ -131,6 +131,7 @@ AngaraObject Angara_path_parent(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_path_with_extension(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("path.with_extension: expected 2 arguments"); return ang_nil(); }
     const char* path = ang_api->as_cstr(args[0]);
     size_t path_len = ang_api->str_len(args[0]);
     const char* ext = ang_api->as_cstr(args[1]);

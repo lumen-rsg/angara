@@ -253,6 +253,7 @@ static void encode_value(AngaraObject obj, uint64_t field_number, ByteBuf* bb) {
 }
 
 AngaraObject Angara_protobuf_encode(int arg_count, AngaraObject args[]) {
+    if (arg_count < 1) { ang_api->throw_error("protobuf.encode: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     AngaraObject input = args[0];
 
@@ -419,6 +420,7 @@ static int try_decode_message(const uint8_t* data, size_t len,
 }
 
 AngaraObject Angara_protobuf_decode(int arg_count, AngaraObject args[]) {
+    if (arg_count < 1) { ang_api->throw_error("protobuf.decode: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
 
     if (!IS_STR(args[0])) {

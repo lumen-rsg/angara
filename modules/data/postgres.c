@@ -24,6 +24,7 @@ static void finalize_pg(void* data) {
 }
 
 AngaraObject Angara_postgres_connect(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("postgres.connect: expected 1 argument"); return ang_nil(); }
     const char* conninfo = ang_api->as_cstr(args[0]);
 
     PGconn* conn = PQconnectdb(conninfo);
@@ -213,6 +214,7 @@ AngaraObject Angara_PgConn_execute(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_PgConn_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("PgConn.close: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     PgConn* p = (PgConn*)ang_api->native_instance_data(args[0]);
     if (p && p->conn) {

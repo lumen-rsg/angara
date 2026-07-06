@@ -10,6 +10,7 @@
 #define IS_STR(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)
 
 AngaraObject Angara_os_getenv(int arg_count, AngaraObject args[]) {
+    if (arg_count < 1) { ang_api->throw_error("os.getenv: expected 1 argument"); return ang_nil(); }
     char* value = getenv(ang_api->as_cstr(args[0]));
     if (!value) return ang_nil();
     return ang_api->string(value);
@@ -52,6 +53,7 @@ static void free_argv(char** argv) {
 
 AngaraObject Angara_os_run(int arg_count, AngaraObject args[]) {
 
+    if (arg_count < 1) { ang_api->throw_error("os.run: expected 1 argument"); return ang_nil(); }
     const char* command = ang_api->as_cstr(args[0]);
 
     int argc = 0;

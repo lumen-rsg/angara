@@ -49,6 +49,7 @@ AngaraObject Angara_compress_zstd_compress(int arg_count, AngaraObject* args) {
 AngaraObject Angara_compress_zstd_decompress(int arg_count, AngaraObject* args) {
     /* decompress(data:string) -> decompressed:string */
 
+    if (arg_count < 1) { ang_api->throw_error("compress.zstd_decompress: expected 1 argument"); return ang_nil(); }
     const char* src = ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
 
@@ -142,6 +143,7 @@ AngaraObject Angara_compress_bzip2_compress(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_compress_bzip2_decompress(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("compress.bzip2_decompress: expected 1 argument"); return ang_nil(); }
     const char* src = ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
 
@@ -224,6 +226,7 @@ AngaraObject Angara_compress_xz_compress(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_compress_xz_decompress(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("compress.xz_decompress: expected 1 argument"); return ang_nil(); }
     const uint8_t* src = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t src_len = ang_api->str_len(args[0]);
 

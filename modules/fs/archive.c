@@ -15,6 +15,7 @@
 
 AngaraObject Angara_archive_gzip_compress(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 1) { ang_api->throw_error("archive.gzip_compress: expected 1 argument"); return ang_nil(); }
     const uint8_t* data = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t data_len = ang_api->str_len(args[0]);
 
@@ -34,6 +35,7 @@ AngaraObject Angara_archive_gzip_compress(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_archive_gzip_decompress(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 2) { ang_api->throw_error("archive.gzip_decompress: expected 2 arguments"); return ang_nil(); }
     const uint8_t* data = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t data_len = ang_api->str_len(args[0]);
 
@@ -71,6 +73,7 @@ AngaraObject Angara_archive_gzip_decompress(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_archive_zlib_compress(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 1) { ang_api->throw_error("archive.zlib_compress: expected 1 argument"); return ang_nil(); }
     const uint8_t* data = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t data_len = ang_api->str_len(args[0]);
 
@@ -90,6 +93,7 @@ AngaraObject Angara_archive_zlib_compress(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_archive_zlib_decompress(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 2) { ang_api->throw_error("archive.zlib_decompress: expected 2 arguments"); return ang_nil(); }
     const uint8_t* data = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t data_len = ang_api->str_len(args[0]);
 
@@ -126,6 +130,7 @@ AngaraObject Angara_archive_zlib_decompress(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_archive_crc32(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("archive.crc32: expected 1 argument"); return ang_nil(); }
     const uint8_t* data = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     uLong crc = crc32(0L, data, (uInt)len);
@@ -133,6 +138,7 @@ AngaraObject Angara_archive_crc32(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_archive_adler32(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("archive.adler32: expected 1 argument"); return ang_nil(); }
     const uint8_t* data = (const uint8_t*)ang_api->as_cstr(args[0]);
     size_t len = ang_api->str_len(args[0]);
     uLong adler = adler32(0L, data, (uInt)len);
@@ -177,6 +183,7 @@ static int path_is_safe(const char* pathname) {
 
 AngaraObject Angara_archive_zip_extract(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 2) { ang_api->throw_error("archive.zip_extract: expected 2 arguments"); return ang_nil(); }
     const char* filepath = ang_api->as_cstr(args[0]);
     const char* destdir = ang_api->as_cstr(args[1]);
 
@@ -225,6 +232,7 @@ AngaraObject Angara_archive_zip_extract(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_archive_zip_create(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 2) { ang_api->throw_error("archive.zip_create: expected 2 arguments"); return ang_nil(); }
     const char* output_path = ang_api->as_cstr(args[0]);
     size_t nfiles = ang_api->list_len(args[1]);
 
@@ -272,6 +280,7 @@ AngaraObject Angara_archive_zip_create(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_archive_tar_extract(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 2) { ang_api->throw_error("archive.tar_extract: expected 2 arguments"); return ang_nil(); }
     const char* filepath = ang_api->as_cstr(args[0]);
     const char* destdir = ang_api->as_cstr(args[1]);
 
@@ -318,6 +327,7 @@ AngaraObject Angara_archive_tar_extract(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_archive_tar_create(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 2) { ang_api->throw_error("archive.tar_create: expected 2 arguments"); return ang_nil(); }
     const char* output_path = ang_api->as_cstr(args[0]);
 
     struct archive* a = archive_write_new();

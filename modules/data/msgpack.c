@@ -231,6 +231,7 @@ static void msgpack_encode_value(AngaraObject obj, ByteBuf* bb) {
 }
 
 AngaraObject Angara_msgpack_encode(int arg_count, AngaraObject args[]) {
+    if (arg_count < 1) { ang_api->throw_error("msgpack.encode: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     ByteBuf bb;
     bb_init(&bb, 4096);
@@ -623,6 +624,7 @@ fail:
 }
 
 AngaraObject Angara_msgpack_decode(int arg_count, AngaraObject args[]) {
+    if (arg_count < 1) { ang_api->throw_error("msgpack.decode: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
 
     if (!IS_STR(args[0])) {

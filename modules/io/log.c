@@ -36,6 +36,7 @@ static void log_write(LogLevel lv, const char* msg) {
 /* ---- public API ---- */
 
 AngaraObject Angara_log_set_level(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("log.set_level: expected 1 argument"); return ang_nil(); }
     const char* s = ang_api->as_cstr(args[0]);
     if      (strcmp(s, "debug") == 0) g_min_level = LOG_DEBUG;
     else if (strcmp(s, "info")  == 0) g_min_level = LOG_INFO;

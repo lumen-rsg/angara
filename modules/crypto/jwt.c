@@ -241,6 +241,7 @@ AngaraObject Angara_jwt_create(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_jwt_verify(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 2) { ang_api->throw_error("jwt.verify: expected 2 arguments"); return ang_nil(); }
     const char* token = ang_api->as_cstr(args[0]);
     size_t token_len = ang_api->str_len(args[0]);
     const char* secret = ang_api->as_cstr(args[1]);
@@ -345,6 +346,7 @@ AngaraObject Angara_jwt_verify(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_jwt_decode(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 1) { ang_api->throw_error("jwt.decode: expected 1 argument"); return ang_nil(); }
     const char* token = ang_api->as_cstr(args[0]);
     size_t token_len = ang_api->str_len(args[0]);
 

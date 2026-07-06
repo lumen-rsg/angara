@@ -24,6 +24,7 @@ AngaraObject Angara_term_clear_line(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_term_set_color(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("term.set_color: expected 2 arguments"); return ang_nil(); }
     const char* fg = ang_api->as_cstr(args[0]);
 
     static const char* fg_names[] = {
@@ -123,6 +124,7 @@ AngaraObject Angara_term_underline(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_term_cursor_move(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("term.cursor_move: expected 2 arguments"); return ang_nil(); }
     printf("\033[%lld;%lldH", (long long)ang_as_i64(args[0]), (long long)ang_as_i64(args[1]));
     fflush(stdout);
     return ang_nil();
@@ -285,6 +287,7 @@ AngaraObject Angara_term_progress_bar(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_term_colorize(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 3) { ang_api->throw_error("term.colorize: expected 3 arguments"); return ang_nil(); }
     static const char* color_names[] = {
         "black","red","green","yellow","blue","magenta","cyan","white",
         "bright_black","bright_red","bright_green","bright_yellow",
@@ -325,6 +328,7 @@ AngaraObject Angara_term_colorize(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_term_table(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 2) { ang_api->throw_error("term.table: expected 2 arguments"); return ang_nil(); }
     size_t ncols = ang_api->list_len(args[0]);
     if (ncols == 0) return ang_api->string("");
 

@@ -54,6 +54,7 @@ static mpz_ptr bigint_arg(int argc, AngaraObject* args, int idx) {
 
 /// bigint.from_i64(n: i64) -> BigInt
 AngaraObject Angara_bigint_from_i64(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("bigint.from_i64: expected 1 argument"); return ang_nil(); }
     BigInt* bi = (BigInt*)malloc(sizeof(BigInt));
     if (!bi) { ang_api->throw_error("bigint: out of memory."); return ang_nil(); }
     mpz_init_set_si(bi->value, ang_as_i64(args[0]));
@@ -62,6 +63,7 @@ AngaraObject Angara_bigint_from_i64(int arg_count, AngaraObject* args) {
 
 /// bigint.from_string(s: string) -> BigInt
 AngaraObject Angara_bigint_from_string(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("bigint.from_string: expected 1 argument"); return ang_nil(); }
     BigInt* bi = (BigInt*)malloc(sizeof(BigInt));
     if (!bi) { ang_api->throw_error("bigint: out of memory."); return ang_nil(); }
     if (mpz_init_set_str(bi->value, ang_api->as_cstr(args[0]), 10) != 0) {
@@ -326,6 +328,7 @@ AngaraObject Angara_BigInt_bit_xor(int arg_count, AngaraObject* args) {
 
 /// shift_left(self, n: i64) -> BigInt   (shift left by n bits; n must be >= 0)
 AngaraObject Angara_BigInt_shift_left(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("BigInt.shift_left: expected 2 arguments"); return ang_nil(); }
     mpz_ptr a = bigint_arg(arg_count, args, 0);
     if (!a) return ang_nil();
     int64_t n = ang_as_i64(args[1]);
@@ -339,6 +342,7 @@ AngaraObject Angara_BigInt_shift_left(int arg_count, AngaraObject* args) {
 
 /// shift_right(self, n: i64) -> BigInt   (shift right by n bits; n must be >= 0)
 AngaraObject Angara_BigInt_shift_right(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("BigInt.shift_right: expected 2 arguments"); return ang_nil(); }
     mpz_ptr a = bigint_arg(arg_count, args, 0);
     if (!a) return ang_nil();
     int64_t n = ang_as_i64(args[1]);

@@ -21,6 +21,7 @@ static void throw_fs_error(const char* message, const char* path) {
 #define IS_STR(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)
 
 AngaraObject Angara_fs_read_file(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("fs.read_file: expected 1 argument"); return ang_nil(); }
     const char* path = ang_api->as_cstr(args[0]);
 
     FILE* file = fopen(path, "rb");
@@ -41,6 +42,7 @@ AngaraObject Angara_fs_read_file(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_write_file(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("fs.write_file: expected 2 arguments"); return ang_nil(); }
     const char* path = ang_api->as_cstr(args[0]);
     const char* content = ang_api->as_cstr(args[1]);
     size_t content_len = ang_api->str_len(args[1]);
@@ -119,6 +121,7 @@ AngaraObject Angara_fs_is_symlink(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_chmod(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("fs.chmod: expected 2 arguments"); return ang_nil(); }
     if (chmod(ang_api->as_cstr(args[0]), (mode_t)ang_as_i64(args[1])) != 0) {
         char buf[256]; snprintf(buf, 256, "chmod failed for '%s': %s", ang_api->as_cstr(args[0]), strerror(errno));
         ang_api->throw_error(buf);
@@ -139,6 +142,7 @@ static int copy_file_contents(const char* source, const char* dest) {
 }
 
 AngaraObject Angara_fs_install(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("fs.install: expected 3 arguments"); return ang_nil(); }
     const char* src = ang_api->as_cstr(args[0]);
     const char* dst = ang_api->as_cstr(args[1]);
     mode_t mode = (mode_t)ang_as_i64(args[2]);
@@ -154,6 +158,7 @@ AngaraObject Angara_fs_install(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_append_file(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("fs.append_file: expected 2 arguments"); return ang_nil(); }
     const char* path = ang_api->as_cstr(args[0]);
     const char* content = ang_api->as_cstr(args[1]);
     size_t content_len = ang_api->str_len(args[1]);
@@ -167,6 +172,7 @@ AngaraObject Angara_fs_append_file(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_list_dir(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("fs.list_dir: expected 1 argument"); return ang_nil(); }
     const char* path = ang_api->as_cstr(args[0]);
     DIR* dir = opendir(path);
     if (!dir) { throw_fs_error("Failed to open directory", path); return ang_nil(); }
@@ -182,6 +188,7 @@ AngaraObject Angara_fs_list_dir(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_copy_file(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("fs.copy_file: expected 2 arguments"); return ang_nil(); }
     const char* src = ang_api->as_cstr(args[0]);
     const char* dst = ang_api->as_cstr(args[1]);
     struct stat st;
@@ -195,12 +202,14 @@ AngaraObject Angara_fs_copy_file(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_file_size(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("fs.file_size: expected 1 argument"); return ang_nil(); }
     struct stat st;
     if (stat(ang_api->as_cstr(args[0]), &st) != 0) return ang_i64(-1);
     return ang_i64((int64_t)st.st_size);
 }
 
 AngaraObject Angara_fs_file_info(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("fs.file_info: expected 1 argument"); return ang_nil(); }
     const char* path = ang_api->as_cstr(args[0]);
     struct stat st;
     if (stat(path, &st) != 0) return ang_nil();
@@ -224,6 +233,7 @@ AngaraObject Angara_fs_temp_dir(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_fs_canonical(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("fs.canonical: expected 1 argument"); return ang_nil(); }
     char buf[PATH_MAX];
     if (!realpath(ang_api->as_cstr(args[0]), buf)) {
         throw_fs_error("canonical: failed to resolve path", ang_api->as_cstr(args[0]));

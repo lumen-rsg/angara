@@ -135,6 +135,7 @@ AngaraObject Angara_RedisConn_cmd(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_RedisConn_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("RedisConn.close: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     RedisConn* rc = (RedisConn*)ang_api->native_instance_data(args[0]);
     if (rc && rc->ctx) {

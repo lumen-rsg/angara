@@ -198,6 +198,7 @@ static int parse_mqtt_url(const char* url, MqttUrlInfo* info) {
 
 AngaraObject Angara_mqtt_connect(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 2) { ang_api->throw_error("mqtt.connect: expected 2 arguments"); return ang_nil(); }
     static bool mosquitto_initialized = false;
     if (!mosquitto_initialized) {
         mosquitto_lib_init();
@@ -346,6 +347,7 @@ AngaraObject Angara_mqtt_connect(int arg_count, AngaraObject* args) {
 
 
 AngaraObject Angara_Connection_publish(int arg_count, AngaraObject* args) {
+    if (arg_count < 4) { ang_api->throw_error("Connection.publish: expected 4 arguments"); return ang_nil(); }
     MqttConnectionData* conn = (MqttConnectionData*)ang_api->native_instance_data(args[0]);
     if (!conn || !conn->mosq) { ang_api->throw_error("mqtt: invalid connection."); return ang_nil(); }
 
@@ -388,6 +390,7 @@ AngaraObject Angara_Connection_subscribe(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Connection_unsubscribe(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("Connection.unsubscribe: expected 2 arguments"); return ang_nil(); }
     MqttConnectionData* conn = (MqttConnectionData*)ang_api->native_instance_data(args[0]);
     if (!conn || !conn->mosq) { ang_api->throw_error("mqtt: invalid connection."); return ang_nil(); }
 
@@ -429,6 +432,7 @@ AngaraObject Angara_Connection_next_message(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Connection_is_connected(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Connection.is_connected: expected 1 argument"); return ang_nil(); }
     MqttConnectionData* conn = (MqttConnectionData*)ang_api->native_instance_data(args[0]);
     if (!conn) return ang_bool(false);
     pthread_mutex_lock(&conn->state_mutex);
@@ -438,6 +442,7 @@ AngaraObject Angara_Connection_is_connected(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Connection_disconnect(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Connection.disconnect: expected 1 argument"); return ang_nil(); }
     MqttConnectionData* conn = (MqttConnectionData*)ang_api->native_instance_data(args[0]);
     if (!conn || !conn->mosq) return ang_nil();
     mosquitto_disconnect(conn->mosq);
@@ -446,6 +451,7 @@ AngaraObject Angara_Connection_disconnect(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Connection_client_id(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Connection.client_id: expected 1 argument"); return ang_nil(); }
     MqttConnectionData* conn = (MqttConnectionData*)ang_api->native_instance_data(args[0]);
     if (!conn) return ang_api->string("");
     return ang_api->string(conn->client_id);

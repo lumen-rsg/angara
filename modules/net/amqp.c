@@ -108,6 +108,7 @@ AngaraObject Angara_amqp_connect(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Connection_channel(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Connection.channel: expected 1 argument"); return ang_nil(); }
     ConnectionData* conn = (ConnectionData*)ang_api->native_instance_data(args[0]);
     ChannelData* ch = (ChannelData*)malloc(sizeof(ChannelData));
     ch->conn_data = conn; ch->connection_obj = args[0];
@@ -119,6 +120,7 @@ AngaraObject Angara_Connection_channel(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Connection_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Connection.close: expected 1 argument"); return ang_nil(); }
     ConnectionData* c = (ConnectionData*)ang_api->native_instance_data(args[0]);
     if (c->is_connected) { amqp_connection_close(c->conn, AMQP_REPLY_SUCCESS); c->is_connected = false; }
     return ang_nil();
@@ -140,6 +142,7 @@ AngaraObject Angara_Channel_queue_declare(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Channel_bind_queue(int arg_count, AngaraObject* args) {
+    if (arg_count < 4) { ang_api->throw_error("Channel.bind_queue: expected 4 arguments"); return ang_nil(); }
     ChannelData* ch = get_channel(args[0]);
     amqp_queue_bind(ch->conn_data->conn, ch->id, amqp_cstring_bytes(ang_api->as_cstr(args[1])), amqp_cstring_bytes(ang_api->as_cstr(args[2])), amqp_cstring_bytes(ang_api->as_cstr(args[3])), amqp_empty_table);
     check_reply(amqp_get_rpc_reply(ch->conn_data->conn), "Queue Bind"); return ang_nil();
@@ -172,28 +175,33 @@ AngaraObject Angara_Channel_publish(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Channel_subscribe(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("Channel.subscribe: expected 2 arguments"); return ang_nil(); }
     ChannelData* ch = get_channel(args[0]);
     amqp_basic_consume(ch->conn_data->conn, ch->id, amqp_cstring_bytes(ang_api->as_cstr(args[1])), amqp_empty_bytes, 0, 0, 0, amqp_empty_table);
     check_reply(amqp_get_rpc_reply(ch->conn_data->conn), "Basic Consume"); return ang_nil();
 }
 
 AngaraObject Angara_Channel_prefetch(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("Channel.prefetch: expected 2 arguments"); return ang_nil(); }
     ChannelData* ch = get_channel(args[0]);
     amqp_basic_qos(ch->conn_data->conn, ch->id, 0, (uint32_t)ang_as_i64(args[1]), 0);
     check_reply(amqp_get_rpc_reply(ch->conn_data->conn), "Basic QOS"); return ang_nil();
 }
 
 AngaraObject Angara_Channel_ack(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("Channel.ack: expected 2 arguments"); return ang_nil(); }
     ChannelData* ch = get_channel(args[0]);
     amqp_basic_ack(ch->conn_data->conn, ch->id, (uint64_t)ang_as_i64(args[1]), 0); return ang_nil();
 }
 
 AngaraObject Angara_Channel_nack(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("Channel.nack: expected 3 arguments"); return ang_nil(); }
     ChannelData* ch = get_channel(args[0]);
     amqp_basic_nack(ch->conn_data->conn, ch->id, (uint64_t)ang_as_i64(args[1]), 0, ang_api->truthy(args[2])); return ang_nil();
 }
 
 AngaraObject Angara_Channel_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Channel.close: expected 1 argument"); return ang_nil(); }
     ChannelData* ch = get_channel(args[0]);
     amqp_channel_close(ch->conn_data->conn, ch->id, AMQP_REPLY_SUCCESS); return ang_nil();
 }

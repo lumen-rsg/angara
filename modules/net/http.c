@@ -61,6 +61,7 @@ static void apply_tls_options(CURL* curl_handle, AngaraObject tls_opts) {
 }
 
 AngaraObject Angara_http_request(int arg_count, AngaraObject args[]) {
+    if (arg_count < 1) { ang_api->throw_error("http.request: expected 1 argument"); return ang_nil(); }
     CURLcode res = CURLE_OK;
     struct curl_slist* headers = NULL;
 

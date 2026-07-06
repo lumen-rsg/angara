@@ -286,6 +286,7 @@ static AngaraObject yaml_scalar_to_angara(const char* value, size_t len,
 // =============================================================================
 
 AngaraObject Angara_yaml_parse(int arg_count, AngaraObject args[]) {
+    if (arg_count < 1) { ang_api->throw_error("yaml.parse: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
 
     const char* input = ang_api->as_cstr(args[0]);
@@ -605,6 +606,7 @@ static void stringify_value(AngaraObject obj, char** buf, size_t* cap,
 }
 
 AngaraObject Angara_yaml_stringify(int arg_count, AngaraObject args[]) {
+    if (arg_count < 1) { ang_api->throw_error("yaml.stringify: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
 
     size_t cap = 4096;

@@ -254,6 +254,7 @@ AngaraObject Angara_MyConn_execute(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_MyConn_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("MyConn.close: expected 1 argument"); return ang_nil(); }
     (void)arg_count;
     MyConn* m = (MyConn*)ang_api->native_instance_data(args[0]);
     if (m && m->conn) {

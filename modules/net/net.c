@@ -109,6 +109,7 @@ AngaraObject Angara_net_tcp_connect(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_TcpConn_send(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("TcpConn.send: expected 2 arguments"); return ang_nil(); }
     TcpConn* conn = (TcpConn*)ang_api->native_instance_data(args[0]);
     if (!conn || conn->fd < 0) return ang_i64(-1);
 
@@ -181,6 +182,7 @@ AngaraObject Angara_TcpConn_set_timeout(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_TcpConn_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("TcpConn.close: expected 1 argument"); return ang_nil(); }
     TcpConn* conn = (TcpConn*)ang_api->native_instance_data(args[0]);
     if (conn && conn->fd >= 0) {
         close(conn->fd);
@@ -191,11 +193,13 @@ AngaraObject Angara_TcpConn_close(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_TcpConn_is_connected(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("TcpConn.is_connected: expected 1 argument"); return ang_nil(); }
     TcpConn* conn = (TcpConn*)ang_api->native_instance_data(args[0]);
     return ang_bool(conn && conn->connected && conn->fd >= 0);
 }
 
 AngaraObject Angara_TcpConn_fileno(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("TcpConn.fileno: expected 1 argument"); return ang_nil(); }
     TcpConn* conn = (TcpConn*)ang_api->native_instance_data(args[0]);
     return ang_i64(conn ? (int64_t)conn->fd : -1);
 }
@@ -349,11 +353,13 @@ AngaraObject Angara_TcpListener_accept_raw(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_TcpListener_port(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("TcpListener.port: expected 1 argument"); return ang_nil(); }
     TcpListener* lstn = (TcpListener*)ang_api->native_instance_data(args[0]);
     return ang_i64(lstn ? (int64_t)lstn->port : -1);
 }
 
 AngaraObject Angara_TcpListener_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("TcpListener.close: expected 1 argument"); return ang_nil(); }
     TcpListener* lstn = (TcpListener*)ang_api->native_instance_data(args[0]);
     if (lstn && lstn->listen_fd >= 0) {
         close(lstn->listen_fd);
@@ -444,6 +450,7 @@ AngaraObject Angara_net_udp_socket(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_UdpSocket_send_to(int arg_count, AngaraObject* args) {
+    if (arg_count < 4) { ang_api->throw_error("UdpSocket.send_to: expected 4 arguments"); return ang_nil(); }
     UdpSock* us = (UdpSock*)ang_api->native_instance_data(args[0]);
     if (!us || us->fd < 0) return ang_i64(-1);
 
@@ -507,6 +514,7 @@ AngaraObject Angara_UdpSocket_set_broadcast(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_UdpSocket_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("UdpSocket.close: expected 1 argument"); return ang_nil(); }
     UdpSock* us = (UdpSock*)ang_api->native_instance_data(args[0]);
     if (us && us->fd >= 0) { close(us->fd); us->fd = -1; }
     return ang_nil();
@@ -514,6 +522,7 @@ AngaraObject Angara_UdpSocket_close(int arg_count, AngaraObject* args) {
 
 AngaraObject Angara_net_resolve(int arg_count, AngaraObject* args) {
 
+    if (arg_count < 1) { ang_api->throw_error("net.resolve: expected 1 argument"); return ang_nil(); }
     struct addrinfo hints, *result;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;   /* support both IPv4 and IPv6 */

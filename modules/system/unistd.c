@@ -54,6 +54,7 @@ AngaraObject Angara_unistd_exec(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_waitpid(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("unistd.waitpid: expected 1 argument"); return ang_nil(); }
     pid_t pid = (pid_t)ang_as_i64(args[0]);
     int status = 0;
     pid_t result = waitpid(pid, &status, 0);
@@ -100,6 +101,7 @@ AngaraObject Angara_unistd_getegid(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_kill(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("unistd.kill: expected 2 arguments"); return ang_nil(); }
     pid_t pid = (pid_t)ang_as_i64(args[0]);
     int sig = (int)ang_as_i64(args[1]);
     if (kill(pid, sig) != 0) {
@@ -125,6 +127,7 @@ AngaraObject Angara_unistd_pipe(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_dup(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("unistd.dup: expected 1 argument"); return ang_nil(); }
     int fd = (int)ang_as_i64(args[0]);
     int newfd = dup(fd);
     if (newfd < 0) {
@@ -137,6 +140,7 @@ AngaraObject Angara_unistd_dup(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_dup2(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("unistd.dup2: expected 2 arguments"); return ang_nil(); }
     int oldfd = (int)ang_as_i64(args[0]);
     int newfd = (int)ang_as_i64(args[1]);
     int result = dup2(oldfd, newfd);
@@ -150,6 +154,7 @@ AngaraObject Angara_unistd_dup2(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_close(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("unistd.close: expected 1 argument"); return ang_nil(); }
     int fd = (int)ang_as_i64(args[0]);
     if (close(fd) != 0) {
         char buf[128];
@@ -160,6 +165,7 @@ AngaraObject Angara_unistd_close(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_read(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("unistd.read: expected 2 arguments"); return ang_nil(); }
     int fd = (int)ang_as_i64(args[0]);
     size_t n = (size_t)ang_as_i64(args[1]);
     if (n == 0) return ang_api->string("");
@@ -183,6 +189,7 @@ AngaraObject Angara_unistd_read(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_write(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("unistd.write: expected 2 arguments"); return ang_nil(); }
     int fd = (int)ang_as_i64(args[0]);
     const char* data = ang_api->as_cstr(args[1]);
     size_t len = ang_api->str_len(args[1]);
@@ -198,6 +205,7 @@ AngaraObject Angara_unistd_write(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_lseek(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("unistd.lseek: expected 3 arguments"); return ang_nil(); }
     int fd = (int)ang_as_i64(args[0]);
     off_t offset = (off_t)ang_as_i64(args[1]);
     int whence = (int)ang_as_i64(args[2]);
@@ -212,11 +220,13 @@ AngaraObject Angara_unistd_lseek(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_isatty(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("unistd.isatty: expected 1 argument"); return ang_nil(); }
     int fd = (int)ang_as_i64(args[0]);
     return ang_bool(isatty(fd) == 1);
 }
 
 AngaraObject Angara_unistd_ttyname(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("unistd.ttyname: expected 1 argument"); return ang_nil(); }
     int fd = (int)ang_as_i64(args[0]);
     char* name = ttyname(fd);
     if (!name) return ang_nil();
@@ -224,6 +234,7 @@ AngaraObject Angara_unistd_ttyname(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_unlink(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("unistd.unlink: expected 1 argument"); return ang_nil(); }
     if (unlink(ang_api->as_cstr(args[0])) != 0) {
         char buf[256];
         snprintf(buf, sizeof(buf), "unlink(\"%s\") failed: %s", ang_api->as_cstr(args[0]), strerror(errno));
@@ -233,6 +244,7 @@ AngaraObject Angara_unistd_unlink(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_symlink(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("unistd.symlink: expected 2 arguments"); return ang_nil(); }
     if (symlink(ang_api->as_cstr(args[0]), ang_api->as_cstr(args[1])) != 0) {
         char buf[256];
         snprintf(buf, sizeof(buf), "symlink() failed: %s", strerror(errno));
@@ -242,6 +254,7 @@ AngaraObject Angara_unistd_symlink(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_readlink(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("unistd.readlink: expected 1 argument"); return ang_nil(); }
     char buf[4096];
     ssize_t len = readlink(ang_api->as_cstr(args[0]), buf, sizeof(buf) - 1);
     if (len < 0) return ang_nil();
@@ -250,12 +263,14 @@ AngaraObject Angara_unistd_readlink(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_access(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("unistd.access: expected 2 arguments"); return ang_nil(); }
     int mode = (int)ang_as_i64(args[1]);
     int result = access(ang_api->as_cstr(args[0]), mode);
     return ang_bool(result == 0);
 }
 
 AngaraObject Angara_unistd_chmod(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("unistd.chmod: expected 2 arguments"); return ang_nil(); }
     if (chmod(ang_api->as_cstr(args[0]), (mode_t)ang_as_i64(args[1])) != 0) {
         char buf[256];
         snprintf(buf, sizeof(buf), "chmod() failed: %s", strerror(errno));
@@ -265,6 +280,7 @@ AngaraObject Angara_unistd_chmod(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_chown(int arg_count, AngaraObject* args) {
+    if (arg_count < 3) { ang_api->throw_error("unistd.chown: expected 3 arguments"); return ang_nil(); }
     if (chown(ang_api->as_cstr(args[0]), (uid_t)ang_as_i64(args[1]), (gid_t)ang_as_i64(args[2])) != 0) {
         char buf[256];
         snprintf(buf, sizeof(buf), "chown() failed: %s", strerror(errno));
@@ -314,17 +330,20 @@ AngaraObject Angara_unistd_SEEK_END(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_usleep(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("unistd.usleep: expected 1 argument"); return ang_nil(); }
     useconds_t usec = (useconds_t)ang_as_i64(args[0]);
     usleep(usec);
     return ang_nil();
 }
 
 AngaraObject Angara_unistd_alarm(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("unistd.alarm: expected 1 argument"); return ang_nil(); }
     unsigned int prev = alarm((unsigned int)ang_as_i64(args[0]));
     return ang_i64((int64_t)prev);
 }
 
 AngaraObject Angara_unistd_sysconf(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("unistd.sysconf: expected 1 argument"); return ang_nil(); }
     long val = sysconf((int)ang_as_i64(args[0]));
     if (val < 0) return ang_i64(-1);
     return ang_i64((int64_t)val);
@@ -340,6 +359,7 @@ AngaraObject Angara_unistd_getcwd(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_unistd_chdir(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("unistd.chdir: expected 1 argument"); return ang_nil(); }
     if (chdir(ang_api->as_cstr(args[0])) != 0) {
         char buf[256];
         snprintf(buf, sizeof(buf), "chdir() failed: %s", strerror(errno));

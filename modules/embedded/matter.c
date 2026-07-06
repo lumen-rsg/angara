@@ -266,6 +266,7 @@ AngaraObject Angara_matter_connect(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Controller_devices(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Controller.devices: expected 1 argument"); return ang_nil(); }
     MatterControllerData* ctrl = (MatterControllerData*)ang_api->native_instance_data(args[0]);
     if (!ctrl) { ang_api->throw_error("matter: invalid controller."); return ang_nil(); }
 
@@ -459,12 +460,14 @@ AngaraObject Angara_Controller_decommission(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Controller_disconnect(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Controller.disconnect: expected 1 argument"); return ang_nil(); }
     MatterControllerData* ctrl = (MatterControllerData*)ang_api->native_instance_data(args[0]);
     if (!ctrl) return ang_nil();
     return ang_nil();
 }
 
 AngaraObject Angara_Controller_is_connected(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Controller.is_connected: expected 1 argument"); return ang_nil(); }
     MatterControllerData* ctrl = (MatterControllerData*)ang_api->native_instance_data(args[0]);
     if (!ctrl || !ctrl->curl) return ang_bool(false);
     AngaraObject body = http_get(ctrl, "/api/v1/health");
@@ -474,6 +477,7 @@ AngaraObject Angara_Controller_is_connected(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_Controller_info(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("Controller.info: expected 1 argument"); return ang_nil(); }
     MatterControllerData* ctrl = (MatterControllerData*)ang_api->native_instance_data(args[0]);
     if (!ctrl) { ang_api->throw_error("matter: invalid controller."); return ang_nil(); }
     return http_get(ctrl, "/api/v1/info");

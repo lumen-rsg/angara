@@ -366,10 +366,12 @@ static int64_t gcd_impl(int64_t a, int64_t b) {
 }
 
 AngaraObject Angara_math_gcd(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("math.gcd: expected 2 arguments"); return ang_nil(); }
     return ang_i64(gcd_impl(ang_as_i64(args[0]), ang_as_i64(args[1])));
 }
 
 AngaraObject Angara_math_lcm(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) { ang_api->throw_error("math.lcm: expected 2 arguments"); return ang_nil(); }
     int64_t a = ang_as_i64(args[0]), b = ang_as_i64(args[1]);
     if (a == 0 || b == 0) return ang_i64(0);
     int64_t g = gcd_impl(a, b);
@@ -379,6 +381,7 @@ AngaraObject Angara_math_lcm(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_math_factorial(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.factorial: expected 1 argument"); return ang_nil(); }
     int64_t n = ang_as_i64(args[0]);
     if (n < 0) { ang_api->throw_error("factorial: n must be >= 0."); return ang_nil(); }
     if (n > 20) { ang_api->throw_error("factorial: overflow for n > 20."); return ang_nil(); }
@@ -388,6 +391,7 @@ AngaraObject Angara_math_factorial(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_math_fibonacci(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.fibonacci: expected 1 argument"); return ang_nil(); }
     int64_t n = ang_as_i64(args[0]);
     if (n < 0) { ang_api->throw_error("fibonacci: n must be >= 0."); return ang_nil(); }
     if (n == 0) return ang_i64(0);
@@ -402,6 +406,7 @@ AngaraObject Angara_math_fibonacci(int arg_count, AngaraObject* args) {
 }
 
 AngaraObject Angara_math_is_prime(int arg_count, AngaraObject* args) {
+    if (arg_count < 1) { ang_api->throw_error("math.is_prime: expected 1 argument"); return ang_nil(); }
     int64_t n = ang_as_i64(args[0]);
     if (n < 2) return ang_bool(false);
     if (n < 4) return ang_bool(true);
