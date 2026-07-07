@@ -73,7 +73,7 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
 
                 // LANG-11: store parameter names and default expressions for methods.
                 {
-                    std::string default_key = class_type->name + "." + method_decl->name.lexeme;
+                    std::string default_key = qualifiedFunctionKey(class_type->name + "." + method_decl->name.lexeme);
                     std::vector<std::string> names;
                     names.reserve(method_decl->params.size());
                     for (const auto& p : method_decl->params) names.push_back(p.name.lexeme);

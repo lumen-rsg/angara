@@ -29,7 +29,7 @@ namespace angara {
     }
 
     TypeChecker::TypeChecker(CompilerDriver& driver, ErrorHandler& errorHandler, const std::string& module_name)
-    : m_errorHandler(errorHandler), m_driver(driver) {
+    : m_errorHandler(errorHandler), m_driver(driver), m_module_name(module_name) {
         m_type_i8 = std::make_shared<PrimitiveType>("i8");
         m_type_i16 = std::make_shared<PrimitiveType>("i16");
         m_type_i32 = std::make_shared<PrimitiveType>("i32");

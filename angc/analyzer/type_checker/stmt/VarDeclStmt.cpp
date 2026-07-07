@@ -118,8 +118,8 @@ void TypeChecker::visit(std::shared_ptr<const VarDeclStmt> stmt) {
                 std::vector<std::string> names;
                 names.reserve(lambda->param_names.size());
                 for (const auto& pn : lambda->param_names) names.push_back(pn.lexeme);
-                m_function_param_names[stmt->name.lexeme] = std::move(names);
-                m_function_defaults[stmt->name.lexeme] = lambda->param_defaults;
+                m_function_param_names[qualifiedFunctionKey(stmt->name.lexeme)] = std::move(names);
+                m_function_defaults[qualifiedFunctionKey(stmt->name.lexeme)] = lambda->param_defaults;
             }
         }
 

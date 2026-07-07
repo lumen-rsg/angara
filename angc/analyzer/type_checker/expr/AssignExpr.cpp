@@ -137,8 +137,8 @@ namespace angara {
                     std::vector<std::string> names;
                     names.reserve(lambda->param_names.size());
                     for (const auto& pn : lambda->param_names) names.push_back(pn.lexeme);
-                    m_function_param_names[var_target->name.lexeme] = std::move(names);
-                    m_function_defaults[var_target->name.lexeme] = lambda->param_defaults;
+                    m_function_param_names[qualifiedFunctionKey(var_target->name.lexeme)] = std::move(names);
+                    m_function_defaults[qualifiedFunctionKey(var_target->name.lexeme)] = lambda->param_defaults;
                 }
             }
         }

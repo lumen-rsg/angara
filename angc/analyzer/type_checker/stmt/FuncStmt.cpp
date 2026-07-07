@@ -26,9 +26,9 @@ namespace angara {
 
         // LANG-11: store parameter names and default expressions.
         if (!stmt.is_foreign && !stmt.is_intrinsic) {
-            std::string default_key = stmt.name.lexeme;
+            std::string default_key = qualifiedFunctionKey(stmt.name.lexeme);
             if (stmt.has_this && m_current_class) {
-                default_key = m_current_class->name + "." + stmt.name.lexeme;
+                default_key = qualifiedFunctionKey(m_current_class->name + "." + stmt.name.lexeme);
             }
             // Store parameter names unconditionally.
             {
@@ -74,8 +74,8 @@ namespace angara {
                     }
                 }
             }
-            if (!bounds.empty()) m_function_bounds[stmt.name.lexeme] = std::move(bounds);
-            if (!tp_bounds.empty()) m_function_type_param_bounds[stmt.name.lexeme] = std::move(tp_bounds);
+            if (!bounds.empty()) m_function_bounds[qualifiedFunctionKey(stmt.name.lexeme)] = std::move(bounds);
+            if (!tp_bounds.empty()) m_function_type_param_bounds[qualifiedFunctionKey(stmt.name.lexeme)] = std::move(tp_bounds);
         }
 
         std::shared_ptr<Type> return_type = m_type_nil;
@@ -252,9 +252,9 @@ namespace angara {
 
         // LANG-11: validate default argument types.
         {
-            std::string default_key = stmt->name.lexeme;
+            std::string default_key = qualifiedFunctionKey(stmt->name.lexeme);
             if (stmt->has_this && m_current_class) {
-                default_key = m_current_class->name + "." + stmt->name.lexeme;
+                default_key = qualifiedFunctionKey(m_current_class->name + "." + stmt->name.lexeme);
             }
             auto def_it = m_function_defaults.find(default_key);
             if (def_it != m_function_defaults.end()) {

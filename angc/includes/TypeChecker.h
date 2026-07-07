@@ -169,6 +169,14 @@ namespace angara {
 
         // --- Type helpers ---
 
+        /// M9: Returns a module-qualified key for function-level maps to prevent
+        /// collisions between same-named functions in different modules.
+        /// Top-level: "module::func", Methods: "module::Class.method"
+        [[nodiscard]] std::string qualifiedFunctionKey(const std::string& base_name) const {
+            if (m_module_name.empty()) return base_name;
+            return m_module_name + "::" + base_name;
+        }
+
         /// Returns true if the type can be used in a boolean context.
         bool isTruthy(const std::shared_ptr<Type> &type);
 
@@ -296,6 +304,7 @@ namespace angara {
         std::shared_ptr<Type> m_type_exception;
         CompilerDriver& m_driver;
         std::shared_ptr<ModuleType> m_module_type;
+        std::string m_module_name;  // M9: stored for qualified function keys
         std::stack<std::shared_ptr<Type>> m_function_return_types;
         std::shared_ptr<ClassType> m_current_class = nullptr;
         std::map<const Symbol*, std::shared_ptr<Type>> m_narrowed_types;

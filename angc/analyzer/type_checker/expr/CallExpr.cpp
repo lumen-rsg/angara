@@ -102,6 +102,8 @@ namespace angara {
                     callee_key = ge->name.lexeme;
                 }
             }
+            // M9: qualify with module name to prevent cross-module collisions
+            if (!callee_key.empty()) callee_key = qualifiedFunctionKey(callee_key);
             const std::vector<std::shared_ptr<Expr>>* arg_exprs_ptr = nullptr;
             // LANG-11: check if any argument is actually named (has a label).
             bool has_named = false;
@@ -185,13 +187,15 @@ namespace angara {
                     // TypeChecker.cpp:457-462.
                     auto tp_bounds_it = m_function_type_param_bounds.find(callee_key);
                     if (tp_bounds_it == m_function_type_param_bounds.end()) {
-                        // For method calls (GetExpr), callee_key is "Class.method"
-                        // but the map is keyed by just the method name. Try the
-                        // suffix after the last dot as a fallback.
+                        // M9: Try module::method as fallback for method calls.
                         auto dot_pos = callee_key.rfind('.');
                         if (dot_pos != std::string::npos) {
+                            std::string module_prefix;
+                            auto sep = callee_key.find("::");
+                            if (sep != std::string::npos && sep < dot_pos)
+                                module_prefix = callee_key.substr(0, sep + 2);
                             tp_bounds_it = m_function_type_param_bounds.find(
-                                callee_key.substr(dot_pos + 1));
+                                module_prefix + callee_key.substr(dot_pos + 1));
                         }
                     }
                     if (tp_bounds_it != m_function_type_param_bounds.end()) {
@@ -214,7 +218,7 @@ namespace angara {
                 // works without monomorphization). m_function_bounds carries the
                 // resolved per-param bounds keyed by function name.
                 if (auto var = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
-                    auto fbit = m_function_bounds.find(var->name.lexeme);
+                    auto fbit = m_function_bounds.find(qualifiedFunctionKey(var->name.lexeme));
                     if (fbit != m_function_bounds.end()) {
                         std::vector<std::pair<size_t, std::shared_ptr<TraitType>>> boxed;
                         for (const auto& [pi, trait] : fbit->second) {
