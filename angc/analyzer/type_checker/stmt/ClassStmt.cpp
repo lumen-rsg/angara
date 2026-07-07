@@ -323,6 +323,11 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
             // underlying impl type does.
             auto to = std::dynamic_pointer_cast<TraitObjectType>(subject);
             return to && adoptsInterface(to->impl_type, iface);
+        } else if (subject->kind == TypeKind::GENERIC_INSTANCE) {
+            // H3: Unwrap generic instantiation (e.g., Box<MyDrawable>) and check
+            // the base type for interface adoption.
+            auto gi = std::dynamic_pointer_cast<GenericInstanceType>(subject);
+            return gi && adoptsInterface(gi->base_type, iface);
         }
         if (!cls) return false;
         for (auto cur = cls; cur; cur = cur->superclass) {
