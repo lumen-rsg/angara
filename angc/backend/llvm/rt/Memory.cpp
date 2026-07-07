@@ -14,7 +14,7 @@ namespace angara {
 // (or for scoped arena allocation) the user swaps the global allocator
 // pointer via __ang_allocator_set.
 //
-// This replaces the entire ChaperoneGC + MarkSweepGC runtime (~5000 lines).
+// This replaces the entire prior GC-based runtime (~5000 lines).
 // ============================================================================
 
 void RuntimeBuilder::generateMemoryManagement() {
@@ -27,7 +27,7 @@ void RuntimeBuilder::generateMemoryManagement() {
     // --- Thread-state TLS (used by thread setup codegen) ---
     m_g_thread_state_tls = new GlobalVariable(
         m_module, i8_ptr, false, GlobalValue::CommonLinkage,
-        ConstantPointerNull::get(i8_ptr), "__ang_gc_thread_state");
+        ConstantPointerNull::get(i8_ptr), "__ang_rt_thread_state");
     m_g_thread_state_tls->setThreadLocal(true);
 
     auto* malloc_fn  = m_module.getFunction("malloc");
@@ -104,13 +104,13 @@ void RuntimeBuilder::generateMemoryManagement() {
     }
 
     // ========================================================================
-    // __ang_gc_alloc(i64 size, i32 type) -> i8*
+    // __ang_rt_alloc(i64 size, i32 type) -> i8*
     // Routes through the Allocator vtable: load alloc fn, call it, init header.
     // ========================================================================
     {
-        auto* fn = createRuntimeFunc("__ang_gc_alloc",
+        auto* fn = createRuntimeFunc("__ang_rt_alloc",
             FunctionType::get(i8_ptr, {i64_ty, i32_ty}, false));
-        m_fn_gc_alloc = FunctionCallee(fn);
+        m_fn_rt_alloc = FunctionCallee(fn);
 
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<> b(entry);
@@ -125,16 +125,16 @@ void RuntimeBuilder::generateMemoryManagement() {
 
         // Init ObjHeader: type, meta (is_unique), next=null
         b.CreateStore(type_arg, b.CreateStructGEP(m_obj_header_type, mem, 0));
-        b.CreateStore(m_gc_initial_meta, b.CreateStructGEP(m_obj_header_type, mem, 1));
+        b.CreateStore(m_rt_initial_meta, b.CreateStructGEP(m_obj_header_type, mem, 1));
         b.CreateStore(ConstantPointerNull::get(i8_ptr),
                        b.CreateStructGEP(m_obj_header_type, mem, 2));
         b.CreateRet(mem);
     }
 
-    // --- __ang_gc_free(i8* obj, i64 size) -> void : routes through Allocator ---
-    // Used by `drop` (Stage 2) and __ang_gc_finalize.
+    // --- __ang_rt_free(i8* obj, i64 size) -> void : routes through Allocator ---
+    // Used by `drop` (Stage 2) and __ang_rt_finalize.
     {
-        auto* fn = createRuntimeFunc("__ang_gc_free",
+        auto* fn = createRuntimeFunc("__ang_rt_free",
             FunctionType::get(void_ty, {i8_ptr, i64_ty}, false));
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<> b(entry);
@@ -164,27 +164,27 @@ void RuntimeBuilder::generateMemoryManagement() {
         IRBuilder<>(entry).CreateRetVoid();
     };
 
-    // --- __ang_gc_read_barrier(i8*) -> i8* : identity ---
+    // --- __ang_rt_read_barrier(i8*) -> i8* : identity ---
     {
-        auto* fn = createRuntimeFunc("__ang_gc_read_barrier",
+        auto* fn = createRuntimeFunc("__ang_rt_read_barrier",
             FunctionType::get(i8_ptr, {i8_ptr}, false));
-        m_fn_gc_read_barrier = FunctionCallee(fn);
+        m_fn_rt_read_barrier = FunctionCallee(fn);
         IRBuilder<>(BasicBlock::Create(m_ctx, "entry", fn)).CreateRet(fn->arg_begin());
     }
 
     // --- Thread register/unregister: set/clear TLS ---
     {
-        auto* fn = createRuntimeFunc("__ang_gc_thread_register",
+        auto* fn = createRuntimeFunc("__ang_rt_thread_register",
             FunctionType::get(void_ty, {i8_ptr}, false));
-        m_fn_gc_thread_register = FunctionCallee(fn);
+        m_fn_rt_thread_register = FunctionCallee(fn);
         IRBuilder<> b(BasicBlock::Create(m_ctx, "entry", fn));
         b.CreateStore(fn->arg_begin(), m_g_thread_state_tls);
         b.CreateRetVoid();
     }
     {
-        auto* fn = createRuntimeFunc("__ang_gc_thread_unregister",
+        auto* fn = createRuntimeFunc("__ang_rt_thread_unregister",
             FunctionType::get(void_ty, {i8_ptr}, false));
-        m_fn_gc_thread_unregister = FunctionCallee(fn);
+        m_fn_rt_thread_unregister = FunctionCallee(fn);
         IRBuilder<> b(BasicBlock::Create(m_ctx, "entry", fn));
         b.CreateStore(ConstantPointerNull::get(i8_ptr), m_g_thread_state_tls);
         b.CreateRetVoid();
@@ -194,9 +194,9 @@ void RuntimeBuilder::generateMemoryManagement() {
     // String literals and other shared objects call this so the in-place
     // concat fast path never mutates a shared buffer.
     {
-        auto* fn = createRuntimeFunc("__ang_gc_clear_unique",
+        auto* fn = createRuntimeFunc("__ang_rt_clear_unique",
             FunctionType::get(void_ty, {m_angara_obj_type}, false));
-        m_fn_gc_clear_unique = FunctionCallee(fn);
+        m_fn_rt_clear_unique = FunctionCallee(fn);
 
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<> b(entry);
@@ -219,37 +219,37 @@ void RuntimeBuilder::generateMemoryManagement() {
     }
 
     // --- No-op stubs ---
-    stub_void("__ang_gc_collect",       m_fn_gc_collect);
-    stub_void("__ang_gc_safepoint",     m_fn_gc_safepoint);
-    stub_void("__ang_gc_pop_frame",     m_fn_gc_pop_frame);
-    stub_void("__ang_gc_print_stats",   m_fn_gc_print_stats);
-    stub_void_ptr("__ang_gc_push_frame", m_fn_gc_push_frame);
+    stub_void("__ang_rt_collect",       m_fn_rt_collect);
+    stub_void("__ang_rt_safepoint",     m_fn_rt_safepoint);
+    stub_void("__ang_rt_pop_frame",     m_fn_rt_pop_frame);
+    stub_void("__ang_rt_print_stats",   m_fn_rt_print_stats);
+    stub_void_ptr("__ang_rt_push_frame", m_fn_rt_push_frame);
 
     // pin/unpin take AngaraObject (not i8*)
     {
-        auto* fn = createRuntimeFunc("__ang_gc_pin",
+        auto* fn = createRuntimeFunc("__ang_rt_pin",
             FunctionType::get(void_ty, {m_angara_obj_type}, false));
-        m_fn_gc_pin = FunctionCallee(fn);
+        m_fn_rt_pin = FunctionCallee(fn);
         IRBuilder<>(BasicBlock::Create(m_ctx, "entry", fn)).CreateRetVoid();
     }
     {
-        auto* fn = createRuntimeFunc("__ang_gc_unpin",
+        auto* fn = createRuntimeFunc("__ang_rt_unpin",
             FunctionType::get(void_ty, {m_angara_obj_type}, false));
-        m_fn_gc_unpin = FunctionCallee(fn);
+        m_fn_rt_unpin = FunctionCallee(fn);
         IRBuilder<>(BasicBlock::Create(m_ctx, "entry", fn)).CreateRetVoid();
     }
 
     // ========================================================================
-    // __ang_gc_finalize(i8* obj) -> void
+    // __ang_rt_finalize(i8* obj) -> void
     // Recursively frees interior pointers of built-in heap types.
-    // Called before __ang_gc_free in cgDrop so that strdup'd chars buffers,
+    // Called before __ang_rt_free in cgDrop so that strdup'd chars buffers,
     // list element arrays, record entry arrays, etc. are freed rather than
-    // leaked.  The parent struct itself is freed by the subsequent __ang_gc_free.
+    // leaked.  The parent struct itself is freed by the subsequent __ang_rt_free.
     // ========================================================================
     {
-        auto* fn = createRuntimeFunc("__ang_gc_finalize",
+        auto* fn = createRuntimeFunc("__ang_rt_finalize",
             FunctionType::get(void_ty, {i8_ptr}, false));
-        m_fn_gc_finalize = FunctionCallee(fn);
+        m_fn_rt_finalize = FunctionCallee(fn);
 
         auto* obj_arg = fn->arg_begin();
 
@@ -445,9 +445,9 @@ void RuntimeBuilder::generateMemoryManagement() {
 
     // --- obj_size: return 0 (unused without compaction) ---
     {
-        auto* fn = createRuntimeFunc("__ang_gc_obj_size",
+        auto* fn = createRuntimeFunc("__ang_rt_obj_size",
             FunctionType::get(i64_ty, {i8_ptr}, false));
-        m_fn_gc_obj_size = FunctionCallee(fn);
+        m_fn_rt_obj_size = FunctionCallee(fn);
         IRBuilder<>(BasicBlock::Create(m_ctx, "entry", fn))
             .CreateRet(ConstantInt::get(i64_ty, 0));
     }

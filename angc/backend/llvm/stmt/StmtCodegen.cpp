@@ -354,7 +354,7 @@ void LLVMBackend::cgForIn(const ForInStmt& s) {
                              loop_exc_save);
         m_exc_loop_chain_saves.push_back(loop_exc_save);
     }
-    // Raw i64 counter — no GC root needed (never holds heap pointers)
+    // Raw i64 counter — no runtime root needed (never holds heap pointers)
     llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().getFirstInsertionPt());
     auto* ia = tmp.CreateAlloca(llvm::Type::getInt64Ty(*ctx), nullptr, "__fi");
     builder->CreateStore(llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),0), ia);
@@ -421,7 +421,7 @@ void LLVMBackend::cgReturn(const ReturnStmt& s) {
         if (m_async_suspend_bb) {
             builder->CreateBr(m_async_suspend_bb);
         } else {
-            if (m_exc_chain_save) emitGcPopFrame();
+            if (m_exc_chain_save) emitRtPopFrame();
             builder->CreateRetVoid();
         }
         return;
@@ -438,15 +438,15 @@ void LLVMBackend::cgReturn(const ReturnStmt& s) {
         // Raw-signature function: unbox the return value
         auto* result = s.value ? cg(s.value) : makeNil();
         auto* raw = unboxToRaw(result, *m_current_raw_return_kind);
-        if (m_exc_chain_save) emitGcPopFrame();
+        if (m_exc_chain_save) emitRtPopFrame();
         builder->CreateRet(raw);
     } else {
         // RT-3: if the return value is a bare call, signal cgCall to mark it as
         // a tail call (best-effort TCK_Tail; cgCall may promote to TCK_MustTail
-        // under the strict boxed+arity gate). The GC pop frame is a no-op today
+        // under the strict boxed+arity gate). The runtime pop frame is a no-op today
         // and must precede the call (not sit between call and ret) for the tail
         // marker to be meaningful.
-        if (m_exc_chain_save) emitGcPopFrame();
+        if (m_exc_chain_save) emitRtPopFrame();
         bool is_tail = s.value && dynamic_cast<const CallExpr*>(s.value.get());
         if (is_tail) m_pending_tail = llvm::CallInst::TCK_Tail;
         auto* result = s.value ? cg(s.value) : makeNil();
@@ -578,8 +578,8 @@ void LLVMBackend::cgDrop(const DropStmt& s) {
                 auto* f_payload = builder->CreateExtractValue(f_val, {1});
                 auto* f_ptr_i64 = builder->CreateBitCast(f_payload, llvm::Type::getInt64Ty(*ctx));
                 auto* f_obj_ptr = builder->CreateIntToPtr(f_ptr_i64, llvm::PointerType::get(*ctx, 0));
-                callRtByName("__ang_gc_finalize", {f_obj_ptr});
-                callRtByName("__ang_gc_free",
+                callRtByName("__ang_rt_finalize", {f_obj_ptr});
+                callRtByName("__ang_rt_free",
                     {f_obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
             };
 
@@ -613,8 +613,8 @@ void LLVMBackend::cgDrop(const DropStmt& s) {
         }
 
         // Finalize + free the field value itself.
-        callRtByName("__ang_gc_finalize", {obj_ptr});
-        callRtByName("__ang_gc_free",
+        callRtByName("__ang_rt_finalize", {obj_ptr});
+        callRtByName("__ang_rt_free",
             {obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
 
         builder->CreateBr(after_bb);
@@ -680,7 +680,7 @@ void LLVMBackend::cgDrop(const DropStmt& s) {
     // __ang_record_get and drop it before freeing the parent. Fields are emitted
     // at compile time based on the type declaration; ref<T> fields are NOT
     // cascaded (non-owning).  Built-in heap types (string, list, record, etc.)
-    // are included so their interior buffers are freed via __ang_gc_finalize.
+    // are included so their interior buffers are freed via __ang_rt_finalize.
     auto type_it = namedTypes.find(s.name.lexeme);
     if (type_it != namedTypes.end() && type_it->second) {
         auto& type = type_it->second;
@@ -691,8 +691,8 @@ void LLVMBackend::cgDrop(const DropStmt& s) {
             auto* f_payload = builder->CreateExtractValue(field_val, {1});
             auto* f_ptr_i64 = builder->CreateBitCast(f_payload, llvm::Type::getInt64Ty(*ctx));
             auto* f_obj_ptr = builder->CreateIntToPtr(f_ptr_i64, llvm::PointerType::get(*ctx, 0));
-            callRtByName("__ang_gc_finalize", {f_obj_ptr});
-            callRtByName("__ang_gc_free",
+            callRtByName("__ang_rt_finalize", {f_obj_ptr});
+            callRtByName("__ang_rt_free",
                 {f_obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
         };
 
@@ -728,8 +728,8 @@ void LLVMBackend::cgDrop(const DropStmt& s) {
     }
 
     // Finalize + free the parent.
-    callRtByName("__ang_gc_finalize", {obj_ptr});
-    callRtByName("__ang_gc_free",
+    callRtByName("__ang_rt_finalize", {obj_ptr});
+    callRtByName("__ang_rt_free",
         {obj_ptr, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)});
 
     builder->CreateBr(after_bb);

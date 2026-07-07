@@ -798,9 +798,9 @@ void RuntimeBuilder::generateDeepClone() {
 
         auto* str_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_string_type));
-        // BUG-6: route through __ang_gc_alloc so the clone is tracked/swept/
+        // BUG-6: route through __ang_rt_alloc so the clone is tracked/swept/
         // finalized (raw malloc leaked clones forever). gc_alloc inits the header.
-        auto* new_ptr = bs.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+        auto* new_ptr = bs.CreateCall(m_module.getFunction("__ang_rt_alloc"),
             {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "new_str");
         bs.CreateStore(len, bs.CreateStructGEP(m_string_type, new_ptr, 1));
         bs.CreateStore(len, bs.CreateStructGEP(m_string_type, new_ptr, 2));
@@ -820,8 +820,8 @@ void RuntimeBuilder::generateDeepClone() {
 
         auto* list_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_list_type));
-        // BUG-6: route through __ang_gc_alloc (see clone string).
-        auto* new_ptr = bl.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+        // BUG-6: route through __ang_rt_alloc (see clone string).
+        auto* new_ptr = bl.CreateCall(m_module.getFunction("__ang_rt_alloc"),
             {list_size, ConstantInt::get(i32_ty, OBJ_LIST)}, "new_list");
         // BUG-4: stored cap must match the allocation. The element buffer below
         // is sized count*elem_size; copying the source's cap left cap>count, so
@@ -879,8 +879,8 @@ void RuntimeBuilder::generateDeepClone() {
 
         auto* rec_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_record_type));
-        // BUG-6: route through __ang_gc_alloc (see clone string).
-        auto* new_ptr = br.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+        // BUG-6: route through __ang_rt_alloc (see clone string).
+        auto* new_ptr = br.CreateCall(m_module.getFunction("__ang_rt_alloc"),
             {rec_size, ConstantInt::get(i32_ty, OBJ_RECORD)}, "new_rec");
         br.CreateStore(count, br.CreateStructGEP(m_record_type, new_ptr, 1));
         br.CreateStore(cap, br.CreateStructGEP(m_record_type, new_ptr, 2));
@@ -938,7 +938,7 @@ void RuntimeBuilder::generateDeepClone() {
         bc.CreateCall(memcpy_fn, {new_ptr, bc.CreateBitCast(closure_ptr, i8_ptr), closure_size});
         // Reset refcount to 1
         auto* header = bc.CreateStructGEP(m_closure_type, new_ptr, 0);
-        bc.CreateStore(getGcInitialMeta(),
+        bc.CreateStore(getRtInitialMeta(),
             bc.CreateStructGEP(m_obj_header_type, header, 1));
         bc.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             bc.CreateStructGEP(m_obj_header_type, header, 2));
@@ -954,8 +954,8 @@ void RuntimeBuilder::generateDeepClone() {
 
         auto* bm_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_bound_method_type));
-        // BUG-6: route through __ang_gc_alloc (see clone string).
-        auto* new_ptr = bb.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+        // BUG-6: route through __ang_rt_alloc (see clone string).
+        auto* new_ptr = bb.CreateCall(m_module.getFunction("__ang_rt_alloc"),
             {bm_size, ConstantInt::get(i32_ty, OBJ_BOUND_METHOD)}, "new_bm");
 
         auto* clone_fn = m_module.getFunction("__ang_deep_clone");
@@ -975,8 +975,8 @@ void RuntimeBuilder::generateDeepClone() {
 
         auto* exc_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_exception_type));
-        // BUG-6: route through __ang_gc_alloc (see clone string).
-        auto* new_ptr = be.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+        // BUG-6: route through __ang_rt_alloc (see clone string).
+        auto* new_ptr = be.CreateCall(m_module.getFunction("__ang_rt_alloc"),
             {exc_size, ConstantInt::get(i32_ty, OBJ_EXCEPTION)}, "new_exc");
 
         auto* clone_fn = m_module.getFunction("__ang_deep_clone");
@@ -997,7 +997,7 @@ void RuntimeBuilder::generateDeepClone() {
         bn2.CreateCall(memcpy_fn, {new_ptr, bn2.CreateBitCast(ni_ptr, i8_ptr), ni_size});
         // Reset refcount to 1
         auto* header = bn2.CreateStructGEP(m_native_instance_type, new_ptr, 0);
-        bn2.CreateStore(getGcInitialMeta(),
+        bn2.CreateStore(getRtInitialMeta(),
             bn2.CreateStructGEP(m_obj_header_type, header, 1));
         bn2.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             bn2.CreateStructGEP(m_obj_header_type, header, 2));
@@ -1014,7 +1014,7 @@ void RuntimeBuilder::generateDeepClone() {
         auto* new_ptr = bt.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_thr");
         bt.CreateCall(memcpy_fn, {new_ptr, bt.CreateBitCast(thr_ptr, i8_ptr), thr_size});
         auto* header = bt.CreateStructGEP(m_thread_type, new_ptr, 0);
-        bt.CreateStore(getGcInitialMeta(),
+        bt.CreateStore(getRtInitialMeta(),
             bt.CreateStructGEP(m_obj_header_type, header, 1));
         bt.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             bt.CreateStructGEP(m_obj_header_type, header, 2));
@@ -1031,7 +1031,7 @@ void RuntimeBuilder::generateDeepClone() {
         auto* new_ptr = bm.CreateBitCast(mem, PointerType::get(m_ctx, 0), "new_mtx");
         bm.CreateCall(memcpy_fn, {new_ptr, bm.CreateBitCast(mtx_ptr, i8_ptr), mtx_size});
         auto* header = bm.CreateStructGEP(m_mutex_type, new_ptr, 0);
-        bm.CreateStore(getGcInitialMeta(),
+        bm.CreateStore(getRtInitialMeta(),
             bm.CreateStructGEP(m_obj_header_type, header, 1));
         bm.CreateStore(ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
             bm.CreateStructGEP(m_obj_header_type, header, 2));

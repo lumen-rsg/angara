@@ -182,7 +182,7 @@ namespace angara {
         void codegenForeignDataDecl(const DataStmt& stmt);
         void codegenEnumDecl(const EnumStmt& stmt);
 
-        /// Returns true if the function body contains any non-primitive values that need GC.
+        /// Returns true if the function body contains any non-primitive values that need runtime tracking.
         bool functionNeedsGC(const FuncStmt& stmt);
         bool exprNeedsGC(const std::shared_ptr<Expr>& expr);
         bool stmtNeedsGC(const std::shared_ptr<Stmt>& stmt);
@@ -259,7 +259,7 @@ namespace angara {
 
         /// Creates an alloca for an AngaraObject local variable at the function entry.
         llvm::AllocaInst* allocLocal(llvm::Function* fn, const std::string& name);
-        /// Type-aware overload: uses raw LLVM type for unboxable primitives, skips GC root.
+        /// Type-aware overload: uses raw LLVM type for unboxable primitives, skips runtime root.
         llvm::AllocaInst* allocLocal(llvm::Function* fn, const std::string& name,
                                       const std::shared_ptr<Type>& type);
         /// Loads a named variable from local scope or globals.
@@ -346,7 +346,7 @@ namespace angara {
         std::map<std::string, llvm::GlobalVariable*> m_string_literal_cache;
 
         // Centralized string-literal initialization function.  All per-literal
-        // init calls (string_from_c + gc_pin + gc_clear_unique) are emitted here
+        // init calls (string_from_c + rt_pin + rt_clear_unique) are emitted here
         // instead of in whichever function first references the literal during
         // compilation.  This avoids a load-before-init bug where a literal whose
         // init code lives in function B (compiled first) is loaded by function A
@@ -441,14 +441,14 @@ namespace angara {
 
         int m_lambda_counter = 0;
 
-        // GC root frame state
+        // Runtime root frame state
 
         // BUG-5: exception-frame leak. A `try` pushes a frame onto the global
         // exception chain; the pop (__ang_try_end) is only emitted on the
         // fall-through path, so a return/break/continue out of a try body leaves
         // a stale frame — a later throw longjmps into it (dead stack). We save
         // the chain pointer at function entry and restore it on every function
-        // exit (emitGcPopFrame), and save/restore per-loop for break/continue.
+        // exit (emitRtPopFrame), and save/restore per-loop for break/continue.
         llvm::Value* m_exc_chain_save = nullptr;          // function-entry chain
         std::vector<llvm::Value*> m_exc_loop_chain_saves; // one per enclosing loop
 
@@ -474,10 +474,10 @@ namespace angara {
         // Populated in the LLVMBackend constructor.
         std::set<std::string> m_heap_types;
 
-        void emitGcPushFrame(llvm::Function* fn, int slot_count);
-        void emitGcPopFrame();
-        llvm::Value* emitGcThreadSetup();
-        void emitGcTeardown(llvm::Value* state_ptr);
+        void emitRtPushFrame(llvm::Function* fn, int slot_count);
+        void emitRtPopFrame();
+        llvm::Value* emitRtThreadSetup();
+        void emitRtTeardown(llvm::Value* state_ptr);
 
         std::string objPath;
         std::string irPath;

@@ -49,7 +49,7 @@ void RuntimeBuilder::generateStringOps() {
         auto* len = b.CreateCall(strlen_fn, {chars}, "len");
         auto* str_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_string_type));
-        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* gc_alloc_fn = m_module.getFunction("__ang_rt_alloc");
         auto* str_ptr = b.CreateCall(gc_alloc_fn,
             {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "str_mem");
 
@@ -70,7 +70,7 @@ void RuntimeBuilder::generateStringOps() {
         auto* len = b.CreateCall(strlen_fn, {chars}, "len");
         auto* str_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_string_type));
-        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* gc_alloc_fn = m_module.getFunction("__ang_rt_alloc");
         auto* str_ptr = b.CreateCall(gc_alloc_fn,
             {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "str_mem");
 
@@ -236,7 +236,7 @@ void RuntimeBuilder::generateStringOps() {
 
                 auto* str_size = ConstantInt::get(i64_ty,
                     m_module.getDataLayout().getTypeAllocSize(m_string_type));
-                auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+                auto* gc_alloc_fn = m_module.getFunction("__ang_rt_alloc");
                 auto* str_ptr = bc.CreateCall(gc_alloc_fn,
                     {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "str_mem");
 
@@ -325,7 +325,7 @@ void RuntimeBuilder::generateStringOps() {
 
             auto* str_size = ConstantInt::get(i64_ty,
                 m_module.getDataLayout().getTypeAllocSize(m_string_type));
-            auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+            auto* gc_alloc_fn = m_module.getFunction("__ang_rt_alloc");
             auto* new_str_ptr = bd.CreateCall(gc_alloc_fn,
                 {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "str_mem");
 

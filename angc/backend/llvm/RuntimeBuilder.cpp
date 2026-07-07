@@ -64,22 +64,22 @@ void RuntimeBuilder::generateTypes() {
         PointerType::get(m_ctx, 0)   // field 2: next (unused; was alloc-list/forward)
     }, "ObjHeader");
 
-    // GcRootFrame + GcThreadState — kept for codegen compatibility (push/pop are no-ops).
-    m_gc_root_frame_type = StructType::create(m_ctx, {
+    // RtRootFrame + RtThreadState — kept for codegen compatibility (push/pop are no-ops).
+    m_rt_root_frame_type = StructType::create(m_ctx, {
         PointerType::get(m_ctx, 0),  // prev_frame
         Type::getInt32Ty(m_ctx),     // count
         ArrayType::get(PointerType::get(m_ctx, 0), 1)  // slots (minimal)
-    }, "GcRootFrame");
+    }, "RtRootFrame");
 
-    m_gc_thread_state_type = StructType::create(m_ctx, {
+    m_rt_thread_state_type = StructType::create(m_ctx, {
         PointerType::get(m_ctx, 0),  // [0] self
         PointerType::get(m_ctx, 0),  // [1] next_thread
         PointerType::get(m_ctx, 0),  // [2] root_frames
         Type::getInt1Ty(m_ctx),      // [3] waiting
         PointerType::get(m_ctx, 0)   // [4] current_arena (unused)
-    }, "GcThreadState");
+    }, "RtThreadState");
 
-    m_gc_initial_meta = ConstantInt::get(Type::getInt32Ty(m_ctx), 0x100);  // is_unique bit
+    m_rt_initial_meta = ConstantInt::get(Type::getInt32Ty(m_ctx), 0x100);  // is_unique bit
 
     m_string_type = StructType::create(m_ctx, {
         m_obj_header_type,
@@ -119,7 +119,7 @@ void RuntimeBuilder::generateTypes() {
         Type::getInt32Ty(m_ctx),
         Type::getInt1Ty(m_ctx),
         PointerType::get(m_ctx, 0),   // env: pointer to captured variables array
-        Type::getInt32Ty(m_ctx)       // env_count: number of captured variables (for GC scanning)
+        Type::getInt32Ty(m_ctx)       // env_count: number of captured variables (for runtime scanning)
     }, "AngaraClosure");
 
     m_bound_method_type = StructType::create(m_ctx, {

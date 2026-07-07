@@ -34,7 +34,7 @@ void RuntimeBuilder::generateListOps() {
 
         auto* list_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_list_type));
-        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* gc_alloc_fn = m_module.getFunction("__ang_rt_alloc");
         auto* list_ptr = b.CreateCall(gc_alloc_fn,
             {list_size, ConstantInt::get(i32_ty, OBJ_LIST)}, "list_mem");
 
@@ -60,7 +60,7 @@ void RuntimeBuilder::generateListOps() {
 
         auto* list_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_list_type));
-        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* gc_alloc_fn = m_module.getFunction("__ang_rt_alloc");
         auto* list_ptr = b.CreateCall(gc_alloc_fn,
             {list_size, ConstantInt::get(i32_ty, OBJ_LIST)}, "list_mem");
 
@@ -453,7 +453,7 @@ void RuntimeBuilder::generateRawArrayOps() {
 
         auto* arr_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_raw_array_type));
-        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* gc_alloc_fn = m_module.getFunction("__ang_rt_alloc");
         auto* arr_ptr = b.CreateCall(gc_alloc_fn,
             {arr_size, ConstantInt::get(i32_ty, OBJ_RAW_ARRAY)}, "arr_mem");
 
@@ -585,7 +585,7 @@ void RuntimeBuilder::generateVectorOps() {
         auto* data_size = b.CreateMul(num_elements_64, elem_size_64, "data_size");
         auto* total_size = b.CreateAdd(header_size, data_size, "total_size");
 
-        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* gc_alloc_fn = m_module.getFunction("__ang_rt_alloc");
         auto* vec_ptr = b.CreateCall(gc_alloc_fn,
             {total_size, ConstantInt::get(i32_ty, OBJ_VECTOR)}, "vec_mem");
 
@@ -635,7 +635,7 @@ void RuntimeBuilder::generateRecordOps() {
 
         auto* rec_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_record_type));
-        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* gc_alloc_fn = m_module.getFunction("__ang_rt_alloc");
         auto* rec_ptr = b.CreateCall(gc_alloc_fn,
             {rec_size, ConstantInt::get(i32_ty, OBJ_RECORD)}, "rec_mem");
 

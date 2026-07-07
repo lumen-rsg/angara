@@ -52,7 +52,7 @@ public:
     RuntimeBuilder(llvm::LLVMContext& context, llvm::Module& module, llvm::IRBuilder<>& builder,
                    bool freestanding = false, unsigned jmp_buf_size = 1024);
 
-    /// Destructor — defined in RuntimeBuilder.cpp where GarbageCollector is complete.
+    /// Destructor — defined in RuntimeBuilder.cpp where RuntimeBuilder is complete.
     ~RuntimeBuilder();
 
     /// Generates all runtime types, function declarations, and implementations.
@@ -159,27 +159,27 @@ public:
     /// Returns the AngaraNativeInstance struct type.
     llvm::StructType* getNativeInstanceType() const { return m_native_instance_type; }
 
-    // --- Memory management (no GC — direct malloc/free via the allocator) ---
+    // --- Memory management (direct malloc/free via the allocator) ---
 
-    llvm::FunctionCallee getAllocFunc()           const { return m_fn_gc_alloc; }
-    llvm::FunctionCallee getStoreTrackFunc()      const { return m_fn_gc_clear_unique; }
-    llvm::FunctionCallee getPushFrameFunc()       const { return m_fn_gc_push_frame; }
-    llvm::FunctionCallee getPopFrameFunc()        const { return m_fn_gc_pop_frame; }
-    llvm::FunctionCallee getThreadRegisterFunc()  const { return m_fn_gc_thread_register; }
-    llvm::FunctionCallee getThreadUnregisterFunc() const { return m_fn_gc_thread_unregister; }
-    llvm::FunctionCallee getGcPinFunc()           const { return m_fn_gc_pin; }
-    llvm::FunctionCallee getGcUnpinFunc()         const { return m_fn_gc_unpin; }
-    llvm::FunctionCallee getGcPrintStatsFunc()    const { return m_fn_gc_print_stats; }
-    llvm::FunctionCallee getReadBarrierFunc()     const { return m_fn_gc_read_barrier; }
+    llvm::FunctionCallee getAllocFunc()           const { return m_fn_rt_alloc; }
+    llvm::FunctionCallee getStoreTrackFunc()      const { return m_fn_rt_clear_unique; }
+    llvm::FunctionCallee getPushFrameFunc()       const { return m_fn_rt_push_frame; }
+    llvm::FunctionCallee getPopFrameFunc()        const { return m_fn_rt_pop_frame; }
+    llvm::FunctionCallee getThreadRegisterFunc()  const { return m_fn_rt_thread_register; }
+    llvm::FunctionCallee getThreadUnregisterFunc() const { return m_fn_rt_thread_unregister; }
+    llvm::FunctionCallee getRtPinFunc()           const { return m_fn_rt_pin; }
+    llvm::FunctionCallee getRtUnpinFunc()         const { return m_fn_rt_unpin; }
+    llvm::FunctionCallee getRtPrintStatsFunc()    const { return m_fn_rt_print_stats; }
+    llvm::FunctionCallee getReadBarrierFunc()     const { return m_fn_rt_read_barrier; }
 
     unsigned headerTypeIndex() const { return 0; }
     unsigned headerMetaIndex() const { return 1; }
     int      headerNextIndex() const { return 2; }
 
-    llvm::StructType*   getGcRootFrameType()   const { return m_gc_root_frame_type; }
-    llvm::StructType*   getGcThreadStateType()  const { return m_gc_thread_state_type; }
-    llvm::GlobalVariable* getGcThreadStateTLS() const { return m_g_thread_state_tls; }
-    llvm::ConstantInt*  getGcInitialMeta()      const { return m_gc_initial_meta; }
+    llvm::StructType*   getRtRootFrameType()   const { return m_rt_root_frame_type; }
+    llvm::StructType*   getRtThreadStateType()  const { return m_rt_thread_state_type; }
+    llvm::GlobalVariable* getRtThreadStateTLS() const { return m_g_thread_state_tls; }
+    llvm::ConstantInt*  getRtInitialMeta()      const { return m_rt_initial_meta; }
 
 private:
     /// Creates all LLVM struct types for the runtime object model.
@@ -188,7 +188,7 @@ private:
     /// Declares external libc functions (malloc, free, printf, pthreads, etc.).
     void declareCLibFunctions();
 
-    /// Generates memory management via the active GC strategy.
+    /// Generates memory management via the active allocator.
     void generateMemoryManagement();
     /// Generates string allocation, concatenation, repetition, and to_string.
     void generateStringOps();
@@ -316,30 +316,30 @@ private:
 
     llvm::GlobalVariable* m_api_vtable = nullptr;
 
-    // --- No-GC runtime types, globals, and callees ---
-    llvm::StructType*     m_gc_root_frame_type    = nullptr;
-    llvm::StructType*     m_gc_thread_state_type   = nullptr;
+    // --- Runtime memory management types, globals, and callees ---
+    llvm::StructType*     m_rt_root_frame_type    = nullptr;
+    llvm::StructType*     m_rt_thread_state_type   = nullptr;
     llvm::GlobalVariable* m_g_thread_state_tls     = nullptr;
-    llvm::ConstantInt*    m_gc_initial_meta        = nullptr;
+    llvm::ConstantInt*    m_rt_initial_meta        = nullptr;
 
     // Unified Allocator (vtable: alloc/realloc/free)
     llvm::StructType*     m_allocator_type          = nullptr;
     llvm::GlobalVariable* m_g_allocator             = nullptr;
 
-    llvm::FunctionCallee m_fn_gc_alloc;
-    llvm::FunctionCallee m_fn_gc_clear_unique;
-    llvm::FunctionCallee m_fn_gc_push_frame;
-    llvm::FunctionCallee m_fn_gc_pop_frame;
-    llvm::FunctionCallee m_fn_gc_thread_register;
-    llvm::FunctionCallee m_fn_gc_thread_unregister;
-    llvm::FunctionCallee m_fn_gc_pin;
-    llvm::FunctionCallee m_fn_gc_unpin;
-    llvm::FunctionCallee m_fn_gc_print_stats;
-    llvm::FunctionCallee m_fn_gc_read_barrier;
-    llvm::FunctionCallee m_fn_gc_collect;
-    llvm::FunctionCallee m_fn_gc_finalize;
-    llvm::FunctionCallee m_fn_gc_obj_size;
-    llvm::FunctionCallee m_fn_gc_safepoint;
+    llvm::FunctionCallee m_fn_rt_alloc;
+    llvm::FunctionCallee m_fn_rt_clear_unique;
+    llvm::FunctionCallee m_fn_rt_push_frame;
+    llvm::FunctionCallee m_fn_rt_pop_frame;
+    llvm::FunctionCallee m_fn_rt_thread_register;
+    llvm::FunctionCallee m_fn_rt_thread_unregister;
+    llvm::FunctionCallee m_fn_rt_pin;
+    llvm::FunctionCallee m_fn_rt_unpin;
+    llvm::FunctionCallee m_fn_rt_print_stats;
+    llvm::FunctionCallee m_fn_rt_read_barrier;
+    llvm::FunctionCallee m_fn_rt_collect;
+    llvm::FunctionCallee m_fn_rt_finalize;
+    llvm::FunctionCallee m_fn_rt_obj_size;
+    llvm::FunctionCallee m_fn_rt_safepoint;
 
     bool m_freestanding = false;
     unsigned m_jmp_buf_size = 1024;   ///< Safe minimum jmp_buf size for the target (see LLVMBackend::getJmpBufSize)

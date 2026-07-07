@@ -651,7 +651,7 @@ void Chaperone::analyzeStmt(Context& ctx,
             }
             if (is_heap_var) {
                 // Register and drop it — the codegen will emit finalize+free
-                // which cleans up interior buffers via __ang_gc_finalize.
+                // which cleans up interior buffers via __ang_rt_finalize.
                 state[key] = State::Dropped;
             } else {
                 diag(ctx, *diag_tok,

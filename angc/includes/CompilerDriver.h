@@ -107,7 +107,7 @@ namespace angara {
         /// Sets the diagnostic output format.
         void set_error_format(const std::string& fmt) { m_error_format = fmt; }
 
-        /// Sets the GC strategy ("chaperone" or "mark-sweep").
+        /// Sets the memory management strategy (v5 uses chaperone allocator).
 
         /// Compiles a root source file and all its transitive imports.
         /// Runs the full pipeline: discover → compile modules in dependency order.

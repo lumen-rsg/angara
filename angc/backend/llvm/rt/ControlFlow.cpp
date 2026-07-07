@@ -39,10 +39,10 @@ void RuntimeBuilder::generateClosureOps() {
 
         auto* closure_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_closure_type));
-        // BUG-6: route through __ang_gc_alloc so the closure is linked into the
-        // GC alloc list (tracked/swept/finalized) -- raw malloc leaked forever
+        // BUG-6: route through __ang_rt_alloc so the closure is linked into the
+        // RT alloc list (tracked/swept/finalized) -- raw malloc leaked forever
         // and the native finalizer never ran. gc_alloc inits the ObjHeader.
-        auto* closure_ptr = b.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+        auto* closure_ptr = b.CreateCall(m_module.getFunction("__ang_rt_alloc"),
             {closure_size, ConstantInt::get(i32_ty, OBJ_CLOSURE)}, "closure_mem");
 
         b.CreateStore(fn_arg, b.CreateStructGEP(m_closure_type, closure_ptr, 1));
@@ -139,8 +139,8 @@ void RuntimeBuilder::generateClosureOps() {
 
         auto* bm_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_bound_method_type));
-        // BUG-6: route through __ang_gc_alloc (see __ang_closure_new).
-        auto* bm_ptr = b.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+        // BUG-6: route through __ang_rt_alloc (see __ang_closure_new).
+        auto* bm_ptr = b.CreateCall(m_module.getFunction("__ang_rt_alloc"),
             {bm_size, ConstantInt::get(i32_ty, OBJ_BOUND_METHOD)}, "bm_mem");
 
         b.CreateStore(recv_arg, b.CreateStructGEP(m_bound_method_type, bm_ptr, 1));
@@ -166,7 +166,7 @@ void RuntimeBuilder::generateClosureOps() {
 
         auto* to_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_trait_object_type));
-        auto* to_ptr = b.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+        auto* to_ptr = b.CreateCall(m_module.getFunction("__ang_rt_alloc"),
             {to_size, ConstantInt::get(i32_ty, OBJ_TRAIT_OBJECT)}, "to_mem");
 
         b.CreateStore(recv_arg, b.CreateStructGEP(m_trait_object_type, to_ptr, 1));
@@ -206,8 +206,8 @@ void RuntimeBuilder::generateExceptionOps() {
 
         auto* exc_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_exception_type));
-        // BUG-6: route through __ang_gc_alloc (see __ang_closure_new).
-        auto* exc_ptr = b.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+        // BUG-6: route through __ang_rt_alloc (see __ang_closure_new).
+        auto* exc_ptr = b.CreateCall(m_module.getFunction("__ang_rt_alloc"),
             {exc_size, ConstantInt::get(i32_ty, OBJ_EXCEPTION)}, "exc_mem");
 
         b.CreateStore(msg, b.CreateStructGEP(m_exception_type, exc_ptr, 1));
@@ -368,17 +368,17 @@ void RuntimeBuilder::generateThreadOps() {
         IRBuilder<> b(entry);
         auto* arg = trampoline->arg_begin();
 
-        // GC: register this thread
-        auto* gc_state_type = m_gc_thread_state_type;
+        // RT: register this thread
+        auto* rt_state_type = m_rt_thread_state_type;
         auto& dl = m_module.getDataLayout();
-        uint64_t state_size_val = dl.getTypeAllocSize(gc_state_type);
+        uint64_t state_size_val = dl.getTypeAllocSize(rt_state_type);
         auto* state_size = ConstantInt::get(i64_ty, state_size_val);
-        auto* state_mem = b.CreateCall(malloc_fn, {state_size}, "gc_state_mem");
-        auto* gc_state = b.CreateBitCast(state_mem, ptr_ty, "gc_state");
+        auto* state_mem = b.CreateCall(malloc_fn, {state_size}, "rt_state_mem");
+        auto* rt_state = b.CreateBitCast(state_mem, ptr_ty, "rt_state");
         auto* memset_fn = m_module.getFunction("memset");
-        b.CreateCall(memset_fn, {gc_state, ConstantInt::get(i32_ty, 0), state_size});
-        auto* register_fn = m_module.getFunction("__ang_gc_thread_register");
-        b.CreateCall(register_fn, {gc_state});
+        b.CreateCall(memset_fn, {rt_state, ConstantInt::get(i32_ty, 0), state_size});
+        auto* register_fn = m_module.getFunction("__ang_rt_thread_register");
+        b.CreateCall(register_fn, {rt_state});
 
         auto* closure = b.CreateLoad(obj_ty, b.CreateStructGEP(m_thread_type, arg, 2), "closure");
         auto* argc = b.CreateLoad(i32_ty, b.CreateStructGEP(m_thread_type, arg, 3), "argc");
@@ -395,10 +395,10 @@ void RuntimeBuilder::generateThreadOps() {
         bf.CreateCall(free_fn, {args});
         bf.CreateBr(done_bb);
         IRBuilder<> bd(done_bb);
-        // GC: unregister and free state
-        auto* unregister_fn = m_module.getFunction("__ang_gc_thread_unregister");
-        bd.CreateCall(unregister_fn, {gc_state});
-        bd.CreateCall(free_fn, {gc_state});
+        // RT: unregister and free state
+        auto* unregister_fn = m_module.getFunction("__ang_rt_thread_unregister");
+        bd.CreateCall(unregister_fn, {rt_state});
+        bd.CreateCall(free_fn, {rt_state});
         bd.CreateRet(ConstantPointerNull::get(ptr_ty));
     }
 
@@ -419,7 +419,7 @@ void RuntimeBuilder::generateThreadOps() {
         auto* type_addr = b.CreateStructGEP(m_obj_header_type, header, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_THREAD), type_addr);
         auto* meta_addr = b.CreateStructGEP(m_obj_header_type, header, 1);
-        b.CreateStore(getGcInitialMeta(), meta_addr);
+        b.CreateStore(getRtInitialMeta(), meta_addr);
         auto* next_addr = b.CreateStructGEP(m_obj_header_type, header, 2);
         b.CreateStore(ConstantPointerNull::get(ptr_ty), next_addr);
 
@@ -485,7 +485,7 @@ void RuntimeBuilder::generateThreadOps() {
         auto* type_addr = b.CreateStructGEP(m_obj_header_type, header, 0);
         b.CreateStore(ConstantInt::get(i32_ty, OBJ_MUTEX), type_addr);
         auto* meta_addr = b.CreateStructGEP(m_obj_header_type, header, 1);
-        b.CreateStore(getGcInitialMeta(), meta_addr);
+        b.CreateStore(getRtInitialMeta(), meta_addr);
         auto* next_addr = b.CreateStructGEP(m_obj_header_type, header, 2);
         b.CreateStore(ConstantPointerNull::get(ptr_ty), next_addr);
 

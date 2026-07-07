@@ -45,8 +45,8 @@ void RuntimeBuilder::generateModuleAPIVTable() {
     auto* fn_record_set   = m_module.getFunction("__ang_record_set");
     auto* fn_list_new     = m_module.getFunction("__ang_list_new");
     auto* fn_list_push    = m_module.getFunction("__ang_list_push");
-    auto* fn_pin         = m_module.getFunction("__ang_gc_pin");
-    auto* fn_unpin       = m_module.getFunction("__ang_gc_unpin");
+    auto* fn_pin         = m_module.getFunction("__ang_rt_pin");
+    auto* fn_unpin       = m_module.getFunction("__ang_rt_unpin");
     auto* fn_to_string    = m_module.getFunction("__ang_to_string");
 
     Function* fn_as_cstr;
@@ -192,10 +192,10 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         // allocator) instead of a hardcoded 40 — fragile if the struct grows.
         auto* size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_native_instance_type));
-        // BUG-6: route through __ang_gc_alloc so native instances are GC-tracked
+        // BUG-6: route through __ang_rt_alloc so native instances are runtime-tracked
         // -- swept and finalized, so the native finalize callback (sqlite3_close,
         // fd close, ...) actually runs instead of leaking forever.
-        auto* inst = b.CreateCall(m_module.getFunction("__ang_gc_alloc"),
+        auto* inst = b.CreateCall(m_module.getFunction("__ang_rt_alloc"),
             {size, ConstantInt::get(i32_ty, OBJ_NATIVE_INSTANCE)}, "ni_mem");
 
         b.CreateStore(data_arg, b.CreateStructGEP(m_native_instance_type, inst, 1));
@@ -320,16 +320,16 @@ void RuntimeBuilder::generateModuleAPIVTable() {
         b.CreateCall(memcpy_fn, {buf, src, len});
         b.CreateStore(ConstantInt::get(i8_ty, 0), b.CreateGEP(i8_ty, buf, {len}));
 
-        // Allocate the String struct through the GC so it is tracked
-        // (linked into the allocation list, walked by mark/sweep, freed
-        // by the runtime rather than by raw free()).  __ang_gc_alloc
+        // Allocate the String struct through the runtime allocator so it is tracked
+        // (linked into the allocation list, freed
+        // by the runtime rather than by raw free()).  __ang_rt_alloc
         // initializes the ObjHeader (type, meta, forward/next); we only
         // set the string-specific fields below.  Using getTypeAllocSize
         // also fixes a latent under-allocation: AngaraString is 40 bytes,
         // not the 32 that was hardcoded here previously.
         auto* str_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_string_type));
-        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* gc_alloc_fn = m_module.getFunction("__ang_rt_alloc");
         auto* str_ptr = b.CreateCall(gc_alloc_fn,
             {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "str_mem");
 
@@ -351,10 +351,10 @@ void RuntimeBuilder::generateModuleAPIVTable() {
 
         // Adopt the caller's buffer without copying.  The runtime takes
         // ownership and will free(buffer) when the string is collected.
-        // Same GC-allocation rationale as fn_string_len above.
+        // Same runtime-allocation rationale as fn_string_len above.
         auto* str_size = ConstantInt::get(i64_ty,
             m_module.getDataLayout().getTypeAllocSize(m_string_type));
-        auto* gc_alloc_fn = m_module.getFunction("__ang_gc_alloc");
+        auto* gc_alloc_fn = m_module.getFunction("__ang_rt_alloc");
         auto* str_ptr = b.CreateCall(gc_alloc_fn,
             {str_size, ConstantInt::get(i32_ty, OBJ_STRING)}, "str_mem");
 

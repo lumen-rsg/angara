@@ -1,5 +1,5 @@
-// C benchmark: GC stress equivalent — short-lived structs, string churn,
-// short-lived arrays, map churn. Uses malloc/free (no GC overhead).
+// C benchmark: Memory stress equivalent — short-lived structs, string churn,
+// short-lived arrays, map churn. Uses malloc/free directly.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

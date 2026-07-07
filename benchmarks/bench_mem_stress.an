@@ -1,5 +1,5 @@
-// Benchmark: GC stress — short-lived objects, string churn, list churn
-// Forces many GC collections through rapid allocation and release of heap objects.
+// Benchmark: Memory stress — short-lived objects, string churn, list churn
+// Tests allocator throughput through rapid allocation and release of heap objects.
 attach io;
 
 data Pair {

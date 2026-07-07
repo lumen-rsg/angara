@@ -286,7 +286,7 @@ void LLVMBackend::createStrlitInitFn() {
 
 llvm::Value* LLVMBackend::makeStr(const std::string& s) {
     // Intern string literals: each unique literal is allocated once per module
-    // and reused across all references. Under GC, the global is a permanent root
+    // and reused across all references. Under the runtime, the global is a permanent root
     // so the string lives for the program's lifetime — no incref needed.
     auto it = m_string_literal_cache.find(s);
     if (it != m_string_literal_cache.end()) {
@@ -315,21 +315,21 @@ llvm::Value* LLVMBackend::makeStr(const std::string& s) {
     auto& init_entry = m_strlit_init_fn->getEntryBlock();
     builder->SetInsertPoint(&init_entry, init_entry.getFirstInsertionPt());
     auto* new_str = callRtByName("__ang_string_from_c", {gsptr});
-    // Pin the string literal so the GC never collects it.
+    // Pin the string literal so the runtime never collects it.
     // String literals are stored in globals, not root frames, so without
     // pinning they'd be invisible to the collector and freed as unreachable.
-    callRtByName("__ang_gc_pin", {new_str});
+    callRtByName("__ang_rt_pin", {new_str});
     // Clear is_unique so the __ang_string_concat in-place fast path never
     // fires on a shared global literal.  Without this, the first concat
     // that uses a literal as its left operand mutates the interned buffer
     // in place, corrupting every subsequent reference to that literal.
-    callRtByName("__ang_gc_clear_unique", {new_str});
+    callRtByName("__ang_rt_clear_unique", {new_str});
     builder->CreateStore(new_str, global);
     builder->restoreIP(savedIP);
 
     m_string_literal_cache[s] = global;
 
-    // Load from the global — no incref under GC
+    // Load from the global — no incref under the runtime
     auto* loaded = builder->CreateLoad(objType, global, "strlit");
     return loaded;
 }
@@ -368,12 +368,12 @@ llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string&
 llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string& name,
                                             const std::shared_ptr<Type>& type) {
     if (type && isUnboxableType(type)) {
-        // Raw primitive: allocate the native LLVM type, skip GC root registration
+        // Raw primitive: allocate the native LLVM type, skip runtime root registration
         auto kind = localKindForType(type);
         llvm::IRBuilder<> tmp(&fn->getEntryBlock(), fn->getEntryBlock().getFirstInsertionPt());
         return tmp.CreateAlloca(llvmTypeForLocalKind(kind), nullptr, name);
     }
-    // Boxed or unknown: use the original allocLocal (objType + GC root)
+    // Boxed or unknown: use the original allocLocal (objType + runtime root)
     return allocLocal(fn, name);
 }
 
@@ -434,7 +434,7 @@ void LLVMBackend::emitDbgDeclare(llvm::AllocaInst* alloca, const std::string& na
         builder->GetInsertBlock());
 }
 
-void LLVMBackend::emitGcPushFrame(llvm::Function* fn, int /*slot_count*/) {
+void LLVMBackend::emitRtPushFrame(llvm::Function* fn, int /*slot_count*/) {
     // v5: no GC frame. Only the BUG-5 exception-chain snapshot remains.
     if (auto* chain_gv = rt->getExceptionChain()) {
         auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
@@ -444,7 +444,7 @@ void LLVMBackend::emitGcPushFrame(llvm::Function* fn, int /*slot_count*/) {
     }
 }
 
-void LLVMBackend::emitGcPopFrame() {
+void LLVMBackend::emitRtPopFrame() {
     // v5: no GC frame pop. Only the BUG-5 exception-chain restore remains.
     if (m_exc_chain_save) {
         auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
@@ -453,27 +453,27 @@ void LLVMBackend::emitGcPopFrame() {
     }
 }
 
-llvm::Value* LLVMBackend::emitGcThreadSetup() {
-    auto* state_type = rt->getGcThreadStateType();
+llvm::Value* LLVMBackend::emitRtThreadSetup() {
+    auto* state_type = rt->getRtThreadStateType();
     auto& dl = mod->getDataLayout();
     uint64_t state_size_val = dl.getTypeAllocSize(state_type);
     auto* state_size = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), state_size_val);
 
-    // malloc a GcThreadState
+    // malloc a RtThreadState
     auto* state_raw = callRtByName("malloc", {state_size});
     auto* state_ptr = builder->CreateBitCast(state_raw, llvm::PointerType::get(*ctx, 0), "gc_state");
 
     // Zero-init
     callRtByName("memset", {state_ptr, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0), state_size});
 
-    // Register with GC
-    callRtByName("__ang_gc_thread_register", {state_ptr});
+    // Register with runtime
+    callRtByName("__ang_rt_thread_register", {state_ptr});
 
     return state_ptr;
 }
 
-void LLVMBackend::emitGcTeardown(llvm::Value* state_ptr) {
-    callRtByName("__ang_gc_thread_unregister", {state_ptr});
+void LLVMBackend::emitRtTeardown(llvm::Value* state_ptr) {
+    callRtByName("__ang_rt_thread_unregister", {state_ptr});
     callRtByName("free", {state_ptr});
 }
 

@@ -2982,14 +2982,14 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
         namedVals[pname] = alloca;
     }
 
-    emitGcPushFrame(lambda_fn, 256);
+    emitRtPushFrame(lambda_fn, 256);
 
     for (const auto& stmt : e.body) {
         cgStmt(stmt);
     }
 
     if (!builder->GetInsertBlock()->getTerminator()) {
-        if (m_exc_chain_save) emitGcPopFrame();
+        if (m_exc_chain_save) emitRtPopFrame();
         builder->CreateRet(makeNil());
     }
 

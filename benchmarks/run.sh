@@ -1,7 +1,7 @@
 #!/bin/bash
 # Angara vs C — Performance Benchmark Suite
 # Compiles and runs each benchmark multiple times, averages the results.
-# Tests: C (-O2), Angara/Chaperone (--release), Angara/MarkSweep (--release --gc mark-sweep)
+# Tests: C (-O2), Angara/Chaperone (--release)
 
 set -euo pipefail
 
@@ -32,7 +32,7 @@ BENCHMARKS=(
     "bench_sort"
     "bench_strings"
     "bench_dataclass"
-    "bench_gc_stress"
+    "bench_mem_stress"
 )
 
 # Friendly descriptions
@@ -45,7 +45,7 @@ DESC[bench_lists]="List Ops (1M items)"
 DESC[bench_sort]="Bubble Sort (20K)"
 DESC[bench_strings]="String Building (100K)"
 DESC[bench_dataclass]="Data Class Churn (500K)"
-DESC[bench_gc_stress]="GC Stress (trees+strings+lists)"
+DESC[bench_mem_stress]="Memory Stress (trees+strings+lists)"
 
 # ── Compile everything ──────────────────────────────────────────────────────
 
@@ -55,20 +55,11 @@ echo -e "${BOLD}╚════════════════════�
 echo ""
 echo -e "${CYAN}Compiling benchmarks...${NC}"
 
-# Compile Angara/Chaperone (default GC)
+# Compile Angara/Chaperone (default allocator)
 for bench in "${BENCHMARKS[@]}"; do
-    echo -e "  ${YELLOW}Angara/Chaperone${NC}: $bench"
-    "$ANGC" --release "$BENCH_DIR/${bench}.an" -o "$BUILD_DIR/${bench}_chaperone" 2>/dev/null || {
-        echo -e "  ${RED}FAILED to compile $bench.an (chaperone)${NC}"
-        exit 1
-    }
-done
-
-# Compile Angara/MarkSweep
-for bench in "${BENCHMARKS[@]}"; do
-    echo -e "  ${YELLOW}Angara/MarkSweep${NC}: $bench"
-    "$ANGC" --release --gc mark-sweep "$BENCH_DIR/${bench}.an" -o "$BUILD_DIR/${bench}_ms" 2>/dev/null || {
-        echo -e "  ${RED}FAILED to compile $bench.an (mark-sweep)${NC}"
+    echo -e "  ${YELLOW}Angara${NC}: $bench"
+    "$ANGC" --release "$BENCH_DIR/${bench}.an" -o "$BUILD_DIR/${bench}_angara" 2>/dev/null || {
+        echo -e "  ${RED}FAILED to compile $bench.an${NC}"
         exit 1
     }
 done
@@ -100,31 +91,22 @@ run_once() {
 # ── Table output ────────────────────────────────────────────────────────────
 
 # Header
-printf "${BOLD}%-30s │ %-11s │ %-11s │ %-11s │ %-9s │ %-9s${NC}\n" \
-    "Benchmark" "Chap. (s)" "MS (s)" "C -O2 (s)" "Chap/C" "MS/C"
-printf "%-30s─┼─%-11s─┼─%-11s─┼─%-11s─┼─%-9s─┼─%-9s\n" \
-    "──────────────────────────────" "───────────" "───────────" "───────────" "─────────" "─────────"
+printf "${BOLD}%-30s │ %-11s │ %-11s │ %-9s${NC}\n" \
+    "Benchmark" "Angara (s)" "C -O2 (s)" "Ratio"
+printf "%-30s─┼─%-11s─┼─%-11s─┼─%-9s\n" \
+    "──────────────────────────────" "───────────" "───────────" "─────────"
 
 for bench in "${BENCHMARKS[@]}"; do
-    chap_bin="$BUILD_DIR/${bench}_chaperone"
-    ms_bin="$BUILD_DIR/${bench}_ms"
+    angara_bin="$BUILD_DIR/${bench}_angara"
     c_bin="$BUILD_DIR/${bench}_c"
 
-    # Run Chaperone benchmark
-    chap_total=0
+    # Run Angara benchmark
+    angara_total=0
     for ((run=1; run<=RUNS; run++)); do
-        t=$(run_once "$chap_bin")
-        chap_total=$(echo "$chap_total + $t" | bc -l)
+        t=$(run_once "$angara_bin")
+        angara_total=$(echo "$angara_total + $t" | bc -l)
     done
-    chap_avg=$(echo "scale=4; $chap_total / $RUNS" | bc -l)
-
-    # Run MarkSweep benchmark
-    ms_total=0
-    for ((run=1; run<=RUNS; run++)); do
-        t=$(run_once "$ms_bin")
-        ms_total=$(echo "$ms_total + $t" | bc -l)
-    done
-    ms_avg=$(echo "scale=4; $ms_total / $RUNS" | bc -l)
+    angara_avg=$(echo "scale=4; $angara_total / $RUNS" | bc -l)
 
     # Run C benchmark
     c_total=0
@@ -134,9 +116,8 @@ for bench in "${BENCHMARKS[@]}"; do
     done
     c_avg=$(echo "scale=4; $c_total / $RUNS" | bc -l)
 
-    # Ratios
-    chap_ratio=$(echo "scale=2; $chap_avg / $c_avg" | bc -l)
-    ms_ratio=$(echo "scale=2; $ms_avg / $c_avg" | bc -l)
+    # Ratio
+    angara_ratio=$(echo "scale=2; $angara_avg / $c_avg" | bc -l)
 
     # Color helper
     color_for_ratio() {
@@ -151,11 +132,10 @@ for bench in "${BENCHMARKS[@]}"; do
         fi
     }
 
-    chap_color=$(color_for_ratio "$chap_ratio")
-    ms_color=$(color_for_ratio "$ms_ratio")
+    angara_color=$(color_for_ratio "$angara_ratio")
 
-    printf "%-30s │ %9.4fs  │ %9.4fs  │ %9.4fs  │ ${chap_color}%7.2fx${NC} │ ${ms_color}%7.2fx${NC}\n" \
-        "${DESC[$bench]}" "$chap_avg" "$ms_avg" "$c_avg" "$chap_ratio" "$ms_ratio"
+    printf "%-30s │ %9.4fs  │ %9.4fs  │ ${angara_color}%7.2fx${NC}\n" \
+        "${DESC[$bench]}" "$angara_avg" "$c_avg" "$angara_ratio"
 done
 
 echo ""
@@ -164,7 +144,6 @@ echo -e "  • Each benchmark was run ${RUNS} times; times are averages."
 echo -e "  • ${GREEN}Ratio <= 1x${NC} = matches/beats C"
 echo -e "  • ${YELLOW}Ratio 1-2x${NC}  = small overhead"
 echo -e "  • ${RED}Ratio > 2x${NC}  = significant overhead (worth investigating)"
-echo -e "  • ${DIM}Chap.${NC} = Chaperone GC (bump-arena), ${DIM}MS${NC} = Mark-Sweep GC"
 echo -e "  • All Angara builds use --release (O2), C uses clang -O2"
 echo -e "  • Results are wall-clock time on $(uname -s) $(uname -m)"
 echo ""

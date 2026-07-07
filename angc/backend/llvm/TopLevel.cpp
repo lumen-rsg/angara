@@ -242,19 +242,19 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     m_current_raw_return_kind = is_raw ? raw_info.return_kind : std::optional<LocalKind>{};
 
     // Reset per-function codegen state. m_exc_chain_save holds an LLVM Value
-    // (an alloca) from emitGcPushFrame; if a prior function set it and this one
-    // doesn't push a frame, a stale value would make emitGcPopFrame reference
+    // (an alloca) from emitRtPushFrame; if a prior function set it and this one
+    // doesn't push a frame, a stale value would make emitRtPopFrame reference
     // an instruction in another function → LLVM module-verify failure. Same for
     // the inlined-main members. Reset before the conditional push below.
     m_exc_chain_save = nullptr;
     m_inlined_main_ret_alloca = nullptr;
     m_inlined_main_cleanup_bb = nullptr;
 
-    // Only push GC frame if the function has heap-referencing values.
-    // Raw primitive-only functions (like fib) don't need GC at all.
+    // Only push runtime frame if the function has heap-referencing values.
+    // Raw primitive-only functions (like fib) don't need runtime tracking at all.
     bool needs_gc = !is_raw || functionNeedsGC(stmt);
     if (needs_gc) {
-        emitGcPushFrame(fn, 256);
+        emitRtPushFrame(fn, 256);
     }
 
     if (stmt.body) {
@@ -265,7 +265,7 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
     }
 
     if (!builder->GetInsertBlock()->getTerminator()) {
-        if (m_exc_chain_save) emitGcPopFrame();
+        if (m_exc_chain_save) emitRtPopFrame();
         if (is_raw) {
             auto* zero = llvm::ConstantInt::get(llvmTypeForLocalKind(raw_info.return_kind), 0);
             builder->CreateRet(zero);
@@ -693,7 +693,7 @@ void LLVMBackend::codegenAsyncResumeFunc(const FuncStmt& stmt, const std::string
     m_exc_chain_save = nullptr;
     m_inlined_main_ret_alloca = nullptr;
     m_inlined_main_cleanup_bb = nullptr;
-    emitGcPushFrame(resume_fn, 256);
+    emitRtPushFrame(resume_fn, 256);
 
     // Generate body — cgAwait will insert the check-branch-suspend and
     // jump to the next state block on resolved, or to suspend_bb on pending.
@@ -712,12 +712,12 @@ void LLVMBackend::codegenAsyncResumeFunc(const FuncStmt& stmt, const std::string
 
     // ---- Suspend block: just return (frame already wrapped by caller) ----
     builder->SetInsertPoint(suspend_bb);
-    if (m_exc_chain_save) emitGcPopFrame();
+    if (m_exc_chain_save) emitRtPopFrame();
     builder->CreateRetVoid();
 
     // ---- Done block: cascade waker if set, then return ----
     builder->SetInsertPoint(done_bb);
-    if (m_exc_chain_save) emitGcPopFrame();
+    if (m_exc_chain_save) emitRtPopFrame();
     // If waker_fn is set, call it to cascade wake the parent
     auto* wfn = builder->CreateLoad(ptr_ty, m_current_async_waker_fn_ptr, "wfn");
     auto* has_waker = builder->CreateIsNotNull(wfn);
@@ -849,7 +849,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
                 namedKinds[pname] = LocalKind::BOXED;
             }
 
-            emitGcPushFrame(fn, 256);
+            emitRtPushFrame(fn, 256);
 
             if (method_stmt->body) {
                 for (const auto& s : *method_stmt->body) {
@@ -859,7 +859,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
             }
 
             if (!builder->GetInsertBlock()->getTerminator()) {
-                if (m_exc_chain_save) emitGcPopFrame();
+                if (m_exc_chain_save) emitRtPopFrame();
                 builder->CreateRet(makeNil());
             }
 
@@ -909,7 +909,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
                     namedVals[pname] = alloca;
                     namedKinds[pname] = LocalKind::BOXED;
                 }
-                emitGcPushFrame(fn, 256);
+                emitRtPushFrame(fn, 256);
                 if (body->body) {
                     for (const auto& s : *body->body) {
                         if (builder->GetInsertBlock()->getTerminator()) break;
@@ -917,7 +917,7 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
                     }
                 }
                 if (!builder->GetInsertBlock()->getTerminator()) {
-                    if (m_exc_chain_save) emitGcPopFrame();
+                    if (m_exc_chain_save) emitRtPopFrame();
                     builder->CreateRet(makeNil());
                 }
                 namedVals = std::move(saved_values);
@@ -1482,11 +1482,11 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
     namedTypes.clear();
     namedKinds.clear();
 
-    // GC: register main thread and push root frame
+    // RT: register main thread and push root frame
     llvm::Value* gc_thread_state = nullptr;
     if (!m_freestanding) {
-        gc_thread_state = emitGcThreadSetup();
-        emitGcPushFrame(main_fn, 256);
+        gc_thread_state = emitRtThreadSetup();
+        emitRtPushFrame(main_fn, 256);
     }
 
     if (!m_freestanding) {
@@ -1626,9 +1626,9 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
                 builder->CreateBr(cleanup_bb);
             }
 
-            // Cleanup block: pop frame, teardown GC thread, branch to exit
+            // Cleanup block: pop frame, teardown runtime thread, branch to exit
             builder->SetInsertPoint(cleanup_bb);
-            if (m_exc_chain_save) emitGcPopFrame();
+            if (m_exc_chain_save) emitRtPopFrame();
             builder->CreateBr(exit_bb);
 
             // Exit block: load return value and return
@@ -1652,12 +1652,12 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
         builder->CreateBr(halt_bb);
     } else {
         if (gc_thread_state) {
-            // Print GC stats before teardown (debug builds only)
+            // Print runtime stats before teardown (debug builds only)
             if (m_debug) {
-                auto print_stats = rt->getGcPrintStatsFunc();
+                auto print_stats = rt->getRtPrintStatsFunc();
                 builder->CreateCall(print_stats);
             }
-            emitGcTeardown(gc_thread_state);
+            emitRtTeardown(gc_thread_state);
         }
         builder->CreateRet(exit_code);
     }
@@ -2015,7 +2015,7 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
     }
 }
 
-// --- GC necessity scanner ---
+// --- heap-allocation scanner ---
 
 bool LLVMBackend::functionNeedsGC(const FuncStmt& stmt) {
     if (!stmt.body) return false;
@@ -2032,7 +2032,7 @@ bool LLVMBackend::stmtNeedsGC(const std::shared_ptr<Stmt>& s) {
         // Check resolved type from type checker
         auto type_it = m_type_checker.getVariableTypes().find(p);
         if (type_it != m_type_checker.getVariableTypes().end()) {
-            if (!isUnboxableType(type_it->second)) return true; // boxed local needs GC
+            if (!isUnboxableType(type_it->second)) return true; // boxed local needs runtime tracking
         } else if (!p->typeAnnotation) {
             return true; // no type info → assume boxed
         }
@@ -2075,8 +2075,8 @@ bool LLVMBackend::stmtNeedsGC(const std::shared_ptr<Stmt>& s) {
         return exprNeedsGC(p->expression);
     }
     if (auto* p = dynamic_cast<const TryStmt*>(s.get())) {
-        // BUG-5: a try needs the enclosing function to carry a GC frame so the
-        // exception-chain save/restore in emitGcPushFrame/emitGcPopFrame runs —
+        // BUG-5: a try needs the enclosing function to carry a runtime frame so the
+        // exception-chain save/restore in emitRtPushFrame/emitRtPopFrame runs —
         // otherwise a return/break/continue out of the try leaks the frame.
         (void)p;
         return true;
