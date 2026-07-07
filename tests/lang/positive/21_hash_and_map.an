@@ -56,7 +56,9 @@ export func main() -> i64 {
     let nks as list<any> = [];
     let nvs as list<any> = [];
     let i = 0;
-    while (i < 20) { imap_put(nks, nvs, i, i * i); i = i + 1; }
+    @unsafe {
+        while (i < 20) { imap_put(nks, nvs, i, i * i); i = i + 1; }
+    }
     io.println(0, "7^2=" + string(imap_get(nks, nvs, 7)));   // 49
     io.println(0, "19^2=" + string(imap_get(nks, nvs, 19))); // 361
     return 0;

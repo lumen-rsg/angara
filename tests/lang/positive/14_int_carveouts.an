@@ -18,8 +18,10 @@ func main() -> i64 {
     }
     io.println(0, "truncated = " + string(truncated));
 
-    // 4. Explicit `as` cast for intentional narrowing.
-    let casted as u8 = 300 as u8;
+    // 4. Explicit `as` cast for intentional narrowing — requires @unsafe
+    //    since M10 (narrowing cast safety check).
+    let casted as u8;
+    @unsafe { casted = 300 as u8; }
     io.println(0, "casted = " + string(casted));
 
     io.println(0, "wide = " + string(wide));

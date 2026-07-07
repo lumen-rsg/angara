@@ -14,7 +14,7 @@ export func main() -> i64 {
     let fut = process_timer(timer);
     let result = loop.run_until(fut);
     io.println(1, "Timer result: " + string(result));
-    drop fut;
+    // fut ownership was transferred to run_until — no drop needed
     drop loop;
     return 0;  // success — result was 42
 }
