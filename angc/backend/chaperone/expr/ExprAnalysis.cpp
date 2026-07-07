@@ -7,6 +7,7 @@
 #include "ASTTypes.h"
 
 #include <functional>
+#include <optional>
 
 namespace angara {
 
@@ -878,25 +879,79 @@ void Chaperone::analyzeExpr(Context& ctx,
         return;
     }
 
-    // MatchExpr: walk the condition + all patterns + all case bodies + guards.
+    // MatchExpr: analyze each arm on its OWN snapshot of state, then merge.
+    // C1: previously every arm shared the same mutable `state`, so a
+    // drop/move/escape in arm 1 corrupted arm 2's view (false E502/E507 or,
+    // worse, a missed real error). This mirrors the IfStmt copy/join pattern
+    // (StmtAnalysis.cpp ~1027) but for a variable number of arms.
     if (auto* match = dynamic_cast<const MatchExpr*>(expr.get())) {
         analyzeExpr(ctx, match->condition, state);
+
+        // A pattern binding (e.g. `case Some(x)`) holds a payload that may be
+        // tracked. The payload's precise type isn't exposed to the Chaperone
+        // (it comes from enum-payload resolution in the type checker), so use
+        // the conservative-but-correct rule from isTrackedTypeObj's "bounded
+        // parametric" stance: if the matched condition is a tracked allocation,
+        // treat its payload bindings as tracked Live values (so ownership of
+        // them is enforced inside the arm and they don't leak past the match).
+        bool payloads_tracked = false;
+        auto cond_type_it = ctx.tc.getExpressionTypes().find(match->condition.get());
+        if (cond_type_it != ctx.tc.getExpressionTypes().end() && cond_type_it->second) {
+            payloads_tracked = isTrackedTypeObj(ctx, *cond_type_it->second);
+        }
+
+        // Fold each arm's post-state into `merged`. Start from the condition
+        // state (the value before any arm ran).
+        std::optional<StateMap> merged;
         for (const auto& cs : match->cases) {
+            StateMap arm_state = state;  // fresh copy per arm
+
+            // Register this arm's pattern bindings as arm-local Live values
+            // (scoped — removed/restored before merge so they never leak into
+            // the post-match state or pollute sibling arms).
+            std::set<std::string> arm_bindings;
+            if (payloads_tracked) {
+                for (const auto& var : cs.variables)
+                    arm_bindings.insert(var.lexeme);
+                for (const auto& pat : cs.patterns) {
+                    if (auto* np = dynamic_cast<const NestedPattern*>(pat.get())) {
+                        for (const auto& b : np->bindings)
+                            arm_bindings.insert(b.lexeme);
+                    }
+                }
+                for (const auto& name : arm_bindings)
+                    arm_state[name] = State::Live;
+            }
+
             for (const auto& pat : cs.patterns) {
                 // M3: recursively analyze NestedPattern subpatterns and bindings
                 // instead of skipping them entirely.
                 if (auto* np = dynamic_cast<const NestedPattern*>(pat.get())) {
-                    if (np->constructor) analyzeExpr(ctx, np->constructor, state);
+                    if (np->constructor) analyzeExpr(ctx, np->constructor, arm_state);
                     for (const auto& sp : np->subpatterns) {
-                        if (sp) analyzeExpr(ctx, sp, state);
+                        if (sp) analyzeExpr(ctx, sp, arm_state);
                     }
                 } else {
-                    analyzeExpr(ctx, pat, state);
+                    analyzeExpr(ctx, pat, arm_state);
                 }
             }
-            if (cs.guard) analyzeExpr(ctx, *cs.guard, state);
-            if (cs.body) analyzeExpr(ctx, cs.body, state);
+            if (cs.guard) analyzeExpr(ctx, *cs.guard, arm_state);
+            if (cs.body) analyzeExpr(ctx, cs.body, arm_state);
+
+            // Scope cleanup: remove arm-local bindings (or restore pre-arm
+            // value if they shadowed an outer variable), so they don't leak.
+            for (const auto& name : arm_bindings) {
+                auto pre_it = state.find(name);
+                if (pre_it != state.end())
+                    arm_state[name] = pre_it->second;
+                else
+                    arm_state.erase(name);
+            }
+
+            merged = merged ? join_maps(*merged, arm_state) : arm_state;
         }
+
+        if (merged) state = std::move(*merged);
         return;
     }
 
