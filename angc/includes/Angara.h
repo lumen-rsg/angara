@@ -30,6 +30,10 @@
 extern "C" {
 #endif
 
+// ABI version — incremented when the AngaraAPI vtable layout changes.
+// The compiler verifies this matches at native module load time.
+#define ANGARA_API_VERSION 1
+
 // =============================================================================
 // §1  Core Value Type (16 bytes — matches LLVM ABI)
 // =============================================================================
@@ -127,6 +131,7 @@ static inline double ang_as_f64(AngaraObject v) {
 typedef struct AngaraAPI AngaraAPI;
 
 struct AngaraAPI {
+    uint32_t api_version;  ///< ABI version — must be ANGARA_API_VERSION
 
     // --- String operations ---
     AngaraObject (*string)(const char* s);                  ///< Create string from C string (copies)
@@ -285,6 +290,18 @@ static const AngaraAPI* ang_api;
 /// \param name  The module name (must match the library filename, e.g. "io")
 #define ANGARA_MODULE_INIT(name) \
     const AngaraFuncDef* Angara_##name##_Init(int* def_count, const AngaraAPI* api)
+
+/// Verify ABI compatibility at module init time.  Call this at the top of every
+/// ANGARA_MODULE_INIT body.  If `api` is NULL (discovery-only call from the
+/// compiler), the check is skipped.  On version mismatch the module refuses to
+/// load by returning NULL.
+#define ANGARA_CHECK_API(api) do { \
+    if ((api) && (api)->api_version != ANGARA_API_VERSION) { \
+        fprintf(stderr, "[%s] ABI version mismatch: module v%d, runtime v%d\n", \
+                __func__, ANGARA_API_VERSION, (api)->api_version); \
+        return NULL; \
+    } \
+} while(0)
 
 /// Sentinel for the end of an AngaraFuncDef array.
 #define ANGARA_FUNC_END { NULL, NULL, NULL, NULL }
