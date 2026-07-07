@@ -109,16 +109,6 @@ void Chaperone::collectTrackedTypes(Context& ctx,
         if (is_sendable) ctx.sendable_types.insert(type_name);
         if (is_sync) ctx.syncable_types.insert(type_name);
     }
-
-    // Non-owned data types are implicitly Send and Sync.
-    for (const auto& stmt : program) {
-        if (auto* data = dynamic_cast<const DataStmt*>(stmt.get())) {
-            if (!data->is_owned) {
-                ctx.sendable_types.insert(data->name.lexeme);
-                ctx.syncable_types.insert(data->name.lexeme);
-            }
-        }
-    }
 }
 
 // ============================================================================
