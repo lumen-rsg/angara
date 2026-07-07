@@ -676,6 +676,17 @@ void LLVMBackend::cgDrop(const DropStmt& s) {
     // --- Not-nil path: extract heap pointer and perform the full drop ---
     builder->SetInsertPoint(notnil_bb);
 
+    // H10: Also verify the tag is TAG_OBJ before treating the payload as a
+    // heap pointer. Non-heap-allocated values (bare integers, floats, bools,
+    // etc.) can reach drop via generic code paths — their payload is data,
+    // not a pointer. Calling finalize/free on it would be UB.
+    auto* is_obj = builder->CreateICmpEQ(
+        tag, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_OBJ));
+    auto* obj_bb = llvm::BasicBlock::Create(*ctx, "drop_obj", fn);
+    builder->CreateCondBr(is_obj, obj_bb, nil_bb);
+
+    builder->SetInsertPoint(obj_bb);
+
     // Extract the heap pointer from the AngaraObject payload.
     auto* payload = builder->CreateExtractValue(val, {1});
     auto* ptr_i64 = builder->CreateBitCast(payload, llvm::Type::getInt64Ty(*ctx));
