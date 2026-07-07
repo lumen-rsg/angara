@@ -411,7 +411,7 @@ void RuntimeBuilder::generateThreadOps() {
         IRBuilder<> b(entry);
         auto* closure = fn->arg_begin();
 
-        auto* size = ConstantInt::get(i64_ty, 56);
+        auto* size = ConstantInt::get(i64_ty, m_module.getDataLayout().getTypeAllocSize(m_thread_type));
         auto* mem = b.CreateCall(malloc_fn, {size}, "mem");
         auto* thread_ptr = b.CreateBitCast(mem, ptr_ty, "thread_ptr");
 
