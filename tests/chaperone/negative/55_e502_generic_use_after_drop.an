@@ -1,0 +1,26 @@
+// Chaperone negative test — E502 (use-after-drop with generic type parameter, M13)
+// When a generic function drops a parameter of type T, the parameter
+// becomes Dropped. Subsequent use must be flagged as E502 (use-after-free).
+// Before M13, generic type parameters were invisible to the Chaperone
+// and this passed silently.
+//
+// expect: E502
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+// Generic drop: x is dropped, then x is used — error.
+func use_after_drop<T>(x as T) {
+    drop x;      // x becomes Dropped
+    let y = x;   // E502: use-after-free of x
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    use_after_drop(b);  // would be unsound at runtime
+    return 0;
+}

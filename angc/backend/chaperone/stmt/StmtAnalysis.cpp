@@ -67,19 +67,27 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
                 param_tracked[i] = true;
             }
         }
-    } else {
-        // Fallback: read each param's type annotation directly (methods).
-        // base_name unwaps optionals/owned, so optional tracked params register.
-        for (size_t i = 0; i < func.params.size(); i++) {
-            std::string tn = base_name(func.params[i].type.get());
-            if (!tn.empty() && ctx.tracked_types.count(tn)) {
-                state[func.params[i].name.lexeme] = State::Live;
-                param_names.insert(func.params[i].name.lexeme);
-                ctx.current_params.insert(func.params[i].name.lexeme);
-                param_tracked[i] = true;
-            }
-        }
-    }
+	} else {
+		// Fallback: read each param's type annotation directly (methods).
+		// base_name unwaps optionals/owned, so optional tracked params register.
+		//
+		// M13: also check if the param type matches a function type parameter
+		// (e.g., `val as T` in a generic method). Generic type params are
+		// always boxed at runtime, so conservatively treat them as tracked.
+		std::set<std::string> func_type_params;
+		for (const auto& tp : func.type_params)
+			func_type_params.insert(tp.lexeme);
+		for (size_t i = 0; i < func.params.size(); i++) {
+			std::string tn = base_name(func.params[i].type.get());
+			bool is_generic = !tn.empty() && func_type_params.count(tn) > 0;
+			if ((!tn.empty() && ctx.tracked_types.count(tn)) || is_generic) {
+				state[func.params[i].name.lexeme] = State::Live;
+				param_names.insert(func.params[i].name.lexeme);
+				ctx.current_params.insert(func.params[i].name.lexeme);
+				param_tracked[i] = true;
+			}
+		}
+	}
 
     // H5: interprocedural borrow propagation. When a function receives both a
     // ref<T> and a tracked T, the ref may point to the tracked param. Seed

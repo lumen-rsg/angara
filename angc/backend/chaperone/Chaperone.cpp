@@ -171,14 +171,27 @@ bool Chaperone::isTrackedTypeObj(Context& ctx, const Type& type) {
         if (!ot || !ot->wrapped_type) return false;
         t = ot->wrapped_type.get();
     }
-    if (t->kind == TypeKind::CLASS || t->kind == TypeKind::INSTANCE) return true;
-    if (t->kind == TypeKind::DATA) return ctx.tracked_types.count(t->toString()) > 0;
-    // Phase B: track built-in heap-allocated types (string, list, record, etc.)
-    // so the Chaperone can detect leaks.  Leak diagnostics for built-in types
-    // are emitted as W521 warnings (not E501 errors) to avoid breaking existing
-    // code; class / owned-data leaks remain hard errors.
-    if (isBuiltinHeapType(*t)) return true;
-    return false;
+	if (t->kind == TypeKind::CLASS || t->kind == TypeKind::INSTANCE) return true;
+	if (t->kind == TypeKind::DATA) return ctx.tracked_types.count(t->toString()) > 0;
+	// M13: Generic type parameters are always boxed at runtime (trait-object ABI),
+	// so they are conservatively treated as tracked. This is "bounded parametric
+	// analysis" — we assume the worst case (T is a tracked heap type) and enforce
+	// ownership rules accordingly. Since Angara does not monomorphize, this is
+	// both sound and necessary: every generic parameter IS boxed at runtime.
+	if (t->kind == TypeKind::TYPE_PARAM) return true;
+	// M13: Generic instances (e.g., Box<i64>) are tracked if their base type
+	// (e.g., Box) is tracked. Unwrap the GenericInstanceType and recurse.
+	if (t->kind == TypeKind::GENERIC_INSTANCE) {
+		auto* gi = dynamic_cast<const GenericInstanceType*>(t);
+		if (gi && gi->base_type) return isTrackedTypeObj(ctx, *gi->base_type);
+		return false;
+	}
+	// Phase B: track built-in heap-allocated types (string, list, record, etc.)
+	// so the Chaperone can detect leaks.  Leak diagnostics for built-in types
+	// are emitted as W521 warnings (not E501 errors) to avoid breaking existing
+	// code; class / owned-data leaks remain hard errors.
+	if (isBuiltinHeapType(*t)) return true;
+	return false;
 }
 
 bool Chaperone::isHeapAllocatedType(Context& ctx, const Type& type) {

@@ -1,0 +1,65 @@
+// Chaperone positive test — correct ownership with generic type parameters (M13)
+// Generic type parameters are conservatively treated as tracked by the Chaperone
+// (bounded parametric analysis). This test verifies that correct ownership
+// patterns — returning, dropping, and moving through locals — are accepted.
+//
+// exit: 80
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+// Generic identity: ownership is returned via the function result.
+func identity<T>(x as T) -> T {
+    return x;
+}
+
+// Generic consume: ownership is explicitly dropped.
+func consume<T>(x as T) {
+    drop x;
+}
+
+// Generic move-through-temporary: move param to local, then return local.
+// The parameter becomes Moved; the local is returned (Escaped). No leak.
+func move_and_return<T>(x as T) -> T {
+    let y = x;   // ownership moves from x to y
+    return y;    // y is returned (Escaped)
+}
+
+// Generic two-param: move one to a local, return the other.
+func choose_first<T>(a as T, b as T) -> T {
+    drop b;      // b is dropped
+    return a;    // a is returned (Escaped)
+}
+
+export func main() -> i64 {
+    // Test identity: ownership flows through return value.
+    let b1 = Buf(10);
+    let r1 = identity(b1);
+    let v1 = r1.get();
+
+    // Test consume: ownership destroyed.
+    let b2 = Buf(20);
+    consume(b2);
+
+    // Test move_and_return: move through local, then return.
+    let b3 = Buf(30);
+    let r3 = move_and_return(b3);
+    let v3 = r3.get();
+
+    // Test choose_first: drop one param, return the other.
+    let b4 = Buf(40);
+    let b5 = Buf(50);
+    let r4 = choose_first(b4, b5);
+    let v4 = r4.get();
+
+    // Clean up remaining tracked locals.
+    drop r1;
+    drop r3;
+    drop r4;
+
+    return v1 + v3 + v4;  // 10 + 30 + 40 = 80
+}
