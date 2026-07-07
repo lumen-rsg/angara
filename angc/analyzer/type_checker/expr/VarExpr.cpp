@@ -17,7 +17,7 @@ namespace angara {
 
             pushAndSave(&expr, m_type_error);
         } else {
-            m_variable_resolutions[&expr] = m_symbols.resolve(expr.name.lexeme);
+            m_variable_resolutions[&expr] = symbol;
             pushAndSave(&expr, symbol->type);
         }
         return {};
