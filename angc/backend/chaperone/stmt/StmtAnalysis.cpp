@@ -1171,8 +1171,8 @@ void Chaperone::analyzeStmt(Context& ctx,
             if (st == State::Live) {
                 // Check if it's still Live after the try body (not dropped inside).
                 auto t_it = try_state.find(name);
-                if (t_it != try_state.end() && t_it->second == State::Dropped)
-                    catch_state[name] = State::Dropped;
+                if (t_it != try_state.end() && t_it->second != State::Live)
+                    catch_state[name] = t_it->second;
             }
         }
 
