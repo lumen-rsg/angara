@@ -705,8 +705,22 @@ void Chaperone::analyzeExpr(Context& ctx,
                     }
                 }
             }
+        } else {
+            // C2: Unknown function (no summary, no @consumes/@escape annotations).
+            // Conservatively mark all tracked Live arguments as Escaped — an
+            // unknown callee (e.g., FFI) may take ownership. Previously the default
+            // was Borrow, which silently missed use-after-free when a foreign
+            // function actually freed the argument.
+            for (size_t i = 0; i < effective_args.size(); i++) {
+                auto* arg = effective_args[i].get();
+                if (auto* ve3 = dynamic_cast<const VarExpr*>(arg)) {
+                    auto st_it = state.find(ve3->name.lexeme);
+                    if (st_it != state.end() && st_it->second == State::Live) {
+                        st_it->second = State::Escaped;
+                    }
+                }
+            }
         }
-        // else: Unknown function — default is BORROW (no state change).
         return;
     }
 

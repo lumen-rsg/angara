@@ -469,7 +469,7 @@ void LSPServer::analyzeDocument(const std::string& uri) {
                 Chaperone::run(statements, typeChecker, errorHandler);
             }
 
-            // Collect all diagnostics (type errors + Chaperone E5xx/W510)
+            // Collect all diagnostics (type errors + Chaperone E5xx/E510)
             result.diagnostics = errorHandler.diagnostics;
 
             // Build hover/definition/completion cache from type checker results.

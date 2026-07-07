@@ -985,10 +985,10 @@ void Chaperone::analyzeStmt(Context& ctx,
                             "Ensure it's handled consistently on all branches.",
                             "E506");
                     } else {
-                        ctx.eh.warning(ifs->keyword,
+                        diag(ctx, ifs->keyword,
                             "🔄 Incomplete fold — `" + name + "` is handled differently on "
                             "the two branches. Add `drop " + name + ";` to the path that's missing it.",
-                            "W510");
+                            "E510");
                     }
                 }
             }
@@ -996,18 +996,18 @@ void Chaperone::analyzeStmt(Context& ctx,
             // join_maps would silently promote it to Live in the merged state,
             // causing a confusing E501 later. Warn about the asymmetry.
             if (in_then && !in_else && it_then->second == State::Live) {
-                ctx.eh.warning(ifs->keyword,
+                diag(ctx, ifs->keyword,
                     "🔄 Incomplete fold — `" + name + "` is live on the if-branch but "
                     "absent from the else-branch. It will appear live after the merge "
                     "and may leak. Add `drop " + name + ";` on the if-branch.",
-                    "W510");
+                    "E510");
             }
             if (!in_then && in_else && it_else->second == State::Live) {
-                ctx.eh.warning(ifs->keyword,
+                diag(ctx, ifs->keyword,
                     "🔄 Incomplete fold — `" + name + "` is live on the else-branch but "
                     "absent from the if-branch. It will appear live after the merge "
                     "and may leak. Add `drop " + name + ";` on the else-branch.",
-                    "W510");
+                    "E510");
             }
         }
         state = join_maps(then_state, else_state);
