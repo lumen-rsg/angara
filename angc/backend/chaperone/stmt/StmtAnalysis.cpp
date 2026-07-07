@@ -839,8 +839,18 @@ void Chaperone::analyzeStmt(Context& ctx,
                 auto vtc = ctx.var_to_closure.find(ve->name.lexeme);
                 if (vtc != ctx.var_to_closure.end()) {
                     const Type* ft = vtc->second;
-                    auto cap_it = ctx.closure_captures.find(ft);
-                    if (cap_it != ctx.closure_captures.end()) {
+                    // H2: Worklist-based transitive closure escape. When a closure is
+                    // returned, its direct captures escape. If a capture is itself a
+                    // closure, its own captures must also transitively escape.
+                    std::set<const Type*> visited;
+                    std::vector<const Type*> worklist;
+                    worklist.push_back(ft);
+                    while (!worklist.empty()) {
+                        const Type* cur_ft = worklist.back();
+                        worklist.pop_back();
+                        if (!visited.insert(cur_ft).second) continue;
+                        auto cap_it = ctx.closure_captures.find(cur_ft);
+                        if (cap_it == ctx.closure_captures.end()) continue;
                         for (const auto& cap_name : cap_it->second) {
                             auto cit = state.find(cap_name);
                             if (cit != state.end() && cit->second == State::Live) {
@@ -855,6 +865,14 @@ void Chaperone::analyzeStmt(Context& ctx,
                                 // don't escape ownership (the closure is borrowed).
                                 if (!ctx.current_function_returns_ref)
                                     cit->second = State::Escaped;
+                            }
+                            // H2: if the capture is itself a closure, follow transitively.
+                            auto inner_vtc = ctx.var_to_closure.find(cap_name);
+                            if (inner_vtc != ctx.var_to_closure.end()) {
+                                worklist.push_back(inner_vtc->second);
+                                // Also remove the inner closure from tracking.
+                                ctx.closure_holders.erase(inner_vtc->second);
+                                ctx.var_to_closure.erase(inner_vtc);
                             }
                         }
                     }
@@ -893,8 +911,16 @@ void Chaperone::analyzeStmt(Context& ctx,
             auto vtc = ctx.var_to_closure.find(ve->name.lexeme);
             if (vtc != ctx.var_to_closure.end()) {
                 const Type* ft = vtc->second;
-                auto cap_it = ctx.closure_captures.find(ft);
-                if (cap_it != ctx.closure_captures.end()) {
+                // H2: Worklist-based transitive closure escape (same as ReturnStmt).
+                std::set<const Type*> visited;
+                std::vector<const Type*> worklist;
+                worklist.push_back(ft);
+                while (!worklist.empty()) {
+                    const Type* cur_ft = worklist.back();
+                    worklist.pop_back();
+                    if (!visited.insert(cur_ft).second) continue;
+                    auto cap_it = ctx.closure_captures.find(cur_ft);
+                    if (cap_it == ctx.closure_captures.end()) continue;
                     for (const auto& cap_name : cap_it->second) {
                         auto cit = state.find(cap_name);
                         if (cit != state.end() && cit->second == State::Live) {
@@ -905,6 +931,13 @@ void Chaperone::analyzeStmt(Context& ctx,
                                 "the captured value.",
                                 "E505");
                             cit->second = State::Escaped;
+                        }
+                        // H2: if the capture is itself a closure, follow transitively.
+                        auto inner_vtc = ctx.var_to_closure.find(cap_name);
+                        if (inner_vtc != ctx.var_to_closure.end()) {
+                            worklist.push_back(inner_vtc->second);
+                            ctx.closure_holders.erase(inner_vtc->second);
+                            ctx.var_to_closure.erase(inner_vtc);
                         }
                     }
                 }
