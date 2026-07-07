@@ -429,6 +429,43 @@ void Chaperone::analyzeStmt(Context& ctx,
         bool tracked = isTrackedVar(ctx, *var);
         state[var->name.lexeme] = tracked ? State::Live : State::Uninit;
 
+        // M12: struct-literal borrow tracking. When a non-owned data struct
+        // is initialized with a RecordExpr, any ref<T> fields that are
+        // assigned tracked Live variables create borrow relationships. The
+        // field (e.g. "c.r") borrows the tracked variable — a later drop of
+        // the referent while the ref field still aliases it must flag E509.
+        if (!tracked && var->initializer) {
+            if (auto* rec = dynamic_cast<const RecordExpr*>(var->initializer.get())) {
+                auto& var_types = ctx.tc.getVariableTypes();
+                auto vt = var_types.find(var);
+                if (vt != var_types.end() && vt->second &&
+                    vt->second->kind == TypeKind::DATA) {
+                    auto* data_type = dynamic_cast<const DataType*>(vt->second.get());
+                    if (data_type) {
+                        // Build a name→index map over RecordExpr keys.
+                        std::map<std::string, size_t> key_index;
+                        for (size_t i = 0; i < rec->keys.size(); i++)
+                            key_index[rec->keys[i].lexeme] = i;
+                        for (const auto& [fname, finfo] : data_type->fields) {
+                            if (!finfo.type || finfo.type->kind != TypeKind::REF)
+                                continue;
+                            auto ki = key_index.find(fname);
+                            if (ki == key_index.end() || ki->second >= rec->values.size())
+                                continue;
+                            auto* val_ve = dynamic_cast<const VarExpr*>(
+                                rec->values[ki->second].get());
+                            if (!val_ve) continue;
+                            auto sit = state.find(val_ve->name.lexeme);
+                            if (sit != state.end() && sit->second == State::Live) {
+                                std::string field_key = var->name.lexeme + "." + fname;
+                                ctx.borrows[field_key] = val_ve->name.lexeme;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Phase B: record whether this variable is a built-in heap type
         // (string, list, record, etc.) vs a class/owned-data.  Leak
         // diagnostics use W521 (warning) for built-in types, E501 (error)
@@ -458,6 +495,54 @@ void Chaperone::analyzeStmt(Context& ctx,
             if (tit != types.end() && tit->second &&
                 tit->second->kind == TypeKind::REF) {
                 ctx.borrows[var->name.lexeme] = move_src;
+            }
+        }
+
+        // M12: S3 borrow propagation through struct fields. If the new binding
+        // is a ref<T> initialized from a field access (GetExpr), record the
+        // borrow relationship. Two cases:
+        //   1. The field itself is ref<T> → propagate the existing borrow.
+        //   2. The field is a tracked allocation → the ref borrows the parent
+        //      object (since cascade-drop on the parent frees the field).
+        // Without this, `let r as ref<Buf> = c.buf; drop c; r.get()` is a
+        // silent dangling ref — the Chaperone sees no relationship.
+        if (!tracked && var->initializer) {
+            auto& types = ctx.tc.getVariableTypes();
+            auto tit = types.find(var);
+            if (tit != types.end() && tit->second &&
+                tit->second->kind == TypeKind::REF) {
+                if (auto* get = dynamic_cast<const GetExpr*>(var->initializer.get())) {
+                    // Extract the object (parent) name for borrow tracking.
+                    std::string obj_name;
+                    if (dynamic_cast<const ThisExpr*>(get->object.get())) {
+                        obj_name = "this";
+                    } else if (auto* ove = dynamic_cast<const VarExpr*>(get->object.get())) {
+                        obj_name = ove->name.lexeme;
+                    }
+                    if (!obj_name.empty()) {
+                        std::string field_key = obj_name + "." + get->name.lexeme;
+                        // Case 1: propagate from an existing ref<T> field borrow
+                        // (e.g. `let r2 = c.ref_field` where ref_field is ref<T>).
+                        auto bit = ctx.borrows.find(field_key);
+                        if (bit != ctx.borrows.end()) {
+                            ctx.borrows[var->name.lexeme] = bit->second;
+                        } else {
+                            // Case 2: the field is a tracked allocation owned by
+                            // the parent — the ref borrows the parent object
+                            // (dropping the parent cascade-drops the field).
+                            auto& expr_types = ctx.tc.getExpressionTypes();
+                            auto et = expr_types.find(get);
+                            if (et != expr_types.end() && et->second &&
+                                isTrackedTypeObj(ctx, *et->second)) {
+                                // Check the parent is tracked and Live.
+                                auto pit = state.find(obj_name);
+                                if (pit != state.end() && pit->second == State::Live) {
+                                    ctx.borrows[var->name.lexeme] = obj_name;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

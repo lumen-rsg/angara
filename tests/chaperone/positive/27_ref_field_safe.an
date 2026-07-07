@@ -1,0 +1,25 @@
+// Chaperone positive test — M12: safe ref<Buf> through struct field
+// A ref<Buf> is taken to a field of an owned struct. The ref is used
+// before the struct is dropped (safe: the referent is still live).
+// Must compile, run, and return the exit code.
+//
+// exit: 42
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+owned Container {
+    let buf as Buf;
+}
+
+export func main() -> i64 {
+    let c = Container(Buf(42));
+    let r as ref<Buf> = c.buf;   // r borrows c — c still owns the Buf
+    let x = r.get();               // safe: c is still live
+    drop c;                        // OK: r is not used after this
+    return x;                      // expect 42
+}

@@ -286,6 +286,19 @@ void Chaperone::analyzeExpr(Context& ctx,
             if (!field_key.empty()) {
                 auto& expr_types = ctx.tc.getExpressionTypes();
                 auto tt = expr_types.find(asgn->target.get());
+
+                // M12: if the target field is ref<T>, assigning a tracked
+                // Live var to it is a BORROW — the source stays Live (it
+                // still owns the object), and we record ref→referent so a
+                // later drop/move of the referent flags the dangling ref
+                // (E509). Without this, the source is unconditionally moved
+                // at line 308 and the borrow is invisible.
+                if (rhs_is_move_source && tt != expr_types.end() && tt->second &&
+                    tt->second->kind == TypeKind::REF) {
+                    ctx.borrows[field_key] = move_src;  // field ref points at referent
+                    return;  // borrow — source stays Live, no move
+                }
+
                 bool field_is_tracked = tt != expr_types.end() && tt->second &&
                                         isTrackedTypeObj(ctx, *tt->second);
 
@@ -627,25 +640,49 @@ void Chaperone::analyzeExpr(Context& ctx,
             field_key = ove->name.lexeme + "." + get->name.lexeme;
         }
 
-        if (!field_key.empty()) {
-            auto it = state.find(field_key);
-            if (it != state.end()) {
-                if (it->second == State::Dropped) {
-                    diag(ctx, get->name,
-                        "\xf0\x9f\x92\x80 Dead reference — field `" +
-                        get->name.lexeme + "` was dropped but is used here. "
-                        "The molecule has already been released.",
-                        "E502");
-                } else if (it->second == State::Moved) {
-                    diag(ctx, get->name,
-                        "\xf0\x9f\x93\xa4 Moved molecule — field `" +
-                        get->name.lexeme + "` had its ownership transferred "
-                        "and is used here.",
-                        "E507");
+            if (!field_key.empty()) {
+                auto it = state.find(field_key);
+                if (it != state.end()) {
+                    if (it->second == State::Dropped) {
+                        diag(ctx, get->name,
+                            "\xf0\x9f\x92\x80 Dead reference — field `" +
+                            get->name.lexeme + "` was dropped but is used here. "
+                            "The molecule has already been released.",
+                            "E502");
+                    } else if (it->second == State::Moved) {
+                        diag(ctx, get->name,
+                            "\xf0\x9f\x93\xa4 Moved molecule — field `" +
+                            get->name.lexeme + "` had its ownership transferred "
+                            "and is used here.",
+                            "E507");
+                    }
+                }
+
+                // M12: if this field access resolves to ref<T>, check whether
+                // the referent has been dropped/moved. A ref<T> field in a data
+                // struct points to a tracked allocation — dropping the referent
+                // while the ref still aliases it is a dangling borrow (E509).
+                auto& expr_types = ctx.tc.getExpressionTypes();
+                auto tt = expr_types.find(get);
+                if (tt != expr_types.end() && tt->second &&
+                    tt->second->kind == TypeKind::REF) {
+                    auto bit = ctx.borrows.find(field_key);
+                    if (bit != ctx.borrows.end()) {
+                        auto rit = state.find(bit->second);
+                        if (rit != state.end() &&
+                            (rit->second == State::Dropped || rit->second == State::Moved)) {
+                            diag(ctx, get->name,
+                                "\xf0\x9f\x94\x97 Dangling borrow — `" + field_key +
+                                "` is a ref to `" + bit->second +
+                                "`, whose ownership has been released. The ref "
+                                "reads freed memory. Keep the referent live while "
+                                "the ref is used.",
+                                "E509");
+                        }
+                    }
                 }
             }
-        }
-        return;
+            return;
     }
 
     // ListExpr: walk all elements. E505 — a tracked Live value placed into

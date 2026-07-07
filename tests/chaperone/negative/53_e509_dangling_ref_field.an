@@ -1,0 +1,25 @@
+// Chaperone negative test — M12: E509 (dangling ref through struct field)
+// A ref<Buf> is taken to a field of an owned struct. The struct is then
+// dropped while the ref still aliases the field memory. The Chaperone must
+// detect this as a dangling borrow and report E509.
+//
+// expect: E509
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+owned Container {
+    let buf as Buf;
+}
+
+export func main() -> i64 {
+    let c = Container(Buf(42));
+    let r as ref<Buf> = c.buf;   // r borrows c (the parent object)
+    drop c;                        // cascade-drops c.buf — r dangles
+    let x = r.get();               // E509: use-after-free via dangling ref
+    return x;
+}
