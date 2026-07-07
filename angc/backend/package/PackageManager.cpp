@@ -84,7 +84,15 @@ bool PackageManager::install_package(const std::string& name,
                 }
             }
         } else {
-            return true;  // No hash to verify, assume ok
+            // M15: a registry that omits the SHA256 field serves an unverified
+            // package. Rather than silently assuming integrity (the old
+            // behavior), emit a loud warning so the bypass is visible, then
+            // proceed — matching the warn-and-continue posture used elsewhere
+            // for package operations where the registry may be incomplete.
+            std::cerr << "  [WARN] Package " << name << " v" << ver_str
+                      << " has no SHA256 hash in registry metadata — installed "
+                      << "without integrity verification.\n";
+            return true;
         }
     }
 
