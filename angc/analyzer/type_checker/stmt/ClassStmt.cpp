@@ -279,11 +279,16 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
             return flag;
         }
 
-        // Only the built-in Send/Sync marker traits bypass method checks.
-        // User-defined empty traits must still be explicitly adopted.
+        // User-defined empty marker traits (e.g. `trait Serializable {}`) carry
+        // no method requirements, so conformance is determined solely by whether
+        // the subject explicitly adopted the trait. Send/Sync are handled above.
+        // H10: previously this branch unconditionally returned false, so a bound
+        // like `<T: Serializable>` never matched any type — even one that
+        // `uses Serializable`. Delegate to adoptsInterface(), which walks the
+        // subject's adopted_traits across the superclass chain via sameType().
         if (trait->methods.empty()) {
             if (trait_name == "Send" || trait_name == "Sync") return true;
-            return false;
+            return adoptsInterface(subject, trait);
         }
 
         // Only class instances can satisfy a method-bearing trait today.
