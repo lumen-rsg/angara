@@ -342,6 +342,8 @@ void Chaperone::detectCycles(Context& ctx,
     const std::vector<std::shared_ptr<Stmt>>& program)
 {
     std::map<std::string, std::set<std::string>> graph;
+    // M6: map (owner, target) → Token of the field that creates the edge.
+    std::map<std::pair<std::string, std::string>, Token> edge_tokens;
 
 
     // Extract the base type name from a field's type annotation. Cycle
@@ -388,8 +390,11 @@ void Chaperone::detectCycles(Context& ctx,
         if (!field || !field->typeAnnotation) return;
         std::set<std::string> tracked;
         collect_tracked(field->typeAnnotation.get(), tracked);
-        for (const auto& ft : tracked)
+        for (const auto& ft : tracked) {
             graph[owner].insert(ft);
+            // M6: store the field's token for cycle diagnostics.
+            edge_tokens[{owner, ft}] = field->name;
+        }
     };
 
     for (const auto& stmt : program) {
@@ -414,7 +419,14 @@ void Chaperone::detectCycles(Context& ctx,
             std::string cycle;
             for (auto i = it; i != path.end(); ++i) cycle += *i + " → ";
             cycle += node;
-            diag(ctx, Token{}, "🔗 Tangled molecule — reference cycle: " + cycle +
+            // M6: use the token from the edge that closes the cycle, if available.
+            Token edge_tok = Token{};
+            if (path.size() >= 2) {
+                std::string prev = path.back();
+                auto et_it = edge_tokens.find({prev, node});
+                if (et_it != edge_tokens.end()) edge_tok = et_it->second;
+            }
+            diag(ctx, edge_tok, "🔗 Tangled molecule — reference cycle: " + cycle +
                 ". Use `borrow<T>` for non-owning back-references.", "E504");
             return true;
         }
@@ -536,11 +548,12 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
     const int MAX_PASSES = 8;
     ctx.suppress_diag = true;
     std::vector<size_t> seen_hashes;  // H4: track summary hashes for oscillation
+    bool converged = false;
     for (int pass = 0; pass < MAX_PASSES; pass++) {
         auto before = ctx.summaries;  // snapshot
         for (const auto& fi : functions)
             analyzeFunction(ctx, *fi.func, fi.summary_key);
-        if (ctx.summaries == before) break;  // converged
+        if (ctx.summaries == before) { converged = true; break; }  // converged
 
         // H4: check for oscillation (a cycle longer than period 1).
         size_t h = 0;
@@ -562,6 +575,15 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
             break;
         }
         seen_hashes.push_back(h);
+    }
+    if (!converged) {
+        // M7: warn when the fixed-point cap is reached without convergence.
+        diag(ctx, functions[0].func->name,
+            "⚠️ Interprocedural fixed-point did not converge after " +
+            std::to_string(MAX_PASSES) + " passes. The current summaries "
+            "are used; results may be imprecise. Consider simplifying "
+            "ownership patterns or adding @consumes / @escape annotations.",
+            "W520");
     }
     ctx.suppress_diag = false;
     // Final diagnostic pass with the converged summaries.
