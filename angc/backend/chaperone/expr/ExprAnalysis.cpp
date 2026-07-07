@@ -895,6 +895,10 @@ void Chaperone::analyzeExpr(Context& ctx,
     // LIB-4: AwaitExpr — consumes the future (move semantics).
     // The future variable transitions from Live to Moved, just like
     // assignment of a tracked variable transfers ownership.
+    //
+    // M11: async/await awareness. An await point suspends the function;
+    // when it resumes, it may be on a different thread. All tracked Live
+    // variables that survive the await must be Send (E516).
     if (auto* await_expr = dynamic_cast<const AwaitExpr*>(expr.get())) {
         analyzeExpr(ctx, await_expr->future, state);
         // If the awaited expression is a simple variable that is tracked
@@ -903,6 +907,49 @@ void Chaperone::analyzeExpr(Context& ctx,
             auto it = state.find(ve->name.lexeme);
             if (it != state.end() && it->second == State::Live) {
                 it->second = State::Moved;
+            }
+        }
+
+        // M11: verify all Live tracked variables are Send — they cross a
+        // thread boundary when the async function resumes.
+        auto& var_types = ctx.tc.getVariableTypes();
+        for (const auto& [name, st] : state) {
+            if (st != State::Live) continue;
+            // H8: skip field-state entries.
+            if (name.find('.') != std::string::npos) continue;
+            // Skip parameters — they're borrowed from the caller.
+            if (ctx.current_params.count(name)) continue;
+
+            // Resolve the variable's type and check Send status.
+            for (const auto& [decl, vtype] : var_types) {
+                if (decl && decl->name.lexeme == name && vtype) {
+                    std::string type_name;
+                    const Type* t = vtype.get();
+                    if (t->kind == TypeKind::INSTANCE) {
+                        auto inst = dynamic_cast<const InstanceType*>(t);
+                        if (inst && inst->class_type)
+                            type_name = inst->class_type->name;
+                        else
+                            type_name = t->toString();
+                    } else {
+                        type_name = t->toString();
+                    }
+                    // Only check tracked types (class/owned data) — primitives
+                    // and data types are inherently Send.
+                    if (!type_name.empty() &&
+                        isTrackedTypeObj(ctx, *vtype) &&
+                        !ctx.sendable_types.count(type_name)) {
+                        diag(ctx, await_expr->keyword,
+                            "\xf0\x9f\xa7\xb5 Async escape — `" + name + "` (`" +
+                            type_name + "`) is held across an `await` point and "
+                            "is not Send. The function may resume on a different "
+                            "thread, so all tracked values must be Send. Mark the "
+                            "type `@sendable`, or drop `" + name + "` before the "
+                            "await.",
+                            "E516");
+                    }
+                    break;
+                }
             }
         }
         return;

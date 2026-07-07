@@ -1,0 +1,28 @@
+// Chaperone positive test — M11: Send type held across await.
+//
+// A Send type can safely be held across an await point — the function
+// may resume on a different thread but the type is safe to transfer.
+// The Chaperone must accept this without errors.
+//
+// exit: 0
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+async func simple() -> i64 {
+    return 1;
+}
+
+async func worker() -> nil {
+    let b = Buf(42);
+    let x = await simple();   // OK: Buf is Send (auto-derived, only i64 field)
+    drop b;
+}
+
+export func main() -> i64 {
+    let f = worker();
+    drop f;
+    return 0;
+}

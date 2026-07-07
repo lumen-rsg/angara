@@ -388,10 +388,11 @@ to mark `o` arguments that are freed or stored by the C API.
 | **E513** | 🔓 Double unlock | A `Mutex` was unlocked without being locked — logic error. |
 | **E514** | 🧵 Shared borrow | A `ref<T>` to a tracked value exists in the parent thread while the value is transferred to another thread via `spawn()`. The ref and the spawned thread can access the same memory concurrently — a data race. |
 | **E515** | 🧵 Non-Sync ref | A `ref<T>` to a **non-Sync** type exists when the value is spawned. Mark the type `@sync` and add synchronization, or drop the ref before spawning. |
+| **E516** | 🧵 Async escape | A tracked value that is not Send is held across an `await` point. The async function may resume on a different thread, so all tracked values must be Send. Add `@sendable` or drop before the await. |
 | **W514** | (warning) | A `ref<T>` to a Sync type crosses a thread boundary — type is Sync but ensure proper synchronization (e.g., Mutex). |
 | **W510** | (warning) | Variable handled differently on if/else branches. |
 
-> **E508** is reserved (unused). **E510–E515** are M11 concurrency-safety diagnostics. **W514** is the Sync-ref-across-threads warning.
+> **E508** is reserved (unused). **E510–E516** are M11 concurrency-safety diagnostics. **W514** is the Sync-ref-across-threads warning.
 > except `W510`. Inside an `@unsafe` block, *all* codes are downgraded to
 > warnings — the Chaperone still analyzes the block and reports, but does not
 > enforce.

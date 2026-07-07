@@ -1,0 +1,29 @@
+// Chaperone negative test — M11: E516 non-Send value held across await.
+//
+// An async function may resume on a different thread after suspension.
+// All tracked values held across an await point must be Send. A non-Send
+// class held across await triggers E516.
+//
+// expect: E516
+
+@unsendable
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+async func simple() -> i64 {
+    return 1;
+}
+
+async func worker() -> nil {
+    let b = Buf(42);
+    let x = await simple();   // E516: b is not Send, held across await
+    drop b;
+}
+
+export func main() -> i64 {
+    let f = worker();
+    drop f;
+    return 0;
+}
