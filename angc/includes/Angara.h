@@ -39,6 +39,9 @@ typedef struct AngaraObject {
     int32_t _tag;       // ANG_TAG_*
     int64_t _payload;   // inline value or ptrtoint(heap_object)
 } AngaraObject;
+static_assert(sizeof(AngaraObject) == 16, "AngaraObject must be 16 bytes");
+static_assert(offsetof(AngaraObject, _tag) == 0, "AngaraObject._tag must be at offset 0");
+static_assert(offsetof(AngaraObject, _payload) == 8, "AngaraObject._payload must be at offset 8");
 
 // --- Type tags (must match RuntimeBuilder TAG_* constants) ---
 #define ANG_TAG_NIL   0
