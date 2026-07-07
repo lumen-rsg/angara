@@ -623,56 +623,75 @@ namespace angara {
         // Push a fresh scope and re-declare parameters with concrete types
         m_symbols.enterScope();
 
-        // Build substituted function type for parameter declarations
-        auto symbol = m_symbols.resolve(stmt->name.lexeme);
-        std::shared_ptr<FunctionType> orig_func_type;
-        if (symbol && symbol->type->kind == TypeKind::FUNCTION) {
-            orig_func_type = std::dynamic_pointer_cast<FunctionType>(symbol->type);
-        }
-
-        // Re-declare 'this' if needed
-        if (stmt->has_this && m_current_class) {
-            Token this_token(TokenType::THIS, "this", stmt->name.line, 0);
-            m_symbols.declare(this_token,
-                std::make_shared<InstanceType>(m_current_class), true);
-        }
-
-        // Push the return type for return-statement checking
-        if (orig_func_type) {
-            auto ret = substituteTypeArgs(orig_func_type->return_type, type_args);
-            m_function_return_types.push(ret);
-        } else {
-            m_function_return_types.push(m_type_nil);
-        }
-
-        // Re-declare parameters with substituted concrete types
-        for (size_t i = 0; i < stmt->params.size(); ++i) {
-            const auto& param = stmt->params[i];
-            std::shared_ptr<Type> param_type;
-            if (orig_func_type && i < orig_func_type->param_types.size()) {
-                param_type = substituteTypeArgs(
-                    orig_func_type->param_types[i], type_args);
-            } else {
-                param_type = m_type_any;
+        // C4: any exception thrown below (e.g. from accept() during body
+        // re-check) would previously skip the state restoration at the end,
+        // leaving a leaked symbol-table scope, a corrupted return-type stack,
+        // and m_active_type_params polluted with the call site's concrete
+        // types. Wrap the setup + re-check in try/catch; the catch performs
+        // the same restoration as the normal path, preserves the hadError
+        // merge, then rethrows so the error is not silently dropped.
+        try {
+            // Build substituted function type for parameter declarations
+            auto symbol = m_symbols.resolve(stmt->name.lexeme);
+            std::shared_ptr<FunctionType> orig_func_type;
+            if (symbol && symbol->type->kind == TypeKind::FUNCTION) {
+                orig_func_type = std::dynamic_pointer_cast<FunctionType>(symbol->type);
             }
-            if (!param.destructure_names.empty()) {
-                if (param_type->kind == TypeKind::TUPLE) {
-                    auto tup = std::dynamic_pointer_cast<TupleType>(param_type);
-                    for (size_t j = 0; j < param.destructure_names.size() &&
-                                       j < tup->element_types.size(); ++j) {
-                        m_symbols.declare(param.destructure_names[j],
-                                         tup->element_types[j], true);
-                    }
+
+            // Re-declare 'this' if needed
+            if (stmt->has_this && m_current_class) {
+                Token this_token(TokenType::THIS, "this", stmt->name.line, 0);
+                m_symbols.declare(this_token,
+                    std::make_shared<InstanceType>(m_current_class), true);
+            }
+
+            // Push the return type for return-statement checking
+            if (orig_func_type) {
+                auto ret = substituteTypeArgs(orig_func_type->return_type, type_args);
+                m_function_return_types.push(ret);
+            } else {
+                m_function_return_types.push(m_type_nil);
+            }
+
+            // Re-declare parameters with substituted concrete types
+            for (size_t i = 0; i < stmt->params.size(); ++i) {
+                const auto& param = stmt->params[i];
+                std::shared_ptr<Type> param_type;
+                if (orig_func_type && i < orig_func_type->param_types.size()) {
+                    param_type = substituteTypeArgs(
+                        orig_func_type->param_types[i], type_args);
+                } else {
+                    param_type = m_type_any;
                 }
-            } else {
-                m_symbols.declare(param.name, param_type, true);
+                if (!param.destructure_names.empty()) {
+                    if (param_type->kind == TypeKind::TUPLE) {
+                        auto tup = std::dynamic_pointer_cast<TupleType>(param_type);
+                        for (size_t j = 0; j < param.destructure_names.size() &&
+                                           j < tup->element_types.size(); ++j) {
+                            m_symbols.declare(param.destructure_names[j],
+                                             tup->element_types[j], true);
+                        }
+                    }
+                } else {
+                    m_symbols.declare(param.name, param_type, true);
+                }
             }
-        }
 
-        // Re-visit body statements with concrete types
-        for (const auto& bodyStmt : (*stmt->body)) {
-            bodyStmt->accept(*this, bodyStmt);
-            if (m_hadError) break;
+            // Re-visit body statements with concrete types
+            for (const auto& bodyStmt : (*stmt->body)) {
+                bodyStmt->accept(*this, bodyStmt);
+                if (m_hadError) break;
+            }
+        } catch (...) {
+            // Restore the same state as the normal path so a thrown exception
+            // doesn't leak scopes/stacks/params, then propagate the exception.
+            m_function_return_types.pop();
+            exitScopeAndWarn();
+            m_active_type_params = saved_type_params;
+            m_active_type_param_bounds = saved_bounds;
+            if (m_hadError) saved_had_error = true;  // preserve a flagged error
+            m_hadError = saved_had_error;
+            throw;
         }
 
         // Restore state
