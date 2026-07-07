@@ -8,7 +8,7 @@ namespace angara {
         std::shared_ptr<Type> result_type = m_type_error;
         switch (expr.op.type) {
             case TokenType::MINUS:
-                if (isNumeric(right_type)) result_type = right_type;
+                if (isNumeric(right_type) || right_type->kind == TypeKind::VECTOR) result_type = right_type;
                 else {
                     // LANG-13: check for user-defined opNeg method on the type.
                     std::shared_ptr<ClassType> cls;
