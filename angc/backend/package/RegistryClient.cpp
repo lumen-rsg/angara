@@ -35,6 +35,8 @@ std::optional<std::string> RegistryClient::http_get(const std::string& url, long
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);                      // M16
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "https,http");  // M16
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "angc-pkg/1.0");
 
@@ -62,6 +64,8 @@ bool RegistryClient::http_download(const std::string& url, const std::string& de
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, nullptr);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &file);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);                      // M16
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "https,http");  // M16
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "angc-pkg/1.0");
 
@@ -225,6 +229,10 @@ std::optional<RegistryPackage> RegistryClient::parse_package_json(const std::str
     while (pos < json.size() && json[pos] != '[') pos++;
     if (pos >= json.size()) return std::nullopt;
 
+    // M15: depth limit to prevent stack overflow from deeply nested JSON.
+    const int MAX_PARSE_DEPTH = 32;
+    int parse_depth = 0;
+
     // Now iterate through the array finding each version object
     while (pos < json.size()) {
         // Find next '{'
@@ -235,8 +243,10 @@ std::optional<RegistryPackage> RegistryClient::parse_package_json(const std::str
         size_t obj_start = pos;
         int depth = 0;
         while (pos < json.size()) {
-            if (json[pos] == '{') depth++;
-            else if (json[pos] == '}') {
+            if (json[pos] == '{') {
+                depth++;
+                if (depth > MAX_PARSE_DEPTH) return std::nullopt;  // M15
+            } else if (json[pos] == '}') {
                 depth--;
                 if (depth == 0) break;
             } else if (json[pos] == '"') {
@@ -270,9 +280,10 @@ std::optional<RegistryPackage> RegistryClient::parse_package_json(const std::str
         // Parse dependencies object
         std::string deps_json = extract_object(obj_json, "dependencies");
         if (!deps_json.empty()) {
-            // Parse key-value pairs from deps_json
+            // M15: depth-limited parsing of key-value pairs from deps_json
             size_t dp = 1; // skip opening '{'
-            while (dp < deps_json.size()) {
+            int deps_depth = 1;
+            while (dp < deps_json.size() && deps_depth > 0) {
                 while (dp < deps_json.size() && deps_json[dp] != '"' && deps_json[dp] != '}')
                     dp++;
                 if (dp >= deps_json.size() || deps_json[dp] == '}') break;
@@ -312,8 +323,17 @@ std::optional<RegistryPackage> RegistryClient::parse_package_json(const std::str
                 }
 
                 // Skip comma
-                while (dp < deps_json.size() && deps_json[dp] != ',' && deps_json[dp] != '}')
-                    dp++;
+                while (dp < deps_json.size() && deps_json[dp] != ',' && deps_json[dp] != '}') {
+                    if (deps_json[dp] == '"') {  // M15: skip strings during scan
+                        dp++;
+                        while (dp < deps_json.size() && deps_json[dp] != '"') {
+                            if (deps_json[dp] == '\\') dp++;
+                            dp++;
+                        }
+                    }
+                    if (dp < deps_json.size()) dp++;
+                }
+                if (dp < deps_json.size() && deps_json[dp] == '}') deps_depth--;
                 if (dp < deps_json.size() && deps_json[dp] == ',') dp++;
             }
         }

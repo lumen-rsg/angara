@@ -443,8 +443,23 @@ void Chaperone::analyzeStmt(Context& ctx,
         if (!var->destructure_names.empty()) {
             if (var->initializer)
                 analyzeExpr(ctx, var->initializer, state);
+            // M5: Check if any destructured element is ref<T> and record
+            // borrow relationships for borrow tracking.
             for (const auto& dn : var->destructure_names) {
                 state[dn.lexeme] = State::Uninit;
+                // Look up the element's type in the symbol table to check for ref<T>
+                auto sym = const_cast<SymbolTable&>(
+                    ctx.tc.getSymbolTable()).resolve(dn.lexeme);
+                if (sym && sym->type && sym->type->kind == TypeKind::REF) {
+                    // If the initializer is a tracked variable, record the borrow
+                    if (auto* src_ve = dynamic_cast<const VarExpr*>(
+                            var->initializer.get())) {
+                        auto src_it = state.find(src_ve->name.lexeme);
+                        if (src_it != state.end() && src_it->second == State::Live) {
+                            ctx.borrows[dn.lexeme] = src_ve->name.lexeme;
+                        }
+                    }
+                }
             }
             return;
         }
@@ -529,6 +544,24 @@ void Chaperone::analyzeStmt(Context& ctx,
                     const Type* ft = src_vtc->second;
                     ctx.closure_holders[ft].insert(var->name.lexeme);
                     ctx.var_to_closure[var->name.lexeme] = ft;
+                }
+            } else if (auto* get_expr = dynamic_cast<const GetExpr*>(var->initializer.get())) {
+                // M4: Bound method reference (obj.method). If the resolved type is
+                // FUNCTION, track the object's closure state — the bound method holds
+                // a reference and must keep the object alive.
+                auto init_type_it = ctx.tc.getExpressionTypes().find(var->initializer.get());
+                if (init_type_it != ctx.tc.getExpressionTypes().end() &&
+                    init_type_it->second &&
+                    init_type_it->second->kind == TypeKind::FUNCTION) {
+                    // Check if the object is a tracked variable holding a closure
+                    if (auto* obj_ve = dynamic_cast<const VarExpr*>(get_expr->object.get())) {
+                        auto obj_vtc = ctx.var_to_closure.find(obj_ve->name.lexeme);
+                        if (obj_vtc != ctx.var_to_closure.end()) {
+                            const Type* ft = obj_vtc->second;
+                            ctx.closure_holders[ft].insert(var->name.lexeme);
+                            ctx.var_to_closure[var->name.lexeme] = ft;
+                        }
+                    }
                 }
             }
         }

@@ -2250,6 +2250,22 @@ llvm::Value* LLVMBackend::cgSubscript(const SubscriptExpr& e) {
         auto* buf_ptr = builder->CreateLoad(llvm::PointerType::get(*ctx, 0),
             builder->CreateStructGEP(rt->getRawArrayType(), arr_ptr, 4), "buf_ptr");
 
+        // M12: Bounds check — load count (field 1) and trap if idx out of range.
+        auto* count_ptr = builder->CreateStructGEP(rt->getRawArrayType(), arr_ptr, 1);
+        auto* count_val = builder->CreateLoad(llvm::Type::getInt64Ty(*ctx), count_ptr, "count");
+        auto* in_bounds = builder->CreateAnd(
+            builder->CreateICmpSGE(idx_val, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)),
+            builder->CreateICmpSLT(idx_val, count_val), "in_bounds");
+        auto* parent_fn = builder->GetInsertBlock()->getParent();
+        auto* oob_bb = llvm::BasicBlock::Create(*ctx, "oob", parent_fn);
+        auto* ok_bb = llvm::BasicBlock::Create(*ctx, "ok", parent_fn);
+        builder->CreateCondBr(in_bounds, ok_bb, oob_bb);
+        builder->SetInsertPoint(oob_bb);
+        auto* trap = llvm::Intrinsic::getOrInsertDeclaration(mod.get(), llvm::Intrinsic::trap);
+        builder->CreateCall(trap, {});
+        builder->CreateUnreachable();
+        builder->SetInsertPoint(ok_bb);
+
         // GEP into the typed buffer: &buf[idx]
         auto* elem_ptr = builder->CreateGEP(elem_llvm_ty, buf_ptr, {idx_val}, "elem_ptr");
 
@@ -2272,6 +2288,22 @@ llvm::Value* LLVMBackend::cgSubscript(const SubscriptExpr& e) {
         // Get the index as i64
         auto* idx_obj = cg(e.index);
         auto* idx_val = getI64(idx_obj);
+
+        // M13: Bounds check — compare idx against vector size before extractelement.
+        auto* vec_size = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), vec_type->size);
+        auto* vec_in_bounds = builder->CreateAnd(
+            builder->CreateICmpSGE(idx_val, llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx), 0)),
+            builder->CreateICmpSLT(idx_val, vec_size), "vec_in_bounds");
+        auto* vfn = builder->GetInsertBlock()->getParent();
+        auto* voob_bb = llvm::BasicBlock::Create(*ctx, "voob", vfn);
+        auto* vok_bb = llvm::BasicBlock::Create(*ctx, "vok", vfn);
+        builder->CreateCondBr(vec_in_bounds, vok_bb, voob_bb);
+        builder->SetInsertPoint(voob_bb);
+        auto* vtrap = llvm::Intrinsic::getOrInsertDeclaration(mod.get(), llvm::Intrinsic::trap);
+        builder->CreateCall(vtrap, {});
+        builder->CreateUnreachable();
+        builder->SetInsertPoint(vok_bb);
+
         // Truncate to i32 for extractelement (LLVM requires i32 index)
         auto* idx_i32 = builder->CreateTrunc(idx_val,
             llvm::Type::getInt32Ty(*ctx), "idx_i32");
