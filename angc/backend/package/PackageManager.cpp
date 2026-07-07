@@ -1,12 +1,14 @@
 #include "../../includes/PackageManager.h"
 #include "../../includes/CLI.h"
 #include "../../includes/StringUtils.h"
+#include "../../../modules/crypto/sha256.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <filesystem>
 #include <algorithm>
 #include <cstdlib>
+#include <iomanip>
 
 namespace fs = std::filesystem;
 
@@ -29,6 +31,32 @@ bool PackageManager::is_installed(const std::string& name, const std::string& ve
     return fs::exists(pkg_path, ec) && fs::is_directory(pkg_path, ec);
 }
 
+// ── Helper: compute SHA-256 hex digest of a file ─────────────────────────
+// C9: Returns the lowercase hex-encoded SHA-256 hash of the file at `path`.
+// Returns empty string on error (file not found, read error).
+static std::string sha256_file(const std::string& path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return "";
+
+    SHA256_CTX ctx;
+    sha256_init(&ctx);
+
+    char buf[8192];
+    while (file.read(buf, sizeof(buf)) || file.gcount() > 0) {
+        sha256_update(&ctx, reinterpret_cast<unsigned char*>(buf), file.gcount());
+    }
+
+    unsigned char digest[32];
+    sha256_final(digest, &ctx);
+
+    std::ostringstream hex;
+    hex << std::hex << std::setfill('0');
+    for (int i = 0; i < 32; i++) {
+        hex << std::setw(2) << static_cast<int>(digest[i]);
+    }
+    return hex.str();
+}
+
 // ── install_package ─────────────────────────────────────────────────────
 
 bool PackageManager::install_package(const std::string& name,
@@ -38,8 +66,26 @@ bool PackageManager::install_package(const std::string& name,
     fs::path pkg_dir = fs::path(packages_dir) / name / ver_str;
 
     if (fs::exists(pkg_dir)) {
-        // Already installed — could verify sha256 here
-        return true;
+        // C9: Verify SHA256 for already-installed packages when a hash is known.
+        if (!version_info.sha256.empty()) {
+            fs::path existing_tarball = pkg_dir / "package.tar.gz";
+            if (fs::exists(existing_tarball)) {
+                std::string computed = sha256_file(existing_tarball.string());
+                if (!computed.empty() && computed != version_info.sha256) {
+                    std::cerr << "  [ERROR] SHA256 mismatch for already-installed package "
+                              << name << " v" << ver_str << ".\n";
+                    std::cerr << "           Expected: " << version_info.sha256 << "\n";
+                    std::cerr << "           Got:      " << computed << "\n";
+                    std::cerr << "           Removing and re-downloading...\n";
+                    fs::remove_all(pkg_dir);
+                    // Fall through to re-download
+                } else {
+                    return true;  // Hash matches, package is good
+                }
+            }
+        } else {
+            return true;  // No hash to verify, assume ok
+        }
     }
 
     // C8: Validate package name and version for path traversal / injection.
@@ -68,6 +114,28 @@ bool PackageManager::install_package(const std::string& name,
         // Clean up the empty directory.
         fs::remove_all(pkg_dir);
         return false;
+    }
+
+    // C9: Verify SHA256 integrity of the downloaded tarball.
+    if (!version_info.sha256.empty()) {
+        std::string computed = sha256_file(tarball.string());
+        if (computed.empty()) {
+            std::cerr << "  [ERROR] Failed to compute SHA256 for downloaded package "
+                      << name << " v" << ver_str << ".\n";
+            fs::remove_all(pkg_dir);
+            return false;
+        }
+        if (computed != version_info.sha256) {
+            std::cerr << "  [ERROR] SHA256 mismatch for package " << name
+                      << " v" << ver_str << "!\n";
+            std::cerr << "           Expected: " << version_info.sha256 << "\n";
+            std::cerr << "           Got:      " << computed << "\n";
+            std::cerr << "           The package may have been tampered with. "
+                      << "Installation aborted.\n";
+            fs::remove_all(pkg_dir);
+            return false;
+        }
+        std::cout << "  SHA256 verified: " << computed << "\n";
     }
 
     // C8: Extract tarball with security flags. Use shell_escape on the path,
