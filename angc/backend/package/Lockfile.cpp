@@ -92,7 +92,89 @@ public:
         }
     }
 
+    // H12: Find the position of a top-level key's value in a JSON object,
+    // properly skipping string literals so that the key text inside a string
+    // value does not cause a false match. Returns the position of the value's
+    // first character, or npos if the key is not found.
+    size_t find_value_pos(const std::string& key) {
+        // We expect to start at a '{'. Skip it and scan for "key":
+        skip_ws();
+        if (!expect('{')) return std::string::npos;
+        std::string search = "\"" + key + "\"";
+        while (m_pos < m_src.size()) {
+            skip_ws();
+            char c = peek();
+            if (c == '}') return std::string::npos; // end of object, key not found
+            if (c == ',') { advance(); continue; }
+
+            // We're at a key (must be a string). Remember position, parse it.
+            if (c == '"') {
+                size_t key_start = m_pos;
+                std::string parsed_key = parse_string();
+                if (parsed_key.empty()) return std::string::npos;
+                skip_ws();
+                if (!expect(':')) return std::string::npos;
+                if (parsed_key == key) {
+                    skip_ws();
+                    return m_pos; // position of value
+                }
+                // Not our key — skip the value, handling nested objects/arrays
+                skip_value();
+                continue;
+            }
+            return std::string::npos; // unexpected
+        }
+        return std::string::npos;
+    }
+
 private:
+    // Skip a JSON value (string, number, bool, null, object, or array).
+    void skip_value() {
+        skip_ws();
+        char c = peek();
+        if (c == '"') {
+            parse_string(); // skip string
+        } else if (c == '{') {
+            advance();
+            int depth = 1;
+            while (m_pos < m_src.size() && depth > 0) {
+                char sc = m_src[m_pos++];
+                if (sc == '"') {
+                    // skip string inside the nested object
+                    while (m_pos < m_src.size()) {
+                        char st = m_src[m_pos++];
+                        if (st == '"') break;
+                        if (st == '\\' && m_pos < m_src.size()) m_pos++;
+                    }
+                } else if (sc == '{') depth++;
+                else if (sc == '}') depth--;
+            }
+        } else if (c == '[') {
+            advance();
+            int depth = 1;
+            while (m_pos < m_src.size() && depth > 0) {
+                char sc = m_src[m_pos++];
+                if (sc == '"') {
+                    while (m_pos < m_src.size()) {
+                        char st = m_src[m_pos++];
+                        if (st == '"') break;
+                        if (st == '\\' && m_pos < m_src.size()) m_pos++;
+                    }
+                } else if (sc == '[') depth++;
+                else if (sc == ']') depth--;
+            }
+        } else {
+            // number, bool, null — read until delimiter
+            while (m_pos < m_src.size()) {
+                c = m_src[m_pos];
+                if (c == ',' || c == '}' || c == ']' || c == ' ' ||
+                    c == '\t' || c == '\n' || c == '\r') break;
+                m_pos++;
+            }
+        }
+    }
+
+public:
     const std::string& m_src;
     size_t m_pos;
 
@@ -178,22 +260,15 @@ bool Lockfile::load(const std::string& path) {
         catch (...) { m_format_version = 1; }
     }
 
-    // Re-parse to get nested packages object
-    // We need a second pass to parse the nested structure.
-    // Strategy: find the "packages" key, then parse its object value.
-    size_t pkg_pos = content.find("\"packages\"");
-    if (pkg_pos == std::string::npos) return true; // no packages
+    // H12: Use the JsonParser to find the "packages" key properly (skipping
+    // strings) instead of a fragile raw content.find("\"packages\"") that
+    // could match inside a version string, SHA256 hash, or field value.
+    JsonParser top_parser(content);
+    size_t pkg_val_pos = top_parser.find_value_pos("packages");
+    if (pkg_val_pos == std::string::npos) return true; // no packages
 
-    // Find the colon after "packages"
-    size_t colon = content.find(':', pkg_pos);
-    if (colon == std::string::npos) return false;
-
-    // Find the opening brace
-    size_t brace = content.find('{', colon);
-    if (brace == std::string::npos) return false;
-
-    // Extract just the packages object
-    std::string pkg_json = content.substr(brace);
+    // Extract just the packages object from the value position
+    std::string pkg_json = content.substr(pkg_val_pos);
 
     JsonParser pkg_parser(pkg_json);
     std::map<std::string, std::map<std::string, std::string>> raw_entries;
