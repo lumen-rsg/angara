@@ -279,8 +279,12 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
             return flag;
         }
 
-        // A marker trait (e.g. `trait Hashable {}`) imposes no method requirements.
-        if (trait->methods.empty()) return true;
+        // Only the built-in Send/Sync marker traits bypass method checks.
+        // User-defined empty traits must still be explicitly adopted.
+        if (trait->methods.empty()) {
+            if (trait_name == "Send" || trait_name == "Sync") return true;
+            return false;
+        }
 
         // Only class instances can satisfy a method-bearing trait today.
         std::shared_ptr<ClassType> cls;
