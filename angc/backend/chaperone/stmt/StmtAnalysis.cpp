@@ -1033,7 +1033,12 @@ void Chaperone::analyzeStmt(Context& ctx,
     // with the pre-loop state for code after the loop (which may execute
     // zero times).  Previously the condition re-analysis used the joined
     // state, which could mask use-after-free in the condition (LOW1).
-    auto analyze_loop_body = [&](const Token& kw, const std::shared_ptr<Stmt>& body) -> StateMap {
+    // Returns (body_state, e506_names) where e506_names is the set of
+    // variables for which E506 fired (unconditionally dropped/moved/escaped
+    // in the loop body). Callers use this to override the conservative
+    // join(Live, Dropped) = Live at the post-loop merge point (L24).
+    auto analyze_loop_body = [&](const Token& kw, const std::shared_ptr<Stmt>& body)
+        -> std::pair<StateMap, std::set<std::string>> {
         StateMap pre = state;
 
         // M2: save and populate loop_pre_live for conditional-destruction
@@ -1057,6 +1062,10 @@ void Chaperone::analyzeStmt(Context& ctx,
         ctx.loop_pre_live = std::move(saved_loop_pre_live);
 
         // Loop-body drop/move/escape check (E506).
+        // L24: collect names of variables that are unconditionally
+        // destroyed in the body so callers can trust body_state over the
+        // conservative join at the post-loop merge point.
+        std::set<std::string> e506_names;
         for (auto& [name, st_pre] : pre) {
             if (st_pre == State::Live) {
                 auto it2 = body_state.find(name);
@@ -1068,31 +1077,43 @@ void Chaperone::analyzeStmt(Context& ctx,
                         "🔄 `" + name + "` is " + reason + " inside the loop but "
                         "allocated before it — it won't be available on iteration 2+.",
                         "E506");
+                    e506_names.insert(name);
                 }
             }
         }
-        return body_state;
+        return {body_state, std::move(e506_names)};
     };
 
     if (auto* wh = dynamic_cast<const WhileStmt*>(stmt.get())) {
         if (wh->condition) analyzeExpr(ctx, wh->condition, state);   // S2: condition
-        StateMap body_state = analyze_loop_body(wh->keyword, wh->body);
+        auto [body_state, e506_names] = analyze_loop_body(wh->keyword, wh->body);
         if (wh->condition) analyzeExpr(ctx, wh->condition, body_state);  // re-evaluated each iter
+        // L24: for variables unconditionally destroyed in the loop body,
+        // trust body_state over the conservative join — E506 already warns
+        // about iteration 2+ unavailability; the post-loop state should
+        // reflect that the variable is gone (avoids false-positive E501).
+        for (const auto& name : e506_names) state.erase(name);
         state = join_maps(state, body_state);  // post-loop: may execute zero times
         return;
     }
     if (auto* fors = dynamic_cast<const ForStmt*>(stmt.get())) {
         if (fors->initializer) { bool t; analyzeStmt(ctx, fors->initializer, state, t); }
         if (fors->condition) analyzeExpr(ctx, fors->condition, state);  // S2: condition
-        StateMap body_state = analyze_loop_body(fors->keyword, fors->body);
+        auto [body_state, e506_names] = analyze_loop_body(fors->keyword, fors->body);
         if (fors->increment) analyzeExpr(ctx, fors->increment, body_state);  // S2: increment
         if (fors->condition) analyzeExpr(ctx, fors->condition, body_state);  // re-checked each iter
+        // L24: for variables unconditionally destroyed in the loop body,
+        // trust body_state over the conservative join.
+        for (const auto& name : e506_names) state.erase(name);
         state = join_maps(state, body_state);  // post-loop: may execute zero times
         return;
     }
     if (auto* forin = dynamic_cast<const ForInStmt*>(stmt.get())) {
         if (forin->collection) analyzeExpr(ctx, forin->collection, state);  // S2: iterable
-        StateMap body_state = analyze_loop_body(forin->name, forin->body);
+        auto [body_state, e506_names] = analyze_loop_body(forin->name, forin->body);
+        // L24: for variables unconditionally destroyed in the loop body,
+        // trust body_state over the conservative join.
+        for (const auto& name : e506_names) state.erase(name);
         state = join_maps(state, body_state);  // post-loop: may execute zero times
         return;
     }
