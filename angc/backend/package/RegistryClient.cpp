@@ -39,6 +39,10 @@ std::optional<std::string> RegistryClient::http_get(const std::string& url, long
     curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "https,http");  // M16
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "angc-pkg/1.0");
+    // H15: force TLS peer + host verification regardless of libcurl's default
+    // build config, so a MITM can't tamper with registry metadata.
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
 
     CURLcode res = curl_easy_perform(curl);
     if (response_code) {
@@ -68,6 +72,9 @@ bool RegistryClient::http_download(const std::string& url, const std::string& de
     curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "https,http");  // M16
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "angc-pkg/1.0");
+    // H15: force TLS peer + host verification (see http_get above).
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
 
     CURLcode res = curl_easy_perform(curl);
     curl_easy_cleanup(curl);
