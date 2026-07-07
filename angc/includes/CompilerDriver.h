@@ -208,7 +208,7 @@ namespace angara {
         /// @return The loaded module, or nullptr on failure.
         std::shared_ptr<ModuleType> loadNativeModule(const std::string& path, const Token& import_token);
 
-        bool m_had_error = false;
+        std::atomic<bool> m_had_error{false};
 
         std::string m_angara_module_path;
         std::string m_native_module_path;
