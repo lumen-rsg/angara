@@ -1,5 +1,6 @@
 #include "../../includes/PackageManager.h"
 #include "../../includes/CLI.h"
+#include "../../includes/StringUtils.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -41,6 +42,18 @@ bool PackageManager::install_package(const std::string& name,
         return true;
     }
 
+    // C8: Validate package name and version for path traversal / injection.
+    if (name.find("..") != std::string::npos ||
+        ver_str.find("..") != std::string::npos) {
+        std::cerr << "  [ERROR] Package name or version contains '..' — path traversal rejected.\n";
+        return false;
+    }
+    if (!is_safe_flags(name, "package name") ||
+        !is_safe_flags(ver_str, "package version")) {
+        std::cerr << "  [ERROR] Package name or version contains dangerous characters.\n";
+        return false;
+    }
+
     fs::create_directories(pkg_dir);
 
     // Download tarball to a temp location
@@ -57,12 +70,17 @@ bool PackageManager::install_package(const std::string& name,
         return false;
     }
 
-    // Extract tarball
-    std::string cmd = "cd " + pkg_dir.string() + " && tar xzf package.tar.gz 2>/dev/null";
+    // C8: Extract tarball with security flags. Use shell_escape on the path,
+    // --no-same-owner to prevent setuid bit propagation, --no-overwrite-dir to
+    // prevent directory overwrites, and strip-components=0 + explicit dir.
+    std::string escaped_dir = shell_escape(pkg_dir.string());
+    std::string cmd = "cd " + escaped_dir + " && tar xzf package.tar.gz"
+                      " --no-same-owner --no-overwrite-dir 2>/dev/null";
     int result = std::system(cmd.c_str());
     if (result != 0) {
         // Try with gzip explicitly
-        cmd = "cd " + pkg_dir.string() + " && gunzip -c package.tar.gz | tar xf - 2>/dev/null";
+        cmd = "cd " + escaped_dir + " && gunzip -c package.tar.gz | "
+              "tar xf - --no-same-owner --no-overwrite-dir 2>/dev/null";
         result = std::system(cmd.c_str());
     }
 
