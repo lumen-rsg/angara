@@ -236,7 +236,18 @@ void RuntimeBuilder::declareCLibFunctions() {
     m_module.getOrInsertFunction("snprintf", FunctionType::get(i32_ty, {i8_ptr, i64_ty, i8_ptr}, true));
     m_module.getOrInsertFunction("strtoll", FunctionType::get(i64_ty, {i8_ptr, PointerType::get(m_ctx, 0), i32_ty}, false));
     m_module.getOrInsertFunction("strtod", FunctionType::get(f64_ty, {i8_ptr, PointerType::get(m_ctx, 0)}, false));
-    m_module.getOrInsertFunction("setjmp", FunctionType::get(i32_ty, {i8_ptr}, false));
+    // H18: mark setjmp as returns_twice at the declaration so every caller —
+    // including the runtime's __ang_try_begin (ControlFlow.cpp) and any future
+    // site — inherits the attribute. Without it, LLVM's optimizer may reorder
+    // register spills/restores around the call and miscompile setjmp/longjmp.
+    // The per-call addFnAttr in StmtCodegen.cpp/LLVMBackend.cpp is now
+    // belt-and-suspenders (idempotent) rather than load-bearing.
+    if (auto setjmp_callee = m_module.getOrInsertFunction(
+            "setjmp", FunctionType::get(i32_ty, {i8_ptr}, false)).getCallee()) {
+        if (auto* setjmp_fn = dyn_cast<Function>(setjmp_callee)) {
+            setjmp_fn->addFnAttr(Attribute::ReturnsTwice);
+        }
+    }
     m_module.getOrInsertFunction("longjmp", FunctionType::get(void_ty, {i8_ptr, i32_ty}, false));
     m_module.getOrInsertFunction("exit", FunctionType::get(void_ty, {i32_ty}, false));
     m_module.getOrInsertFunction("pthread_create", FunctionType::get(i32_ty,
