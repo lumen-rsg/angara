@@ -6,6 +6,7 @@
 //
 // expect: E503
 
+@sendable
 class Buf {
     let v as i64;
     func init(this, x as i64) { this.v = x; }

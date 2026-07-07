@@ -1,0 +1,16 @@
+// Chaperone positive test — M11: valid mutex lock/unlock usage.
+//
+// Proper lock/unlock pairing with no double-lock or double-unlock.
+// The Chaperone must accept this without errors.
+//
+// exit: 0
+
+export func main() -> i64 {
+    let mtx = Mutex();
+    mtx.lock();
+    mtx.unlock();
+    // Lock again — valid pattern
+    mtx.lock();
+    mtx.unlock();
+    return 0;
+}

@@ -64,9 +64,16 @@ void Chaperone::collectTrackedTypes(Context& ctx,
         if (!stmt) continue;
         if (auto* cls = dynamic_cast<const ClassStmt*>(stmt.get())) {
             ctx.tracked_types.insert(cls->name.lexeme);
+            if (cls->is_sendable)
+                ctx.sendable_types.insert(cls->name.lexeme);
         } else if (auto* data = dynamic_cast<const DataStmt*>(stmt.get())) {
             if (data->is_owned) {
                 ctx.tracked_types.insert(data->name.lexeme);
+                if (data->is_sendable)
+                    ctx.sendable_types.insert(data->name.lexeme);
+            } else {
+                // M11: non-owned data types are implicitly sendable (copy-on-assign).
+                ctx.sendable_types.insert(data->name.lexeme);
             }
         }
     }

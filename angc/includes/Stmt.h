@@ -386,6 +386,11 @@ namespace angara {
         const std::vector<std::shared_ptr<ClassMember>> members;
         bool is_exported = false;
 
+        // M11: @sendable — safe to transfer ownership to another thread via spawn().
+        // data types are implicitly sendable (copy-on-assign); class types must
+        // opt in with this annotation.
+        bool is_sendable = false;
+
         // Constructor updated to accept the contracts vector
         ClassStmt(Token name, std::shared_ptr<VarExpr> superclass,
                   std::vector<std::shared_ptr<VarExpr>> contracts,
@@ -463,6 +468,7 @@ namespace angara {
         bool is_opaque = false;
         bool is_union = false;
         bool is_owned = false;  // v5: `owned` keyword — heap type, must be dropped
+        bool is_sendable = false; // M11: @sendable — safe to transfer to another thread via spawn()
 
         DataStmt(Token name, std::vector<std::shared_ptr<VarDeclStmt>> fields,
                  std::vector<Token> type_params = {},

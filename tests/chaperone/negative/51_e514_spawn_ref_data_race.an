@@ -1,0 +1,27 @@
+// Chaperone negative test — M11: E514 ref<T> data race with spawned thread.
+//
+// When a ref<T> to a tracked value exists in the parent, and the tracked
+// value is transferred to another thread via spawn(), the ref and the
+// spawned thread can concurrently access the same memory — a data race.
+// The Chaperone must detect this and report E514.
+//
+// expect: E514
+
+@sendable
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+func worker(b as Buf) -> nil {
+    drop b;
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let r as ref<Buf> = b;     // r borrows b
+    let t = spawn(worker, b);  // E514: r still borrows b, but b is spawned
+    t.join();
+    drop t;
+    return 0;
+}

@@ -1,0 +1,14 @@
+// Chaperone negative test — M11: E512 double mutex lock.
+//
+// Locking an already-locked mutex is a potential deadlock. The Chaperone
+// must detect this and report E512.
+//
+// expect: E512
+
+export func main() -> i64 {
+    let mtx = Mutex();
+    mtx.lock();
+    mtx.lock();   // E512: mutex already locked
+    mtx.unlock();
+    return 0;
+}

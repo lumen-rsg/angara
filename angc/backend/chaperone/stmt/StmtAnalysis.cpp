@@ -21,6 +21,7 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
     StateMap state;
     ctx.borrows.clear();        // S3: borrow map is per-function (reset each pass)
     ctx.thread_escaped.clear(); // M11: thread-escape set is per-function
+    ctx.mutex_locked.clear();   // M11: mutex lock state is per-function
     ctx.current_params.clear();  // rebuilt below as tracked params register
 
     // Register tracked parameters. Prefer the resolved FunctionType from the
@@ -182,6 +183,16 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
                     warn(ctx, func.name, msg, "W521");
                 else
                     diag(ctx, func.name, msg, "E501");
+            }
+        }
+        // M11: check for mutexes held at function exit.
+        for (const auto& [mtx_name, locked] : ctx.mutex_locked) {
+            if (locked) {
+                warn(ctx, func.name,
+                    "\xf0\x9f\x94\x92 Mutex `" + mtx_name + "` is held when function `" +
+                    func.name.lexeme + "` exits — potential deadlock. "
+                    "Add `" + mtx_name + ".unlock();` before the function returns.",
+                    "W521");
             }
         }
     }

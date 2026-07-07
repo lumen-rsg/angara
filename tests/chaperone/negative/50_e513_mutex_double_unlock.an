@@ -1,0 +1,12 @@
+// Chaperone negative test — M11: E513 double mutex unlock.
+//
+// Unlocking a mutex that is not locked is a logic error. The Chaperone
+// must detect this and report E513.
+//
+// expect: E513
+
+export func main() -> i64 {
+    let mtx = Mutex();
+    mtx.unlock();   // E513: mutex not locked
+    return 0;
+}

@@ -104,6 +104,13 @@ private:
         // regular-escaped variables (e.g., returned to caller) so E510 can fire
         // with a thread-specific diagnostic. Cleared per function.
         std::set<std::string> thread_escaped;
+        // M11: types marked @sendable (safe to transfer across thread boundaries).
+        // data types (non-owned) are implicitly sendable; owned/class types must
+        // opt in. Checked when spawn() arguments are analyzed.
+        std::set<std::string> sendable_types;
+        // M11: per-mutex lock state. true = locked, false = unlocked.
+        // Cleared per function.
+        std::map<std::string, bool> mutex_locked;
         // M2: names of variables that were Live before entering the current
         // loop body. Used to detect conditional destruction inside loops:
         // if a pre-loop-Live variable is destroyed on one branch of an if/else

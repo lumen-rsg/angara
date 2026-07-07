@@ -383,9 +383,13 @@ to mark `o` arguments that are freed or stored by the C API.
 | **E507** | 📤 Moved molecule | Use-after-move — a moved-from variable (source of `let x = y` / `x = y` of a tracked type, or `this.f = y` in a method) is read. Read the new owner instead. |
 | **E509** | 🔗 Dangling borrow | A `ref<T>` is read after its referent was dropped/moved — the borrow dangles and would read freed memory. |
 | **E510** | 🧵 Thread escape | A tracked allocation's ownership was transferred to another thread via `spawn()`. Using or dropping it in the parent thread is a data race / use-after-transfer / double-free. |
+| **E511** | 🧵 Not sendable | A tracked type is not marked `@sendable` and cannot be transferred across thread boundaries via `spawn()`. Add `@sendable` to the type declaration. |
+| **E512** | 🔒 Double lock | A `Mutex` was locked while already locked — potential deadlock. |
+| **E513** | 🔓 Double unlock | A `Mutex` was unlocked without being locked — logic error. |
+| **E514** | 🧵 Shared borrow | A `ref<T>` to a tracked value exists in the parent thread while the value is transferred to another thread via `spawn()`. The ref and the spawned thread can access the same memory concurrently — a data race. |
 | **W510** | (warning) | Variable handled differently on if/else branches. |
 
-> **E508** is reserved (unused). Diagnostic codes are fatal (halt compilation)
+> **E508** is reserved (unused). **E510–E514** are M11 concurrency-safety diagnostics.
 > except `W510`. Inside an `@unsafe` block, *all* codes are downgraded to
 > warnings — the Chaperone still analyzes the block and reports, but does not
 > enforce.

@@ -6,8 +6,10 @@ namespace angara {
             // RT-1: parse @on_throw(<value>) annotation for foreign funcs.
             // SIMD-2: parse @inline annotation for functions.
             // v5: parse @consumes / @escape annotations for ownership semantics.
+            // M11: parse @sendable annotation for thread-safe types.
             std::optional<int64_t> pending_on_throw;
             bool pending_inline = false;
+            bool pending_sendable = false;
             std::set<int> pending_consumes;
             std::set<int> pending_escapes;
 
@@ -60,6 +62,9 @@ namespace angara {
                 } else if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "escape") {
                     advance();
                     parse_param_index_list(pending_escapes);
+                } else if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "sendable") {
+                    advance();
+                    pending_sendable = true;
                 } else {
                     // Not a recognized annotation — restore and break out.
                     m_current = saved;
@@ -160,6 +165,7 @@ namespace angara {
             } else if (match({TokenType::CLASS})) {
                 decl_stmt = classDeclaration();
                 std::static_pointer_cast<ClassStmt>(decl_stmt)->is_exported = is_exported;
+                std::static_pointer_cast<ClassStmt>(decl_stmt)->is_sendable = pending_sendable;
             } else if (match({TokenType::TRAIT})) {
                 decl_stmt = traitDeclaration();
                 std::static_pointer_cast<TraitStmt>(decl_stmt)->is_exported = is_exported;
@@ -178,10 +184,12 @@ namespace angara {
                 auto data_decl = std::static_pointer_cast<DataStmt>(dataDeclaration());
                 data_decl->is_owned = true;
                 data_decl->is_exported = is_exported;
+                data_decl->is_sendable = pending_sendable;
                 return data_decl;
             } else if (match({TokenType::DATA})) {
                 auto data_decl = std::static_pointer_cast<DataStmt>(dataDeclaration());
                 data_decl->is_exported = is_exported;
+                data_decl->is_sendable = pending_sendable;
                 return data_decl;
             } else if (match({TokenType::ENUM})) {
                 auto enum_decl = std::static_pointer_cast<EnumStmt>(enumDeclaration());

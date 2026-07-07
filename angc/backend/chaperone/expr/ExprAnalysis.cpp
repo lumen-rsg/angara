@@ -363,6 +363,9 @@ void Chaperone::analyzeExpr(Context& ctx,
         // all tracked args (positions 1..N) to Escaped. The first argument (the
         // closure/function) is not a data transfer. Record escaped vars in
         // thread_escaped so E510 can fire on subsequent use in the parent thread.
+        //
+        // Also enforces: only @sendable types (or implicitly-sendable data types)
+        // can be passed to spawn(). Non-sendable tracked types trigger E511.
         if (callee_name == "spawn") {
             for (size_t i = 0; i < effective_args.size(); i++) {
                 analyzeExpr(ctx, effective_args[i], state);
@@ -372,8 +375,60 @@ void Chaperone::analyzeExpr(Context& ctx,
                 if (auto* ve = dynamic_cast<const VarExpr*>(effective_args[i].get())) {
                     auto it = state.find(ve->name.lexeme);
                     if (it != state.end() && it->second == State::Live) {
+                        // M11: resolve type name early — needed for both @sendable
+                        // and E514 diagnostics.
+                        std::string type_name;
+                        auto& expr_types = ctx.tc.getExpressionTypes();
+                        auto et = expr_types.find(effective_args[i].get());
+                        if (et != expr_types.end() && et->second) {
+                            const Type* t = et->second.get();
+                            if (t->kind == TypeKind::OPTIONAL) {
+                                auto ot = dynamic_cast<const OptionalType*>(t);
+                                if (ot && ot->wrapped_type)
+                                    t = ot->wrapped_type.get();
+                            }
+                            if (t->kind == TypeKind::INSTANCE) {
+                                auto inst = dynamic_cast<const InstanceType*>(t);
+                                if (inst && inst->class_type)
+                                    type_name = inst->class_type->name;
+                                else
+                                    type_name = t->toString();
+                            } else {
+                                type_name = t->toString();
+                            }
+                        }
+
+                        // M11: @sendable check — the type must be in sendable_types.
+                        if (!type_name.empty() &&
+                            !ctx.sendable_types.count(type_name) &&
+                            et != expr_types.end() && et->second &&
+                            isTrackedTypeObj(ctx, *et->second)) {
+                            diag(ctx, ve->name,
+                                "\xf0\x9f\xa7\xb5 Not sendable — `" + type_name + "` is not marked "
+                                "@sendable and cannot be transferred to another thread "
+                                "via `spawn()`. Add `@sendable` to the type declaration "
+                                "to allow cross-thread ownership transfer.",
+                                "E511");
+                            continue;  // don't transition to Escaped — blocked
+                        }
                         it->second = State::Escaped;
                         ctx.thread_escaped.insert(ve->name.lexeme);
+
+                        // M11: E514 — check for ref<T> data races. If any ref<T>
+                        // in the parent borrows this variable, the ref and the
+                        // spawned thread can concurrently access the same memory.
+                        for (const auto& [ref_name, referent] : ctx.borrows) {
+                            if (referent == ve->name.lexeme) {
+                                diag(ctx, ve->name,
+                                    "\xf0\x9f\xa7\xb5 Shared borrow — `" + ref_name + "` is a `ref<" +
+                                    type_name + ">` to `" + ve->name.lexeme + "`, which is being "
+                                    "transferred to another thread via `spawn()`. The ref and the "
+                                    "spawned thread can access the same memory concurrently — "
+                                    "a data race. Drop the ref before spawning, or use a Mutex "
+                                    "to synchronize access.",
+                                    "E514");
+                            }
+                        }
                     }
                 }
             }
@@ -394,6 +449,50 @@ void Chaperone::analyzeExpr(Context& ctx,
             // the VarDeclStmt handler will mark the result as Live.
             // No summary-based argument transitions needed.
             return;
+        }
+
+        // M11: Mutex lock/unlock tracking.
+        // Detect mutex.lock() and mutex.unlock() calls on Mutex-typed objects
+        // and track the per-mutex lock state. Double-lock → E512, double-unlock → E513.
+        if (method_name == "lock" || method_name == "unlock") {
+            // Find the object variable name for the mutex.
+            std::string mutex_var_name;
+            if (auto* get = dynamic_cast<const GetExpr*>(call->callee.get())) {
+                if (auto* ove = dynamic_cast<const VarExpr*>(get->object.get())) {
+                    // Verify it's a Mutex type.
+                    auto tit = ctx.tc.getExpressionTypes().find(get->object.get());
+                    if (tit != ctx.tc.getExpressionTypes().end() && tit->second &&
+                        tit->second->kind == TypeKind::MUTEX) {
+                        mutex_var_name = ove->name.lexeme;
+                    }
+                }
+            }
+            if (!mutex_var_name.empty()) {
+                // Walk callee and args for UAF checks.
+                analyzeExpr(ctx, call->callee, state);
+                for (const auto& arg : effective_args)
+                    analyzeExpr(ctx, arg, state);
+
+                bool currently_locked = ctx.mutex_locked[mutex_var_name];
+                if (method_name == "lock") {
+                    if (currently_locked) {
+                        diag(ctx, call->paren,
+                            "\xf0\x9f\x94\x92 Double lock — `" + mutex_var_name + "` is already "
+                            "locked. Locking it again may cause a deadlock.",
+                            "E512");
+                    }
+                    ctx.mutex_locked[mutex_var_name] = true;
+                } else { // unlock
+                    if (!currently_locked) {
+                        diag(ctx, call->paren,
+                            "\xf0\x9f\x94\x93 Double unlock — `" + mutex_var_name + "` is not "
+                            "locked. Unlocking an unlocked mutex is a logic error.",
+                            "E513");
+                    }
+                    ctx.mutex_locked[mutex_var_name] = false;
+                }
+                return;
+            }
         }
 
         // Look up the summary: first by function name, then by closure
