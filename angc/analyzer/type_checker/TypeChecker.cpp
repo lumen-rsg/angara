@@ -147,6 +147,11 @@ namespace angara {
     }
 
     bool TypeChecker::isTruthy(const std::shared_ptr<Type>& type) {
+        // H11: guard against a null shared_ptr (consistent with isInteger/isFloat/
+        // isNumeric/isBoolean in Type.h, which all null-check first). A null type
+        // reaching here indicates a bug elsewhere; treat as non-truthy rather than
+        // crashing.
+        if (!type) return false;
         if (type->kind == TypeKind::ERROR) {
             return false;
         }
