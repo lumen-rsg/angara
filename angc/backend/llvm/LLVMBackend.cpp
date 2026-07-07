@@ -814,6 +814,15 @@ llvm::Type* LLVMBackend::resolveCFieldType(const std::shared_ptr<Type>& type) {
     if (type->kind == TypeKind::VOID) {
         return llvm::Type::getVoidTy(*ctx);
     }
+    // H17: SIMD vectors as C foreign struct fields — map to the LLVM fixed
+    // vector type (e.g. vec4<f32> -> <4 x float>). Without this the VECTOR
+    // kind fell through to the getInt64Ty default, a silent type mismatch in
+    // generated IR. llvmTypeForVector() already does the correct mapping.
+    if (type->kind == TypeKind::VECTOR) {
+        auto vec = std::dynamic_pointer_cast<VectorType>(type);
+        if (vec) return llvmTypeForVector(*vec);
+        return llvm::Type::getInt64Ty(*ctx);
+    }
     if (type->kind == TypeKind::FUNCTION) {
         // C function pointer — opaque ptr
         return llvm::PointerType::get(*ctx, 0);
