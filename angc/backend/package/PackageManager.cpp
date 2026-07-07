@@ -141,14 +141,17 @@ bool PackageManager::install_package(const std::string& name,
     // C8: Extract tarball with security flags. Use shell_escape on the path,
     // --no-same-owner to prevent setuid bit propagation, --no-overwrite-dir to
     // prevent directory overwrites, and strip-components=0 + explicit dir.
+    // M14: --no-same-permissions strips the setuid/setgid/sticky mode bits
+    // (distinct from --no-same-owner, which only affects UID/GID), so a
+    // malicious package can't ship a setuid binary that retains its bit.
     std::string escaped_dir = shell_escape(pkg_dir.string());
     std::string cmd = "cd " + escaped_dir + " && tar xzf package.tar.gz"
-                      " --no-same-owner --no-overwrite-dir 2>/dev/null";
+                      " --no-same-owner --no-same-permissions --no-overwrite-dir 2>/dev/null";
     int result = std::system(cmd.c_str());
     if (result != 0) {
         // Try with gzip explicitly
         cmd = "cd " + escaped_dir + " && gunzip -c package.tar.gz | "
-              "tar xf - --no-same-owner --no-overwrite-dir 2>/dev/null";
+              "tar xf - --no-same-owner --no-same-permissions --no-overwrite-dir 2>/dev/null";
         result = std::system(cmd.c_str());
     }
 
