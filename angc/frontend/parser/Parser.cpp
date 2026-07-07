@@ -98,6 +98,13 @@ namespace angara {
                     } catch (const std::invalid_argument&) {
                         throw error(size_token, "Invalid array size '" + size_token.lexeme + "'.", "E109");
                     }
+                    // M9: reject non-positive sizes. A zero or negative size would
+                    // flow into FixedArrayTypeExpr and produce a zero-length or
+                    // negative-bounds array in the generated LLVM IR.
+                    if (arr_size <= 0) {
+                        throw error(size_token,
+                            "Array size must be positive, got " + std::to_string(arr_size) + ".", "E109");
+                    }
                     base_type = std::make_shared<FixedArrayTypeExpr>(base_type, arr_size);
                 }
             }
