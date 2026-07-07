@@ -1,4 +1,5 @@
 #include "SymbolTable.h"
+#include <cassert>
 
 namespace angara {
 
@@ -61,6 +62,11 @@ namespace angara {
     }
 
     const std::map<std::string, std::shared_ptr<Symbol>>& SymbolTable::getGlobalScope() const {
+        // M12: the constructor guarantees m_scopes is never empty (it calls
+        // enterScope()). A moved-from or otherwise corrupted table could violate
+        // that; front() on an empty vector is UB. Assert so corruption surfaces
+        // as a clear failure instead of silently indexing into garbage.
+        assert(!m_scopes.empty() && "SymbolTable::m_scopes must never be empty");
         return m_scopes.front();
     }
 
