@@ -1110,6 +1110,32 @@ void Chaperone::analyzeStmt(Context& ctx,
     }
     if (auto* forin = dynamic_cast<const ForInStmt*>(stmt.get())) {
         if (forin->collection) analyzeExpr(ctx, forin->collection, state);  // S2: iterable
+
+        // H1: Add the for-in loop variable(s) to the state map so the body
+        // can track drops, moves, and escapes. Determine the element type from
+        // the collection's resolved type (mirrors TypeChecker::visit(ForInStmt)).
+        auto& expr_types = ctx.tc.getExpressionTypes();
+        auto ct = expr_types.find(forin->collection.get());
+        if (ct != expr_types.end() && ct->second) {
+            std::shared_ptr<Type> elem_type;
+            if (ct->second->kind == TypeKind::LIST) {
+                elem_type = std::dynamic_pointer_cast<ListType>(ct->second)->element_type;
+            } else if (ct->second->toString() == "string") {
+                // string iteration yields string elements (characters)
+                // — strings are builtin-heap, not tracked, so skip.
+            }
+            if (elem_type && isTrackedTypeObj(ctx, *elem_type)) {
+                if (!forin->destructure_names.empty()) {
+                    for (const auto& dname : forin->destructure_names) {
+                        state[dname.lexeme] = State::Live;
+                    }
+                } else if (forin->name.lexeme != "for") {
+                    // 'for' is a dummy token when destructure is used
+                    state[forin->name.lexeme] = State::Live;
+                }
+            }
+        }
+
         auto [body_state, e506_names] = analyze_loop_body(forin->name, forin->body);
         // L24: for variables unconditionally destroyed in the loop body,
         // trust body_state over the conservative join.
