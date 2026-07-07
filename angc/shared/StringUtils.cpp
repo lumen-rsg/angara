@@ -44,8 +44,13 @@ namespace angara {
         for (size_t i = 0; i < flags.size(); i++) {
             char c = flags[i];
             // Reject shell metacharacters that enable command injection.
+            // H14: also reject '$', '(', ')', '#' — '$' enables $(...) and ${...}
+            // expansion/subshell injection, parens form subshells and command
+            // grouping, and '#' starts a shell comment. All slip past the
+            // original blocklist.
             if (c == ';' || c == '|' || c == '&' || c == '`' ||
-                c == '>' || c == '<' || c == '\n' || c == '\r' || c == '\0') {
+                c == '>' || c == '<' || c == '\n' || c == '\r' || c == '\0' ||
+                c == '$' || c == '(' || c == ')' || c == '#') {
                 std::cerr << "[SECURITY] Dangerous character '" << c
                           << "' (0x" << std::hex << static_cast<int>(c) << std::dec
                           << ") in " << context << " flags rejected to prevent "
