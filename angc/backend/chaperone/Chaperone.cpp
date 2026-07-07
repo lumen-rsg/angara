@@ -83,7 +83,7 @@ void Chaperone::collectTrackedTypes(Context& ctx,
     // The TypeChecker already auto-derives is_sendable/is_sync on ClassType
     // and DataType during its deriveSendAndSync() pass. We just read those
     // flags here instead of duplicating the derivation logic.
-    const auto& sym_table = ctx.tc.getSymbolTable();
+    auto& sym_table = ctx.tc.getSymbolTable();  // L2: non-const, resolve() marks symbols used
     for (const auto& stmt : program) {
         if (!stmt) continue;
         std::string type_name;
@@ -93,7 +93,7 @@ void Chaperone::collectTrackedTypes(Context& ctx,
             type_name = data->name.lexeme;
         } else continue;
 
-        auto sym = const_cast<SymbolTable&>(sym_table).resolve(type_name);
+        auto sym = sym_table.resolve(type_name);
         if (!sym || !sym->type) continue;
 
         bool is_sendable = false;
@@ -459,7 +459,7 @@ void Chaperone::detectCycles(Context& ctx,
 // ============================================================================
 
 bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
-                    const TypeChecker& tc, ErrorHandler& eh)
+                    TypeChecker& tc, ErrorHandler& eh)
 {
     Context ctx(tc, eh);
     collectTrackedTypes(ctx, program);
@@ -565,15 +565,20 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
         }
 
         // H4: check for oscillation (a cycle longer than period 1).
+        // L1: Use a proper hash-combine instead of simple XOR+shift which
+        // loses bits and is prone to collisions.
         size_t h = 0;
+        auto hash_combine = [&h](size_t val) {
+            h ^= val + 0x9e3779b9 + (h << 6) + (h >> 2);
+        };
         for (const auto& [k, v] : ctx.summaries) {
-            h ^= std::hash<std::string>{}(k);
-            for (auto pb : v) h = (h << 1) ^ static_cast<size_t>(pb);
+            hash_combine(std::hash<std::string>{}(k));
+            for (auto pb : v) hash_combine(static_cast<size_t>(pb));
         }
         // M1: also hash closure summaries
         for (const auto& [k, v] : ctx.closure_summaries) {
-            h ^= reinterpret_cast<size_t>(k);
-            for (auto pb : v) h = (h << 1) ^ static_cast<size_t>(pb);
+            hash_combine(reinterpret_cast<size_t>(k));
+            for (auto pb : v) hash_combine(static_cast<size_t>(pb));
         }
         auto osc_it = std::find(seen_hashes.begin(), seen_hashes.end(), h);
         if (osc_it != seen_hashes.end() && (seen_hashes.size() < 2 || osc_it != seen_hashes.end() - 1)) {

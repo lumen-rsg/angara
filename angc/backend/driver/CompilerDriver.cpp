@@ -452,6 +452,14 @@ namespace angara {
         return ftime.time_since_epoch().count();
     }
 
+    // L15: returns file size for additional freshness check alongside mtime.
+    static uintmax_t file_size(const std::string& path) {
+        std::error_code ec;
+        auto sz = std::filesystem::file_size(path, ec);
+        if (ec) return 0;
+        return sz;
+    }
+
     bool CompilerDriver::compileDiscoveredModules() {
         namespace fs = std::filesystem;
 
@@ -501,7 +509,7 @@ namespace angara {
                 }
             }
 
-            if (!manifest.isClean(path, src_mtime, dep_mtimes)) {
+            if (!manifest.isClean(path, src_mtime, file_size(path), dep_mtimes)) {
                 dirty_modules.insert(path);
             }
         }
@@ -604,7 +612,7 @@ namespace angara {
                 // Determine the .o file path.
                 std::string obj_file = m_build_dir + "/ang_" + sanitize_module_name(disc.name) + ".o";
 
-                manifest.addEntry(path, disc.name, src_mtime,
+                manifest.addEntry(path, disc.name, src_mtime, file_size(path),
                                   dep_mtimes, obj_file);
             }
             manifest.save();

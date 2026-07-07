@@ -92,11 +92,15 @@ namespace angara {
     // (accepts any non-ASCII Unicode, including symbols), matching the behaviour
     // of Go, early Rust, and similar compilers. Full Unicode ID_Start/ID_Continue
     // classification (TR31) requires embedded property tables and is deferred.
+    // L6: reject standalone UTF-8 continuation bytes (0x80-0xBF) which can never
+    // start a valid sequence and indicate corrupted/malformed input.
     bool isAlpha(char c) {
+        unsigned char uc = static_cast<unsigned char>(c);
+        if (uc >= 0x80 && uc < 0xC0) return false;  // L6: continuation byte
         return (c >= 'a' && c <= 'z') ||
                (c >= 'A' && c <= 'Z') ||
                c == '_' ||
-               (static_cast<unsigned char>(c) >= 0x80);  // UTF-8 multi-byte
+               (uc >= 0xC0);  // UTF-8 multi-byte start
     }
 
     bool isAlphaNumeric(char c) {
@@ -218,6 +222,13 @@ namespace angara {
                             Token(diag_type, "", m_line, m_column, m_filename),
                             "Octal escape sequence '\\" + octal_str + "' is out of range.", "E004"
                         );
+                    } else if (val < 0 || val > 255) {
+                        // L4: values outside 0-255 are truncated by the char cast
+                        m_errorHandler.report(
+                            Token(diag_type, "", m_line, m_column, m_filename),
+                            "Octal escape sequence '\\" + octal_str + "' value " +
+                            std::to_string(val) + " is out of range (0-255).", "E004"
+                        );
                     } else {
                         octal_char = static_cast<char>(val);
                     }
@@ -249,6 +260,13 @@ namespace angara {
                             m_errorHandler.report(
                                 Token(diag_type, "", m_line, m_column, m_filename),
                                 "Hex escape sequence '\\x" + hex_str + "' is out of range.", "E004"
+                            );
+                        } else if (val < 0 || val > 255) {
+                            // L4: values outside 0-255 are truncated by the char cast
+                            m_errorHandler.report(
+                                Token(diag_type, "", m_line, m_column, m_filename),
+                                "Hex escape sequence '\\x" + hex_str + "' value " +
+                                std::to_string(val) + " is out of range (0-255).", "E004"
                             );
                         } else {
                             hex_char = static_cast<char>(val);
@@ -921,6 +939,32 @@ namespace angara {
                 if (ch != '_') clean_num += ch;
             }
             TokenType emit_type = is_float ? TokenType::NUMBER_FLOAT : TokenType::NUMBER_INT;
+
+            // L5: Validate integer literal range during lexing — don't defer
+            // overflow to stoll which may throw. UINT64_MAX = 18446744073709551615.
+            if (!is_float && !clean_num.empty()) {
+                // Check if the literal is pure decimal (no 0x/0b prefix)
+                bool is_hex = (clean_num.size() >= 2 && clean_num[0] == '0' &&
+                              (clean_num[1] == 'x' || clean_num[1] == 'X'));
+                size_t num_start = is_hex ? 2 : 0;
+                std::string digits = clean_num.substr(num_start);
+                // Remove any leading zeros for length check
+                while (digits.size() > 1 && digits[0] == '0') digits.erase(0, 1);
+                if (!is_hex && digits.size() > 20) {
+                    m_errorHandler.report(
+                        Token(emit_type, clean_num, m_line,
+                              m_column - static_cast<int>(m_current - m_start), m_filename),
+                        "Integer literal '" + clean_num + "' is too large for a 64-bit integer.",
+                        "E024");
+                } else if (!is_hex && digits.size() == 20 &&
+                           digits > "18446744073709551615") {
+                    m_errorHandler.report(
+                        Token(emit_type, clean_num, m_line,
+                              m_column - static_cast<int>(m_current - m_start), m_filename),
+                        "Integer literal '" + clean_num + "' exceeds UINT64_MAX.",
+                        "E024");
+                }
+            }
 
             if (suffix != LiteralSuffix::NONE || number_end != m_current) {
                 // Suffix was found (valid or invalid).  Emit the numeric token

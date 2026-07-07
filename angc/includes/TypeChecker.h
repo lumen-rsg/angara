@@ -47,6 +47,9 @@ namespace angara {
 
         /// Returns the symbol table (for use by later compiler stages).
         [[nodiscard]] const SymbolTable& getSymbolTable() const;
+        /// L2: Non-const accessor — avoids const_cast in Chaperone and other passes
+        /// that need to call resolve() (which marks symbols as used).
+        [[nodiscard]] SymbolTable& getSymbolTable() { return m_symbols; }
 
         /// Returns the module type descriptor (for use by later compiler stages).
         [[nodiscard]] std::shared_ptr<ModuleType> getModuleType() const;

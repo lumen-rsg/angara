@@ -23,6 +23,7 @@ public:
     struct ModuleEntry {
         std::string name;
         int64_t src_mtime = 0;          // source file last-write time
+        uintmax_t src_size = 0;         // L15: source file size for additional freshness check
         std::map<std::string, int64_t> dep_mtimes;  // dep path → mtime
         std::string obj_file;           // cached .o file path
     };
@@ -62,12 +63,15 @@ public:
     /// is always dirty.
     bool isClean(const std::string& module_path,
                  int64_t current_src_mtime,
+                 uintmax_t current_src_size,
                  const std::map<std::string, int64_t>& current_dep_mtimes) const {
         auto it = m_entries.find(module_path);
         if (it == m_entries.end()) return false;
 
         const auto& entry = it->second;
+        // L15: check both mtime and file size to catch timestamp-granularity issues
         if (entry.src_mtime != current_src_mtime) return false;
+        if (entry.src_size != current_src_size) return false;
 
         // Check that all dependency mtimes match.
         if (entry.dep_mtimes.size() != current_dep_mtimes.size()) return false;
@@ -94,11 +98,13 @@ public:
     void addEntry(const std::string& module_path,
                   const std::string& name,
                   int64_t src_mtime,
+                  uintmax_t src_size,
                   const std::map<std::string, int64_t>& dep_mtimes,
                   const std::string& obj_file) {
         ModuleEntry entry;
         entry.name = name;
         entry.src_mtime = src_mtime;
+        entry.src_size = src_size;  // L15
         entry.dep_mtimes = dep_mtimes;
         entry.obj_file = obj_file;
         m_entries[module_path] = std::move(entry);
@@ -131,6 +137,7 @@ private:
             ss << "    " << jsonString(path) << ": {\n";
             ss << "      \"name\": " << jsonString(entry.name) << ",\n";
             ss << "      \"src_mtime\": " << entry.src_mtime << ",\n";
+            ss << "      \"src_size\": " << entry.src_size << ",\n";  // L15
             ss << "      \"obj_file\": " << jsonString(entry.obj_file) << ",\n";
             ss << "      \"deps\": {\n";
             bool first_dep = true;
@@ -178,6 +185,8 @@ private:
                             entry.name = parseString();
                         else if (field == "src_mtime")
                             entry.src_mtime = parseNumber();
+                        else if (field == "src_size")       // L15
+                            entry.src_size = static_cast<uintmax_t>(parseNumber());
                         else if (field == "obj_file")
                             entry.obj_file = parseString();
                         else if (field == "deps") {

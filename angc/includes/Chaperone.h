@@ -32,7 +32,7 @@ class Chaperone {
 public:
     /// Runs the pass on the entire program.
     static bool run(const std::vector<std::shared_ptr<Stmt>>& program,
-                    const TypeChecker& tc,
+                    TypeChecker& tc,  // L2: non-const — resolve() marks symbols as used
                     ErrorHandler& eh);
 
 private:
@@ -67,7 +67,7 @@ private:
 
     // --- Analysis context (must be before diag which takes Context&) ---
     struct Context {
-        const TypeChecker& tc;
+        TypeChecker& tc;  // L2: non-const — resolve() marks symbols as used
         ErrorHandler& eh;
         std::set<std::string> tracked_types;
         std::string current_function;
@@ -155,7 +155,7 @@ private:
         const Type* pending_closure_type = nullptr;
         std::set<std::string> pending_closure_captures;
 
-        Context(const TypeChecker& t, ErrorHandler& e)
+        Context(TypeChecker& t, ErrorHandler& e)
             : tc(t), eh(e) {}
     };
 

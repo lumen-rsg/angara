@@ -41,7 +41,7 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
         if (auto* ow = dynamic_cast<const OwnedTypeNode*>(t)) return base_name(ow->inner_type.get());
         return "";
     };
-    auto sem_sym = const_cast<SymbolTable&>(ctx.tc.getSymbolTable()).resolve(func.name.lexeme);
+    auto sem_sym = ctx.tc.getSymbolTable().resolve(func.name.lexeme);
     if (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION) {
         auto fn_type = std::dynamic_pointer_cast<FunctionType>(sem_sym->type);
         for (size_t i = 0; i < fn_type->param_types.size() && i < func.params.size(); i++) {
@@ -168,8 +168,7 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
         auto dot = summary_key.rfind('.');
         if (dot != std::string::npos) {
             std::string cls_name = summary_key.substr(0, dot);
-            auto sym = const_cast<SymbolTable&>(
-                ctx.tc.getSymbolTable()).resolve(cls_name);
+            auto sym = ctx.tc.getSymbolTable().resolve(cls_name);
             if (sym && sym->type && sym->type->kind == TypeKind::CLASS) {
                 auto cls = std::dynamic_pointer_cast<ClassType>(sym->type);
                 if (cls) {
@@ -185,11 +184,35 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
 
     bool terminates = false;
     if (func.body) {
-        // analyzeBlock takes state by value and returns the threaded map;
-        // capture the result so the body's effects (moves, drops) are visible
-        // to the leak check and summary below. Discarding it left every param
-        // stuck at its entry state, which corrupted the interprocedural summary.
         state = analyzeBlock(ctx, *func.body, state, terminates);
+    }
+
+    // L3: For constructors, verify all tracked fields were initialized.
+    if (func.has_this && func.name.lexeme == "init") {
+        auto dot = summary_key.rfind('.');
+        if (dot != std::string::npos) {
+            std::string cls_name = summary_key.substr(0, dot);
+            auto sym = ctx.tc.getSymbolTable().resolve(cls_name);
+            if (sym && sym->type && sym->type->kind == TypeKind::CLASS) {
+                auto cls = std::dynamic_pointer_cast<ClassType>(sym->type);
+                if (cls) {
+                    for (const auto& [fname, finfo] : cls->fields) {
+                        if (finfo.type && isTrackedTypeObj(ctx, *finfo.type)) {
+                            std::string field_key = "this." + fname;
+                            auto fit = state.find(field_key);
+                            if (fit == state.end() || fit->second != State::Live) {
+                                warn(ctx, func.name,
+                                    "🔧 Uninitialized field — `" + fname +
+                                    "` is a tracked field in `" + cls_name +
+                                    "` but was not assigned in the constructor `init`. "
+                                    "It must be initialized before the constructor exits.",
+                                    "W522");
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     if (!terminates) {
@@ -448,8 +471,7 @@ void Chaperone::analyzeStmt(Context& ctx,
             for (const auto& dn : var->destructure_names) {
                 state[dn.lexeme] = State::Uninit;
                 // Look up the element's type in the symbol table to check for ref<T>
-                auto sym = const_cast<SymbolTable&>(
-                    ctx.tc.getSymbolTable()).resolve(dn.lexeme);
+                auto sym = ctx.tc.getSymbolTable().resolve(dn.lexeme);
                 if (sym && sym->type && sym->type->kind == TypeKind::REF) {
                     // If the initializer is a tracked variable, record the borrow
                     if (auto* src_ve = dynamic_cast<const VarExpr*>(
@@ -775,8 +797,7 @@ void Chaperone::analyzeStmt(Context& ctx,
             // via the symbol table. For Uninit locals (declared but not tracked),
             // look up the type via the TypeChecker's variable-types map.
             if (it == state.end()) {
-                auto sym = const_cast<SymbolTable&>(
-                    ctx.tc.getSymbolTable()).resolve(key);
+                auto sym = ctx.tc.getSymbolTable().resolve(key);
                 if (sym && sym->type) {
                     is_heap_var = isHeapAllocatedType(ctx, *sym->type);
                 }
