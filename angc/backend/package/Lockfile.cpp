@@ -337,7 +337,12 @@ bool Lockfile::load(const std::string& path) {
 bool Lockfile::save() const {
     if (m_path.empty()) return false;
 
-    std::ofstream file(m_path);
+    // M16: write to a temp sibling, then atomically rename over m_path. A crash
+    // mid-write previously left m_path half-written and irrecoverable; the
+    // temp+rename pattern (POSIX rename is atomic on the same filesystem) keeps
+    // the existing lockfile intact until the new one is fully written.
+    std::string tmp_path = m_path + ".tmp";
+    std::ofstream file(tmp_path);
     if (!file.is_open()) return false;
 
     file << "{\n";
@@ -381,7 +386,26 @@ bool Lockfile::save() const {
     file << "  }\n";
     file << "}\n";
 
-    return file.good();
+    // Flush + close before renaming so all bytes are on disk.
+    bool write_ok = file.good();
+    file.close();
+
+    if (!write_ok) {
+        // Best-effort cleanup of the partial temp file; leave m_path untouched.
+        std::error_code ec;
+        std::filesystem::remove(tmp_path, ec);
+        return false;
+    }
+
+    // Atomic on POSIX for same-filesystem renames; overwrites m_path.
+    std::error_code ren_ec;
+    std::filesystem::rename(tmp_path, m_path, ren_ec);
+    if (ren_ec) {
+        std::error_code cleanup_ec;
+        std::filesystem::remove(tmp_path, cleanup_ec);  // best-effort cleanup
+        return false;
+    }
+    return true;
 }
 
 const LockfileEntry* Lockfile::get(const std::string& name) const {
