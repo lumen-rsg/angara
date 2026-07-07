@@ -303,5 +303,20 @@ namespace angara {
         ErrorHandler &m_errorHandler;
         bool m_panicMode = false;
         int m_recursionDepth = 0;
+
+        // C3: RAII guard for m_recursionDepth. The old manual ++/--
+        // skipped the decrement if the dispatched parse call threw
+        // ParseError, leaving the counter >= 256 forever and making
+        // every subsequent statement()/expression() spuriously throw
+        // "Maximum recursion depth exceeded" — one nested error killed
+        // the rest of the parse. The destructor guarantees the decrement
+        // on every path, including exception unwinding.
+        struct RecursionGuard {
+            int& depth;
+            explicit RecursionGuard(int& d) : depth(d) { ++depth; }
+            ~RecursionGuard() { --depth; }
+            RecursionGuard(const RecursionGuard&) = delete;
+            RecursionGuard& operator=(const RecursionGuard&) = delete;
+        };
     };
 }

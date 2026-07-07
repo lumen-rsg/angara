@@ -159,10 +159,8 @@ namespace angara {
         if (m_recursionDepth > 256) {
             throw error(peek(), "Maximum recursion depth exceeded — statement nesting is too deep.", "E471");
         }
-        m_recursionDepth++;
-        auto result = dispatchStatement();
-        m_recursionDepth--;
-        return result;
+        RecursionGuard guard(m_recursionDepth);
+        return dispatchStatement();
     }
 
     std::shared_ptr<Stmt> Parser::dispatchStatement() {
@@ -202,10 +200,8 @@ namespace angara {
         if (m_recursionDepth > 256) {
             throw error(peek(), "Maximum recursion depth exceeded — expression is too deeply nested.", "E471");
         }
-        m_recursionDepth++;
-        auto result = assignment();
-        m_recursionDepth--;
-        return result;
+        RecursionGuard guard(m_recursionDepth);
+        return assignment();
     }
 
     bool Parser::match(const std::vector<TokenType> &types) {
