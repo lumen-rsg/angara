@@ -16,9 +16,11 @@
 
 static void throw_fs_error(const char* message, const char* path) {
     const char* error_reason = strerror(errno);
-    // M19: use a static buffer to avoid a malloc leak — throw_error is
-    // __noreturn__ (calls longjmp), so the old free() after it was dead code.
-    static char full_message[1024];
+    // M19/M22: use a thread-local buffer to (a) avoid a malloc leak —
+    // throw_error is __noreturn__ (calls longjmp), so a heap buffer allocated
+    // here would leak — and (b) be safe when multiple threads call different
+    // fs functions simultaneously (a plain 'static' buffer would race).
+    static __thread char full_message[1024];
     snprintf(full_message, sizeof(full_message), "%s '%s': %s", message, path, error_reason);
     ang_api->throw_error(full_message);
 }
@@ -33,7 +35,16 @@ AngaraObject Angara_fs_read_file(int arg_count, AngaraObject* args) {
     if (!file) return ang_nil();
 
     fseek(file, 0L, SEEK_END);
-    size_t file_size = ftell(file);
+    // M19: ftell() returns -1L on failure (e.g. for pipes/special files), which
+    // a size_t conversion would silently turn into a huge value. Check it
+    // explicitly and refuse to read in that case.
+    long tell_result = ftell(file);
+    if (tell_result < 0) {
+        fclose(file);
+        ang_api->throw_error("fs.read_file: cannot determine file size (ftell failed).");
+        return ang_nil();
+    }
+    size_t file_size = (size_t)tell_result;
     rewind(file);
 
     char* buffer = (char*)malloc(file_size + 1);
