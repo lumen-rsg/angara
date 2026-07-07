@@ -458,6 +458,8 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
 
             if (base_type->kind == TypeKind::DATA) {
                 auto data_type = std::dynamic_pointer_cast<DataType>(base_type);
+                // H13: guard against a TypeKind/runtime-type mismatch.
+                if (!data_type) return m_type_error;
                 if (data_type->is_generic()) {
                     if (generic->arguments.size() != data_type->type_params.size()) {
                         error(generic->name, "Generic type '" + base_name + "' expects " +
@@ -489,6 +491,8 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
 
             if (base_type->kind == TypeKind::CLASS) {
                 auto class_type = std::dynamic_pointer_cast<ClassType>(base_type);
+                // H13: guard against a TypeKind/runtime-type mismatch.
+                if (!class_type) return m_type_error;
                 if (class_type->is_generic()) {
                     if (generic->arguments.size() != class_type->type_params.size()) {
                         error(generic->name, "Generic type '" + base_name + "' expects " +
@@ -521,6 +525,8 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
             // LANG-8: generic enum (e.g., Result<i64, string>)
             if (base_type->kind == TypeKind::ENUM) {
                 auto enum_type = std::dynamic_pointer_cast<EnumType>(base_type);
+                // H13: guard against a TypeKind/runtime-type mismatch.
+                if (!enum_type) return m_type_error;
                 if (enum_type->is_generic()) {
                     if (generic->arguments.size() != enum_type->type_params.size()) {
                         error(generic->name, "Generic type '" + base_name + "' expects " +
