@@ -40,6 +40,10 @@ namespace angara {
         /// @return The parsed statement node.
         std::shared_ptr<Stmt> statement();
 
+        /// Internal dispatch for statement parsing, called from statement()
+        /// after recursion-depth check.
+        std::shared_ptr<Stmt> dispatchStatement();
+
         /// Parses an expression followed by a semicolon.
         /// @return The parsed expression-statement node.
         std::shared_ptr<Stmt> expressionStatement();
