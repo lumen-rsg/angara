@@ -158,6 +158,8 @@ public:
     llvm::GlobalVariable* getAPIVtable() const { return m_api_vtable; }
     /// Returns the AngaraNativeInstance struct type.
     llvm::StructType* getNativeInstanceType() const { return m_native_instance_type; }
+    /// H8: Returns the exception frame struct type { [jmp_buf_size x i8], ptr }.
+    llvm::StructType* getExcFrameType() const { return m_exc_frame_type; }
 
     // --- Memory management (direct malloc/free via the allocator) ---
 
@@ -256,6 +258,7 @@ private:
         llvm::StructType* m_raw_array_type = nullptr;      // SIMD-1
         llvm::StructType* m_vector_type = nullptr;          // SIMD-5
         llvm::StructType* m_native_instance_type = nullptr;
+        llvm::StructType* m_exc_frame_type = nullptr;       // H8: exception frame { [N x i8], ptr }
 
     llvm::FunctionCallee m_fn_string_from_c;
     llvm::FunctionCallee m_fn_string_concat;

@@ -166,6 +166,13 @@ void RuntimeBuilder::generateTypes() {
         PointerType::get(m_ctx, 0),
     }, "AngaraNativeInstance");
 
+    // H8: Single definition of the exception frame struct { [jmp_buf x i8], ptr }.
+    // Previously created independently in four places with two different names.
+    m_exc_frame_type = StructType::create(m_ctx, {
+        ArrayType::get(Type::getInt8Ty(m_ctx), m_jmp_buf_size),
+        PointerType::get(m_ctx, 0)
+    }, "AngaraExcFrame");
+
     m_thread_type = StructType::create(m_ctx, {
         m_obj_header_type,
         PointerType::get(m_ctx, 0),

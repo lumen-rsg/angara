@@ -961,9 +961,8 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
 
         // RT-1: wrap the callback invocation in a setjmp/try so a throw lands
         // inside the trampoline (not across C frames). Mirrors cgTry exactly.
-        auto* frameType = llvm::StructType::create(*ctx,
-            {llvm::ArrayType::get(llvm::Type::getInt8Ty(*ctx), getJmpBufSize(targetTriple)),
-             llvm::PointerType::get(*ctx, 0)}, "EF");
+        // H8: Use the single definition from RuntimeBuilder.
+        auto* frameType = rt->getExcFrameType();
         auto* frame = builder->CreateAlloca(frameType);
         auto* frame_raw = builder->CreateBitCast(frame, llvm::PointerType::get(*ctx, 0));
         auto* prev_addr = builder->CreateStructGEP(frameType, frame, 1);

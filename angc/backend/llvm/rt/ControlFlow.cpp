@@ -264,10 +264,8 @@ void RuntimeBuilder::generateExceptionOps() {
         IRBuilder<> bu(unwind_bb);
         // M19: drain defer stack before longjmp (cleans up C resources on error paths)
         bu.CreateCall(m_module.getFunction("__ang_api_defer_run"), {});
-        auto* frame_type = StructType::create(m_ctx, {
-            ArrayType::get(i8_ty, m_jmp_buf_size),
-            i8_ptr
-        }, "ExceptionFrame");
+        // H8: Use single definition from generateTypes().
+        auto* frame_type = m_exc_frame_type;
 
         auto* frame = bu.CreateBitCast(chain, PointerType::get(m_ctx, 0));
         auto* prev_ptr = bu.CreateStructGEP(frame_type, frame, 1);
@@ -291,10 +289,8 @@ void RuntimeBuilder::generateExceptionOps() {
         IRBuilder<> b(entry);
         auto* frame_arg = fn->arg_begin();
 
-        auto* frame_type = StructType::create(m_ctx, {
-            ArrayType::get(i8_ty, m_jmp_buf_size),
-            i8_ptr
-        }, "ExceptionFrame");
+        // H8: Use single definition from generateTypes().
+        auto* frame_type = m_exc_frame_type;
 
         auto* frame = b.CreateBitCast(frame_arg, PointerType::get(m_ctx, 0));
         auto* prev_addr = b.CreateStructGEP(frame_type, frame, 1);
@@ -316,10 +312,8 @@ void RuntimeBuilder::generateExceptionOps() {
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<> b(entry);
 
-        auto* frame_type = StructType::create(m_ctx, {
-            ArrayType::get(i8_ty, m_jmp_buf_size),
-            i8_ptr
-        }, "ExceptionFrame");
+        // H8: Use single definition from generateTypes().
+        auto* frame_type = m_exc_frame_type;
 
         auto* chain = b.CreateLoad(i8_ptr, m_g_exception_chain, "chain");
         auto* frame = b.CreateBitCast(chain, PointerType::get(m_ctx, 0));

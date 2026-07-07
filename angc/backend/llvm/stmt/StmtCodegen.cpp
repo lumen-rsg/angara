@@ -476,9 +476,8 @@ void LLVMBackend::cgTry(const TryStmt& s) {
     auto* finallyBB = s.finallyBlock ? llvm::BasicBlock::Create(*ctx,"finally",fn) : nullptr;
     auto* afterAll = llvm::BasicBlock::Create(*ctx,"after_try",fn);
 
-    auto* frameType = llvm::StructType::create(*ctx,
-        {llvm::ArrayType::get(llvm::Type::getInt8Ty(*ctx), getJmpBufSize(targetTriple)),
-         llvm::PointerType::get(*ctx, 0)}, "EF");
+    // H8: Use the single definition from RuntimeBuilder.
+    auto* frameType = rt->getExcFrameType();
     auto* frame = builder->CreateAlloca(frameType);
 
     auto* frame_raw = builder->CreateBitCast(frame, llvm::PointerType::get(*ctx, 0));
