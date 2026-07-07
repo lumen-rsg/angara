@@ -781,33 +781,48 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
                    name == "Mutex";
         };
 
-        // Helper: resolve a type name to its semantic Type and check its
-        // is_sendable/is_sync flag.
-        auto typeIsSend = [&](const std::string& name) -> bool {
-            if (isInherentlySend(name)) return true;
-            auto sym = m_symbols.resolve(name);
-            if (!sym || !sym->type) return false;
-            if (sym->type->kind == TypeKind::CLASS) {
-                auto cls = std::dynamic_pointer_cast<ClassType>(sym->type);
+        // Helper: check a field type's is_sendable/is_sync flag.
+        // L7: previously these took a type NAME string and re-resolved it via
+        // m_symbols.resolve(name). For CLASS/DATA types toString() returns the
+        // bare name, so two same-named types from different attach-imported
+        // modules would collide in the symbol-table lookup. Now we take the
+        // actual Type object and read its flag directly. Primitives still go
+        // through the name-keyed isInherentlySend/Sync fast path (built-ins
+        // like "i64", "string", "bool"); for non-CLASS/DATA/INSTANCE types
+        // (e.g. ref<T>) the name fast path is the only signal, matching the
+        // previous conservative behavior.
+        auto typeIsSend = [&](const std::shared_ptr<Type>& ty) -> bool {
+            if (!ty) return false;
+            if (isInherentlySend(ty->toString())) return true;
+            if (ty->kind == TypeKind::CLASS) {
+                auto cls = std::dynamic_pointer_cast<ClassType>(ty);
                 return cls && cls->is_sendable;
             }
-            if (sym->type->kind == TypeKind::DATA) {
-                auto data = std::dynamic_pointer_cast<DataType>(sym->type);
+            if (ty->kind == TypeKind::DATA) {
+                auto data = std::dynamic_pointer_cast<DataType>(ty);
                 return data && data->is_sendable;
+            }
+            if (ty->kind == TypeKind::INSTANCE) {
+                // An instance's Send-ness rides on its class.
+                auto inst = std::dynamic_pointer_cast<InstanceType>(ty);
+                return inst && inst->class_type && inst->class_type->is_sendable;
             }
             return false;
         };
-        auto typeIsSync = [&](const std::string& name) -> bool {
-            if (isInherentlySync(name)) return true;
-            auto sym = m_symbols.resolve(name);
-            if (!sym || !sym->type) return false;
-            if (sym->type->kind == TypeKind::CLASS) {
-                auto cls = std::dynamic_pointer_cast<ClassType>(sym->type);
+        auto typeIsSync = [&](const std::shared_ptr<Type>& ty) -> bool {
+            if (!ty) return false;
+            if (isInherentlySync(ty->toString())) return true;
+            if (ty->kind == TypeKind::CLASS) {
+                auto cls = std::dynamic_pointer_cast<ClassType>(ty);
                 return cls && cls->is_sync;
             }
-            if (sym->type->kind == TypeKind::DATA) {
-                auto data = std::dynamic_pointer_cast<DataType>(sym->type);
+            if (ty->kind == TypeKind::DATA) {
+                auto data = std::dynamic_pointer_cast<DataType>(ty);
                 return data && data->is_sync;
+            }
+            if (ty->kind == TypeKind::INSTANCE) {
+                auto inst = std::dynamic_pointer_cast<InstanceType>(ty);
+                return inst && inst->class_type && inst->class_type->is_sync;
             }
             return false;
         };
@@ -865,8 +880,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
                     if (finfo.type->kind == TypeKind::CLASS ||
                         finfo.type->kind == TypeKind::INSTANCE ||
                         finfo.type->kind == TypeKind::DATA) {
-                        std::string ft = finfo.type->toString();
-                        if (!typeIsSend(ft)) { all_send = false; break; }
+                        if (!typeIsSend(finfo.type)) { all_send = false; break; }
                     }
                 }
                 if (all_send) { *flag = true; changed = true; }
@@ -893,8 +907,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
                 bool all_sync = true;
                 for (const auto& [fname, finfo] : *fields) {
                     if (!finfo.type) continue;
-                    std::string ft = finfo.type->toString();
-                    if (!typeIsSync(ft)) { all_sync = false; break; }
+                    if (!typeIsSync(finfo.type)) { all_sync = false; break; }
                 }
                 if (all_sync) { *flag = true; changed = true; }
             }
