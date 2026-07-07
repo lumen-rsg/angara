@@ -167,7 +167,7 @@ namespace angara {
         // --- Type helpers ---
 
         /// Returns true if the type can be used in a boolean context.
-        static bool isTruthy(const std::shared_ptr<Type> &type);
+        bool isTruthy(const std::shared_ptr<Type> &type);
 
         /// Pops the top type from the internal type stack (used to pass types up from expressions).
         /// @return The popped type, or an error type if the stack is empty.

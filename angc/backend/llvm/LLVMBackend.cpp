@@ -356,7 +356,7 @@ llvm::Value* LLVMBackend::callRt(llvm::FunctionCallee c, const std::vector<llvm:
 llvm::Value* LLVMBackend::callRtByName(const std::string& name, const std::vector<llvm::Value*>& a) {
     auto* fn = mod->getFunction(name);
     if (fn) return builder->CreateCall(fn, a);
-    llvm::report_fatal_error("[LLVMBackend] callRtByName: mandatory runtime function '" + name + "' not found");
+    llvm::report_fatal_error(llvm::StringRef("[LLVMBackend] callRtByName: mandatory runtime function '" + name + "' not found"));
     return makeNil();
 }
 
