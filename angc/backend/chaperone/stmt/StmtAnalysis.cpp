@@ -275,6 +275,20 @@ Chaperone::StateMap Chaperone::analyzeScopedBlock(Context& ctx,
     // M1: scope cleanup — remove variables declared inside this block,
     // or restore their pre-block values if they shadow an outer variable.
     for (const auto& name : declared_names) {
+        // L21: if this variable held a closure, remove it from the closure's
+        // holders (the closure is no longer reachable through this variable).
+        auto vtc = ctx.var_to_closure.find(name);
+        if (vtc != ctx.var_to_closure.end()) {
+            const Type* ft = vtc->second;
+            auto holders_it = ctx.closure_holders.find(ft);
+            if (holders_it != ctx.closure_holders.end()) {
+                holders_it->second.erase(name);
+                if (holders_it->second.empty())
+                    ctx.closure_holders.erase(holders_it);
+            }
+            ctx.var_to_closure.erase(vtc);
+        }
+
         auto pre_it = pre_state.find(name);
         if (pre_it != pre_state.end()) {
             state[name] = pre_it->second;
@@ -296,6 +310,19 @@ void Chaperone::analyzeScopedStmt(Context& ctx,
     // M1: scope cleanup — remove variables declared by this statement,
     // or restore their pre-statement values if they shadow outer variables.
     for (const auto& name : declared_names) {
+        // L21: if this variable held a closure, remove it from the closure's holders.
+        auto vtc = ctx.var_to_closure.find(name);
+        if (vtc != ctx.var_to_closure.end()) {
+            const Type* ft = vtc->second;
+            auto holders_it = ctx.closure_holders.find(ft);
+            if (holders_it != ctx.closure_holders.end()) {
+                holders_it->second.erase(name);
+                if (holders_it->second.empty())
+                    ctx.closure_holders.erase(holders_it);
+            }
+            ctx.var_to_closure.erase(vtc);
+        }
+
         auto pre_it = pre_state.find(name);
         if (pre_it != pre_state.end()) {
             state[name] = pre_it->second;
@@ -421,8 +448,56 @@ void Chaperone::analyzeStmt(Context& ctx,
         }
 
         // Check the initializer expression for use-after-free / use-after-move.
+        // L21: before analyzing the new initializer, if this variable already
+        // held a closure from a previous declaration, remove it from the old
+        // closure's holders (the new initializer will replace it).
+        auto old_vtc = ctx.var_to_closure.find(var->name.lexeme);
+        if (old_vtc != ctx.var_to_closure.end()) {
+            const Type* old_ft = old_vtc->second;
+            auto holders_it = ctx.closure_holders.find(old_ft);
+            if (holders_it != ctx.closure_holders.end()) {
+                holders_it->second.erase(var->name.lexeme);
+                if (holders_it->second.empty())
+                    ctx.closure_holders.erase(holders_it);
+            }
+            ctx.var_to_closure.erase(old_vtc);
+        }
+
         if (var->initializer)
             analyzeExpr(ctx, var->initializer, state);
+
+        // L21: closure capture tracking. If the initializer is a LambdaExpr,
+        // the LambdaExpr handler stored pending captures in ctx — transfer
+        // them into the persistent maps keyed by the new variable name.
+        // If the initializer is a VarExpr that holds a closure (let g = f),
+        // propagate the closure reference to the new variable.
+        if (var->initializer) {
+            if (ctx.pending_closure_type) {
+                // LambdaExpr initializer with pending captures.
+                const Type* ft = ctx.pending_closure_type;
+                // Verify the pending type matches the initializer's resolved type.
+                auto init_type_it = ctx.tc.getExpressionTypes().find(var->initializer.get());
+                if (init_type_it != ctx.tc.getExpressionTypes().end() &&
+                    init_type_it->second.get() == ft) {
+                    if (!ctx.closure_captures.count(ft))
+                        ctx.closure_captures[ft] = std::move(ctx.pending_closure_captures);
+                    else
+                        ctx.pending_closure_captures.clear();
+                    ctx.closure_holders[ft].insert(var->name.lexeme);
+                    ctx.var_to_closure[var->name.lexeme] = ft;
+                }
+                ctx.pending_closure_type = nullptr;
+                ctx.pending_closure_captures.clear();
+            } else if (auto* src_ve = dynamic_cast<const VarExpr*>(var->initializer.get())) {
+                // VarExpr initializer: let g = f — propagate closure reference.
+                auto src_vtc = ctx.var_to_closure.find(src_ve->name.lexeme);
+                if (src_vtc != ctx.var_to_closure.end()) {
+                    const Type* ft = src_vtc->second;
+                    ctx.closure_holders[ft].insert(var->name.lexeme);
+                    ctx.var_to_closure[var->name.lexeme] = ft;
+                }
+            }
+        }
 
         auto it = state.find(var->name.lexeme);
         if (it != state.end() && it->second == State::Live) {
@@ -681,7 +756,14 @@ void Chaperone::analyzeStmt(Context& ctx,
                 "moved to another variable; dropping it would double-free. Drop the new owner instead.",
                 "E503");
         } else {
-            it->second = State::Dropped;
+            // L21: before dropping, check if any pending closure still captures
+            // this variable. If so, emit E505 and transition to Escaped instead
+            // of Dropped — the closure still holds a reference.
+            if (checkPendingCaptures(ctx, key, state, *diag_tok)) {
+                it->second = State::Escaped;
+            } else {
+                it->second = State::Dropped;
+            }
         }
         return;
     }
@@ -692,8 +774,38 @@ void Chaperone::analyzeStmt(Context& ctx,
             analyzeExpr(ctx, ret->value, state);
             if (auto* ve = dynamic_cast<const VarExpr*>(ret->value.get())) {
                 auto it = state.find(ve->name.lexeme);
-                if (it != state.end() && it->second == State::Live)
+                if (it != state.end() && it->second == State::Live) {
+                    // L21: before escaping the return value, check if any pending
+                    // closure still captures it. Emit E505 if so.
+                    checkPendingCaptures(ctx, ve->name.lexeme, state, ve->name);
                     it->second = State::Escaped;
+                }
+                // L21: if a closure variable itself is being returned, its
+                // captured variables are now at risk of dangling. Emit E505 for
+                // each Live captured variable that isn't also being returned.
+                auto vtc = ctx.var_to_closure.find(ve->name.lexeme);
+                if (vtc != ctx.var_to_closure.end()) {
+                    const Type* ft = vtc->second;
+                    auto cap_it = ctx.closure_captures.find(ft);
+                    if (cap_it != ctx.closure_captures.end()) {
+                        for (const auto& cap_name : cap_it->second) {
+                            auto cit = state.find(cap_name);
+                            if (cit != state.end() && cit->second == State::Live) {
+                                diag(ctx, ve->name,
+                                    "\U0001f9ec Escaped molecule \u2014 `" + cap_name +
+                                    "` is captured by closure `" + ve->name.lexeme +
+                                    "` which is being returned. The closure will outlive "
+                                    "the captured value. Drop the captured value via the "
+                                    "closure or return it together.",
+                                    "E505");
+                                cit->second = State::Escaped;
+                            }
+                        }
+                    }
+                    // The closure is escaping — remove it from pending tracking.
+                    ctx.closure_holders.erase(ft);
+                    ctx.var_to_closure.erase(vtc);
+                }
             }
         }
         for (auto& [name, st] : state) {
@@ -718,6 +830,32 @@ void Chaperone::analyzeStmt(Context& ctx,
     // --- ThrowStmt ---
     if (auto* thr = dynamic_cast<const ThrowStmt*>(stmt.get())) {
         analyzeExpr(ctx, thr->expression, state);
+
+        // L21: if a closure variable is being thrown, its captured variables
+        // are now at risk of dangling (the closure escapes via the exception).
+        if (auto* ve = dynamic_cast<const VarExpr*>(thr->expression.get())) {
+            auto vtc = ctx.var_to_closure.find(ve->name.lexeme);
+            if (vtc != ctx.var_to_closure.end()) {
+                const Type* ft = vtc->second;
+                auto cap_it = ctx.closure_captures.find(ft);
+                if (cap_it != ctx.closure_captures.end()) {
+                    for (const auto& cap_name : cap_it->second) {
+                        auto cit = state.find(cap_name);
+                        if (cit != state.end() && cit->second == State::Live) {
+                            diag(ctx, ve->name,
+                                "\U0001f9ec Escaped molecule \u2014 `" + cap_name +
+                                "` is captured by closure `" + ve->name.lexeme +
+                                "` which is being thrown. The closure will outlive "
+                                "the captured value.",
+                                "E505");
+                            cit->second = State::Escaped;
+                        }
+                    }
+                }
+                ctx.closure_holders.erase(ft);
+                ctx.var_to_closure.erase(vtc);
+            }
+        }
         // v5: report leaks on throw paths as errors. No auto-unwind —
         // the programmer must use `finally {}` for explicit cleanup.
         // S8: a name listed in a surrounding `finally {}`'s drops is

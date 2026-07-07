@@ -126,6 +126,30 @@ private:
         // E501 (error), giving developers visibility without breaking compilation.
         std::set<std::string> builtin_heap_vars;
 
+        // L21: deferred closure escape analysis. Instead of immediately emitting
+        // E505 when a non-IIFE LambdaExpr captures a tracked variable, we defer
+        // the check to the point where the captured variable is dropped/moved.
+        //
+        // closure_captures: maps closure identity (FunctionType*) to the set of
+        // tracked variables it captures. Populated once when the LambdaExpr body
+        // is first analyzed. The FunctionType* key is stable across variable
+        // assignments (the same shared_ptr<FunctionType> flows through the type
+        // checker from LambdaExpr → VarDeclStmt → Symbol → VarExpr lookups).
+        std::map<const Type*, std::set<std::string>> closure_captures;
+        // closure_holders: maps closure identity to the set of local variables
+        // currently holding a reference to it. When non-empty, the closure is
+        // "pending" — its captured variables cannot be dropped without E505.
+        std::map<const Type*, std::set<std::string>> closure_holders;
+        // var_to_closure: reverse map from variable name to the closure it holds.
+        // Enables O(1) updates when a variable is reassigned or goes out of scope.
+        std::map<std::string, const Type*> var_to_closure;
+
+        // Temporary communication channel: LambdaExpr handler populates these,
+        // the enclosing VarDeclStmt or AssignExpr handler consumes them to
+        // transfer captures into the persistent closure_* maps above.
+        const Type* pending_closure_type = nullptr;
+        std::set<std::string> pending_closure_captures;
+
         Context(const TypeChecker& t, ErrorHandler& e)
             : tc(t), eh(e) {}
     };
@@ -187,6 +211,14 @@ private:
     static void analyzeExpr(Context& ctx,
         const std::shared_ptr<struct Expr>& expr,
         StateMap& state, bool is_callee = false);
+
+    /// L21: check whether `var_name` is captured by any pending closure.
+    /// Called before transitioning a tracked variable from Live to Dropped/Moved/
+    /// Escaped. If a pending closure still references it, emits E505 and returns
+    /// true — the caller should transition the variable to Escaped, not Dropped.
+    /// @return true if E505 was emitted (variable is Escaped, not Dropped).
+    static bool checkPendingCaptures(Context& ctx, const std::string& var_name,
+                                      StateMap& state, const Token& tok);
 
     /// E505: flag a tracked Live value escaping into an untracked container.
     /// @param container_type  Optional resolved type of the container; if tracked,

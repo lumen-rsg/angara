@@ -1,0 +1,27 @@
+// Chaperone negative test — deferred E505: one alias called, other still pending (L21).
+// When a closure is copied to another variable (let g = f), both variables
+// independently hold capture references. Calling only one leaves the other
+// still pending — dropping the captured variable must still trigger E505.
+//
+// expect: E505
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    // Store closure in f — captures b.
+    let f = func() -> i64 { return b.get(); };
+    // Alias: g also holds the closure and its capture references.
+    let g = f;
+    // Call f only — f's capture reference is resolved, but g's is still pending.
+    let r1 = f();
+    // Drop b while g still has a pending capture reference → E505.
+    drop b;
+    let r2 = g();
+    return r1 + r2;
+}

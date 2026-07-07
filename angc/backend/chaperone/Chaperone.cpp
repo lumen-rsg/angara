@@ -154,8 +154,13 @@ bool Chaperone::isBuiltinHeapType(const Type& t) {
             // string is the only heap-allocated primitive
             return inner->toString() == "string";
         case TypeKind::FUNCTION:
-            // Closures and bound methods are FUNCTION-kind heap objects.
-            return true;
+            // L21: closures and bound methods are NOT tracked as heap objects.
+            // While closures are heap-allocated at runtime, they don't hold
+            // tracked resources — captured variables are tracked through the
+            // captured variables' own state. Treating FUNCTION as a heap type
+            // would cause `let g = f` to be an ownership move (S1), breaking
+            // closure aliasing.
+            return false;
         default:
             return false;
     }
@@ -300,6 +305,44 @@ void Chaperone::collectVarRefs(const std::shared_ptr<Stmt>& stmt,
 // above, and a surrounding `finally {}` discharges the obligation (S8). The
 // programmer cleans up explicitly; the Chaperone verifies.
 // ============================================================================
+
+// ============================================================================
+// L21: deferred closure escape analysis.
+// ============================================================================
+
+bool Chaperone::checkPendingCaptures(Context& ctx, const std::string& var_name,
+                                      StateMap& state, const Token& tok)
+{
+    // Scan all pending closures for any that capture this variable.
+    for (auto& [ft, holders] : ctx.closure_holders) {
+        if (holders.empty()) continue;
+        auto cap_it = ctx.closure_captures.find(ft);
+        if (cap_it == ctx.closure_captures.end()) continue;
+        if (!cap_it->second.count(var_name)) continue;
+
+        // Build a human-readable list of holder variable names.
+        std::string holder_list;
+        for (const auto& h : holders) {
+            if (!holder_list.empty()) holder_list += ", ";
+            holder_list += "`" + h + "`";
+        }
+
+        diag(ctx, tok,
+            "\U0001f9ec Escaped molecule \u2014 `" + var_name + "` is captured by "
+            "a closure held in " + holder_list + " which may still reference it. "
+            "Call the closure before dropping this value, or drop the captured "
+            "value via the closure's lifecycle.",
+            "E505");
+
+        // Don't erase from closure_captures — the capture set is immutable.
+        // Pending status is tracked by closure_holders; when all holders are
+        // removed (call/scope exit), the closure is no longer pending.
+        // Erasing here would break interprocedural convergence passes where
+        // suppress_diag is true: the capture would be gone on the next pass.
+        return true;
+    }
+    return false;
+}
 
 // ============================================================================
 // Phase 4: Cycle detection

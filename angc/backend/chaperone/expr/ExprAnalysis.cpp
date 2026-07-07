@@ -170,7 +170,53 @@ void Chaperone::analyzeExpr(Context& ctx,
         }
 
         // Walk the RHS (catches use-after-free / use-after-move inside it).
+        // L21: before analyzing the value, if the target is a bare variable that
+        // currently holds a closure, remove it from the old closure's holders.
+        const VarExpr* tgt_ve = dynamic_cast<const VarExpr*>(asgn->target.get());
+        if (tgt_ve) {
+            auto vtc_it = ctx.var_to_closure.find(tgt_ve->name.lexeme);
+            if (vtc_it != ctx.var_to_closure.end()) {
+                const Type* old_ft = vtc_it->second;
+                auto holders_it = ctx.closure_holders.find(old_ft);
+                if (holders_it != ctx.closure_holders.end()) {
+                    holders_it->second.erase(tgt_ve->name.lexeme);
+                    if (holders_it->second.empty())
+                        ctx.closure_holders.erase(holders_it);
+                }
+                ctx.var_to_closure.erase(vtc_it);
+            }
+        }
+
         analyzeExpr(ctx, asgn->value, state);
+
+        // L21: after analyzing the value, if it's a LambdaExpr with pending
+        // captures, transfer them to the target variable.
+        if (tgt_ve && ctx.pending_closure_type) {
+            const Type* ft = ctx.pending_closure_type;
+            // Only consume if the pending type matches the value expression's type.
+            auto val_type_it = ctx.tc.getExpressionTypes().find(asgn->value.get());
+            if (val_type_it != ctx.tc.getExpressionTypes().end() &&
+                val_type_it->second.get() == ft) {
+                if (!ctx.closure_captures.count(ft))
+                    ctx.closure_captures[ft] = std::move(ctx.pending_closure_captures);
+                ctx.closure_holders[ft].insert(tgt_ve->name.lexeme);
+                ctx.var_to_closure[tgt_ve->name.lexeme] = ft;
+                ctx.pending_closure_type = nullptr;
+                ctx.pending_closure_captures.clear();
+            }
+        }
+        // L21: if the value is a VarExpr that holds a closure, propagate the
+        // reference to the target.
+        if (tgt_ve && asgn->value && !ctx.pending_closure_type) {
+            if (auto* src_ve = dynamic_cast<const VarExpr*>(asgn->value.get())) {
+                auto src_vtc = ctx.var_to_closure.find(src_ve->name.lexeme);
+                if (src_vtc != ctx.var_to_closure.end()) {
+                    const Type* ft = src_vtc->second;
+                    ctx.closure_holders[ft].insert(tgt_ve->name.lexeme);
+                    ctx.var_to_closure[tgt_ve->name.lexeme] = ft;
+                }
+            }
+        }
 
         // Only a plain `=` can transfer whole-variable ownership. `+=` etc.
         // keep the target's allocation (compound assign).
@@ -352,6 +398,22 @@ void Chaperone::analyzeExpr(Context& ctx,
         std::string method_name;  // fallback for method calls
         if (auto* ve = dynamic_cast<const VarExpr*>(call->callee.get())) {
             callee_name = ve->name.lexeme;
+
+            // L21: if this variable holds a closure with pending captures,
+            // calling it resolves those captures — the closure is consumed
+            // synchronously and can no longer outlive its captured variables.
+            auto vtc_it = ctx.var_to_closure.find(callee_name);
+            if (vtc_it != ctx.var_to_closure.end()) {
+                const Type* ft = vtc_it->second;
+                // Remove this variable from the closure's holder set.
+                auto holders_it = ctx.closure_holders.find(ft);
+                if (holders_it != ctx.closure_holders.end()) {
+                    holders_it->second.erase(callee_name);
+                    if (holders_it->second.empty())
+                        ctx.closure_holders.erase(holders_it);
+                }
+                ctx.var_to_closure.erase(vtc_it);
+            }
         } else if (auto* get = dynamic_cast<const GetExpr*>(call->callee.get())) {
             method_name = get->name.lexeme;  // e.g. "init"
             // Resolve the object's type to get the class name.
@@ -854,19 +916,37 @@ void Chaperone::analyzeExpr(Context& ctx,
             return;
         }
 
-        // Non-IIFE: the closure may outlive captures — emit E505 and transition
-        // captured Live variables to Escaped.
+        // L21: Non-IIFE closure stored in a variable. Instead of immediately
+        // emitting E505 and transitioning captures to Escaped, we defer the
+        // check. The capture set and the FunctionType identity are stored in
+        // ctx.pending_closure_* — the enclosing VarDeclStmt or AssignExpr
+        // handler will transfer them into the persistent closure_* maps.
+        // E505 is deferred to the point where a captured variable is actually
+        // dropped/moved while the closure still has pending holders.
+        //
+        // Collect captures: only tracked Live variables that are referenced.
+        std::set<std::string> live_captures;
         for (const auto& name : referenced) {
             auto it = state.find(name);
-            if (it != state.end() && it->second == State::Live) {
-                diag(ctx, lam->keyword,
-                    "🧬 Escaped molecule — `" + name + "` is captured by a closure "
-                    "that may outlive it. Ownership is treated as transferred; drop "
-                    "the captured value via the closure's lifecycle, not the local.",
-                    "E505");
-                it->second = State::Escaped;
-            }
+            if (it != state.end() && it->second == State::Live)
+                live_captures.insert(name);
         }
+
+        // Look up the FunctionType for this LambdaExpr — it serves as the
+        // canonical closure identity (stable across variable assignments).
+        auto lam_type_it = ctx.tc.getExpressionTypes().find(expr.get());
+        if (!live_captures.empty() &&
+            lam_type_it != ctx.tc.getExpressionTypes().end() && lam_type_it->second &&
+            lam_type_it->second->kind == TypeKind::FUNCTION) {
+            // Defer: store captures and closure identity for the enclosing
+            // VarDeclStmt / AssignExpr handler to consume.
+            ctx.pending_closure_type = lam_type_it->second.get();
+            ctx.pending_closure_captures = std::move(live_captures);
+            // NOTE: captures stay Live in the outer state — no E505, no Escaped.
+        }
+        // If there are no Live captures, or if the type isn't a FunctionType,
+        // we fall through with nothing pending — the closure doesn't affect
+        // any tracked variable.
 
         // C4: Analyze the lambda body for memory safety. Start with a fresh
         // state map containing captured variables as Escaped (they come from
@@ -883,7 +963,7 @@ void Chaperone::analyzeExpr(Context& ctx,
         // can't see what the closure does to its arguments.
         // Also save/restore ctx.current_params so that lambda params are
         // excluded from E501 leak checks (just like regular function params).
-        auto lam_type_it = ctx.tc.getExpressionTypes().find(expr.get());
+        // (lam_type_it was resolved above in the L21 deferred-capture block.)
         std::set<std::string> saved_params;
         std::swap(saved_params, ctx.current_params);
         if (lam_type_it != ctx.tc.getExpressionTypes().end() && lam_type_it->second &&
