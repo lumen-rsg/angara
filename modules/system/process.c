@@ -236,8 +236,12 @@ AngaraObject Angara_process_run(int arg_count, AngaraObject* args) {
 
     char tmp[4096];
     ssize_t n;
-    while ((n = read(stdout_pipe[0], tmp, sizeof(tmp))) > 0 ||
-           (n == -1 && errno == EINTR)) {
+    // M20: if the initial malloc failed, skip the read loop entirely — the
+    // return path below is already NULL-safe and would otherwise memcpy into
+    // offset-from-NULL.
+    while (out_buf &&
+           ((n = read(stdout_pipe[0], tmp, sizeof(tmp))) > 0 ||
+            (n == -1 && errno == EINTR))) {
         if (n <= 0) continue;
         if (out_len + (size_t)n >= out_cap) {
             out_cap = (out_len + (size_t)n) * 2;
@@ -254,8 +258,10 @@ AngaraObject Angara_process_run(int arg_count, AngaraObject* args) {
     size_t err_len = 0, err_cap = 4096;
     err_buf = (char*)malloc(err_cap);
 
-    while ((n = read(stderr_pipe[0], tmp, sizeof(tmp))) > 0 ||
-           (n == -1 && errno == EINTR)) {
+    // M20: see out_buf above — guard the loop on a successful allocation.
+    while (err_buf &&
+           ((n = read(stderr_pipe[0], tmp, sizeof(tmp))) > 0 ||
+            (n == -1 && errno == EINTR))) {
         if (n <= 0) continue;
         if (err_len + (size_t)n >= err_cap) {
             err_cap = (err_len + (size_t)n) * 2;
