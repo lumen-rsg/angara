@@ -180,10 +180,23 @@ bool Chaperone::isTrackedTypeObj(Context& ctx, const Type& type) {
 	// both sound and necessary: every generic parameter IS boxed at runtime.
 	if (t->kind == TypeKind::TYPE_PARAM) return true;
 	// M13: Generic instances (e.g., Box<i64>) are tracked if their base type
-	// (e.g., Box) is tracked. Unwrap the GenericInstanceType and recurse.
+	// (e.g., Box) is tracked. Unwrap the GenericInstanceType chain iteratively.
+	// L2: a depth cap guards against a cyclic instance (theoretically
+	// constructible by the type checker) blowing the stack via unbounded
+	// recursion. 32 is far beyond any realistic nesting depth.
 	if (t->kind == TypeKind::GENERIC_INSTANCE) {
-		auto* gi = dynamic_cast<const GenericInstanceType*>(t);
-		if (gi && gi->base_type) return isTrackedTypeObj(ctx, *gi->base_type);
+		const Type* cur = t;
+		for (int depth = 0; depth < 32; ++depth) {
+			auto* gi = dynamic_cast<const GenericInstanceType*>(cur);
+			if (!gi || !gi->base_type) return false;
+			const Type& base = *gi->base_type;
+			if (base.kind != TypeKind::GENERIC_INSTANCE) {
+				return isTrackedTypeObj(ctx, base);
+			}
+			cur = &base;
+		}
+		// Depth limit hit without resolving — treat as untracked rather than
+		// risking a runaway chain.
 		return false;
 	}
 	// Phase B: track built-in heap-allocated types (string, list, record, etc.)
