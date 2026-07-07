@@ -61,7 +61,9 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
         mod->addModuleFlag(llvm::Module::Warning, "Debug Info Version", llvm::DEBUG_METADATA_VERSION);
         int dwarf_ver = m_dwarf_version;
         if (dwarf_ver == 0) {
-#ifdef __APPLE__
+#ifdef _WIN32
+            dwarf_ver = 4;   // clang on Windows defaults to DWARF 4
+#elif defined(__APPLE__)
             dwarf_ver = 2;
 #else
             dwarf_ver = 5;

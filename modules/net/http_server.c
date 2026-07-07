@@ -13,6 +13,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include "../_wincompat.h"
+#include "../_winsock.h"
+#else
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -21,6 +25,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <poll.h>
+#endif
 #include "Angara.h"
 
 #define IS_STR(v)  (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)

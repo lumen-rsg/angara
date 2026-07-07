@@ -12,7 +12,18 @@ MAGENTA := $(ESC)[1;35m
 CYAN    := $(ESC)[1;36m
 
 UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
+# ── Windows (MINGW64 / MSYS2) detection ─────────────────────────────────
+ifneq ($(findstring MINGW,$(UNAME_S)),)
+    WIN32       := 1
+    SO_EXT      := dll
+    SONAME_FLAG :=
+    INSTALL_BIN_DIR := /mingw64/bin
+else ifneq ($(findstring MSYS,$(UNAME_S)),)
+    WIN32       := 1
+    SO_EXT      := dll
+    SONAME_FLAG :=
+    INSTALL_BIN_DIR := /usr/bin
+else ifeq ($(UNAME_S),Darwin)
     SO_EXT      := dylib
     SONAME_FLAG := -Wl,-install_name
     INSTALL_BIN_DIR := /opt/homebrew/bin
@@ -23,6 +34,12 @@ ifeq ($(UNAME_S),Darwin)
 else
     SO_EXT      := so
     SONAME_FLAG := -Wl,-soname
+endif
+
+ifneq ($(WIN32),1)
+    SONAME_ARG := $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$$(@F)
+else
+    SONAME_ARG :=
 endif
 
 LLVM_CONFIG := $(shell ls /usr/bin/llvm-config* 2>/dev/null | sort -t- -k3 -V | tail -1 || which llvm-config 2>/dev/null)
@@ -239,119 +256,125 @@ build/obj/modules/simd/simd.o: modules/simd/simd.c
 build/modules/http.$(SO_EXT): build/obj/modules/net/http.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(CURL_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_ARG) $(CURL_LIBS) -o $@
 
 build/modules/websocket.$(SO_EXT): build/obj/modules/net/websocket.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(LWS_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_ARG) $(LWS_LIBS) -o $@
 
 build/modules/time.$(SO_EXT): build/obj/modules/system/time.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-ifeq ($(UNAME_S),Darwin)
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
+ifeq ($(WIN32),1)
+	@$(CC) $< -shared -o $@
+else ifeq ($(UNAME_S),Darwin)
+	@$(CC) $< -shared $(SONAME_ARG) -o $@
 else
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lrt -o $@
+	@$(CC) $< -shared $(SONAME_ARG) -lrt -o $@
 endif
 
 build/modules/amqp.$(SO_EXT): build/obj/modules/net/amqp.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(AMQP_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_ARG) $(AMQP_LIBS) -o $@
 
 build/modules/mqtt.$(SO_EXT): build/obj/modules/net/mqtt.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(MQTT_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_ARG) $(MQTT_LIBS) -o $@
 
 build/modules/matter.$(SO_EXT): build/obj/modules/embedded/matter.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(CURL_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_ARG) $(CURL_LIBS) -o $@
 
 build/modules/math.$(SO_EXT): build/obj/modules/math/math.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-ifeq ($(UNAME_S),Darwin)
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
+ifeq ($(WIN32),1)
+	@$(CC) $< -shared -o $@
+else ifeq ($(UNAME_S),Darwin)
+	@$(CC) $< -shared $(SONAME_ARG) -o $@
 else
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lm -o $@
+	@$(CC) $< -shared $(SONAME_ARG) -lm -o $@
 endif
 
 build/modules/simd.$(SO_EXT): build/obj/modules/simd/simd.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
+	@$(CC) $< -shared $(SONAME_ARG) -o $@
 
 build/modules/sys.$(SO_EXT): build/obj/modules/system/sys.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-ifeq ($(UNAME_S),Darwin)
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lproc -o $@
+ifeq ($(WIN32),1)
+	@$(CC) $< -shared -o $@
+else ifeq ($(UNAME_S),Darwin)
+	@$(CC) $< -shared $(SONAME_ARG) -lproc -o $@
 else
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
+	@$(CC) $< -shared $(SONAME_ARG) -o $@
 endif
 
 build/modules/json.$(SO_EXT): build/obj/modules/data/json.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CXX) $^ -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
+	@$(CXX) $^ -shared $(SONAME_ARG) -o $@
 
 build/modules/rpc.$(SO_EXT): build/obj/modules/net/rpc.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (RPC+JSON)\n" "$@"
-	@$(CXX) $^ -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
+	@$(CXX) $^ -shared $(SONAME_ARG) -o $@
 
 build/modules/archive.$(SO_EXT): build/obj/modules/fs/archive.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (ARCHIVE+ZLIB)\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(ARCHIVE_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_ARG) $(ARCHIVE_LIBS) -o $@
 
 build/modules/sqlite.$(SO_EXT): build/obj/modules/data/sqlite.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (SQLITE3)\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(SQLITE_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_ARG) $(SQLITE_LIBS) -o $@
 
 build/modules/bigint.$(SO_EXT): build/obj/modules/math/bigint.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (GMP)\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(GMP_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_ARG) $(GMP_LIBS) -o $@
 
 build/modules/redis.$(SO_EXT): build/obj/modules/data/redis.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (REDIS)\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lhiredis -o $@
+	@$(CC) $< -shared $(SONAME_ARG) -lhiredis -o $@
 
 build/modules/postgres.$(SO_EXT): build/obj/modules/data/postgres.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (POSTGRES)\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) $(PG_LIBS) -o $@
+	@$(CC) $< -shared $(SONAME_ARG) $(PG_LIBS) -o $@
 
 build/modules/mysql.$(SO_EXT): build/obj/modules/data/mysql.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (MYSQL)\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lmariadb -o $@
+	@$(CC) $< -shared $(SONAME_ARG) -lmariadb -o $@
 
 build/modules/tls.$(SO_EXT): build/obj/modules/net/tls.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (TLS)\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lssl -lcrypto -o $@
+	@$(CC) $< -shared $(SONAME_ARG) -lssl -lcrypto -o $@
 
 build/modules/jwt.$(SO_EXT): build/obj/modules/crypto/jwt.o $(JSON_BR_OBJ)
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (JWT+JSON)\n" "$@"
-	@$(CXX) $^ -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
+	@$(CXX) $^ -shared $(SONAME_ARG) -o $@
 
 build/modules/net.$(SO_EXT): build/obj/modules/net/net.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (NET)\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
+	@$(CC) $< -shared $(SONAME_ARG) -o $@
 
 build/modules/http_server.$(SO_EXT): build/obj/modules/net/http_server.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (HTTP)\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
+	@$(CC) $< -shared $(SONAME_ARG) -o $@
 
 build/modules/io.$(SO_EXT): build/obj/modules/io/io.o
 build/modules/term.$(SO_EXT): build/obj/modules/io/term.o
@@ -369,7 +392,7 @@ build/modules/watch.$(SO_EXT): build/obj/modules/fs/watch.o
 build/modules/compress.$(SO_EXT): build/obj/modules/fs/compress.o
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s (ZSTD)\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -lzstd -lbz2 -llzma -o $@
+	@$(CC) $< -shared $(SONAME_ARG) -lzstd -lbz2 -llzma -o $@
 
 build/modules/adv_string.$(SO_EXT): build/obj/modules/text/adv_string.o
 build/modules/regex.$(SO_EXT): build/obj/modules/text/regex.o
@@ -396,7 +419,7 @@ build/modules/csv.$(SO_EXT) build/modules/config.$(SO_EXT) build/modules/sort.$(
 build/modules/args.$(SO_EXT) build/modules/assert.$(SO_EXT) build/modules/calltest.$(SO_EXT):
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
-	@$(CC) $< -shared $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F) -o $@
+	@$(CC) $< -shared $(SONAME_ARG) -o $@
 
 $(ANGC_OUT): $(ANGC_OBJS)
 	@mkdir -p $(@D)

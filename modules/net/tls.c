@@ -10,13 +10,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include "../_wincompat.h"
+#include "../_winsock.h"
+#include <pthread.h>
+#else
 #include <unistd.h>
 #include <errno.h>
 #include <sys/socket.h>
 #include <netdb.h>
+#include <pthread.h>
+#endif
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-#include <pthread.h>
 #include "Angara.h"
 
 #define IS_STR(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)

@@ -1,6 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include "../_wincompat.h"
+#include "../_winsock.h"
+#include <pthread.h>
+#else
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -10,9 +15,18 @@
 #include <arpa/inet.h>
 #include <poll.h>
 #include <pthread.h>
+#endif
 
 #include "Angara.h"
 #include "json_bridge.h"
+
+#ifndef _WIN32
+static int set_nonblocking(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags == -1) return -1;
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+#endif
 
 
 #define IS_STR(v)  (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)

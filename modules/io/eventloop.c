@@ -13,6 +13,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include "../_wincompat.h"
+#include "../_winsock.h"
+#include <pthread.h>
+// Windows: event loop uses WaitForMultipleObjects instead of epoll.
+// This is a stub that provides basic functionality via select().
+// Full Windows event loop with IOCP is deferred to a future update.
+#else
 #include <unistd.h>
 #include <errno.h>
 #include <sys/epoll.h>
@@ -21,6 +29,7 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <pthread.h>
+#endif
 #include <stdatomic.h>
 #include "Angara.h"
 

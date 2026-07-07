@@ -5,10 +5,22 @@
 #include <string.h>
 #include <time.h>
 #include <ctype.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <bcrypt.h>
+#pragma comment(lib, "bcrypt.lib")
+#endif
 #include "Angara.h"
 
 static int secure_random_bytes(unsigned char* buf, size_t len) {
-#ifdef __APPLE__
+#ifdef _WIN32
+    // Windows: use BCryptGenRandom (CNG API), available since Vista/Server 2008
+    if (BCryptGenRandom(NULL, buf, (ULONG)len, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0)
+        return 0;
+    // Fallback to rand() if CNG fails (unlikely)
+    for (size_t i = 0; i < len; i++) buf[i] = (unsigned char)(rand() % 256);
+    return 0;
+#elif defined(__APPLE__)
     arc4random_buf(buf, len);
     return 0;
 #elif defined(__linux__)

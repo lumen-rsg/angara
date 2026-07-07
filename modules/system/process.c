@@ -2,6 +2,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <process.h>
+#else
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -9,6 +14,7 @@
 #include <sys/wait.h>
 #include <signal.h>
 #include <poll.h>
+#endif
 #include "Angara.h"
 
 #define IS_STR(v)  (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)

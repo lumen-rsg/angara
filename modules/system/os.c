@@ -3,8 +3,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#ifdef _WIN32
+#include "../_wincompat.h"
+#include <process.h>  // _spawnvp, _P_WAIT
+#else
 #include <unistd.h>
 #include <sys/wait.h>
+#endif
 #include "Angara.h"
 
 #define IS_STR(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)

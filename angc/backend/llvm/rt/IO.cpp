@@ -1,6 +1,6 @@
 #include "RuntimeBuilder.h"
 
-#ifdef __linux__
+#if defined(__linux__) || defined(_WIN32)
 #include <cstdio>
 #endif
 
@@ -114,7 +114,12 @@ void RuntimeBuilder::generateIOOps() {
         return b.CreateLoad(i8_ptr, chars_ptr, "cstr");
     };
 
-#ifdef __APPLE__
+#ifdef _WIN32
+    // Windows: use standard C stdout/stderr/stdin (MSVC & MinGW both export these)
+    auto* stdout_g = m_module.getOrInsertGlobal("stdout", PointerType::get(m_ctx, 0));
+    auto* stderr_g = m_module.getOrInsertGlobal("stderr", PointerType::get(m_ctx, 0));
+    auto* stdin_g = m_module.getOrInsertGlobal("stdin", PointerType::get(m_ctx, 0));
+#elif defined(__APPLE__)
     auto* stdout_g = m_module.getOrInsertGlobal("__stdoutp", PointerType::get(m_ctx, 0));
     auto* stderr_g = m_module.getOrInsertGlobal("__stderrp", PointerType::get(m_ctx, 0));
     auto* stdin_g = m_module.getOrInsertGlobal("__stdinp", PointerType::get(m_ctx, 0));
@@ -125,7 +130,7 @@ void RuntimeBuilder::generateIOOps() {
 #endif
 
     auto resolve_stream = [&](IRBuilder<>& b, Constant* gvar, const char* name) -> Value* {
-#ifdef __APPLE__
+#if defined(_WIN32) || defined(__APPLE__)
         return b.CreateLoad(PointerType::get(m_ctx, 0), gvar, name);
 #else
         (void)b; (void)name;

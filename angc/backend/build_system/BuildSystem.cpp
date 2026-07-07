@@ -518,6 +518,9 @@ namespace angara {
 
 #if defined(__APPLE__)
         link_cmd << " -Wl,-install_name,@rpath/lib" << mod.name << SO_EXT;
+#elif defined(_WIN32)
+        // Windows DLL: export all symbols (MinGW/clang default to not exporting)
+        link_cmd << " -Wl,--export-all-symbols";
 #endif
 
         link_cmd << " -o " << angara::shell_escape(mod_output.string());

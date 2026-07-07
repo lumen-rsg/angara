@@ -3,10 +3,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#ifdef _WIN32
+#include "../_wincompat.h"
+#else
 #include <unistd.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <dirent.h>
+#endif
 #include <limits.h>
 #include "Angara.h"
 

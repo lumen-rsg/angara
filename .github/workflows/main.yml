@@ -17,6 +17,9 @@ jobs:
           - os: macos-latest
             artifact: angara-macos-arm64
             ext: dylib
+          - os: windows-latest
+            artifact: angara-windows-x64
+            ext: dll
 
     runs-on: ${{ matrix.os }}
 
@@ -62,26 +65,77 @@ jobs:
           cmake --build build -j$(sysctl -n hw.ncpu)
           sudo cmake --install build
 
+      # ── Windows dependencies (MSYS2) ──
+      - name: Setup MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-clang
+            mingw-w64-x86_64-llvm
+            mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-curl
+            mingw-w64-x86_64-libwebsockets
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-libarchive
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-sqlite3
+            mingw-w64-x86_64-gmp
+            mingw-w64-x86_64-mariadb-connector-c
+            mingw-w64-x86_64-hiredis
+            mingw-w64-x86_64-postgresql
+            mingw-w64-x86_64-zstd
+            mingw-w64-x86_64-libbz2
+            mingw-w64-x86_64-xz
+            mingw-w64-x86_64-cjson
+            mingw-w64-x86_64-mosquitto
+            make
+            git
+
       # ── Build ──
-      - name: Build Compiler
+      - name: Build Compiler (Linux/macOS)
+        if: runner.os != 'Windows'
         env:
           CC: clang
           CXX: clang++
           EXTRA_CXXFLAGS: -Werror -Wno-error=unused-parameter
         run: make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu) all
 
-      - name: Build Modules
+      - name: Build Compiler (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        env:
+          CC: clang
+          CXX: clang++
+          EXTRA_CXXFLAGS: -Wno-error=unused-parameter
+        run: make -j$(nproc) all
+
+      - name: Build Modules (Linux/macOS)
+        if: runner.os != 'Windows'
         env:
           CC: clang
           CXX: clang++
           EXTRA_CXXFLAGS: -Werror -Wno-error=unused-parameter
         run: make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu) modules
 
+      - name: Build Modules (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        env:
+          CC: clang
+          CXX: clang++
+          EXTRA_CXXFLAGS: -Wno-error=unused-parameter
+        run: make -j$(nproc) modules
+
       # ── Test ──
-      - name: Run Test Suite
+      - name: Run Test Suite (Linux/macOS)
+        if: runner.os != 'Windows'
         run: make test-ci
 
-      - name: Run LLVM Backend Tests
+      - name: Run LLVM Backend Tests (Linux/macOS)
+        if: runner.os != 'Windows'
         run: |
           for f in tests/llvm/*.an; do
             echo "Testing: $f"
@@ -90,7 +144,8 @@ jobs:
             ./"$base" || exit 1
           done
 
-      - name: Run Feature Tests
+      - name: Run Feature Tests (Linux/macOS)
+        if: runner.os != 'Windows'
         run: |
           for f in tests/features/*.an; do
             echo "Testing: $f"
@@ -137,6 +192,11 @@ jobs:
         with:
           name: angara-macos-arm64
 
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: angara-windows-x64
+
       - name: Generate Release Tag
         run: echo "TAG_NAME=v$(date +%s)-${{ github.sha }}" >> $GITHUB_ENV
 
@@ -155,6 +215,7 @@ jobs:
             **Platforms:**
             - `angara-linux-x64.tar.gz` — Linux x86_64
             - `angara-macos-arm64.tar.gz` — macOS Apple Silicon
+            - `angara-windows-x64.tar.gz` — Windows x86_64 (MSYS2/MinGW)
 
             This is an unstable development build.
           draft: false
@@ -162,6 +223,7 @@ jobs:
           files: |
             angara-linux-x64.tar.gz
             angara-macos-arm64.tar.gz
+            angara-windows-x64.tar.gz
 
   sanitizers:
     runs-on: ubuntu-latest

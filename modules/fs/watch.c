@@ -8,10 +8,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include "../_wincompat.h"
+// Windows: file watching via ReadDirectoryChangesW.
+// This is a stub; full Windows file watcher support is deferred.
+#else
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#endif
 #include "Angara.h"
 
 #define IS_STR(v) (ang_is_obj(v) && ang_api->obj_type(v) == ANG_OBJ_STRING)

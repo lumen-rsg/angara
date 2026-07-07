@@ -2,9 +2,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include "../_wincompat.h"
+#else
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <termios.h>
+#endif
 #include <errno.h>
 #include "Angara.h"
 

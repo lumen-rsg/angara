@@ -215,15 +215,24 @@ int angara::CLI::cmdCompileSingleFile(const std::string& source_file) {
     if (m_flags.nostdlib) {
 #if defined(__APPLE__)
         cmd_link << " -nodefaultlibs -lSystem -Wno-return-type";
+#elif defined(_WIN32)
+        cmd_link << " -nodefaultlibs -Wno-return-type";
 #else
         cmd_link << " -nostdlib -Wno-return-type";
 #endif
     } else {
         // RT-6: position-independent executable (matches LLVMBackend's PIC
         // relocation model). Freestanding/nostdlib builds stay non-PIE.
+#if defined(_WIN32)
+        // Windows: no -fPIE/-pie (different PIC model), no -rpath,
+        // need Windows subsystem libraries.
+        cmd_link << " -Wno-return-type";
+        cmd_link << " -luser32 -lshell32";
+#else
         cmd_link << " -fPIE -pie";
         cmd_link << " -pthread -lm -Wno-return-type";
         cmd_link << " -Wl,-rpath," << angara_home() << "/modules";
+#endif
     }
 
     this->verbose("Link command: " + cmd_link.str());
