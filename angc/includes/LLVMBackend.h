@@ -154,6 +154,11 @@ namespace angara {
         void codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>& statements);
         void codegenGlobalVarDecl(const VarDeclStmt& stmt);
         void codegenFunctionDecl(const FuncStmt& stmt, const std::string& module_name);
+
+        // --- Unboxed primitive support ---
+        /// Kind of local variable storage: boxed (AngaraObject) or raw LLVM primitive.
+        /// RAW_PTR is a C pointer (string→char*, *T, *void) used for FFI marshalling.
+        enum class LocalKind { BOXED, RAW_I1, RAW_I64, RAW_F64, RAW_PTR };
         /// LIB-4: codegen for async functions — wrapper allocates frame, calls resume.
         void codegenAsyncFuncDecl(const FuncStmt& stmt, const std::string& module_name);
         /// LIB-4 Stage S: generate the resumable state machine (foo$resume).
@@ -163,6 +168,7 @@ namespace angara {
                                     const std::vector<int>& param_field_idx,
                                     const std::vector<const AwaitExpr*>& await_states,
                                     const std::vector<std::pair<std::string, int>>& local_slots,
+                                    const std::map<std::string, LocalKind>& local_kinds,
                                     const std::shared_ptr<FunctionType>& sem_fn_type);
         /// LIB-4: walk the AST to collect all AwaitExpr nodes and assign state numbers.
         void collectAwaitStates(const std::shared_ptr<Expr>& expr,
@@ -170,11 +176,14 @@ namespace angara {
         void collectAwaitStatesStmt(const std::shared_ptr<Stmt>& stmt,
                                      std::vector<const AwaitExpr*>& awaits);
         /// LIB-4 Stage S: walk the body to collect VarDeclStmt nodes for frame slots.
+        /// Also populates local_kinds with the LocalKind for each variable (unboxed vs boxed).
         void collectAsyncLocals(const std::shared_ptr<Stmt>& stmt,
                                 std::vector<std::pair<std::string, int>>& locals,
+                                std::map<std::string, LocalKind>& local_kinds,
                                 int& next_slot);
         void collectAsyncLocalsExpr(const std::shared_ptr<Expr>& expr,
                                      std::vector<std::pair<std::string, int>>& locals,
+                                     std::map<std::string, LocalKind>& local_kinds,
                                      int& next_slot);
         void codegenForeignFuncDecl(const FuncStmt& stmt);
         void codegenClassDecl(const ClassStmt& stmt);
@@ -276,10 +285,7 @@ namespace angara {
         /// Returns the bit width of a sized integer type (8, 16, 32, or 64).
         static int getIntBitWidth(const std::shared_ptr<Type>& type);
 
-        // --- Unboxed primitive support ---
-        /// Kind of local variable storage: boxed (AngaraObject) or raw LLVM primitive.
-        /// RAW_PTR is a C pointer (string→char*, *T, *void) used for FFI marshalling.
-        enum class LocalKind { BOXED, RAW_I1, RAW_I64, RAW_F64, RAW_PTR };
+        // --- Unboxed primitive support (continued) ---
 
         /// RT-2: returns (cached) a DWARF DIType for a LocalKind.
         llvm::DIType* diTypeForLocalKind(LocalKind kind);

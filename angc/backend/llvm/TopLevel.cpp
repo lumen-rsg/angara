@@ -385,30 +385,41 @@ void LLVMBackend::collectAwaitStatesStmt(const std::shared_ptr<Stmt>& stmt,
 // LIB-4 Stage S: walk statements to collect VarDeclStmt nodes for frame slots.
 void LLVMBackend::collectAsyncLocals(const std::shared_ptr<Stmt>& stmt,
                                       std::vector<std::pair<std::string, int>>& locals,
+                                      std::map<std::string, LocalKind>& local_kinds,
                                       int& next_slot) {
     if (!stmt) return;
     if (auto* vd = dynamic_cast<const VarDeclStmt*>(stmt.get())) {
-        locals.push_back({sanitize(vd->name.lexeme), next_slot++});
+        std::string name = sanitize(vd->name.lexeme);
+        locals.push_back({name, next_slot++});
+        // L8: determine if this local can be stored unboxed in the frame
+        auto kind = LocalKind::BOXED;  // default: boxed
+        auto type_it = m_type_checker.getVariableTypes().find(vd);
+        if (type_it != m_type_checker.getVariableTypes().end() && type_it->second) {
+            if (isUnboxableType(type_it->second)) {
+                kind = localKindForType(type_it->second);
+            }
+        }
+        local_kinds[name] = kind;
         return;
     }
     if (auto* blk = dynamic_cast<const BlockStmt*>(stmt.get())) {
-        for (auto& s : blk->statements) collectAsyncLocals(s, locals, next_slot);
+        for (auto& s : blk->statements) collectAsyncLocals(s, locals, local_kinds, next_slot);
     } else if (auto* ifs = dynamic_cast<const IfStmt*>(stmt.get())) {
-        if (ifs->thenBranch) collectAsyncLocals(ifs->thenBranch, locals, next_slot);
-        if (ifs->elseBranch) collectAsyncLocals(ifs->elseBranch, locals, next_slot);
+        if (ifs->thenBranch) collectAsyncLocals(ifs->thenBranch, locals, local_kinds, next_slot);
+        if (ifs->elseBranch) collectAsyncLocals(ifs->elseBranch, locals, local_kinds, next_slot);
     } else if (auto* wh = dynamic_cast<const WhileStmt*>(stmt.get())) {
-        if (wh->body) collectAsyncLocals(wh->body, locals, next_slot);
+        if (wh->body) collectAsyncLocals(wh->body, locals, local_kinds, next_slot);
     } else if (auto* fr = dynamic_cast<const ForStmt*>(stmt.get())) {
-        if (fr->initializer) collectAsyncLocals(fr->initializer, locals, next_slot);
-        if (fr->body) collectAsyncLocals(fr->body, locals, next_slot);
+        if (fr->initializer) collectAsyncLocals(fr->initializer, locals, local_kinds, next_slot);
+        if (fr->body) collectAsyncLocals(fr->body, locals, local_kinds, next_slot);
     } else if (auto* fi = dynamic_cast<const ForInStmt*>(stmt.get())) {
-        if (fi->body) collectAsyncLocals(fi->body, locals, next_slot);
+        if (fi->body) collectAsyncLocals(fi->body, locals, local_kinds, next_slot);
     } else if (auto* trys = dynamic_cast<const TryStmt*>(stmt.get())) {
-        if (trys->tryBlock) collectAsyncLocals(trys->tryBlock, locals, next_slot);
-        if (trys->catchBlock) collectAsyncLocals(trys->catchBlock, locals, next_slot);
-        if (trys->finallyBlock) collectAsyncLocals(trys->finallyBlock, locals, next_slot);
+        if (trys->tryBlock) collectAsyncLocals(trys->tryBlock, locals, local_kinds, next_slot);
+        if (trys->catchBlock) collectAsyncLocals(trys->catchBlock, locals, local_kinds, next_slot);
+        if (trys->finallyBlock) collectAsyncLocals(trys->finallyBlock, locals, local_kinds, next_slot);
     } else if (auto* uns = dynamic_cast<const UnsafeBlockStmt*>(stmt.get())) {
-        for (auto& s : uns->block->statements) collectAsyncLocals(s, locals, next_slot);
+        for (auto& s : uns->block->statements) collectAsyncLocals(s, locals, local_kinds, next_slot);
     }
     // ExpressionStmt, ReturnStmt, DropStmt, BreakStmt, ContinueStmt, ThrowStmt:
     // no VarDeclStmt children.
@@ -416,9 +427,10 @@ void LLVMBackend::collectAsyncLocals(const std::shared_ptr<Stmt>& stmt,
 
 void LLVMBackend::collectAsyncLocalsExpr(const std::shared_ptr<Expr>& expr,
                                            std::vector<std::pair<std::string, int>>& locals,
+                                           std::map<std::string, LocalKind>& local_kinds,
                                            int& next_slot) {
     // Currently no VarDeclStmt inside expressions; placeholder for future use.
-    (void)expr; (void)locals; (void)next_slot;
+    (void)expr; (void)locals; (void)local_kinds; (void)next_slot;
 }
 
 // LIB-4 Stage S: codegen for async functions.
@@ -442,10 +454,11 @@ void LLVMBackend::codegenAsyncFuncDecl(const FuncStmt& stmt, const std::string& 
 
     // ---- Collect local variables for frame slots ----
     std::vector<std::pair<std::string, int>> local_slots;
+    std::map<std::string, LocalKind> local_kinds;
     int next_local_slot = 6 + (int)stmt.params.size();  // after header (fields 0-5) + params
     if (stmt.body) {
         for (auto& s : *stmt.body) {
-            collectAsyncLocals(s, local_slots, next_local_slot);
+            collectAsyncLocals(s, local_slots, local_kinds, next_local_slot);
         }
     }
 
@@ -462,9 +475,11 @@ void LLVMBackend::codegenAsyncFuncDecl(const FuncStmt& stmt, const std::string& 
         frame_fields.push_back(objType);
     }
 
-    // Local variable slots
+    // Local variable slots — L8: use unboxed LLVM type for primitives
     for (size_t li = 0; li < local_slots.size(); ++li) {
-        frame_fields.push_back(objType);
+        auto kit = local_kinds.find(local_slots[li].first);
+        auto kind = (kit != local_kinds.end()) ? kit->second : LocalKind::BOXED;
+        frame_fields.push_back(llvmTypeForLocalKind(kind));
     }
 
     auto* frame_struct_ty = llvm::StructType::get(*ctx, frame_fields, false);
@@ -559,7 +574,7 @@ void LLVMBackend::codegenAsyncFuncDecl(const FuncStmt& stmt, const std::string& 
 
     // Call the resume function
     codegenAsyncResumeFunc(stmt, module_name, wrapper_fn, frame_struct_ty,
-                           param_field_idx, await_states, local_slots, sem_fn_type);
+                           param_field_idx, await_states, local_slots, local_kinds, sem_fn_type);
 
     // Restore builder to wrapper function's entry block
     builder->SetInsertPoint(entry);
@@ -586,6 +601,7 @@ void LLVMBackend::codegenAsyncResumeFunc(const FuncStmt& stmt, const std::string
                                           const std::vector<int>& param_field_idx,
                                           const std::vector<const AwaitExpr*>& await_states,
                                           const std::vector<std::pair<std::string, int>>& local_slots,
+                                          const std::map<std::string, LocalKind>& local_kinds,
                                           const std::shared_ptr<FunctionType>& sem_fn_type) {
     const std::string func_name = mangle(module_name, stmt.name.lexeme);
     std::string resume_name = func_name + "$resume";
@@ -637,6 +653,7 @@ void LLVMBackend::codegenAsyncResumeFunc(const FuncStmt& stmt, const std::string
     m_current_async_waker_ctx_ptr = builder->CreateStructGEP(frame_struct_ty, typed_frame, 4, "wctx_p");
 
     // Register params as frame-based "locals" (so loadVar/storeVar use frame GEP)
+    // Note: params stay BOXED in the frame because the ABI always passes them boxed
     for (size_t pi = 0; pi < stmt.params.size(); ++pi) {
         auto pname = sanitize(stmt.params[pi].name.lexeme);
         m_async_local_slots[pname] = param_field_idx[pi];
@@ -646,10 +663,11 @@ void LLVMBackend::codegenAsyncResumeFunc(const FuncStmt& stmt, const std::string
         if (param_type) namedTypes[pname] = param_type;
     }
 
-    // Register local var slots
+    // Register local var slots — L8: use unboxed LocalKind when available
     for (auto& [name, slot] : local_slots) {
         m_async_local_slots[name] = slot;
-        namedKinds[name] = LocalKind::BOXED;
+        auto kit = local_kinds.find(name);
+        namedKinds[name] = (kit != local_kinds.end()) ? kit->second : LocalKind::BOXED;
     }
 
     // Create basic blocks

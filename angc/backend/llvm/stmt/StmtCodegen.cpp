@@ -143,9 +143,15 @@ void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
         if (m_in_async_function) {
             auto slot_it = m_async_local_slots.find(s.name.lexeme);
             if (slot_it != m_async_local_slots.end()) {
+                // L8: use unboxed LocalKind when the variable type allows it
+                if (var_type) {
+                    namedTypes[s.name.lexeme] = var_type;
+                    namedKinds[s.name.lexeme] = isUnboxableType(var_type)
+                        ? localKindForType(var_type) : LocalKind::BOXED;
+                } else {
+                    namedKinds[s.name.lexeme] = LocalKind::BOXED;
+                }
                 // Store directly to frame slot via storeVar (which routes to frame GEP)
-                namedKinds[s.name.lexeme] = LocalKind::BOXED;
-                if (var_type) namedTypes[s.name.lexeme] = var_type;
                 storeVar(s.name.lexeme, v);
                 return;
             }

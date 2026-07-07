@@ -486,6 +486,12 @@ llvm::Value* LLVMBackend::loadVar(const std::string& n) {
                 llvm::PointerType::get(*ctx, 0));
             auto* field_ptr = builder->CreateStructGEP(m_current_async_frame_type,
                 typed_frame, slot_it->second, n + "_p");
+            // L8: load unboxed primitive directly, box it on return
+            auto kit = namedKinds.find(n);
+            if (kit != namedKinds.end() && kit->second != LocalKind::BOXED) {
+                auto* raw = builder->CreateLoad(llvmTypeForLocalKind(kit->second), field_ptr, n);
+                return boxRaw(raw, kit->second);
+            }
             return builder->CreateLoad(objType, field_ptr, n);
         }
     }
@@ -510,6 +516,12 @@ void LLVMBackend::storeVar(const std::string& n, llvm::Value* v) {
                 llvm::PointerType::get(*ctx, 0));
             auto* field_ptr = builder->CreateStructGEP(m_current_async_frame_type,
                 typed_frame, slot_it->second, n + "_p");
+            // L8: unbox primitive before storing to unboxed frame slot
+            auto kit = namedKinds.find(n);
+            if (kit != namedKinds.end() && kit->second != LocalKind::BOXED) {
+                builder->CreateStore(unboxToRaw(v, kit->second), field_ptr);
+                return;
+            }
             builder->CreateStore(v, field_ptr);
             return;
         }
