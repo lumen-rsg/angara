@@ -556,14 +556,23 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
     bool converged = false;
     for (int pass = 0; pass < MAX_PASSES; pass++) {
         auto before = ctx.summaries;  // snapshot
+        auto before_closures = ctx.closure_summaries;  // M1: also snapshot closure summaries
         for (const auto& fi : functions)
             analyzeFunction(ctx, *fi.func, fi.summary_key);
-        if (ctx.summaries == before) { converged = true; break; }  // converged
+        // M1: also check closure_summaries for convergence
+        if (ctx.summaries == before && ctx.closure_summaries == before_closures) {
+            converged = true; break;
+        }
 
         // H4: check for oscillation (a cycle longer than period 1).
         size_t h = 0;
         for (const auto& [k, v] : ctx.summaries) {
             h ^= std::hash<std::string>{}(k);
+            for (auto pb : v) h = (h << 1) ^ static_cast<size_t>(pb);
+        }
+        // M1: also hash closure summaries
+        for (const auto& [k, v] : ctx.closure_summaries) {
+            h ^= reinterpret_cast<size_t>(k);
             for (auto pb : v) h = (h << 1) ^ static_cast<size_t>(pb);
         }
         auto osc_it = std::find(seen_hashes.begin(), seen_hashes.end(), h);
