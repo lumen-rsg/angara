@@ -16,4 +16,9 @@ namespace angara {
     // Safe to interpolate into a shell command passed to system().
     std::string shell_escape(const std::string& arg);
 
+    // C7: Returns true if the string contains only characters safe for
+    // compiler/linker flags (no shell metacharacters like ; | & ` > <).
+    // Prints a warning to stderr and returns false if dangerous chars are found.
+    bool is_safe_flags(const std::string& flags, const char* context);
+
 } // namespace angara

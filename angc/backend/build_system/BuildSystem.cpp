@@ -483,7 +483,10 @@ namespace angara {
                 cmd << " -I" << (fs::path(project_root) / inc).string();
             }
 
-            if (!mod.cflags.empty()) cmd << " " << mod.cflags;
+            if (!mod.cflags.empty()) {
+                if (is_safe_flags(mod.cflags, "cflags"))
+                    cmd << " " << mod.cflags;
+            }
 
             cmd << " -c " << angara::shell_escape(src_path.string()) << " -o " << angara::shell_escape(obj_path.string());
 
@@ -514,7 +517,10 @@ namespace angara {
             link_cmd << " -framework " << fw;
         }
 
-        if (!mod.ldflags.empty()) link_cmd << " " << mod.ldflags;
+        if (!mod.ldflags.empty()) {
+            if (is_safe_flags(mod.ldflags, "ldflags"))
+                link_cmd << " " << mod.ldflags;
+        }
 
 #if defined(__APPLE__)
         link_cmd << " -Wl,-install_name,@rpath/lib" << mod.name << SO_EXT;
@@ -652,7 +658,8 @@ namespace angara {
         }
 
         if (!config.profile.ldflags.empty()) {
-            cmd << " " << config.profile.ldflags;
+            if (is_safe_flags(config.profile.ldflags, "profile ldflags"))
+                cmd << " " << config.profile.ldflags;
         }
 
         if (config.freestanding) {

@@ -4,6 +4,7 @@
 
 #include "StringUtils.h"
 #include <vector>
+#include <iostream>
 #include <algorithm>
 
 namespace angara {
@@ -37,6 +38,22 @@ namespace angara {
         }
         escaped += "'";
         return escaped;
+    }
+
+    bool is_safe_flags(const std::string& flags, const char* context) {
+        for (size_t i = 0; i < flags.size(); i++) {
+            char c = flags[i];
+            // Reject shell metacharacters that enable command injection.
+            if (c == ';' || c == '|' || c == '&' || c == '`' ||
+                c == '>' || c == '<' || c == '\n' || c == '\r' || c == '\0') {
+                std::cerr << "[SECURITY] Dangerous character '" << c
+                          << "' (0x" << std::hex << static_cast<int>(c) << std::dec
+                          << ") in " << context << " flags rejected to prevent "
+                          << "command injection." << std::endl;
+                return false;
+            }
+        }
+        return true;
     }
 
 } // namespace angara
