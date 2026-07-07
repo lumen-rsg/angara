@@ -279,6 +279,12 @@ namespace angara {
     }
 
     Token Parser::previous() const {
+        // H12: if no token has been consumed yet (m_current == 0) the bare
+        // m_tokens[m_current - 1] would underflow to m_tokens[-1]. Return the
+        // same EOF sentinel peek()/peekNext() use on out-of-bounds access.
+        if (m_current <= 0) {
+            return Token{TokenType::EOF_TOKEN, "", 0, 0};
+        }
         return m_tokens[m_current - 1];
     }
 
