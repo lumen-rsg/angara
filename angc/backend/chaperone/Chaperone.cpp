@@ -584,12 +584,17 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
         if (osc_it != seen_hashes.end() && (seen_hashes.size() < 2 || osc_it != seen_hashes.end() - 1)) {
             // Same hash as a non-immediately-previous pass — oscillation detected.
             ctx.suppress_diag = false;
-            diag(ctx, functions[0].func->name,
-                "⚠️ Interprocedural fixed-point is oscillating — summaries did not "
-                "converge. The last pass's summaries are used; results may be "
-                "imprecise. Consider simplifying ownership patterns or adding "
-                "@consumes / @escape annotations.",
-                "W521");
+            // L1: functions is normally non-empty here, but guard the [0]
+            // indexing so a zero-function program can't trigger UB if the
+            // convergence short-circuit above ever changes.
+            if (!functions.empty()) {
+                diag(ctx, functions[0].func->name,
+                    "⚠️ Interprocedural fixed-point is oscillating — summaries did not "
+                    "converge. The last pass's summaries are used; results may be "
+                    "imprecise. Consider simplifying ownership patterns or adding "
+                    "@consumes / @escape annotations.",
+                    "W521");
+            }
             ctx.suppress_diag = true;
             break;
         }
@@ -597,12 +602,15 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
     }
     if (!converged) {
         // M7: warn when the fixed-point cap is reached without convergence.
-        diag(ctx, functions[0].func->name,
-            "⚠️ Interprocedural fixed-point did not converge after " +
-            std::to_string(MAX_PASSES) + " passes. The current summaries "
-            "are used; results may be imprecise. Consider simplifying "
-            "ownership patterns or adding @consumes / @escape annotations.",
-            "W520");
+        // L1: see above — guard the [0] indexing against an empty functions set.
+        if (!functions.empty()) {
+            diag(ctx, functions[0].func->name,
+                "⚠️ Interprocedural fixed-point did not converge after " +
+                std::to_string(MAX_PASSES) + " passes. The current summaries "
+                "are used; results may be imprecise. Consider simplifying "
+                "ownership patterns or adding @consumes / @escape annotations.",
+                "W520");
+        }
     }
     ctx.suppress_diag = false;
     // Final diagnostic pass with the converged summaries.
