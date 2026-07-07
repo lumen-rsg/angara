@@ -10,6 +10,9 @@ namespace angara {
             std::optional<int64_t> pending_on_throw;
             bool pending_inline = false;
             bool pending_sendable = false;
+            bool pending_unsendable = false;
+            bool pending_sync = false;
+            bool pending_unsync = false;
             std::set<int> pending_consumes;
             std::set<int> pending_escapes;
 
@@ -65,6 +68,15 @@ namespace angara {
                 } else if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "sendable") {
                     advance();
                     pending_sendable = true;
+                } else if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "unsendable") {
+                    advance();
+                    pending_unsendable = true;
+                } else if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "sync") {
+                    advance();
+                    pending_sync = true;
+                } else if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "unsync") {
+                    advance();
+                    pending_unsync = true;
                 } else {
                     // Not a recognized annotation — restore and break out.
                     m_current = saved;
@@ -166,6 +178,9 @@ namespace angara {
                 decl_stmt = classDeclaration();
                 std::static_pointer_cast<ClassStmt>(decl_stmt)->is_exported = is_exported;
                 std::static_pointer_cast<ClassStmt>(decl_stmt)->is_sendable = pending_sendable;
+                std::static_pointer_cast<ClassStmt>(decl_stmt)->is_unsendable = pending_unsendable;
+                std::static_pointer_cast<ClassStmt>(decl_stmt)->is_sync = pending_sync;
+                std::static_pointer_cast<ClassStmt>(decl_stmt)->is_unsync = pending_unsync;
             } else if (match({TokenType::TRAIT})) {
                 decl_stmt = traitDeclaration();
                 std::static_pointer_cast<TraitStmt>(decl_stmt)->is_exported = is_exported;
@@ -185,11 +200,17 @@ namespace angara {
                 data_decl->is_owned = true;
                 data_decl->is_exported = is_exported;
                 data_decl->is_sendable = pending_sendable;
+                data_decl->is_unsendable = pending_unsendable;
+                data_decl->is_sync = pending_sync;
+                data_decl->is_unsync = pending_unsync;
                 return data_decl;
             } else if (match({TokenType::DATA})) {
                 auto data_decl = std::static_pointer_cast<DataStmt>(dataDeclaration());
                 data_decl->is_exported = is_exported;
                 data_decl->is_sendable = pending_sendable;
+                data_decl->is_unsendable = pending_unsendable;
+                data_decl->is_sync = pending_sync;
+                data_decl->is_unsync = pending_unsync;
                 return data_decl;
             } else if (match({TokenType::ENUM})) {
                 auto enum_decl = std::static_pointer_cast<EnumStmt>(enumDeclaration());

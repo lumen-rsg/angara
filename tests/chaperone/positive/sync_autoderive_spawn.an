@@ -1,0 +1,23 @@
+// Chaperone positive test — M11: auto-derived Send type passed to spawn.
+//
+// A class with only primitive fields is automatically Send and Sync.
+// No @sendable annotation needed. The Chaperone must accept this.
+//
+// exit: 0
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+func worker(b as Buf) -> nil {
+    drop b;
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let t = spawn(worker, b);
+    t.join();
+    drop t;
+    return 0;
+}

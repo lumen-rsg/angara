@@ -108,6 +108,10 @@ private:
         // data types (non-owned) are implicitly sendable; owned/class types must
         // opt in. Checked when spawn() arguments are analyzed.
         std::set<std::string> sendable_types;
+        // M11: types that are Sync (safe to share via ref<T> across threads).
+        // data types, primitives, and Mutex are inherently Sync.
+        // class/owned types must opt in via @sync or be auto-derived.
+        std::set<std::string> syncable_types;
         // M11: per-mutex lock state. true = locked, false = unlocked.
         // Cleared per function.
         std::map<std::string, bool> mutex_locked;

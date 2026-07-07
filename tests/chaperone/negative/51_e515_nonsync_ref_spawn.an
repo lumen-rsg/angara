@@ -1,0 +1,27 @@
+// Chaperone negative test — M11: E515 non-Sync ref<T> data race with spawn.
+//
+// When a ref<T> to a non-Sync type exists and the value is spawned,
+// the Chaperone must report E515. The type is not Sync, so the ref
+// cannot be safely shared across threads.
+//
+// expect: E515
+
+@sendable
+@unsync
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+func worker(b as Buf) -> nil {
+    drop b;
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let r as ref<Buf> = b;     // r borrows b
+    let t = spawn(worker, b);  // E515: Buf is not Sync, ref shared across threads
+    t.join();
+    drop t;
+    return 0;
+}

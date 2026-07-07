@@ -404,29 +404,41 @@ void Chaperone::analyzeExpr(Context& ctx,
                             et != expr_types.end() && et->second &&
                             isTrackedTypeObj(ctx, *et->second)) {
                             diag(ctx, ve->name,
-                                "\xf0\x9f\xa7\xb5 Not sendable — `" + type_name + "` is not marked "
-                                "@sendable and cannot be transferred to another thread "
-                                "via `spawn()`. Add `@sendable` to the type declaration "
-                                "to allow cross-thread ownership transfer.",
+                                "\xf0\x9f\xa7\xb5 Not sendable — `" + type_name + "` is not Send "
+                                "and cannot be transferred to another thread via `spawn()`. "
+                                "Ensure all fields are Send, or add `@sendable` to the type "
+                                "declaration to allow cross-thread ownership transfer.",
                                 "E511");
                             continue;  // don't transition to Escaped — blocked
                         }
                         it->second = State::Escaped;
                         ctx.thread_escaped.insert(ve->name.lexeme);
 
-                        // M11: E514 — check for ref<T> data races. If any ref<T>
+                        // M11: E514/E515 — check for ref<T> data races. If any ref<T>
                         // in the parent borrows this variable, the ref and the
                         // spawned thread can concurrently access the same memory.
                         for (const auto& [ref_name, referent] : ctx.borrows) {
                             if (referent == ve->name.lexeme) {
-                                diag(ctx, ve->name,
-                                    "\xf0\x9f\xa7\xb5 Shared borrow — `" + ref_name + "` is a `ref<" +
-                                    type_name + ">` to `" + ve->name.lexeme + "`, which is being "
-                                    "transferred to another thread via `spawn()`. The ref and the "
-                                    "spawned thread can access the same memory concurrently — "
-                                    "a data race. Drop the ref before spawning, or use a Mutex "
-                                    "to synchronize access.",
-                                    "E514");
+                                if (!type_name.empty() && !ctx.syncable_types.count(type_name)) {
+                                    // T is not Sync — hard error.
+                                    diag(ctx, ve->name,
+                                        "\xf0\x9f\xa7\xb5 Non-Sync ref — `" + ref_name + "` is a `ref<" +
+                                        type_name + ">` to `" + ve->name.lexeme + "`, which is being "
+                                        "transferred to another thread via `spawn()`. `" + type_name +
+                                        "` is not Sync and cannot be safely shared across threads via ref. "
+                                        "Mark the type `@sync` and add proper synchronization, or drop "
+                                        "the ref before spawning.",
+                                        "E515");
+                                } else {
+                                    // T is Sync but ref crosses thread boundary — warning.
+                                    warn(ctx, ve->name,
+                                        "\xf0\x9f\xa7\xb5 Shared ref across threads — `" + ref_name +
+                                        "` is a `ref<" + type_name + ">` to `" + ve->name.lexeme +
+                                        "`, which is being transferred to another thread via `spawn()`. "
+                                        "`" + type_name + "` is Sync, but ensure proper synchronization "
+                                        "(e.g., Mutex) when accessing from multiple threads.",
+                                        "W514");
+                                }
                             }
                         }
                     }

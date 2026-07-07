@@ -1,0 +1,26 @@
+// Chaperone negative test — M11: W514 Sync ref<T> across threads warning.
+//
+// When a ref<T> to a Sync type exists and the value is spawned, the Chaperone
+// emits W514 (warning) — the type is Sync but proper synchronization is still
+// needed. Unlike E515 for non-Sync types, this is a warning because the type
+// is marked as safe for concurrent access.
+//
+// expect: W514
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+func worker(b as Buf) -> nil {
+    drop b;
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    let r as ref<Buf> = b;     // r borrows b
+    let t = spawn(worker, b);  // W514: Sync type, but ref shared across threads
+    t.join();
+    drop t;
+    return 0;
+}

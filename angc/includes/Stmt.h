@@ -390,6 +390,12 @@ namespace angara {
         // data types are implicitly sendable (copy-on-assign); class types must
         // opt in with this annotation.
         bool is_sendable = false;
+        // M11: @unsendable — explicitly not Send, overrides auto-derivation.
+        bool is_unsendable = false;
+        // M11: @sync — safe to share via ref<T> across threads.
+        bool is_sync = false;
+        // M11: @unsync — explicitly not Sync, overrides auto-derivation.
+        bool is_unsync = false;
 
         // Constructor updated to accept the contracts vector
         ClassStmt(Token name, std::shared_ptr<VarExpr> superclass,
@@ -469,6 +475,9 @@ namespace angara {
         bool is_union = false;
         bool is_owned = false;  // v5: `owned` keyword — heap type, must be dropped
         bool is_sendable = false; // M11: @sendable — safe to transfer to another thread via spawn()
+        bool is_unsendable = false; // M11: @unsendable — explicitly not Send
+        bool is_sync = false;    // M11: @sync — safe to share via ref<T> across threads
+        bool is_unsync = false;  // M11: @unsync — explicitly not Sync
 
         DataStmt(Token name, std::vector<std::shared_ptr<VarDeclStmt>> fields,
                  std::vector<Token> type_params = {},
