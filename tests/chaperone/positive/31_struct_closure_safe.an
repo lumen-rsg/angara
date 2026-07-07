@@ -1,0 +1,26 @@
+// Chaperone positive test — struct containing a closure, scope-exit before captures (L21).
+// When a closure is stored as a field of a struct (via RecordExpr), the struct
+// variable becomes a holder for the closure's capture references. When the struct
+// goes out of scope, the closure is dropped and the capture reference is released,
+// so the captured variable can then be safely dropped without E505.
+//
+// exit: 42
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    // Scoped block: m holds a map containing a closure that captures b.
+    {
+        let m = {"cb": func() -> i64 { return b.get(); }};
+        // m goes out of scope here — scope cleanup removes it from closure_holders.
+    }
+    // Now safe to drop b — no pending closure references (m and its closure are gone).
+    drop b;
+    return 42;
+}

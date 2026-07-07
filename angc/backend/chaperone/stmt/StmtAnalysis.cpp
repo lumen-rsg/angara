@@ -471,14 +471,30 @@ void Chaperone::analyzeStmt(Context& ctx,
         // them into the persistent maps keyed by the new variable name.
         // If the initializer is a VarExpr that holds a closure (let g = f),
         // propagate the closure reference to the new variable.
+        // If the initializer is a composite expression (RecordExpr, etc.)
+        // containing a LambdaExpr, the pending data is also consumed — the
+        // enclosing variable becomes a holder for the nested closure(s).
         if (var->initializer) {
             if (ctx.pending_closure_type) {
-                // LambdaExpr initializer with pending captures.
+                // LambdaExpr (direct or nested in a composite) with pending captures.
                 const Type* ft = ctx.pending_closure_type;
-                // Verify the pending type matches the initializer's resolved type.
                 auto init_type_it = ctx.tc.getExpressionTypes().find(var->initializer.get());
-                if (init_type_it != ctx.tc.getExpressionTypes().end() &&
-                    init_type_it->second.get() == ft) {
+                bool should_consume = false;
+
+                if (init_type_it != ctx.tc.getExpressionTypes().end() && init_type_it->second) {
+                    if (init_type_it->second.get() == ft) {
+                        // Direct LambdaExpr initializer — type matches exactly.
+                        should_consume = true;
+                    } else if (dynamic_cast<const RecordExpr*>(var->initializer.get())) {
+                        // Composite initializer (struct literal) containing a
+                        // LambdaExpr field. The pending data was set during
+                        // analyzeExpr() on the field values and belongs to this
+                        // variable even though the top-level type is not FUNCTION.
+                        should_consume = true;
+                    }
+                }
+
+                if (should_consume) {
                     if (!ctx.closure_captures.count(ft))
                         ctx.closure_captures[ft] = std::move(ctx.pending_closure_captures);
                     else
@@ -763,6 +779,21 @@ void Chaperone::analyzeStmt(Context& ctx,
                 it->second = State::Escaped;
             } else {
                 it->second = State::Dropped;
+                // L21: if this variable held a closure (directly or via a
+                // struct containing a closure), dropping it releases those
+                // captures. Remove from tracking so subsequent drops of the
+                // captured variables don't false-positive.
+                auto vtc = ctx.var_to_closure.find(key);
+                if (vtc != ctx.var_to_closure.end()) {
+                    const Type* ft = vtc->second;
+                    auto holders_it = ctx.closure_holders.find(ft);
+                    if (holders_it != ctx.closure_holders.end()) {
+                        holders_it->second.erase(key);
+                        if (holders_it->second.empty())
+                            ctx.closure_holders.erase(holders_it);
+                    }
+                    ctx.var_to_closure.erase(vtc);
+                }
             }
         }
         return;

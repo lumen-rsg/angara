@@ -1,0 +1,24 @@
+// Chaperone negative test — struct containing a closure, captured var dropped first (L21).
+// When a closure is stored as a field of a struct (via RecordExpr), the struct
+// variable holds a reference to the captured variable. Dropping the captured
+// variable before the struct goes out of scope must trigger E505 — the closure
+// in the struct still references the dropped value.
+//
+// expect: E505
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+    public:
+    func get(this) -> i64 { return this.v; }
+}
+
+export func main() -> i64 {
+    let b = Buf(42);
+    // Map literal containing a closure that captures b.
+    let m = {"cb": func() -> i64 { return b.get(); }};
+    // Drop b while m (and its closure) still exists → E505.
+    drop b;
+    // m goes out of scope here (not reached — compilation halts on E505).
+    return 0;
+}

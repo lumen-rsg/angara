@@ -190,20 +190,33 @@ void Chaperone::analyzeExpr(Context& ctx,
         analyzeExpr(ctx, asgn->value, state);
 
         // L21: after analyzing the value, if it's a LambdaExpr with pending
-        // captures, transfer them to the target variable.
+        // captures, transfer them to the target variable. Also handles
+        // composite expressions (RecordExpr, etc.) containing a LambdaExpr.
         if (tgt_ve && ctx.pending_closure_type) {
             const Type* ft = ctx.pending_closure_type;
-            // Only consume if the pending type matches the value expression's type.
             auto val_type_it = ctx.tc.getExpressionTypes().find(asgn->value.get());
-            if (val_type_it != ctx.tc.getExpressionTypes().end() &&
-                val_type_it->second.get() == ft) {
+            bool should_consume = false;
+
+            if (val_type_it != ctx.tc.getExpressionTypes().end() && val_type_it->second) {
+                if (val_type_it->second.get() == ft) {
+                    // Direct LambdaExpr value — type matches exactly.
+                    should_consume = true;
+                } else if (dynamic_cast<const RecordExpr*>(asgn->value.get())) {
+                    // Composite value (struct literal) containing a LambdaExpr field.
+                    should_consume = true;
+                }
+            }
+
+            if (should_consume) {
                 if (!ctx.closure_captures.count(ft))
                     ctx.closure_captures[ft] = std::move(ctx.pending_closure_captures);
+                else
+                    ctx.pending_closure_captures.clear();
                 ctx.closure_holders[ft].insert(tgt_ve->name.lexeme);
                 ctx.var_to_closure[tgt_ve->name.lexeme] = ft;
-                ctx.pending_closure_type = nullptr;
-                ctx.pending_closure_captures.clear();
             }
+            ctx.pending_closure_type = nullptr;
+            ctx.pending_closure_captures.clear();
         }
         // L21: if the value is a VarExpr that holds a closure, propagate the
         // reference to the target.
@@ -402,17 +415,25 @@ void Chaperone::analyzeExpr(Context& ctx,
             // L21: if this variable holds a closure with pending captures,
             // calling it resolves those captures — the closure is consumed
             // synchronously and can no longer outlive its captured variables.
+            // Only clear the tracking if the callee actually has FUNCTION type
+            // (struct variables that contain closures are also in var_to_closure
+            // but are not directly callable).
             auto vtc_it = ctx.var_to_closure.find(callee_name);
             if (vtc_it != ctx.var_to_closure.end()) {
-                const Type* ft = vtc_it->second;
-                // Remove this variable from the closure's holder set.
-                auto holders_it = ctx.closure_holders.find(ft);
-                if (holders_it != ctx.closure_holders.end()) {
-                    holders_it->second.erase(callee_name);
-                    if (holders_it->second.empty())
-                        ctx.closure_holders.erase(holders_it);
+                auto callee_type_it = ctx.tc.getExpressionTypes().find(call->callee.get());
+                if (callee_type_it != ctx.tc.getExpressionTypes().end() &&
+                    callee_type_it->second &&
+                    callee_type_it->second->kind == TypeKind::FUNCTION) {
+                    const Type* ft = vtc_it->second;
+                    // Remove this variable from the closure's holder set.
+                    auto holders_it = ctx.closure_holders.find(ft);
+                    if (holders_it != ctx.closure_holders.end()) {
+                        holders_it->second.erase(callee_name);
+                        if (holders_it->second.empty())
+                            ctx.closure_holders.erase(holders_it);
+                    }
+                    ctx.var_to_closure.erase(vtc_it);
                 }
-                ctx.var_to_closure.erase(vtc_it);
             }
         } else if (auto* get = dynamic_cast<const GetExpr*>(call->callee.get())) {
             method_name = get->name.lexeme;  // e.g. "init"
