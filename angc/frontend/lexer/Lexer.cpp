@@ -946,29 +946,40 @@ namespace angara {
             }
             TokenType emit_type = is_float ? TokenType::NUMBER_FLOAT : TokenType::NUMBER_INT;
 
-            // L5: Validate integer literal range during lexing — don't defer
-            // overflow to stoll which may throw. UINT64_MAX = 18446744073709551615.
+            // H9/L5: Validate integer literal range during lexing — don't defer
+            // overflow to codegen (stoll), which throws and is then silently
+            // turned into 0 by a catch. Determine the base from the prefix and
+            // parse with stoull so all bases (decimal/hex/binary/octal) are
+            // checked against the same UINT64_MAX boundary the old decimal-only
+            // string heuristic used.
             if (!is_float && !clean_num.empty()) {
-                // Check if the literal is pure decimal (no 0x/0b prefix)
-                bool is_hex = (clean_num.size() >= 2 && clean_num[0] == '0' &&
-                              (clean_num[1] == 'x' || clean_num[1] == 'X'));
-                size_t num_start = is_hex ? 2 : 0;
+                int base = 10;
+                size_t num_start = 0;
+                if (clean_num.size() >= 2 && clean_num[0] == '0') {
+                    char p = clean_num[1];
+                    if (p == 'x' || p == 'X') { base = 16; num_start = 2; }
+                    else if (p == 'b' || p == 'B') { base = 2;  num_start = 2; }
+                    else if (p == 'o' || p == 'O') { base = 8;  num_start = 2; }
+                }
                 std::string digits = clean_num.substr(num_start);
-                // Remove any leading zeros for length check
-                while (digits.size() > 1 && digits[0] == '0') digits.erase(0, 1);
-                if (!is_hex && digits.size() > 20) {
-                    m_errorHandler.report(
-                        Token(emit_type, clean_num, m_line,
-                              m_column - static_cast<int>(m_current - m_start), m_filename),
-                        "Integer literal '" + clean_num + "' is too large for a 64-bit integer.",
-                        "E024");
-                } else if (!is_hex && digits.size() == 20 &&
-                           digits > "18446744073709551615") {
-                    m_errorHandler.report(
-                        Token(emit_type, clean_num, m_line,
-                              m_column - static_cast<int>(m_current - m_start), m_filename),
-                        "Integer literal '" + clean_num + "' exceeds UINT64_MAX.",
-                        "E024");
+                if (!digits.empty()) {
+                    try {
+                        // stoull throws std::out_of_range when the value exceeds
+                        // unsigned long long (UINT64_MAX). That is our overflow
+                        // signal. std::invalid_argument shouldn't occur here
+                        // (digits were already validated by the scanner), but
+                        // guard anyway to be safe.
+                        size_t pos = 0;
+                        (void)std::stoull(digits, &pos, base);
+                    } catch (const std::out_of_range&) {
+                        m_errorHandler.report(
+                            Token(emit_type, clean_num, m_line,
+                                  m_column - static_cast<int>(m_current - m_start), m_filename),
+                            "Integer literal '" + clean_num + "' exceeds UINT64_MAX.",
+                            "E024");
+                    } catch (const std::invalid_argument&) {
+                        // Swallow — malformed input should already be caught upstream.
+                    }
                 }
             }
 
