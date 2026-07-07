@@ -471,7 +471,12 @@ void RuntimeBuilder::generateThreadOps() {
         auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<> b(entry);
 
-        auto* size = ConstantInt::get(i64_ty, 80);
+        // L13: derive the allocation size from the LLVM struct type rather than
+        // hardcoding 80 bytes, so this can't drift if m_mutex_type changes.
+        // Matches the getTypeAllocSize pattern used for closures/bound methods/
+        // trait objects/exceptions elsewhere in this file.
+        auto* size = ConstantInt::get(i64_ty,
+            m_module.getDataLayout().getTypeAllocSize(m_mutex_type));
         auto* mem = b.CreateCall(malloc_fn, {size}, "mem");
         auto* mutex_ptr = b.CreateBitCast(mem, ptr_ty, "mutex_ptr");
 
