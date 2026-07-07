@@ -144,7 +144,7 @@ namespace angara {
                     } else {
                         result_type = m_type_i64;
                     }
-                } else if (left_type->toString() == "string" && isNumeric(right_type)) {
+                } else if (left_type->toString() == "string" && isInteger(right_type)) {
                     result_type = m_type_string;
                 } else if (left_type->kind == TypeKind::VECTOR && right_type->kind == TypeKind::VECTOR) {
                     // SIMD-5: element-wise vector multiplication
