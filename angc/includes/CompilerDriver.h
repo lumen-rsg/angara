@@ -170,6 +170,10 @@ namespace angara {
         /// @return The base name (e.g. "io" from "/opt/angara/modules/libio.so").
         static std::string get_base_name(const std::string& path);
 
+        /// Sanitizes a module name for use in file paths, replacing any character
+        /// that is not [a-zA-Z0-9_-] with '_'. Prevents path-traversal via '../'.
+        static std::string sanitize_module_name(const std::string& name);
+
         /// Reads a file's contents into a string. Returns empty string on failure.
         static std::string read_file(const std::string& path);
 

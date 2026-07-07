@@ -562,9 +562,10 @@ namespace angara {
                 // For clean modules, add the cached .o file to the link set
                 // before dispatching (compileOneModule skips codegen for these).
                 if (is_clean) {
+                    std::string safe_name = sanitize_module_name(disc.name);
                     std::string obj_file = m_build_dir.empty()
-                        ? "ang_" + disc.name + ".o"
-                        : m_build_dir + "/ang_" + disc.name + ".o";
+                        ? "ang_" + safe_name + ".o"
+                        : m_build_dir + "/ang_" + safe_name + ".o";
                     {
                         std::lock_guard<std::mutex> lock(m_obj_files_mutex);
                         m_generated_object_files.insert(obj_file);
@@ -601,7 +602,7 @@ namespace angara {
                 }
 
                 // Determine the .o file path.
-                std::string obj_file = m_build_dir + "/ang_" + disc.name + ".o";
+                std::string obj_file = m_build_dir + "/ang_" + sanitize_module_name(disc.name) + ".o";
 
                 manifest.addEntry(path, disc.name, src_mtime,
                                   dep_mtimes, obj_file);
@@ -775,6 +776,17 @@ namespace angara {
             return basename.substr(3);
         }
         return basename;
+    }
+
+    std::string CompilerDriver::sanitize_module_name(const std::string& name) {
+        std::string r;
+        for (char c : name) {
+            if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-')
+                r += c;
+            else
+                r += '_';
+        }
+        return r;
     }
 
     static std::optional<std::string> find_candidate(const std::filesystem::path& dir, const std::string& name) {
