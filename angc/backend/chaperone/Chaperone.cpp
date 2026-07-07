@@ -4,6 +4,8 @@
 #include "TypeChecker.h"
 #include "ErrorHandler.h"
 #include "Token.h"
+#include "Type.h"
+#include "SymbolTable.h"
 
 #include <functional>
 
@@ -60,163 +62,60 @@ Chaperone::StateMap Chaperone::join_maps(const StateMap& a, const StateMap& b) {
 void Chaperone::collectTrackedTypes(Context& ctx,
     const std::vector<std::shared_ptr<Stmt>>& program)
 {
-    // --- Pass 1: collect tracked types and explicit annotations ---
+    // --- Pass 1: collect tracked types from AST ---
     for (const auto& stmt : program) {
         if (!stmt) continue;
         if (auto* cls = dynamic_cast<const ClassStmt*>(stmt.get())) {
             ctx.tracked_types.insert(cls->name.lexeme);
-            if (cls->is_sendable && !cls->is_unsendable)
-                ctx.sendable_types.insert(cls->name.lexeme);
-            if (cls->is_sync && !cls->is_unsync)
-                ctx.syncable_types.insert(cls->name.lexeme);
         } else if (auto* data = dynamic_cast<const DataStmt*>(stmt.get())) {
             if (data->is_owned) {
                 ctx.tracked_types.insert(data->name.lexeme);
-                if (data->is_sendable && !data->is_unsendable)
-                    ctx.sendable_types.insert(data->name.lexeme);
-                if (data->is_sync && !data->is_unsync)
-                    ctx.syncable_types.insert(data->name.lexeme);
-            } else {
-                // M11: non-owned data types are implicitly sendable and syncable.
-                ctx.sendable_types.insert(data->name.lexeme);
-                ctx.syncable_types.insert(data->name.lexeme);
             }
         }
     }
 
-    // --- Pass 2: auto-derive Send and Sync via fixed-point iteration ---
-    // Inherently sendable/syncable types (primitives and built-ins).
-    auto isInherentlySendable = [&](const std::string& name) -> bool {
-        return name == "i64" || name == "f64" || name == "string" ||
-               name == "bool" || name == "char" ||
-               name == "Mutex" || name == "Thread" ||
-               ctx.sendable_types.count(name);  // already registered
-    };
-    auto isInherentlySyncable = [&](const std::string& name) -> bool {
-        return name == "i64" || name == "f64" || name == "string" ||
-               name == "bool" || name == "char" ||
-               name == "Mutex" ||
-               ctx.syncable_types.count(name);  // already registered
-    };
-
-    // Extract base type name from a field's AST type annotation.
-    // (same approach as detectCycles)
-    std::function<std::string(const ASTType*)> base_name = [&](const ASTType* t) -> std::string {
-        if (!t) return "";
-        if (auto* s = dynamic_cast<const SimpleType*>(t)) return s->name.lexeme;
-        if (auto* g = dynamic_cast<const GenericType*>(t)) return g->name.lexeme;
-        if (auto* o = dynamic_cast<const OptionalTypeNode*>(t)) return base_name(o->base_type.get());
-        if (auto* ow = dynamic_cast<const OwnedTypeNode*>(t)) return base_name(ow->inner_type.get());
-        return "";
-    };
-
-    // Collects the tracked field type names for a class or owned data type.
-    // For Send: only owned (tracked) field types matter.
-    // For Sync: all field types matter (including ref<T> — T must be Sync).
-    struct FieldInfo {
-        std::set<std::string> owned_fields;   // tracked field type names (for Send)
-        std::set<std::string> all_fields;     // all field type names (for Sync)
-    };
-    std::map<std::string, FieldInfo> type_fields;
+    // --- Pass 2: read Send/Sync status from TypeChecker semantic types ---
+    // The TypeChecker already auto-derives is_sendable/is_sync on ClassType
+    // and DataType during its deriveSendAndSync() pass. We just read those
+    // flags here instead of duplicating the derivation logic.
+    const auto& sym_table = ctx.tc.getSymbolTable();
     for (const auto& stmt : program) {
         if (!stmt) continue;
+        std::string type_name;
+        if (auto* cls = dynamic_cast<const ClassStmt*>(stmt.get())) {
+            type_name = cls->name.lexeme;
+        } else if (auto* data = dynamic_cast<const DataStmt*>(stmt.get())) {
+            type_name = data->name.lexeme;
+        } else continue;
+
+        auto sym = const_cast<SymbolTable&>(sym_table).resolve(type_name);
+        if (!sym || !sym->type) continue;
+
+        bool is_sendable = false;
+        bool is_sync = false;
+        if (sym->type->kind == TypeKind::CLASS) {
+            auto cls_type = std::dynamic_pointer_cast<ClassType>(sym->type);
+            if (cls_type) {
+                is_sendable = cls_type->is_sendable;
+                is_sync = cls_type->is_sync;
+            }
+        } else if (sym->type->kind == TypeKind::DATA) {
+            auto data_type = std::dynamic_pointer_cast<DataType>(sym->type);
+            if (data_type) {
+                is_sendable = data_type->is_sendable;
+                is_sync = data_type->is_sync;
+            }
+        }
+        if (is_sendable) ctx.sendable_types.insert(type_name);
+        if (is_sync) ctx.syncable_types.insert(type_name);
+    }
+
+    // Non-owned data types are implicitly Send and Sync.
+    for (const auto& stmt : program) {
         if (auto* data = dynamic_cast<const DataStmt*>(stmt.get())) {
-            if (!data->is_owned) continue;
-            FieldInfo& fi = type_fields[data->name.lexeme];
-            for (const auto& f : data->fields) {
-                if (!f || !f->typeAnnotation) continue;
-                std::string ft = base_name(f->typeAnnotation.get());
-                if (ft.empty()) continue;
-                fi.all_fields.insert(ft);
-                if (ctx.tracked_types.count(ft))
-                    fi.owned_fields.insert(ft);
-            }
-        } else if (auto* cls = dynamic_cast<const ClassStmt*>(stmt.get())) {
-            FieldInfo& fi = type_fields[cls->name.lexeme];
-            for (const auto& member : cls->members) {
-                if (auto* fm = dynamic_cast<const FieldMember*>(member.get())) {
-                    if (!fm->declaration || !fm->declaration->typeAnnotation) continue;
-                    std::string ft = base_name(fm->declaration->typeAnnotation.get());
-                    if (ft.empty()) continue;
-                    fi.all_fields.insert(ft);
-                    if (ctx.tracked_types.count(ft))
-                        fi.owned_fields.insert(ft);
-                }
-            }
-        }
-    }
-
-    // Fixed-point auto-derivation for Send.
-    bool changed = true;
-    while (changed) {
-        changed = false;
-        for (const auto& stmt : program) {
-            if (!stmt) continue;
-            std::string type_name;
-            bool is_unsendable = false;
-            if (auto* cls = dynamic_cast<const ClassStmt*>(stmt.get())) {
-                type_name = cls->name.lexeme;
-                is_unsendable = cls->is_unsendable;
-            } else if (auto* data = dynamic_cast<const DataStmt*>(stmt.get())) {
-                if (!data->is_owned) continue;
-                type_name = data->name.lexeme;
-                is_unsendable = data->is_unsendable;
-            } else continue;
-
-            if (is_unsendable || ctx.sendable_types.count(type_name)) continue;
-
-            auto fi = type_fields.find(type_name);
-            if (fi == type_fields.end()) {
-                // No fields → vacuously Send.
-                ctx.sendable_types.insert(type_name);
-                changed = true;
-                continue;
-            }
-            bool all_sendable = true;
-            for (const auto& ft : fi->second.owned_fields) {
-                if (!isInherentlySendable(ft)) { all_sendable = false; break; }
-            }
-            if (all_sendable) {
-                ctx.sendable_types.insert(type_name);
-                changed = true;
-            }
-        }
-    }
-
-    // Fixed-point auto-derivation for Sync.
-    changed = true;
-    while (changed) {
-        changed = false;
-        for (const auto& stmt : program) {
-            if (!stmt) continue;
-            std::string type_name;
-            bool is_unsync = false;
-            if (auto* cls = dynamic_cast<const ClassStmt*>(stmt.get())) {
-                type_name = cls->name.lexeme;
-                is_unsync = cls->is_unsync;
-            } else if (auto* data = dynamic_cast<const DataStmt*>(stmt.get())) {
-                if (!data->is_owned) continue;
-                type_name = data->name.lexeme;
-                is_unsync = data->is_unsync;
-            } else continue;
-
-            if (is_unsync || ctx.syncable_types.count(type_name)) continue;
-
-            auto fi = type_fields.find(type_name);
-            if (fi == type_fields.end()) {
-                // No fields → vacuously Sync.
-                ctx.syncable_types.insert(type_name);
-                changed = true;
-                continue;
-            }
-            // For Sync, ALL fields must be Sync (including ref<T> fields).
-            bool all_syncable = true;
-            for (const auto& ft : fi->second.all_fields) {
-                if (!isInherentlySyncable(ft)) { all_syncable = false; break; }
-            }
-            if (all_syncable) {
-                ctx.syncable_types.insert(type_name);
-                changed = true;
+            if (!data->is_owned) {
+                ctx.sendable_types.insert(data->name.lexeme);
+                ctx.syncable_types.insert(data->name.lexeme);
             }
         }
     }

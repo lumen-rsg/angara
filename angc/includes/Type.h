@@ -235,6 +235,12 @@ namespace angara {
         // qualified diagnostics ("app::Foo" vs "lib::Foo").
         std::string home_module;
 
+        // M11: Send/Sync — populated during TypeChecker auto-derivation pass.
+        bool is_sendable = false;
+        bool is_sync = false;
+        bool is_unsendable = false;
+        bool is_unsync = false;
+
         explicit ClassType(std::string name)
                 : Type(TypeKind::CLASS), name(std::move(name)) {}
 
@@ -508,6 +514,12 @@ namespace angara {
         // TS-2: resolved bounds, e.g. "K" -> TraitType("Hashable") for `<K: Hashable>`.
         std::map<std::string, std::shared_ptr<TraitType>> type_param_bounds;
         std::string home_module;  // TS-4: declaring module (for qualified diagnostics)
+
+        // M11: Send/Sync — populated during TypeChecker auto-derivation pass.
+        bool is_sendable = false;
+        bool is_sync = false;
+        bool is_unsendable = false;
+        bool is_unsync = false;
 
         explicit DataType(std::string name)
             : Type(TypeKind::DATA), name(std::move(name)) {}

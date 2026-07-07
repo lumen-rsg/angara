@@ -160,6 +160,10 @@ namespace angara {
         /// Resolves the RHS type and registers the alias name in the symbol table.
         void defineTypeAliasHeader(const TypeAliasStmt &stmt);
 
+        // M11: auto-derive Send/Sync on all ClassType and DataType instances
+        // after headers are defined. Runs a fixed-point over field types.
+        void deriveSendAndSync(const std::vector<std::shared_ptr<Stmt>>& statements);
+
         // --- Type helpers ---
 
         /// Returns true if the type can be used in a boolean context.
@@ -284,6 +288,8 @@ namespace angara {
         std::shared_ptr<Type> m_type_error;
         std::shared_ptr<Type> m_type_thread;
         std::shared_ptr<Type> m_type_mutex;
+        std::shared_ptr<TraitType> m_type_send;   // M11: built-in Send marker trait
+        std::shared_ptr<TraitType> m_type_sync;   // M11: built-in Sync marker trait
         std::shared_ptr<Type> m_type_exception;
         CompilerDriver& m_driver;
         std::shared_ptr<ModuleType> m_module_type;

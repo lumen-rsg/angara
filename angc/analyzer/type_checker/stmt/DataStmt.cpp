@@ -83,6 +83,12 @@ namespace angara {
 
         data_type->constructor_type = std::make_shared<FunctionType>(ctor_params, data_type);
 
+        // M11: copy Send/Sync flags from AST to semantic type.
+        data_type->is_sendable = stmt.is_sendable;
+        data_type->is_sync = stmt.is_sync;
+        data_type->is_unsendable = stmt.is_unsendable;
+        data_type->is_unsync = stmt.is_unsync;
+
         m_active_type_params = saved_type_params;
     }
 

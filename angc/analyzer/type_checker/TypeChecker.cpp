@@ -48,6 +48,9 @@ namespace angara {
         m_type_error = std::make_shared<PrimitiveType>("<error>");
         m_type_thread = std::make_shared<ThreadType>();
         m_type_mutex = std::make_shared<MutexType>();
+        // M11: create Send/Sync as marker traits (no methods).
+        m_type_send = std::make_shared<TraitType>("Send");
+        m_type_sync = std::make_shared<TraitType>("Sync");
         m_module_type = std::make_shared<ModuleType>(module_name);
         m_type_exception = std::make_shared<ExceptionType>();
 
@@ -83,6 +86,10 @@ namespace angara {
             m_type_mutex
         );
         m_symbols.declare(Token(TokenType::IDENTIFIER, "Mutex", 0, 0), mutex_constructor_type, true);
+
+        // M11: register Send/Sync as built-in marker trait types.
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "Send", 0, 0), m_type_send, true);
+        m_symbols.declare(Token(TokenType::IDENTIFIER, "Sync", 0, 0), m_type_sync, true);
 
         auto string_conv_type = std::make_shared<FunctionType>(
             std::vector<std::shared_ptr<Type>>{m_type_any}, m_type_string
@@ -252,6 +259,10 @@ bool TypeChecker::check(const std::vector<std::shared_ptr<Stmt>>& statements) {
             }
         }
     }
+    if (m_hadError) return false;
+
+    // M11: auto-derive Send/Sync on all types after headers are defined.
+    deriveSendAndSync(statements);
     if (m_hadError) return false;
 
     for (const auto& stmt : statements) {
@@ -735,6 +746,142 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
             auto c_vec = std::dynamic_pointer_cast<VectorType>(concrete);
             if (p_vec->size == c_vec->size) {
                 extract_type_args(p_vec->element_type, c_vec->element_type, inferred);
+            }
+        }
+    }
+
+    // M11: auto-derive Send and Sync for all ClassType and DataType instances.
+    // Runs after all headers are defined. Uses a fixed-point algorithm: a type
+    // is Send if all its owned fields are Send; Sync if all fields are Sync.
+    void TypeChecker::deriveSendAndSync(const std::vector<std::shared_ptr<Stmt>>& statements) {
+        // Helper: is a type name inherently Send/Sync?
+        auto isInherentlySend = [&](const std::string& name) {
+            return name == "i64" || name == "f64" || name == "string" ||
+                   name == "bool" || name == "char" ||
+                   name == "Mutex" || name == "Thread";
+        };
+        auto isInherentlySync = [&](const std::string& name) {
+            return name == "i64" || name == "f64" || name == "string" ||
+                   name == "bool" || name == "char" ||
+                   name == "Mutex";
+        };
+
+        // Helper: resolve a type name to its semantic Type and check its
+        // is_sendable/is_sync flag.
+        auto typeIsSend = [&](const std::string& name) -> bool {
+            if (isInherentlySend(name)) return true;
+            auto sym = m_symbols.resolve(name);
+            if (!sym || !sym->type) return false;
+            if (sym->type->kind == TypeKind::CLASS) {
+                auto cls = std::dynamic_pointer_cast<ClassType>(sym->type);
+                return cls && cls->is_sendable;
+            }
+            if (sym->type->kind == TypeKind::DATA) {
+                auto data = std::dynamic_pointer_cast<DataType>(sym->type);
+                return data && data->is_sendable;
+            }
+            return false;
+        };
+        auto typeIsSync = [&](const std::string& name) -> bool {
+            if (isInherentlySync(name)) return true;
+            auto sym = m_symbols.resolve(name);
+            if (!sym || !sym->type) return false;
+            if (sym->type->kind == TypeKind::CLASS) {
+                auto cls = std::dynamic_pointer_cast<ClassType>(sym->type);
+                return cls && cls->is_sync;
+            }
+            if (sym->type->kind == TypeKind::DATA) {
+                auto data = std::dynamic_pointer_cast<DataType>(sym->type);
+                return data && data->is_sync;
+            }
+            return false;
+        };
+
+        // Collect all ClassType/DataType objects to process.
+        struct TypeEntry {
+            std::string name;
+            ClassType* cls = nullptr;
+            DataType* data = nullptr;
+        };
+        std::vector<TypeEntry> entries;
+        for (const auto& stmt : statements) {
+            if (!stmt) continue;
+            std::string type_name;
+            if (auto* cls_stmt = dynamic_cast<const ClassStmt*>(stmt.get())) {
+                type_name = cls_stmt->name.lexeme;
+            } else if (auto* data_stmt = dynamic_cast<const DataStmt*>(stmt.get())) {
+                type_name = data_stmt->name.lexeme;
+            } else continue;
+
+            auto sym = m_symbols.resolve(type_name);
+            if (!sym || !sym->type) continue;
+            TypeEntry e;
+            e.name = type_name;
+            if (sym->type->kind == TypeKind::CLASS)
+                e.cls = dynamic_cast<ClassType*>(sym->type.get());
+            else if (sym->type->kind == TypeKind::DATA)
+                e.data = dynamic_cast<DataType*>(sym->type.get());
+            else continue;
+            entries.push_back(e);
+        }
+
+        // Fixed-point for Send.
+        bool changed = true;
+        int max_iters = 20;
+        while (changed && max_iters-- > 0) {
+            changed = false;
+            for (auto& e : entries) {
+                bool* flag = nullptr;
+                bool* unsync_flag = nullptr;
+                const std::map<std::string, ClassType::MemberInfo>* fields = nullptr;
+                if (e.cls) { flag = &e.cls->is_sendable; fields = &e.cls->fields; }
+                else { flag = &e.data->is_sendable; fields = &e.data->fields; }
+
+                // @unsendable prevents auto-derivation.
+                if (e.cls && e.cls->is_unsendable) continue;
+                if (e.data && e.data->is_unsendable) continue;
+                if (*flag) continue;  // already Send
+
+                bool all_send = true;
+                for (const auto& [fname, finfo] : *fields) {
+                    if (!finfo.type) continue;
+                    // Only owned fields matter for Send (tracked types: class, instance, owned data).
+                    // Primitives, ref<T>, etc. don't affect Send.
+                    if (finfo.type->kind == TypeKind::CLASS ||
+                        finfo.type->kind == TypeKind::INSTANCE ||
+                        finfo.type->kind == TypeKind::DATA) {
+                        std::string ft = finfo.type->toString();
+                        if (!typeIsSend(ft)) { all_send = false; break; }
+                    }
+                }
+                if (all_send) { *flag = true; changed = true; }
+            }
+        }
+
+        // Fixed-point for Sync.
+        changed = true;
+        max_iters = 20;
+        while (changed && max_iters-- > 0) {
+            changed = false;
+            for (auto& e : entries) {
+                bool* flag = nullptr;
+                const std::map<std::string, ClassType::MemberInfo>* fields = nullptr;
+                if (e.cls) { flag = &e.cls->is_sync; fields = &e.cls->fields; }
+                else { flag = &e.data->is_sync; fields = &e.data->fields; }
+
+                // @unsync prevents auto-derivation.
+                if (e.cls && e.cls->is_unsync) continue;
+                if (e.data && e.data->is_unsync) continue;
+                if (*flag) continue;  // already Sync
+
+                // For Sync, ALL fields must be Sync (including ref<T> fields).
+                bool all_sync = true;
+                for (const auto& [fname, finfo] : *fields) {
+                    if (!finfo.type) continue;
+                    std::string ft = finfo.type->toString();
+                    if (!typeIsSync(ft)) { all_sync = false; break; }
+                }
+                if (all_sync) { *flag = true; changed = true; }
             }
         }
     }

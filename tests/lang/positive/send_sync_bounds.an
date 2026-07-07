@@ -1,0 +1,28 @@
+// M11: Generic bounds with Send and Sync traits.
+// Send and Sync are built-in marker traits automatically derived by the compiler.
+// Types with only primitive fields are automatically Send and Sync.
+//
+// exit: 141
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+// Generic function requiring T to be Send.
+func send_it<T: Send>(x as T) -> i64 {
+    return 42;
+}
+
+// Generic function requiring T to be Sync.
+func sync_it<T: Sync>(x as T) -> i64 {
+    return 99;
+}
+
+export func main() -> i64 {
+    let b = Buf(100);
+    let r1 = send_it(b);  // Buf is Send (only i64 field)
+    let r2 = sync_it(b);  // Buf is Sync (only i64 field)
+    drop b;
+    return r1 + r2;       // 42 + 99 = 141
+}

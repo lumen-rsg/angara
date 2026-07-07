@@ -194,6 +194,12 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
             }
         }
 
+        // M11: copy Send/Sync flags from AST to semantic type.
+        class_type->is_sendable = stmt.is_sendable;
+        class_type->is_sync = stmt.is_sync;
+        class_type->is_unsendable = stmt.is_unsendable;
+        class_type->is_unsync = stmt.is_unsync;
+
         m_current_class = nullptr;
 
     }
@@ -251,6 +257,28 @@ void TypeChecker::defineClassHeader(const ClassStmt& stmt) {
     bool TypeChecker::conformsToTrait(const std::shared_ptr<Type>& subject,
                                       const std::shared_ptr<TraitType>& trait) {
         if (!subject || !trait) return false;
+
+        // M11: Send and Sync are built-in marker traits that require checking
+        // the type's is_sendable/is_sync flags rather than just method conformance.
+        const std::string& trait_name = trait->toString();
+        if (trait_name == "Send" || trait_name == "Sync") {
+            // Walk through InstanceType to get the underlying class/data type.
+            std::shared_ptr<Type> base = subject;
+            if (base->kind == TypeKind::INSTANCE) {
+                auto inst = std::dynamic_pointer_cast<InstanceType>(base);
+                if (inst && inst->class_type) base = inst->class_type;
+            }
+            bool flag = false;
+            if (base->kind == TypeKind::CLASS) {
+                auto cls = std::dynamic_pointer_cast<ClassType>(base);
+                flag = (trait_name == "Send") ? cls->is_sendable : cls->is_sync;
+            } else if (base->kind == TypeKind::DATA) {
+                auto data = std::dynamic_pointer_cast<DataType>(base);
+                flag = (trait_name == "Send") ? data->is_sendable : data->is_sync;
+            }
+            return flag;
+        }
+
         // A marker trait (e.g. `trait Hashable {}`) imposes no method requirements.
         if (trait->methods.empty()) return true;
 
