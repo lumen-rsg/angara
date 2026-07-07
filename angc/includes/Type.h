@@ -774,6 +774,13 @@ namespace angara {
                     auto v = std::dynamic_pointer_cast<VectorType>(type);
                     return std::make_shared<VectorType>(substitute(v->element_type), v->size);
                 }
+                case TypeKind::TRAIT_OBJECT: {
+                    // H5: substitute type params in both interface and impl types.
+                    auto to = std::dynamic_pointer_cast<TraitObjectType>(type);
+                    return std::make_shared<TraitObjectType>(
+                        substitute(to->interface_type),
+                        substitute(to->impl_type));
+                }
                 default:
                     // Primitives, nominal types, etc. carry no type params.
                     return type;
@@ -1030,6 +1037,13 @@ namespace angara {
             case TypeKind::VECTOR: {
                 auto v = std::dynamic_pointer_cast<VectorType>(type);
                 return std::make_shared<VectorType>(substituteTypeArgs(v->element_type, args), v->size);
+            }
+            case TypeKind::TRAIT_OBJECT: {
+                // H5: substitute type params in both interface and impl types.
+                auto to = std::dynamic_pointer_cast<TraitObjectType>(type);
+                return std::make_shared<TraitObjectType>(
+                    substituteTypeArgs(to->interface_type, args),
+                    substituteTypeArgs(to->impl_type, args));
             }
             default:
                 return type;
