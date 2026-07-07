@@ -45,7 +45,7 @@ namespace angara {
         m_type_char = std::make_shared<PrimitiveType>("char");  // LANG-4
         m_type_nil = std::make_shared<NilType>();
         m_type_any = std::make_shared<AnyType>();
-        m_type_error = std::make_shared<PrimitiveType>("<error>");
+        m_type_error = std::make_shared<ErrorType>();
         m_type_thread = std::make_shared<ThreadType>();
         m_type_mutex = std::make_shared<MutexType>();
         // M11: create Send/Sync as marker traits (no methods).

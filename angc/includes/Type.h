@@ -386,6 +386,11 @@ namespace angara {
         std::string toString() const override { return "any"; }
     };
 
+    struct ErrorType : Type {
+        ErrorType() : Type(TypeKind::ERROR) {}
+        std::string toString() const override { return "<error>"; }
+    };
+
     // The semantic representation of a contract.
     struct ContractType : Type {
         const std::string name;
