@@ -1,5 +1,6 @@
 #include "LLVMBackend.h"
 #include "RuntimeBuilder.h"
+#include <cstdlib>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
@@ -357,7 +358,12 @@ llvm::Value* LLVMBackend::callRtByName(const std::string& name, const std::vecto
     auto* fn = mod->getFunction(name);
     if (fn) return builder->CreateCall(fn, a);
     llvm::report_fatal_error(llvm::StringRef("[LLVMBackend] callRtByName: mandatory runtime function '" + name + "' not found"));
-    return makeNil();
+    // M24: report_fatal_error throws by default, but a non-default handler
+    // could catch it and resume execution — which would silently pass a nil
+    // value downstream as if it were valid. Abort unconditionally so the
+    // process terminates regardless of the installed fatal-error handler.
+    std::abort();
+    return makeNil();  // unreachable; satisfies control-flow analysis
 }
 
 llvm::AllocaInst* LLVMBackend::allocLocal(llvm::Function* fn, const std::string& name) {
