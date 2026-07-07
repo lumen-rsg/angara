@@ -257,7 +257,18 @@ private:
             num += advance();
         }
         if (num.empty()) return 0;
-        return std::stoll(num);
+        // M13: a corrupted/huge manifest numeric field makes stoll throw
+        // std::out_of_range (std::invalid_argument is unlikely since num is
+        // non-empty and digit-only here). parse() has no try/catch, so an
+        // uncaught exception would crash the compiler. Catch, warn, and
+        // return 0 (matching the empty-num fallback) instead.
+        try {
+            return std::stoll(num);
+        } catch (const std::exception& e) {
+            std::cerr << "[WARN] BuildManifest: bad numeric field '" << num
+                      << "' (" << e.what() << "), treating as 0.\n";
+            return 0;
+        }
     }
 
     void parseObject(std::function<void(const std::string& key)> callback) {
