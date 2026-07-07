@@ -36,7 +36,7 @@ namespace angara {
                 }
                 break;
             case TokenType::BANG:
-                if (right_type->toString() == "bool") result_type = m_type_bool;
+                if (sameType(right_type, m_type_bool)) result_type = m_type_bool;
                 else error(expr.op, "Operator '!' requires a boolean operand, but got '" + right_type->toString() + "'.", "E360");
                 break;
             case TokenType::TILDE:
