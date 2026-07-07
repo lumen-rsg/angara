@@ -35,11 +35,16 @@ void Chaperone::warn(Context& ctx, const Token& tok,
 
 Chaperone::State Chaperone::join(State a, State b) {
     if (a == b) return a;
-    if (a == State::Live || b == State::Live) return State::Live;
-    // Both are "gone" states (Dropped/Escaped/Moved/Uninit in some combination).
-    // Conservatively return Dropped — the variable is not available. The
-    // diagnostic in the DropStmt handler covers all "gone" reasons (M3).
-    return State::Dropped;
+    // C1: "gone" states must dominate. If a variable is dead (Escaped/Moved/
+    // Dropped) on either branch, the merged state is conservatively that dead
+    // state. Previously "Live" dominated, which was unsound — a variable that
+    // escaped on one branch was treated as still Live after the merge.
+    if (a == State::Escaped || b == State::Escaped) return State::Escaped;
+    if (a == State::Moved   || b == State::Moved)   return State::Moved;
+    if (a == State::Dropped || b == State::Dropped) return State::Dropped;
+    if (a == State::Live    || b == State::Live)    return State::Live;
+    // Both are Uninit (the only remaining combination).
+    return State::Uninit;
 }
 
 Chaperone::StateMap Chaperone::join_maps(const StateMap& a, const StateMap& b) {
