@@ -370,10 +370,35 @@ void Chaperone::detectCycles(Context& ctx,
         return "";
     };
 
+    // L22: Collect tracked type names from a field type annotation, recursing
+    // into generic type arguments.  For `list<B>` where B is tracked, this
+    // adds edge A → B even though `list` itself is not a tracked type.
+    // Without this, container-mediated cycles (A → list<B> → A) are missed.
+    std::function<void(const ASTType*, std::set<std::string>&)> collect_tracked;
+    collect_tracked = [&](const ASTType* t, std::set<std::string>& out) {
+        if (!t) return;
+        if (auto* g = dynamic_cast<const GenericType*>(t)) {
+            std::string bn = g->name.lexeme;
+            if (!bn.empty() && ctx.tracked_types.count(bn))
+                out.insert(bn);
+            for (const auto& arg : g->arguments)
+                collect_tracked(arg.get(), out);
+        } else if (auto* o = dynamic_cast<const OptionalTypeNode*>(t)) {
+            collect_tracked(o->base_type.get(), out);
+        } else if (auto* ow = dynamic_cast<const OwnedTypeNode*>(t)) {
+            collect_tracked(ow->inner_type.get(), out);
+        } else {
+            std::string bn = base_name(t);
+            if (!bn.empty() && ctx.tracked_types.count(bn))
+                out.insert(bn);
+        }
+    };
+
     auto check_field = [&](const std::string& owner, const VarDeclStmt* field) {
         if (!field || !field->typeAnnotation) return;
-        std::string ft = base_name(field->typeAnnotation.get());
-        if (!ft.empty() && ctx.tracked_types.count(ft))
+        std::set<std::string> tracked;
+        collect_tracked(field->typeAnnotation.get(), tracked);
+        for (const auto& ft : tracked)
             graph[owner].insert(ft);
     };
 

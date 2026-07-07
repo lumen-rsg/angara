@@ -1,0 +1,20 @@
+// Chaperone negative test — E504 (reference cycle via container)
+// An owned type A holds a list<B>, and B holds an A, forming a
+// container-mediated cycle A → list<B> → A that would cascade-drop
+// infinitely.  Must report E504 at type-declaration time.
+//
+// expect: E504
+
+owned B {
+    let val as i64;
+    let a as A;
+}
+
+owned A {
+    let val as i64;
+    let items as list<B>;   // container-mediated cycle: A → list<B> → B → A
+}
+
+export func main() -> i64 {
+    return 0;
+}
