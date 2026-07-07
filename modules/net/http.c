@@ -104,6 +104,10 @@ AngaraObject Angara_http_request(int arg_count, AngaraObject args[]) {
     curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, write_memory_callback);
     curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, (void*)&chunk);
     curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "angara-http-client/1.0");
+    // L10: bound the request lifetime so a slow or malicious server can't hang
+    // the caller indefinitely. Mirrors http_simple_request's 30s/10s timeouts.
+    curl_easy_setopt(curl_handle, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl_handle, CURLOPT_CONNECTTIMEOUT, 10L);
     apply_tls_options(curl_handle, tls_obj);
 
     if (strcmp(method, "POST") == 0) {
