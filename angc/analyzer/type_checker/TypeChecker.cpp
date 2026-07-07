@@ -153,8 +153,12 @@ namespace angara {
         if (type->kind == TypeKind::NIL) {
             return false;
         }
+        // Only bool, numeric types, and pointers are truthy.
+        if (sameType(type, m_type_bool)) return true;
+        if (isNumeric(type)) return true;
+        if (type->kind == TypeKind::POINTER) return true;
 
-        return true;
+        return false;
     }
 
 
