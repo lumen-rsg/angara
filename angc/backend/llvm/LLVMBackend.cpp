@@ -1352,8 +1352,11 @@ llvm::Value* LLVMBackend::callVariadicForeignFn(const std::string& c_func_name,
                 // float promotes to double
                 c_val = builder->CreateFPExt(c_val, llvm::Type::getDoubleTy(*ctx));
             } else if (n == "bool" || n == "i8" || n == "u8" || n == "i16" || n == "u16") {
-                // Promote to i32 (C int)
-                c_val = builder->CreateZExt(c_val, llvm::Type::getInt32Ty(*ctx));
+                // Promote to i32 (C int). Use SExt for signed types, ZExt for unsigned.
+                bool is_unsigned = (n == "u8" || n == "u16" || n == "bool");
+                c_val = is_unsigned
+                    ? builder->CreateZExt(c_val, llvm::Type::getInt32Ty(*ctx))
+                    : builder->CreateSExt(c_val, llvm::Type::getInt32Ty(*ctx));
             }
         }
 
