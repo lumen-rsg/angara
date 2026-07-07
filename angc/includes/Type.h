@@ -211,7 +211,9 @@ namespace angara {
             Token declaration_token;
             bool is_const;
         };
-        bool is_native;
+        // H8: default-initialized so reads before codegen (which is the only
+        // writer today) are never indeterminate.
+        bool is_native = false;
         const std::string name;
         std::shared_ptr<ClassType> superclass = nullptr;
         std::map<std::string, MemberInfo> fields;
