@@ -344,10 +344,19 @@ AngaraObject Angara_process_spawn(int arg_count, AngaraObject* args) {
     }
     argv[ai] = NULL;
 
-    int in_pipe[2], out_pipe[2], err_pipe[2];
-    pipe(in_pipe);
-    pipe(out_pipe);
-    pipe(err_pipe);
+    int in_pipe[2] = {-1, -1}, out_pipe[2] = {-1, -1}, err_pipe[2] = {-1, -1};
+    /* M21: check each pipe() result; on failure, clean up everything allocated
+     * so far (argv + any pipes that did succeed) and throw, rather than handing
+     * -1 fds to dup2()/fork(). */
+    if (pipe(in_pipe) < 0 || pipe(out_pipe) < 0 || pipe(err_pipe) < 0) {
+        for (int i = 0; i < argc_build; i++) free(argv[i]);
+        free(argv);
+        if (in_pipe[0]  >= 0) { close(in_pipe[0]);  close(in_pipe[1]);  }
+        if (out_pipe[0] >= 0) { close(out_pipe[0]); close(out_pipe[1]); }
+        if (err_pipe[0] >= 0) { close(err_pipe[0]); close(err_pipe[1]); }
+        ang_api->throw_error("spawn: failed to create pipes.");
+        return ang_nil();
+    }
 
     pid_t pid = fork();
     if (pid < 0) {
