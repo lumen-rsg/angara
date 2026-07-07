@@ -2910,6 +2910,29 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     for (const auto& [name, alloca] : namedVals) {
         captures.emplace_back(name, alloca);
     }
+
+    // C10: In async functions, local variables live in the heap-allocated frame
+    // struct, not in stack allocas. namedVals is empty here (cleared in
+    // codegenAsyncResumeFunc), so we must also iterate m_async_local_slots to
+    // capture those variables. We load each from the async frame via loadVar()
+    // and store into a temporary alloca so the existing capture-copy loop works.
+    if (m_in_async_function) {
+        for (const auto& [name, slot_idx] : m_async_local_slots) {
+            // Skip if already captured via namedVals (shouldn't happen, but safe)
+            bool already_captured = false;
+            for (const auto& [cname, _] : captures) {
+                if (cname == name) { already_captured = true; break; }
+            }
+            if (already_captured) continue;
+
+            // Load the value from the async frame
+            auto* val = loadVar(name);
+            // Create a temporary alloca and store the value
+            auto* tmp_alloca = builder->CreateAlloca(objType, nullptr, name + "_cap");
+            builder->CreateStore(val, tmp_alloca);
+            captures.emplace_back(name, tmp_alloca);
+        }
+    }
     int capture_count = (int)captures.size();
 
     // At the call site: malloc a per-instance array and store captured values into it
