@@ -230,7 +230,12 @@ namespace angara {
                             std::to_string(val) + " is out of range (0-255).", "E004"
                         );
                     } else {
-                        octal_char = static_cast<char>(val);
+                        // M10: val is checked to be in [0,255], but a direct
+                        // static_cast<char> is implementation-defined for values
+                        // with the high bit set on platforms where char is signed.
+                        // Cast through unsigned char to make the conversion
+                        // well-defined (modulo-256 bit pattern).
+                        octal_char = static_cast<char>(static_cast<unsigned char>(val));
                     }
                 }
                 out << octal_char;
@@ -269,7 +274,8 @@ namespace angara {
                                 std::to_string(val) + " is out of range (0-255).", "E004"
                             );
                         } else {
-                            hex_char = static_cast<char>(val);
+                            // M10: see octal case — cast through unsigned char.
+                            hex_char = static_cast<char>(static_cast<unsigned char>(val));
                         }
                     }
                     out << hex_char;
