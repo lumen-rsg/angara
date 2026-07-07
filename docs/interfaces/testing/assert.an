@@ -1,0 +1,23 @@
+// Interface file for the 'assert' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach assert;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/testing/ alongside assert.c.
+
+// Assert that a condition is true. If false, throws an error with the message.
+export func that(condition as any, message as string) -> nil;
+
+// Assert that two values are equal. If not, throws an error with the message.
+export func eq(actual as any, expected as any, message as string) -> nil;
+
+// Assert that two values are not equal. If they are, throws an error.
+export func ne(actual as any, expected as any, message as string) -> nil;
+
+// Unconditionally fail with a message.
+export func fail(message as string) -> nil;
+
+// Create a new test runner. Returns a TestRunner class instance.
+export func runner() -> any;

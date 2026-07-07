@@ -1,0 +1,26 @@
+// Interface file for the 'sort' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach sort;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/data/ alongside sort.c.
+
+// Return a sorted copy of the list (ascending, in-place copy).
+export func sorted(items as list<any>) -> list<any>;
+
+// Return a reversed copy of the list.
+export func reverse(items as list<any>) -> list<any>;
+
+// Check if the list contains a value.
+export func contains(items as list<any>, value as any) -> bool;
+
+// Binary search for a value in a sorted list. Returns index or -1.
+export func binary_search(items as list<any>, value as any) -> i64;
+
+// Remove duplicate elements from a list. Preserves order.
+export func dedup(items as list<any>) -> list<any>;
+
+// Merge two sorted lists into a single sorted list.
+export func merge(a as list<any>, b as list<any>) -> list<any>;

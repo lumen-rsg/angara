@@ -1,0 +1,27 @@
+// Interface file for the 'process' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach process;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/system/ alongside process.c.
+
+// Execute a command and capture its stdout as a string.
+export func exec(command as string) -> string;
+
+// Run a command with arguments and options. Returns a record with
+// exit_code, stdout, and stderr.
+export func run(command as string, argv as list<string>, options as record) -> record;
+
+// Spawn a child process. Returns a Process class instance.
+export func spawn(command as string, argv as list<string>, options as record) -> any;
+
+// Get the current process ID.
+export func getpid() -> i64;
+
+// Get the parent process ID.
+export func getppid() -> i64;
+
+// Send a signal to a process. Optional signal number (default SIGTERM=15).
+export func kill(pid as i64, signal as i64) -> nil;

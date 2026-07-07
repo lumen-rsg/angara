@@ -1,0 +1,17 @@
+// Interface file for the 'rpc' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach rpc;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/net/ alongside rpc.c.
+
+// Create an RPC server on the given port. Returns an RpcServer class instance.
+export func create_server(port as i64) -> any;
+
+// Call a remote RPC method. Returns the result.
+export func call(address as string, port as i64, method as string, args as list<any>) -> any;
+
+// Send a notification (fire-and-forget) to a remote RPC method.
+export func notify(address as string, port as i64, method as string, args as list<any>) -> nil;

@@ -1,0 +1,12 @@
+// Interface file for the 'redis' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach redis;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/data/ alongside redis.c.
+
+// Connect to a Redis server.
+// Returns a connection handle (RedisConn class instance).
+export func connect(host as string, port as i64) -> any;

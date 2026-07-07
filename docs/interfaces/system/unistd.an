@@ -1,0 +1,65 @@
+// Interface file for the 'unistd' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach unistd;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/system/ alongside unistd.c.
+
+// --- Process control ---
+export func fork() -> i64;
+export func exec(path as string, argv as string) -> nil;  // variadic
+export func waitpid(pid as i64) -> record;
+export func getpid() -> i64;
+export func getppid() -> i64;
+export func getuid() -> i64;
+export func geteuid() -> i64;
+export func getgid() -> i64;
+export func getegid() -> i64;
+export func kill(pid as i64, sig as i64) -> nil;
+
+// --- Pipe I/O ---
+export func pipe() -> record;
+export func dup(fd as i64) -> i64;
+export func dup2(oldfd as i64, newfd as i64) -> i64;
+export func close(fd as i64) -> nil;
+export func read(fd as i64, count as i64) -> string;
+export func write(fd as i64, data as string) -> i64;
+export func lseek(fd as i64, offset as i64, whence as i64) -> i64;
+export func isatty(fd as i64) -> bool;
+export func ttyname(fd as i64) -> string;
+
+// --- File system ---
+export func unlink(path as string) -> nil;
+export func symlink(target as string, linkpath as string) -> nil;
+export func readlink(path as string) -> string;
+export func access(path as string, mode as i64) -> bool;
+export func chmod(path as string, mode as i64) -> nil;
+export func chown(path as string, uid as i64, gid as i64) -> nil;
+
+// --- Directory ---
+export func getcwd() -> string;
+export func chdir(path as string) -> nil;
+export func hostname() -> string;
+
+// --- Standard file descriptor constants ---
+export func STDIN() -> i64;
+export func STDOUT() -> i64;
+export func STDERR() -> i64;
+
+// --- access(2) mode constants ---
+export func F_OK() -> i64;
+export func R_OK() -> i64;
+export func W_OK() -> i64;
+export func X_OK() -> i64;
+
+// --- lseek(2) whence constants ---
+export func SEEK_SET() -> i64;
+export func SEEK_CUR() -> i64;
+export func SEEK_END() -> i64;
+
+// --- Miscellaneous ---
+export func usleep(usec as i64) -> nil;
+export func alarm(seconds as i64) -> i64;
+export func sysconf(name as i64) -> i64;

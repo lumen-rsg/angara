@@ -1,0 +1,14 @@
+// Interface file for the 'websocket' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach websocket;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/net/ alongside websocket.c.
+
+// Connect to a WebSocket server. Returns a connection handle record.
+export func connect(url as string, options as record) -> record;
+
+// Create a WebSocket server on the given port. Returns a server handle record.
+export func createServer(port as i64, options as record) -> record;

@@ -1,0 +1,62 @@
+// Interface file for the 'color' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach color;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/io/ alongside color.c.
+
+// --- Foreground color escape codes ---
+export func black() -> string;
+export func red() -> string;
+export func green() -> string;
+export func yellow() -> string;
+export func blue() -> string;
+export func magenta() -> string;
+export func cyan() -> string;
+export func white() -> string;
+export func bright_black() -> string;
+export func bright_red() -> string;
+export func bright_green() -> string;
+export func bright_yellow() -> string;
+export func bright_blue() -> string;
+export func bright_magenta() -> string;
+export func bright_cyan() -> string;
+export func bright_white() -> string;
+
+// --- Background color escape codes ---
+export func bg_black() -> string;
+export func bg_red() -> string;
+export func bg_green() -> string;
+export func bg_yellow() -> string;
+export func bg_blue() -> string;
+export func bg_magenta() -> string;
+export func bg_cyan() -> string;
+export func bg_white() -> string;
+
+// --- Text style escape codes ---
+export func bold() -> string;
+export func dim() -> string;
+export func italic() -> string;
+export func underline() -> string;
+export func blink() -> string;
+export func reverse() -> string;
+export func hidden() -> string;
+export func reset() -> string;
+
+// --- Dynamic color ---
+// Returns escape code for 256-color foreground.
+export func fg(code as i64) -> string;
+
+// Returns escape code for 256-color background.
+export func bg(code as i64) -> string;
+
+// Returns escape code for true-color (RGB) foreground.
+export func rgb_fg(r as i64, g as i64, b as i64) -> string;
+
+// Returns escape code for true-color (RGB) background.
+export func rgb_bg(r as i64, g as i64, b as i64) -> string;
+
+// Apply multiple style tokens to text. Returns the styled string.
+export func style(text as string, tokens as string) -> string;

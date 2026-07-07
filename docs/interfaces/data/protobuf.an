@@ -1,0 +1,14 @@
+// Interface file for the 'protobuf' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach protobuf;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/data/ alongside protobuf.c.
+
+// Encode a record to a protobuf binary string using a schema definition.
+export func encode(schema as record, data as record) -> string;
+
+// Decode a protobuf binary string to a record using a schema definition.
+export func decode(schema as record, data as string) -> record;

@@ -1,0 +1,12 @@
+// Interface file for the 'matter' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach matter;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/embedded/ alongside matter.c.
+
+// Connect to a Matter (IoT) fabric/network with configuration options.
+// Returns a connection handle record.
+export func connect(config as record) -> record;

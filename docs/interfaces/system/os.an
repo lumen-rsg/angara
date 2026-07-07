@@ -1,0 +1,15 @@
+// Interface file for the 'os' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach os;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/system/ alongside os.c.
+
+// Get an environment variable.
+export func getenv(name as string) -> string;
+
+// Run a shell command and capture its output. Returns a record with fields:
+// exit_code (i64), stdout (string), stderr (string).
+export func run(command as string) -> record;

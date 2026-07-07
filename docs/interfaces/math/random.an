@@ -1,0 +1,35 @@
+// Interface file for the 'random' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach random;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/math/ alongside random.c.
+
+// Return a random i64 in [0, 2^63-1).
+export func int() -> i64;
+
+// Return a random i64 in [min, max) (half-open range).
+export func int_range(min as i64, max as i64) -> i64;
+
+// Return a random f64 in [0.0, 1.0).
+export func float() -> f64;
+
+// Return a random boolean.
+export func bool() -> bool;
+
+// Seed the random number generator.
+export func seed(s as i64) -> nil;
+
+// Return a string of n random bytes.
+export func bytes(n as i64) -> string;
+
+// Pick a random element from a list.
+export func pick(items as list<any>) -> any;
+
+// Shuffle a list in place.
+export func shuffle(items as list<any>) -> nil;
+
+// Generate a random UUID v4 string.
+export func uuid_v4() -> string;

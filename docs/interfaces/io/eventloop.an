@@ -1,0 +1,23 @@
+// Interface file for the 'eventloop' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach eventloop;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/io/ alongside eventloop.c.
+
+// Create a new event loop. Returns a Loop class instance.
+export func Loop() -> any;
+
+// Create a channel for inter-fiber communication. Optional buffer capacity.
+export func channel(capacity as i64) -> record;
+
+// --- Event type constants ---
+export func READ() -> i64;
+export func WRITE() -> i64;
+export func RDWR() -> i64;
+export func READABLE() -> i64;
+export func WRITABLE() -> i64;
+export func TIMER() -> i64;
+export func CHANNEL() -> i64;

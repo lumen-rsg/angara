@@ -1,0 +1,38 @@
+// Interface file for the 'path' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach path;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/fs/ alongside path.c.
+
+// Join path segments together. Accepts variadic string arguments.
+export func join(segments as string) -> string;
+
+// Return the last component of a path (the filename).
+export func basename(p as string) -> string;
+
+// Return the directory portion of a path.
+export func dirname(p as string) -> string;
+
+// Return the file extension (including the dot), or empty string.
+export func extension(p as string) -> string;
+
+// Return the filename without its extension.
+export func stem(p as string) -> string;
+
+// Check if a path is absolute.
+export func is_absolute(p as string) -> bool;
+
+// Normalize a path (resolve . and .., collapse slashes).
+export func normalize(p as string) -> string;
+
+// Return the platform path separator ("/" on Unix, "\\" on Windows).
+export func separator() -> string;
+
+// Return the parent directory of a path (same as dirname).
+export func parent(p as string) -> string;
+
+// Replace or append the file extension. Returns the modified path.
+export func with_extension(p as string, ext as string) -> string;

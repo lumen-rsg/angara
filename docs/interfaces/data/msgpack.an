@@ -1,0 +1,14 @@
+// Interface file for the 'msgpack' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach msgpack;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/data/ alongside msgpack.c.
+
+// Encode an Angara value to a MessagePack binary string.
+export func encode(value as any) -> string;
+
+// Decode a MessagePack binary string to an Angara value.
+export func decode(data as string) -> any;

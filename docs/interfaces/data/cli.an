@@ -1,0 +1,30 @@
+// Interface file for the 'cli' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach cli;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/data/ alongside cli.c.
+
+// Parse CLI arguments with a command schema definition.
+// Returns a record with parsed command, options, and flags.
+export func parse(schema as record, argv as list<string>) -> record;
+
+// Generate a help string from the schema definition.
+export func help(schema as record) -> string;
+
+// Define a subcommand.
+export func command(name as string, help as string, schema as record) -> record;
+
+// Define a value option for a command.
+export func option(name as string, help as string, default as any) -> record;
+
+// Define a boolean flag for a command.
+export func flag(name as string, help as string) -> record;
+
+// Define positional arguments for a command.
+export func args(schema as record) -> record;
+
+// Check if the parse result indicates help was requested.
+export func is_help(result as record) -> bool;

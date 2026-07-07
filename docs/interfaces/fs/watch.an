@@ -1,0 +1,30 @@
+// Interface file for the 'watch' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach watch;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/fs/ alongside watch.c.
+
+// Create a new file system watcher. Returns a Watcher class instance.
+export func new() -> any;
+
+// --- Event type constants (flags for filtering) ---
+export func ACCESS() -> i64;
+export func MODIFY() -> i64;
+export func ATTRIB() -> i64;
+export func CLOSE_WRITE() -> i64;
+export func CLOSE_NOWRITE() -> i64;
+export func OPEN() -> i64;
+export func MOVED_FROM() -> i64;
+export func MOVED_TO() -> i64;
+export func CREATE() -> i64;
+export func DELETE() -> i64;
+export func DELETE_SELF() -> i64;
+export func MOVE_SELF() -> i64;
+export func ONLYDIR() -> i64;
+export func DONT_FOLLOW() -> i64;
+export func EXCL_UNLINK() -> i64;
+export func MASK_CREATE() -> i64;
+export func ALL_EVENTS() -> i64;

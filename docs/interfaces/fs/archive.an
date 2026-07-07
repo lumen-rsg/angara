@@ -1,0 +1,38 @@
+// Interface file for the 'archive' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach archive;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/fs/ alongside archive.c.
+
+// Gzip-compress a string. Returns the compressed binary data as a string.
+export func gzip_compress(data as string) -> string;
+
+// Gzip-decompress a binary string. Optional max output size.
+export func gzip_decompress(data as string, max_size as i64) -> string;
+
+// Zlib-compress a string. Returns the compressed binary data as a string.
+export func zlib_compress(data as string) -> string;
+
+// Zlib-decompress a binary string. Optional max output size.
+export func zlib_decompress(data as string, max_size as i64) -> string;
+
+// Compute CRC32 checksum of a string. Returns a 32-bit integer.
+export func crc32(data as string) -> i64;
+
+// Compute Adler32 checksum of a string. Returns a 32-bit integer.
+export func adler32(data as string) -> i64;
+
+// Extract a zip archive to a directory.
+export func zip_extract(zip_path as string, dest_dir as string) -> nil;
+
+// Create a zip archive from a list of file paths.
+export func zip_create(zip_path as string, files as list<string>) -> nil;
+
+// Extract a tar archive to a directory.
+export func tar_extract(tar_path as string, dest_dir as string) -> nil;
+
+// Create a tar archive from a list of file paths.
+export func tar_create(tar_path as string, files as list<string>) -> nil;

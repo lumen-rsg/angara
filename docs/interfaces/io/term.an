@@ -1,0 +1,62 @@
+// Interface file for the 'term' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach term;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/io/ alongside term.c.
+
+// Clear the terminal screen.
+export func clear() -> nil;
+
+// Clear the current line.
+export func clear_line() -> nil;
+
+// Set terminal text color. Optional background color.
+export func set_color(fg as string, bg as string) -> nil;
+
+// Reset terminal colors to defaults.
+export func reset_color() -> nil;
+
+// Apply bold style to text. If no text, returns the escape code.
+export func bold(text as string) -> string;
+
+// Apply dim style to text. If no text, returns the escape code.
+export func dim(text as string) -> string;
+
+// Apply underline style to text. If no text, returns the escape code.
+export func underline(text as string) -> string;
+
+// Colorize text with foreground, background, and optional style.
+export func colorize(text as string, fg as string, bg as string) -> string;
+
+// Move cursor to a position (row, col).
+export func cursor_move(row as i64, col as i64) -> nil;
+
+// Move cursor up by n lines (default 1).
+export func cursor_up(n as i64) -> nil;
+
+// Move cursor down by n lines (default 1).
+export func cursor_down(n as i64) -> nil;
+
+// Hide the cursor.
+export func hide_cursor() -> nil;
+
+// Show the cursor.
+export func show_cursor() -> nil;
+
+// Get terminal size as a record {rows, cols}.
+export func terminal_size() -> record;
+
+// Check if a file descriptor is a TTY. Defaults to stdout (fd 1).
+export func is_tty(fd as i64) -> bool;
+
+// Read a single keypress from the terminal. Returns the key as a string.
+export func read_key() -> string;
+
+// Render a progress bar string. Takes current, total, and optional width.
+export func progress_bar(current as f64, total as f64, width as i64) -> string;
+
+// Render a table as a string. Takes headers and rows.
+export func table(headers as list<string>, rows as list<list<string>>) -> string;

@@ -1,0 +1,16 @@
+// Interface file for the 'amqp' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach amqp;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/net/ alongside amqp.c.
+
+// Connect to an AMQP 0-9-1 broker (e.g., RabbitMQ).
+// Returns a connection handle with channel management.
+export func connect(url as string, options as record) -> record;
+
+// Internal: create a channel on the connection. Returns a Channel class instance.
+// Typically accessed through the connection handle.
+export func _channel() -> any;

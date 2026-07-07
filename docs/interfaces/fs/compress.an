@@ -1,0 +1,29 @@
+// Interface file for the 'compress' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach compress;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/fs/ alongside compress.c.
+
+// Zstandard-compress a string. Optional compression level.
+export func zstd_compress(data as string, level as i64) -> string;
+
+// Zstandard-decompress a binary string.
+export func zstd_decompress(data as string) -> string;
+
+// Return the maximum Zstandard compression level.
+export func zstd_max_level() -> i64;
+
+// Bzip2-compress a string. Optional compression level.
+export func bzip2_compress(data as string, level as i64) -> string;
+
+// Bzip2-decompress a binary string.
+export func bzip2_decompress(data as string) -> string;
+
+// XZ/LZMA-compress a string. Optional compression level.
+export func xz_compress(data as string, level as i64) -> string;
+
+// XZ/LZMA-decompress a binary string.
+export func xz_decompress(data as string) -> string;

@@ -1,0 +1,23 @@
+// Interface file for the 'csv' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach csv;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/data/ alongside csv.c.
+
+// Parse a CSV string into a list of rows (each row is a list of strings).
+export func parse(content as string, delimiter as string) -> list<list<string>>;
+
+// Parse a CSV string with header into a list of records.
+export func parse_record(content as string, delimiter as string) -> list<record>;
+
+// Serialize a list of rows to a CSV string.
+export func stringify(rows as list<list<string>>, delimiter as string) -> string;
+
+// Read and parse a CSV file. Returns a list of rows.
+export func read_file(path as string, delimiter as string) -> list<list<string>>;
+
+// Write rows to a CSV file.
+export func write_file(path as string, rows as list<list<string>>, delimiter as string) -> nil;

@@ -1,0 +1,44 @@
+// Interface file for the 'sys' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach sys;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/system/ alongside sys.c.
+
+// --- System identity ---
+export func hostname() -> string;
+export func os_name() -> string;
+export func os_version() -> string;
+export func arch() -> string;
+
+// --- Process identity ---
+export func pid() -> i64;
+export func ppid() -> i64;
+export func uid() -> i64;
+export func gid() -> i64;
+export func user() -> string;
+export func shell() -> string;
+export func home() -> string;
+
+// --- Working directory ---
+export func cwd() -> string;
+export func chdir(path as string) -> nil;
+
+// --- Environment ---
+export func setenv(name as string, value as string) -> nil;
+export func unsetenv(name as string) -> nil;
+export func getenv(name as string) -> string;
+export func getenv_all() -> record;
+
+// --- System resources ---
+export func cpu_count() -> i64;
+export func mem_info() -> record;
+export func uptime() -> f64;
+export func page_size() -> i64;
+export func clock_ticks() -> i64;
+
+// --- Paths ---
+export func executable_path() -> string;
+export func tmp() -> string;

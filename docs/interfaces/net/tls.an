@@ -1,0 +1,16 @@
+// Interface file for the 'tls' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach tls;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/net/ alongside tls.c.
+
+// Connect to a TLS server. Returns a TLS connection record.
+// cert_path and key_path are required for client certificate authentication.
+export func connect(host as string, port as i64, options as record) -> record;
+
+// Start a TLS listener. Returns a TlsListener class instance.
+// cert_path and key_path are required (PEM format).
+export func listen(port as i64, cert_path as string, key_path as string) -> any;

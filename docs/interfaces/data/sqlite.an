@@ -1,0 +1,15 @@
+// Interface file for the 'sqlite' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach sqlite;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/data/ alongside sqlite.c.
+
+// Open a SQLite database file. Returns a database handle (SqliteDb class instance).
+export func open(path as string) -> any;
+
+// Create a connection pool for a SQLite database.
+// Returns a pool handle (SqlitePool class instance).
+export func pool(path as string, size as i64) -> any;

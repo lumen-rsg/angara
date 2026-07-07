@@ -1,0 +1,35 @@
+// Interface file for the 'hash' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach hash;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/crypto/ alongside hash.c.
+
+// FNV-1a hash (64-bit). Returns a 64-bit integer hash.
+export func fnv1a(data as string) -> i64;
+
+// DJB2 hash. Returns a 64-bit integer hash.
+export func djb2(data as string) -> i64;
+
+// CRC-16/CCITT checksum. Returns a 16-bit checksum as i64.
+export func crc16(data as string) -> i64;
+
+// CRC-32/ISO checksum. Returns a 32-bit checksum as i64.
+export func crc32(data as string) -> i64;
+
+// MD5 hash. Returns a 32-character lowercase hex string.
+export func md5(data as string) -> string;
+
+// SHA-1 hash. Returns a 40-character lowercase hex string.
+export func sha1(data as string) -> string;
+
+// SHA-256 hash. Returns a 64-character lowercase hex string.
+export func sha256(data as string) -> string;
+
+// HMAC-SHA256. Returns a 64-character lowercase hex string.
+export func hmac_sha256(data as string, key as string) -> string;
+
+// Hash a file using the given algorithm ("md5", "sha1", or "sha256").
+export func hash_file(algo as string, path as string) -> string;

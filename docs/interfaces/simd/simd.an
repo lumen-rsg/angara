@@ -1,0 +1,24 @@
+// Interface file for the 'simd' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach simd;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/simd/ alongside simd.c.
+//
+// These are SIMD-accelerated math operations using NEON (ARM64) or SSE/AVX (x86_64).
+// Functions operate on raw f64[] arrays via the FFI.
+
+// NEON/SSE-accelerated dot product: Σ(a[i] * b[i]) for i in [0, n).
+// Processes 4 doubles per iteration.
+export foreign func simd_f64x4_dot(n as i64, a as f64[], b as f64[]) -> f64;
+
+// NEON/SSE-accelerated element-wise addition: out[i] = a[i] + b[i].
+export foreign func simd_f64x4_add(n as i64, a as f64[], b as f64[], out as f64[]) -> nil;
+
+// NEON/SSE-accelerated element-wise multiplication: out[i] = a[i] * b[i].
+export foreign func simd_f64x4_mul(n as i64, a as f64[], b as f64[], out as f64[]) -> nil;
+
+// NEON/SSE-accelerated fused multiply-add: y[i] = a * x[i] + y[i].
+export foreign func simd_f64x4_fma(n as i64, a as f64, x as f64[], y as f64[]) -> nil;

@@ -1,0 +1,90 @@
+// Interface file for the 'adv_string' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach adv_string;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/text/ alongside adv_string.c.
+
+// Get the character at index i.
+export func get(s as string, i as i64) -> string;
+
+// Extract a substring from start (inclusive) to end (exclusive).
+export func substring(s as string, start as i64, end as i64) -> string;
+
+// Check if the string contains only digit characters.
+export func is_digit(s as string) -> bool;
+
+// Check if the string contains only whitespace characters.
+export func is_whitespace(s as string) -> bool;
+
+// Check if the string contains only alphabetic characters.
+export func is_alpha(s as string) -> bool;
+
+// Check if the string contains only alphanumeric characters.
+export func is_alnum(s as string) -> bool;
+
+// Pad the end of a string to the given length with the pad character.
+export func pad_end(s as string, length as i64, pad as string) -> string;
+
+// Pad the start of a string to the given length with the pad character.
+export func pad_start(s as string, length as i64, pad as string) -> string;
+
+// Convert string to uppercase.
+export func to_uppercase(s as string) -> string;
+
+// Convert string to lowercase.
+export func to_lowercase(s as string) -> string;
+
+// Trim whitespace from both ends of the string.
+export func trim(s as string) -> string;
+
+// Check if the string contains a substring.
+export func contains(s as string, substr as string) -> bool;
+
+// Join a list of strings with a separator.
+export func join(items as list<string>, sep as string) -> string;
+
+// Split a string by a delimiter. Returns a list of strings.
+export func split(s as string, delim as string) -> list<string>;
+
+// Find the first index of a substring, or -1 if not found.
+export func index_of(s as string, substr as string) -> i64;
+
+// Find the last index of a substring, or -1 if not found.
+export func last_index_of(s as string, substr as string) -> i64;
+
+// Replace all occurrences of old with new in the string.
+export func replace(s as string, old as string, new as string) -> string;
+
+// Check if the string starts with a given prefix.
+export func starts_with(s as string, prefix as string) -> bool;
+
+// Check if the string ends with a given suffix.
+export func ends_with(s as string, suffix as string) -> bool;
+
+// Repeat the string n times.
+export func repeat(s as string, n as i64) -> string;
+
+// Reverse the string.
+export func reverse(s as string) -> string;
+
+// Count non-overlapping occurrences of a substring.
+export func count(s as string, substr as string) -> i64;
+
+// Parse string to i64.
+export func to_i64(s as string) -> i64;
+
+// Parse string to f64.
+export func to_f64(s as string) -> f64;
+
+// Split string into a list of single-character strings.
+export func chars(s as string) -> list<string>;
+
+// Compute the Levenshtein edit distance between two strings.
+export func levenshtein(a as string, b as string) -> i64;
+
+// Format a string with positional arguments (like sprintf).
+// The format string uses {} placeholders.
+export func format(fmt as string, args as any) -> string;

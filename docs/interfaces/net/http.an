@@ -1,0 +1,30 @@
+// Interface file for the 'http' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach http;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/net/ alongside http.c.
+
+// Make an HTTP request with full configuration. Returns a response record
+// with fields: status (i64), headers (record), body (string).
+export func request(config as record) -> record;
+
+// HTTP GET request. Returns a response record.
+export func get(url as string, options as record) -> record;
+
+// HTTP POST request. Returns a response record.
+export func post(url as string, body as string, options as record) -> record;
+
+// HTTP PUT request. Returns a response record.
+export func put(url as string, body as string, options as record) -> record;
+
+// HTTP DELETE request. Returns a response record.
+export func delete(url as string, options as record) -> record;
+
+// HTTP PATCH request. Returns a response record.
+export func patch(url as string, body as string, options as record) -> record;
+
+// HTTP HEAD request. Returns a response record (no body).
+export func head(url as string, options as record) -> record;

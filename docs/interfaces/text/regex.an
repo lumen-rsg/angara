@@ -1,0 +1,24 @@
+// Interface file for the 'regex' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach regex;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/text/ alongside regex.c.
+
+// Check if the pattern matches anywhere in the text (partial match).
+export func match(pattern as string, text as string) -> bool;
+
+// Check if the pattern matches the entire text (full match).
+export func test(pattern as string, text as string) -> bool;
+
+// Find all matches. Returns a list of records with match details.
+export func find(pattern as string, text as string) -> list<record>;
+
+// Replace all occurrences of the pattern with the replacement string.
+export func replace(pattern as string, replacement as string, text as string) -> string;
+
+// Split text by the regex pattern. Optional max split count.
+// Returns a list of strings.
+export func split(pattern as string, text as string, limit as i64) -> list<string>;

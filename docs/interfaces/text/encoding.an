@@ -1,0 +1,38 @@
+// Interface file for the 'encoding' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach encoding;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/text/ alongside encoding.c.
+
+// Encode a string to standard Base64.
+export func base64_encode(data as string) -> string;
+
+// Decode a standard Base64 string.
+export func base64_decode(data as string) -> string;
+
+// Encode a string to Base32 (RFC 4648).
+export func base32_encode(data as string) -> string;
+
+// Decode a Base32 string.
+export func base32_decode(data as string) -> string;
+
+// Encode a string to URL-safe Base64 (no padding).
+export func base64url_encode(data as string) -> string;
+
+// Decode a URL-safe Base64 string.
+export func base64url_decode(data as string) -> string;
+
+// Encode a string to lowercase hexadecimal.
+export func hex_encode(data as string) -> string;
+
+// Decode a hexadecimal string.
+export func hex_decode(data as string) -> string;
+
+// URL-encode (percent-encode) a string.
+export func url_encode(data as string) -> string;
+
+// URL-decode (percent-decode) a string.
+export func url_decode(data as string) -> string;

@@ -1,0 +1,21 @@
+// Interface file for the 'args' native module.
+// Documents the type signatures of all exported functions.
+//
+// Usage: attach args;
+//
+// Note: This is a documentation interface file. When compiler support
+// for interface-based type-checking is added (L30), this file will be
+// moved to modules/data/ alongside args.c.
+
+// Parse command-line arguments using a schema definition.
+// Returns a record of parsed values.
+export func parse(schema as record, argv as list<string>) -> record;
+
+// Define a boolean flag argument.
+export func flag(name as string, help as string) -> record;
+
+// Define a value option argument.
+export func option(name as string, help as string, default as any) -> record;
+
+// Define a positional argument.
+export func positional(name as string, help as string) -> record;
