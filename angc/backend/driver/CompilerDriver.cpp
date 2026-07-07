@@ -998,7 +998,7 @@ namespace angara {
     std::shared_ptr<ModuleType> CompilerDriver::loadNativeModule(const std::string& path, const Token& import_token) {
         print_progress("Loading native module: " + path);
 
-        void* handle = dlopen(path.c_str(), RTLD_LAZY);
+        void* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
         if (!handle) {
             std::cerr << "\n" << CLR_RED << "[ERROR] Could not load native module '" << path << "'.\n"
                       << "         " << dlerror() << "\n"
