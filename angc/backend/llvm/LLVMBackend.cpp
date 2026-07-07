@@ -72,7 +72,7 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
         mod->addModuleFlag(llvm::Module::Warning, "Dwarf Version", dwarf_ver);
         auto diBuilder = std::make_unique<llvm::DIBuilder>(*mod);
         auto diFile = diBuilder->createFile("angara", ".");
-        auto diCU = diBuilder->createCompileUnit(llvm::dwarf::DW_LANG_C_plus_plus, diFile, "angc", false, "", 0);
+        auto diCU = diBuilder->createCompileUnit(llvm::dwarf::DW_LANG_C, diFile, "angc", false, "", 0);
         m_di_builder = std::move(diBuilder);
         m_di_file = diFile;
         m_di_cu = diCU;
