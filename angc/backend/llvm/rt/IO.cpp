@@ -360,8 +360,15 @@ void RuntimeBuilder::generateIOOps() {
 
         auto* is_done = bl.CreateICmpEQ(bytes_read, ConstantInt::get(i64_ty, 0));
         auto* is_full = bl.CreateICmpEQ(new_total, cap);
-        auto* need_action = bl.CreateOr(is_done, bl.CreateNot(is_full));
-        bl.CreateCondBr(is_done, done_bb, is_full ? grow_bb : loop_bb);
+        // H11: Split the ternary on llvm::Value* into two sequential branches.
+        // is_full is a Value*, not a bool — in C++ any non-null pointer is
+        // truthy, so the ternary always selected grow_bb, causing exponential
+        // buffer growth on every partial fread.
+        auto* check_full_bb = llvm::BasicBlock::Create(m_ctx, "check_full", fn);
+        bl.CreateCondBr(is_done, done_bb, check_full_bb);
+
+        IRBuilder<> bcf(check_full_bb);
+        bcf.CreateCondBr(is_full, grow_bb, loop_bb);
 
         IRBuilder<> bg(grow_bb);
         auto* cur_cap = bg.CreateLoad(i64_ty, cap_alloca);
