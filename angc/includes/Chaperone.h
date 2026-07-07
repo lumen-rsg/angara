@@ -76,6 +76,11 @@ private:
         // borrowed (the caller owns it); flagging it as a leak is a false
         // positive. Reset per function in analyzeFunction.
         std::set<std::string> current_params;
+        // L23: whether the current function's return type is ref<T>.
+        // When true, returning a tracked variable is a borrow (not an ownership
+        // escape) — the value stays Live and the caller receives a non-owning
+        // reference. Reset per function in analyzeFunction.
+        bool current_function_returns_ref = false;
         std::map<std::string, FunctionSummary> summaries;
         // H2: closure call summaries. Keyed by FunctionType pointer — each LambdaExpr
         // creates a unique FunctionType that flows through variable assignments,

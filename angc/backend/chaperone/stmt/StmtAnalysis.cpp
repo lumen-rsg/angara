@@ -140,6 +140,24 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
         }
     }
 
+    // L23: determine if this function's return type is ref<T>.
+    // When a function returns ref<T>, returning a tracked variable is a borrow
+    // (not an ownership escape) — the value stays Live and the caller receives
+    // a non-owning reference. Check the resolved FunctionType first, then fall
+    // back to the AST return-type annotation.
+    ctx.current_function_returns_ref = false;
+    if (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION) {
+        auto fn_type = std::dynamic_pointer_cast<FunctionType>(sem_sym->type);
+        if (fn_type && fn_type->return_type && fn_type->return_type->kind == TypeKind::REF) {
+            ctx.current_function_returns_ref = true;
+        }
+    }
+    if (!ctx.current_function_returns_ref && func.returnType) {
+        if (auto* generic = dynamic_cast<const GenericType*>(func.returnType.get())) {
+            ctx.current_function_returns_ref = (generic->name.lexeme == "ref");
+        }
+    }
+
     // H8: cross-function field tracking. For non-constructor methods,
     // seed all tracked fields of `this` as Live. This causes the first
     // field overwrite in a regular method to trigger E501 (leak) unless
@@ -809,7 +827,11 @@ void Chaperone::analyzeStmt(Context& ctx,
                     // L21: before escaping the return value, check if any pending
                     // closure still captures it. Emit E505 if so.
                     checkPendingCaptures(ctx, ve->name.lexeme, state, ve->name);
-                    it->second = State::Escaped;
+                    // L23: returning a tracked value as ref<T> is a borrow, not
+                    // an ownership escape — the caller receives a non-owning
+                    // reference. Leave the value Live so the callee still owns it.
+                    if (!ctx.current_function_returns_ref)
+                        it->second = State::Escaped;
                 }
                 // L21: if a closure variable itself is being returned, its
                 // captured variables are now at risk of dangling. Emit E505 for
@@ -829,7 +851,10 @@ void Chaperone::analyzeStmt(Context& ctx,
                                     "the captured value. Drop the captured value via the "
                                     "closure or return it together.",
                                     "E505");
-                                cit->second = State::Escaped;
+                                // L23: if returning as ref<T>, the closure's captures
+                                // don't escape ownership (the closure is borrowed).
+                                if (!ctx.current_function_returns_ref)
+                                    cit->second = State::Escaped;
                             }
                         }
                     }

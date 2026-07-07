@@ -1,0 +1,22 @@
+// Chaperone negative test — L23: return of tracked value as ref<T>
+// A function that returns ref<T> to a locally-allocated tracked value
+// without dropping it must report E501. The returned value is a borrow,
+// not an ownership escape — the callee still owns the value and must
+// drop it before returning. Previously, the return incorrectly marked
+// the value as Escaped (ownership-transferred), hiding the leak.
+//
+// expect: E501
+
+class Buf {
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+func leakRef() -> ref<Buf> {
+    let b = Buf(42);
+    return b;   // L23: b is not dropped — must be E501 (leak, not escape)
+}
+
+export func main() -> i64 {
+    return 0;
+}
