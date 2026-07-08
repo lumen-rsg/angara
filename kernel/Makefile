@@ -30,6 +30,17 @@ KDIR ?= /lib/modules/$(shell uname -r)/build
 # link cleanly against either.
 CC   ?= gcc
 
+# Auto-resolve the Angara compiler if `angc` isn't on PATH (typical from a
+# fresh clone). This file is at <repo>/kernel/Makefile, so build/angc is two
+# levels up. Computed relative to this file; exported for kbuild recursion.
+KERNEL_MK_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+ifeq ($(wildcard $(KERNEL_MK_DIR)/../build/angc),)
+  $(info [kernel] angc not found at $(KERNEL_MK_DIR)/../build/angc — set ANGC=/path/to/angc)
+else
+  ANGC := $(KERNEL_MK_DIR)/../build/angc
+endif
+export ANGC
+
 # Resolve the real GNU make once (avoid an AppImage `make` shadow in PATH).
 REAL_MAKE := $(firstword $(wildcard /usr/bin/make /usr/bin/gmake $(shell command -v make 2>/dev/null)))
 
