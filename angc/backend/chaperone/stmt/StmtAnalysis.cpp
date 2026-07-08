@@ -1052,6 +1052,21 @@ void Chaperone::analyzeStmt(Context& ctx,
                 ctx.closure_holders.erase(ft);
                 ctx.var_to_closure.erase(vtc);
             }
+        } else {
+            // H2: the thrown value is not a bare VarExpr (e.g. throw obj.field
+            // or throw make()). Generalize escape like ReturnStmt (H1):
+            // collect every variable referenced in the throw expression and
+            // transition any tracked Live one to Escaped, so a thrown
+            // field/constructor doesn't silently stay Live. Throws always
+            // escape ownership (no ref-return analogue).
+            std::set<std::string> refs;
+            collectExprVarRefs(thr->expression, refs);
+            for (const auto& name : refs) {
+                auto rit = state.find(name);
+                if (rit != state.end() && rit->second == State::Live) {
+                    rit->second = State::Escaped;
+                }
+            }
         }
         // v5: report leaks on throw paths as errors. No auto-unwind —
         // the programmer must use `finally {}` for explicit cleanup.
