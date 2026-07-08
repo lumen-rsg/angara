@@ -61,4 +61,42 @@ namespace angara {
         return true;
     }
 
+    bool is_safe_path(const std::string& path, const char* context) {
+        if (path.empty()) return true;  // empty is fine (unset/optional)
+
+        // Null byte would truncate the path when handed to C APIs.
+        if (path.find('\0') != std::string::npos) {
+            std::cerr << "[SECURITY] Null byte in " << context
+                      << " path rejected: \"" << path << "\"." << std::endl;
+            return false;
+        }
+
+        // Absolute paths escape the workspace root (config paths are relative).
+        // Treat both POSIX '/' and Windows '\' drive roots as absolute.
+        if (path.front() == '/' || path.front() == '\\' ||
+            (path.size() >= 2 && path[1] == ':')) {
+            std::cerr << "[SECURITY] Absolute " << context
+                      << " path rejected (must be workspace-relative): \""
+                      << path << "\"." << std::endl;
+            return false;
+        }
+
+        // Reject any path *component* equal to ".." (parent traversal). Split
+        // on both separators so Windows-style '\' is covered too. A literal
+        // ".." as a component — not merely a substring — is the real escape;
+        // "foo..bar" / "..hidden" are benign file names.
+        size_t start = 0;
+        for (size_t i = 0; i <= path.size(); ++i) {
+            if (i == path.size() || path[i] == '/' || path[i] == '\\') {
+                if (i - start == 2 && path[start] == '.' && path[start + 1] == '.') {
+                    std::cerr << "[SECURITY] Path traversal (\"..\") in " << context
+                              << " path rejected: \"" << path << "\"." << std::endl;
+                    return false;
+                }
+                start = i + 1;
+            }
+        }
+        return true;
+    }
+
 } // namespace angara

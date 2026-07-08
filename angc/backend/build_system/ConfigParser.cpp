@@ -1,4 +1,5 @@
 #include "../../includes/ConfigParser.h"
+#include "../../includes/StringUtils.h"  // L8: is_safe_path
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -115,14 +116,22 @@ namespace angara {
 
             else if (currentSection == "project") {
                 if (key == "name") {
+                    // L8: name also seeds path, so validate it as a path.
+                    if (!is_safe_path(value, "project name")) return std::nullopt;
                     currentProject.name = value;
                     if (currentProject.path.empty()) currentProject.path = value;
                 }
-                else if (key == "path") currentProject.path = value;
+                else if (key == "path") {
+                    if (!is_safe_path(value, "project path")) return std::nullopt;  // L8
+                    currentProject.path = value;
+                }
                 else if (key == "author") currentProject.author = value;
                 else if (key == "version") currentProject.version = value;
                 else if (key == "description") currentProject.description = value;
-                else if (key == "entry") currentProject.entry_point = value;
+                else if (key == "entry") {
+                    if (!is_safe_path(value, "project entry")) return std::nullopt;  // L8
+                    currentProject.entry_point = value;
+                }
                 else if (key == "type") {
                     if (value == "library" || value == "lib") currentProject.type = ProjectType::LIBRARY;
                     else currentProject.type = ProjectType::APP;
@@ -152,8 +161,21 @@ namespace angara {
 
             else if (currentSection == "native-module") {
                 if (key == "name") currentNativeModule.name = value;
-                else if (key == "sources") currentNativeModule.sources = parse_list(value);
-                else if (key == "include_dirs" || key == "includes") currentNativeModule.include_dirs = parse_list(value);
+                else if (key == "sources") {
+                    // L8: each source is a workspace-relative path.
+                    auto srcs = parse_list(value);
+                    for (const auto& s : srcs) {
+                        if (!is_safe_path(s, "native module source")) return std::nullopt;
+                    }
+                    currentNativeModule.sources = std::move(srcs);
+                }
+                else if (key == "include_dirs" || key == "includes") {
+                    auto dirs = parse_list(value);
+                    for (const auto& d : dirs) {
+                        if (!is_safe_path(d, "native module include dir")) return std::nullopt;  // L8
+                    }
+                    currentNativeModule.include_dirs = std::move(dirs);
+                }
                 else if (key == "libs" || key == "link_libs") currentNativeModule.link_libs = parse_list(value);
                 else if (key == "frameworks") currentNativeModule.link_frameworks = parse_list(value);
                 else if (key == "cflags") currentNativeModule.cflags = value;

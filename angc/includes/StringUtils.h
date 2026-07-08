@@ -21,4 +21,11 @@ namespace angara {
     // Prints a warning to stderr and returns false if dangerous chars are found.
     bool is_safe_flags(const std::string& flags, const char* context);
 
+    // L8: Returns true if `path` is a safe workspace-relative path: no `..`
+    // components (path traversal), no null bytes, and not absolute. Config
+    // fields like `path`/`entry`/`sources`/`include_dirs` are joined onto the
+    // workspace root, so an absolute value or a `..`-component escapes it.
+    // Prints a [SECURITY] warning and returns false on a rejected path.
+    bool is_safe_path(const std::string& path, const char* context);
+
 } // namespace angara

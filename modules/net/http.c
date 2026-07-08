@@ -9,9 +9,18 @@
 typedef struct { char* buffer; size_t size; } MemoryStruct;
 typedef struct { const char* body; size_t size; size_t sent; } RequestBody;
 
+// M18: cap in-memory response bodies so a malicious server can't drive the
+// process out of memory. 100 MB covers any realistic API/HTML payload; a
+// tarball download path should stream to disk (RegistryClient::http_download)
+// rather than accumulate in memory. Returning 0 aborts the transfer with
+// CURLE_WRITE_ERROR.
+#define HTTP_MAX_RESPONSE_BYTES (100UL * 1024 * 1024)
+
 static size_t write_memory_callback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t realsize = size * nmemb;
     MemoryStruct* mem = (MemoryStruct*)userp;
+    // M18: reject a chunk that would push the buffer past the cap.
+    if (mem->size + realsize > HTTP_MAX_RESPONSE_BYTES) return 0;
     char* ptr = realloc(mem->buffer, mem->size + realsize + 1);
     if (!ptr) return 0;
     mem->buffer = ptr;
