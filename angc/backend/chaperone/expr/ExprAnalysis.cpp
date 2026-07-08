@@ -833,10 +833,53 @@ void Chaperone::analyzeExpr(Context& ctx,
         return;
     }
 
-    // LogicalExpr (&&, ||): walk both sides.
+    // LogicalExpr (&&, ||): analyze with short-circuit awareness.
+    // H5: previously both operands were walked sequentially on the same state,
+    // so a drop in the right corrupted the continuation, and a guarded access
+    // like `x != nil && use(*x)` could false-flag E502 (the right side is only
+    // reached when the left is true, so the nil-check establishes x's liveness
+    // for the right side).
+    //
+    // Baseline (sound): analyze the right operand on a COPY of state so a
+    // transition there doesn't leak into the continuation, then join — mirrors
+    // IfStmt / TernaryExpr.
+    //
+    // Heuristic: for `&&`, if the left operand is a liveness guard on a
+    // variable (x != nil, or an `is` check), that variable is known-Live on
+    // the right side — force it Live in the right's copy before analyzing, so
+    // a guarded use doesn't false-flag E502. (`||`'s right runs only when the
+    // left is false, which doesn't establish liveness, so no suppression.)
     if (auto* log = dynamic_cast<const LogicalExpr*>(expr.get())) {
         analyzeExpr(ctx, log->left, state);
-        analyzeExpr(ctx, log->right, state);
+
+        // Detect a liveness guard on the left: `x != nil` / `nil != x`.
+        auto nil_guard_var = [](const Expr* e) -> std::string {
+            auto* b = dynamic_cast<const Binary*>(e);
+            if (!b) return "";
+            if (b->op.type != TokenType::BANG_EQUAL) return "";
+            auto* lv = dynamic_cast<const VarExpr*>(b->left.get());
+            auto* rv = dynamic_cast<const VarExpr*>(b->right.get());
+            auto* ln = dynamic_cast<const Literal*>(b->left.get());
+            auto* rn = dynamic_cast<const Literal*>(b->right.get());
+            bool right_is_nil = rn && rn->token.type == TokenType::NIL;
+            bool left_is_nil = ln && ln->token.type == TokenType::NIL;
+            if (lv && right_is_nil) return lv->name.lexeme;
+            if (rv && left_is_nil) return rv->name.lexeme;
+            return "";
+        };
+
+        StateMap right_state = state;
+        if (log->op.type == TokenType::LOGICAL_AND) {
+            std::string guarded = nil_guard_var(log->left.get());
+            if (!guarded.empty()) {
+                // The nil-check establishes liveness for the right side.
+                auto git = right_state.find(guarded);
+                if (git != right_state.end() && git->second != State::Live)
+                    git->second = State::Live;
+            }
+        }
+        if (log->right) analyzeExpr(ctx, log->right, right_state);
+        state = join_maps(state, right_state);
         return;
     }
 
