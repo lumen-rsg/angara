@@ -3198,7 +3198,7 @@ llvm::Value* LLVMBackend::cgAwait(const AwaitExpr& e) {
     auto* cont_bb     = llvm::BasicBlock::Create(*ctx, "await_cont", fn);
 
     // ---- Check if child is resolved ----
-    auto* child_state_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+    auto* child_state_ptr = builder->CreateStructGEP(m_async_frame_header_ty,
         child_typed, 0, "child_state_p");
     auto* child_state = builder->CreateLoad(m_async_state_ty, child_state_ptr, "child_state");
     auto* is_resolved = builder->CreateICmpEQ(child_state,
@@ -3207,7 +3207,7 @@ llvm::Value* LLVMBackend::cgAwait(const AwaitExpr& e) {
 
     // ---- Resolved path (initial run, child already done) ----
     builder->SetInsertPoint(resolved_bb);
-    auto* child_result_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+    auto* child_result_ptr = builder->CreateStructGEP(m_async_frame_header_ty,
         child_typed, 1, "child_result_p");
     auto* result = builder->CreateLoad(objType, child_result_ptr, "await_result");
     builder->CreateBr(cont_bb);
@@ -3220,7 +3220,7 @@ llvm::Value* LLVMBackend::cgAwait(const AwaitExpr& e) {
     auto* retry_frame_ptr = callRtByName("__ang_api_native_instance_data", {retry_future_val});
     auto* retry_typed = builder->CreateBitCast(retry_frame_ptr,
         llvm::PointerType::get(*ctx, 0));
-    auto* retry_result_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+    auto* retry_result_ptr = builder->CreateStructGEP(m_async_frame_header_ty,
         retry_typed, 1, "retry_result_p");
     auto* retry_result = builder->CreateLoad(objType, retry_result_ptr, "retry_result");
     builder->CreateBr(cont_bb);
@@ -3239,10 +3239,10 @@ llvm::Value* LLVMBackend::cgAwait(const AwaitExpr& e) {
     // Register {&resume_fn, own_frame} as waker on child's frame (fields 3, 4)
     auto* resume_fn_val = builder->CreateBitCast(m_current_async_resume_fn,
         llvm::PointerType::get(*ctx, 0));
-    auto* child_waker_fn_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+    auto* child_waker_fn_ptr = builder->CreateStructGEP(m_async_frame_header_ty,
         child_typed, 3, "child_wfn_p");
     builder->CreateStore(resume_fn_val, child_waker_fn_ptr);
-    auto* child_waker_ctx_ptr = builder->CreateStructGEP(m_current_async_frame_type,
+    auto* child_waker_ctx_ptr = builder->CreateStructGEP(m_async_frame_header_ty,
         child_typed, 4, "child_wctx_p");
     builder->CreateStore(m_current_async_frame, child_waker_ctx_ptr);
     builder->CreateBr(m_async_suspend_bb);

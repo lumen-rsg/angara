@@ -463,7 +463,12 @@ void LLVMBackend::codegenAsyncFuncDecl(const FuncStmt& stmt, const std::string& 
     }
 
     // ---- Build frame struct type ----
-    // Standard header: { i32 state, obj result, obj awaited, ptr waker_fn, ptr waker_ctx, ptr loop }
+    // C7 INVARIANT: the first 6 fields below are the fixed async header and MUST
+    // stay layout-identical to m_async_frame_header_ty (the canonical {i32,
+    // objType, objType, ptr, ptr, ptr} built at backend init). Child-frame
+    // accesses in cgAwait GEP through that header type, not this full frame
+    // type, so the header offsets must not diverge. Param slots (fields 6+)
+    // and local slots follow and may vary per function.
     auto* state_ty = llvm::Type::getInt32Ty(*ctx);
     auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
     std::vector<llvm::Type*> frame_fields = {state_ty, objType, objType, ptr_ty, ptr_ty, ptr_ty};

@@ -404,6 +404,7 @@ namespace angara {
         bool m_in_async_function = false;
         llvm::Value* m_current_async_frame = nullptr;       // future frame (i8* from malloc)
         llvm::StructType* m_current_async_frame_type = nullptr;  // frame struct type
+        llvm::StructType* m_async_frame_header_ty = nullptr;  // C7: fixed header prefix type
         llvm::Value* m_current_async_state_ptr = nullptr;   // pointer to state field (GEP)
         llvm::Value* m_current_async_result_ptr = nullptr;  // pointer to result field (GEP)
         llvm::Value* m_current_async_waker_fn_ptr = nullptr; // pointer to waker_fn field (GEP)
