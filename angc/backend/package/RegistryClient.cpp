@@ -1,4 +1,5 @@
 #include "../../includes/RegistryClient.h"
+#include "json.hpp"  // M17: vendored nlohmann/json for strict JSON validation
 #include <curl/curl.h>
 #include <fstream>
 #include <iostream>
@@ -19,9 +20,15 @@ RegistryClient::RegistryClient(std::string registry_url)
 
 // ── HTTP GET helpers ────────────────────────────────────────────────────
 
+// M18: cap registry metadata responses so a malicious/compromised registry
+// can't exhaust memory. Package metadata is tiny JSON; 10 MB is far above any
+// realistic payload. Returning 0 aborts the transfer (CURLE_WRITE_ERROR).
+static constexpr size_t REGISTRY_MAX_METADATA_BYTES = 10 * 1024 * 1024;
+
 static size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
     auto* str = static_cast<std::string*>(userp);
     size_t total = size * nmemb;
+    if (str->size() + total > REGISTRY_MAX_METADATA_BYTES) return 0;  // M18
     str->append(static_cast<char*>(contents), total);
     return total;
 }
@@ -84,6 +91,10 @@ bool RegistryClient::http_download(const std::string& url, const std::string& de
     curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "https,http");  // M16
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 120L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "angc-pkg/1.0");
+    // M18: bound a tarball download so a malicious registry can't fill the
+    // disk. 100 MB is generous for an Angara package tarball.
+    curl_easy_setopt(curl, CURLOPT_MAXFILESIZE_LARGE,
+                     static_cast<curl_off_t>(100 * 1024 * 1024));
     // H15: force TLS peer + host verification (see http_get above).
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
@@ -96,8 +107,13 @@ bool RegistryClient::http_download(const std::string& url, const std::string& de
 }
 
 // ── Registry JSON parsing ───────────────────────────────────────────────
-
-// Minimal JSON parsing for the registry response format:
+//
+// M17: replaced a hand-rolled, lax scanner with nlohmann/json, which enforces
+// strict JSON syntax and rejects invalid UTF-8 by throwing. A corrupted or
+// truncated registry response now yields std::nullopt instead of being
+// mis-parsed into empty/garbled fields.
+//
+// Expected response shape:
 // {
 //   "name": "io",
 //   "versions": [
@@ -111,249 +127,52 @@ bool RegistryClient::http_download(const std::string& url, const std::string& de
 //   ]
 // }
 
-namespace {
-
-// Extract the value of a JSON string key. Returns empty if not found.
-std::string extract_string(const std::string& json, const std::string& key, size_t start_pos = 0) {
-    std::string search = "\"" + key + "\"";
-    size_t pos = json.find(search, start_pos);
-    if (pos == std::string::npos) return "";
-
-    // Find the colon
-    pos = json.find(':', pos + search.size());
-    if (pos == std::string::npos) return "";
-
-    // Skip whitespace
-    pos++;
-    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n'))
-        pos++;
-
-    if (pos >= json.size() || json[pos] != '"') {
-        // Non-string value (number, bool, null) — read until comma/brace/bracket
-        size_t end = json.find_first_of(",}]", pos);
-        if (end == std::string::npos) end = json.size();
-        std::string val = json.substr(pos, end - pos);
-        // Trim whitespace
-        while (!val.empty() && val.back() == ' ') val.pop_back();
-        return val;
-    }
-
-    pos++; // skip opening quote
-    std::string val;
-    while (pos < json.size()) {
-        if (json[pos] == '\\') {
-            pos++;
-            if (pos < json.size()) val += json[pos];
-        } else if (json[pos] == '"') {
-            break;
-        } else {
-            val += json[pos];
-        }
-        pos++;
-    }
-    return val;
-}
-
-// Extract a nested JSON object value for a key. Returns the raw JSON between { and }.
-std::string extract_object(const std::string& json, const std::string& key, size_t start_pos = 0) {
-    std::string search = "\"" + key + "\"";
-    size_t pos = json.find(search, start_pos);
-    if (pos == std::string::npos) return "";
-
-    pos = json.find(':', pos + search.size());
-    if (pos == std::string::npos) return "";
-
-    pos++;
-    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n'))
-        pos++;
-
-    if (pos >= json.size() || json[pos] != '{') return "";
-
-    size_t start = pos;
-    int depth = 0;
-    while (pos < json.size()) {
-        if (json[pos] == '{') depth++;
-        else if (json[pos] == '}') {
-            depth--;
-            if (depth == 0) return json.substr(start, pos - start + 1);
-        } else if (json[pos] == '"') {
-            pos++;
-            while (pos < json.size() && json[pos] != '"') {
-                if (json[pos] == '\\') pos++;
-                pos++;
-            }
-        }
-        pos++;
-    }
-    return "";
-}
-
-// Extract a JSON array value for a key. Returns comma-separated strings.
-std::vector<std::string> extract_array(const std::string& json, const std::string& key, size_t start_pos = 0) {
-    std::vector<std::string> result;
-    std::string search = "\"" + key + "\"";
-    size_t pos = json.find(search, start_pos);
-    if (pos == std::string::npos) return result;
-
-    pos = json.find(':', pos + search.size());
-    if (pos == std::string::npos) return result;
-
-    pos++;
-    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n'))
-        pos++;
-
-    if (pos >= json.size() || json[pos] != '[') return result;
-
-    pos++; // skip '['
-    while (pos < json.size()) {
-        while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t' || json[pos] == '\n' || json[pos] == ','))
-            pos++;
-
-        if (pos >= json.size() || json[pos] == ']') break;
-
-        if (json[pos] == '"') {
-            pos++; // skip opening quote
-            std::string val;
-            while (pos < json.size() && json[pos] != '"') {
-                if (json[pos] == '\\') pos++;
-                if (pos < json.size()) val += json[pos];
-                pos++;
-            }
-            if (pos < json.size()) pos++; // skip closing quote
-            if (!val.empty()) result.push_back(val);
-        } else {
-            pos++; // skip unrecognized char
-        }
-    }
-    return result;
-}
-
-} // anonymous namespace
-
-std::optional<RegistryPackage> RegistryClient::parse_package_json(const std::string& json,
+std::optional<RegistryPackage> RegistryClient::parse_package_json(const std::string& json_text,
                                                                    const std::string& name) {
+    using nlohmann::json;
+
+    json root;
+    try {
+        root = json::parse(json_text);  // throws on malformed JSON / bad UTF-8
+    } catch (const json::exception&) {
+        return std::nullopt;
+    }
+    if (!root.is_object()) return std::nullopt;
+
     RegistryPackage pkg;
     pkg.name = name;
 
-    // Find the "versions" array
-    std::string search = "\"versions\"";
-    size_t pos = json.find(search);
-    if (pos == std::string::npos) return std::nullopt;
+    // "versions" is required and must be an array.
+    if (!root.contains("versions") || !root["versions"].is_array()) return std::nullopt;
 
-    pos = json.find(':', pos + search.size());
-    if (pos == std::string::npos) return std::nullopt;
+    for (const auto& v : root["versions"]) {
+        if (!v.is_object()) continue;
 
-    // Find the opening bracket of the versions array
-    pos++;
-    while (pos < json.size() && json[pos] != '[') pos++;
-    if (pos >= json.size()) return std::nullopt;
-
-    // M15: depth limit to prevent stack overflow from deeply nested JSON.
-    const int MAX_PARSE_DEPTH = 32;
-    int parse_depth = 0;
-
-    // Now iterate through the array finding each version object
-    while (pos < json.size()) {
-        // Find next '{'
-        while (pos < json.size() && json[pos] != '{' && json[pos] != ']') pos++;
-        if (pos >= json.size() || json[pos] == ']') break;
-
-        // Parse one version object
-        size_t obj_start = pos;
-        int depth = 0;
-        while (pos < json.size()) {
-            if (json[pos] == '{') {
-                depth++;
-                if (depth > MAX_PARSE_DEPTH) return std::nullopt;  // M15
-            } else if (json[pos] == '}') {
-                depth--;
-                if (depth == 0) break;
-            } else if (json[pos] == '"') {
-                pos++;
-                while (pos < json.size() && json[pos] != '"') {
-                    if (json[pos] == '\\') pos++;
-                    pos++;
-                }
-            }
-            pos++;
-        }
-        if (pos >= json.size()) break;
-
-        std::string obj_json = json.substr(obj_start, pos - obj_start + 1);
-        pos++; // move past '}'
+        // "version" is mandatory and must be a parseable semver string.
+        if (!v.contains("version") || !v["version"].is_string()) continue;
+        auto parsed_ver = Version::parse(v["version"].get<std::string>());
+        if (!parsed_ver) continue;  // skip unparseable version, as before
 
         RegistryVersion rv;
-        std::string ver_str = extract_string(obj_json, "version");
-        if (auto v = Version::parse(ver_str)) {
-            rv.version = *v;
-        } else {
-            continue; // skip unparseable version
+        rv.version = *parsed_ver;
+        rv.sha256 = v.value("sha256", std::string{});
+        rv.has_native = v.value("has_native", false);
+
+        // source_modules: array of strings.
+        if (v.contains("source_modules") && v["source_modules"].is_array()) {
+            for (const auto& m : v["source_modules"]) {
+                if (m.is_string()) rv.source_modules.push_back(m.get<std::string>());
+            }
         }
 
-        rv.sha256 = extract_string(obj_json, "sha256");
-        std::string native_str = extract_string(obj_json, "has_native");
-        rv.has_native = (native_str == "true");
-
-        rv.source_modules = extract_array(obj_json, "source_modules");
-
-        // Parse dependencies object
-        std::string deps_json = extract_object(obj_json, "dependencies");
-        if (!deps_json.empty()) {
-            // M15: depth-limited parsing of key-value pairs from deps_json
-            size_t dp = 1; // skip opening '{'
-            int deps_depth = 1;
-            while (dp < deps_json.size() && deps_depth > 0) {
-                while (dp < deps_json.size() && deps_json[dp] != '"' && deps_json[dp] != '}')
-                    dp++;
-                if (dp >= deps_json.size() || deps_json[dp] == '}') break;
-
-                std::string dep_name = extract_string(deps_json, "", dp);
-                // Actually we need a better approach — let's parse manually
-                dp++; // skip opening quote of key
-                std::string key;
-                while (dp < deps_json.size() && deps_json[dp] != '"') {
-                    if (deps_json[dp] == '\\') dp++;
-                    if (dp < deps_json.size()) key += deps_json[dp];
-                    dp++;
-                }
-                dp++; // skip closing quote
-
-                // Find colon
-                while (dp < deps_json.size() && deps_json[dp] != ':') dp++;
-                dp++; // skip colon
-
-                // Skip whitespace
-                while (dp < deps_json.size() && (deps_json[dp] == ' ' || deps_json[dp] == '\t' || deps_json[dp] == '\n'))
-                    dp++;
-
-                std::string val;
-                if (dp < deps_json.size() && deps_json[dp] == '"') {
-                    dp++; // skip opening quote
-                    while (dp < deps_json.size() && deps_json[dp] != '"') {
-                        if (deps_json[dp] == '\\') dp++;
-                        if (dp < deps_json.size()) val += deps_json[dp];
-                        dp++;
-                    }
-                    dp++; // skip closing quote
-                }
-
-                if (!key.empty()) {
-                    rv.dependencies[key] = val;
-                }
-
-                // Skip comma
-                while (dp < deps_json.size() && deps_json[dp] != ',' && deps_json[dp] != '}') {
-                    if (deps_json[dp] == '"') {  // M15: skip strings during scan
-                        dp++;
-                        while (dp < deps_json.size() && deps_json[dp] != '"') {
-                            if (deps_json[dp] == '\\') dp++;
-                            dp++;
-                        }
-                    }
-                    if (dp < deps_json.size()) dp++;
-                }
-                if (dp < deps_json.size() && deps_json[dp] == '}') deps_depth--;
-                if (dp < deps_json.size() && deps_json[dp] == ',') dp++;
+        // dependencies: object mapping name -> constraint (string).
+        if (v.contains("dependencies") && v["dependencies"].is_object()) {
+            for (auto it = v["dependencies"].begin(); it != v["dependencies"].end(); ++it) {
+                // Coerce non-string values to their string form so a constraint
+                // stored as e.g. a number still round-trips.
+                rv.dependencies[it.key()] = it.value().is_string()
+                    ? it.value().get<std::string>()
+                    : it.value().dump();
             }
         }
 

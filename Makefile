@@ -183,6 +183,18 @@ build/obj/%.o: %.cpp
 	@printf "$(GREEN)[CX] $(RESET) %s\n" "$<"
 	@$(CXX) $(CXXFLAGS) $(LLVM_CXXFLAGS) -c $< -o $@
 
+# M17: package manager sources use the vendored nlohmann/json header for strict
+# JSON validation (replacing hand-rolled parsers). -Imodules/data resolves it.
+build/obj/angc/backend/package/RegistryClient.o: angc/backend/package/RegistryClient.cpp
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CX] $(RESET) %s (JSON)\n" "$<"
+	@$(CXX) $(CXXFLAGS) $(LLVM_CXXFLAGS) -Imodules/data -c $< -o $@
+
+build/obj/angc/backend/package/Lockfile.o: angc/backend/package/Lockfile.cpp
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CX] $(RESET) %s (JSON)\n" "$<"
+	@$(CXX) $(CXXFLAGS) $(LLVM_CXXFLAGS) -Imodules/data -c $< -o $@
+
 build/obj/modules/net/http.o: modules/net/http.c
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CC]  $(RESET) %s (CURL)\n" "$<"

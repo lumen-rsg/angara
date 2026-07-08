@@ -55,8 +55,6 @@ private:
     std::string m_path;
     int m_format_version = 1;
     std::map<std::string, LockfileEntry> m_entries;
-
-    static std::string escape_json(const std::string& s);
 };
 
 } // namespace angara

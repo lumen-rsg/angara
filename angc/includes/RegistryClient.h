@@ -45,6 +45,12 @@ public:
     /// Returns the current registry URL.
     const std::string& url() const { return m_registry_url; }
 
+    /// Parse a registry JSON response into a RegistryPackage. Pure / side-effect
+    /// free, so safe to call directly (used by tests). Returns std::nullopt on
+    /// malformed JSON or if no parseable versions are present.
+    static std::optional<RegistryPackage> parse_package_json(const std::string& json,
+                                                              const std::string& name);
+
 private:
     std::string m_registry_url;
 
@@ -54,10 +60,6 @@ private:
 
     /// Download a URL to a file. Returns true on success.
     bool http_download(const std::string& url, const std::string& dest_path);
-
-    /// Parse registry JSON response into RegistryPackage.
-    static std::optional<RegistryPackage> parse_package_json(const std::string& json,
-                                                              const std::string& name);
 };
 
 } // namespace angara
