@@ -734,8 +734,12 @@ void LLVMBackend::cgDrop(const DropStmt& s) {
                 ct = std::dynamic_pointer_cast<InstanceType>(type)->class_type;
             else
                 ct = std::dynamic_pointer_cast<ClassType>(type);
-            if (ct) {
-                for (auto& [fname, finfo] : ct->fields) {
+            // H16: walk the superclass chain so inherited heap fields are
+            // dropped too. Previously only the immediate class's fields were
+            // iterated, leaking any heap allocation held in a parent class's
+            // fields.
+            for (auto cur = ct; cur; cur = cur->superclass) {
+                for (auto& [fname, finfo] : cur->fields) {
                     if (is_heap_field(finfo.type))
                         drop_field(fname);
                 }
