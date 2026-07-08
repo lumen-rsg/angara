@@ -969,6 +969,25 @@ void Chaperone::analyzeStmt(Context& ctx,
                     ctx.closure_holders.erase(ft);
                     ctx.var_to_closure.erase(vtc);
                 }
+            } else {
+                // H1: the return value is not a bare VarExpr (e.g.
+                // `return obj.field`, `return make()`). analyzeExpr already
+                // walked it, but the ownership escape transition above only
+                // fired for VarExpr. Generalize: collect every variable
+                // referenced in the return expression and transition any that
+                // is tracked Live to Escaped, so a returned field/constructor
+                // doesn't silently keep its source Live (false leak E501) or
+                // escape untracked. Respect current_function_returns_ref: a
+                // ref<T> return is a borrow, not an ownership transfer.
+                std::set<std::string> refs;
+                collectExprVarRefs(ret->value, refs);
+                for (const auto& name : refs) {
+                    auto rit = state.find(name);
+                    if (rit != state.end() && rit->second == State::Live &&
+                        !ctx.current_function_returns_ref) {
+                        rit->second = State::Escaped;
+                    }
+                }
             }
         }
         for (auto& [name, st] : state) {
