@@ -438,17 +438,21 @@ void Chaperone::analyzeExpr(Context& ctx,
             }
         } else if (auto* get = dynamic_cast<const GetExpr*>(call->callee.get())) {
             method_name = get->name.lexeme;  // e.g. "init"
-            // Resolve the object's type to get the class name.
-            if (auto* ve2 = dynamic_cast<const VarExpr*>(get->object.get())) {
-                auto tit = ctx.tc.getExpressionTypes().find(get->object.get());
-                if (tit != ctx.tc.getExpressionTypes().end() && tit->second) {
-                    // Drill through INSTANCE → CLASS to get the class name.
-                    const Type* t = tit->second.get();
-                    if (t->kind == TypeKind::INSTANCE) {
-                        auto inst = dynamic_cast<const InstanceType*>(t);
-                        if (inst && inst->class_type)
-                            callee_name = inst->class_type->name + "." + method_name;
-                    }
+            // M2: resolve the object's type to get the class name. The type
+            // checker stores resolved types for ALL expressions (including
+            // chained access like obj.inner), so look up by the object
+            // expression pointer regardless of whether it's a VarExpr or a
+            // nested GetExpr. Previously this was gated on VarExpr only, so
+            // obj.inner.method() fell back to the bare method name and could
+            // collide with a same-named method on another class.
+            auto tit = ctx.tc.getExpressionTypes().find(get->object.get());
+            if (tit != ctx.tc.getExpressionTypes().end() && tit->second) {
+                // Drill through INSTANCE → CLASS to get the class name.
+                const Type* t = tit->second.get();
+                if (t->kind == TypeKind::INSTANCE) {
+                    auto inst = dynamic_cast<const InstanceType*>(t);
+                    if (inst && inst->class_type)
+                        callee_name = inst->class_type->name + "." + method_name;
                 }
             }
             if (callee_name.empty())
