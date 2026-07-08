@@ -384,6 +384,13 @@ void Chaperone::analyzeExpr(Context& ctx,
                             "E501");
                     }
                     state[field_key] = State::Live;
+                } else if (tt != expr_types.end() && tt->second) {
+                    // H7: the field resolves but isn't ownership-tracked (e.g.
+                    // an i64 field, or a non-owned data field). Previously the
+                    // source was silently marked Moved at line ~391 with no
+                    // diagnostic — ownership vanished. Check whether a tracked
+                    // Live source is escaping into this untracked field (E505).
+                    checkEscapeIntoContainer(ctx, asgn->value, state, tt->second.get());
                 }
             }
 
