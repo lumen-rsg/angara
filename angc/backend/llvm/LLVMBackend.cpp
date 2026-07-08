@@ -728,14 +728,20 @@ llvm::Value* LLVMBackend::makeVector(llvm::Value* raw_vec, const VectorType& vec
     auto* i8_ty = llvm::Type::getInt8Ty(*ctx);
     auto* i8_ptr = llvm::PointerType::get(*ctx, 0);
 
-    // Determine element size in bytes
-    int elem_size_bytes = 0;
-    const auto& ename = vec_type.element_type->toString();
-    if (ename == "f32" || ename == "i32" || ename == "u32") elem_size_bytes = 4;
-    else if (ename == "f64" || ename == "i64" || ename == "u64") elem_size_bytes = 8;
-    else if (ename == "i8" || ename == "u8") elem_size_bytes = 1;
-    else if (ename == "i16" || ename == "u16") elem_size_bytes = 2;
-    else elem_size_bytes = 4; // fallback: assumes 4-byte element
+        // Determine element size in bytes
+        int elem_size_bytes = 0;
+        const auto& ename = vec_type.element_type->toString();
+        if (ename == "f32" || ename == "i32" || ename == "u32") elem_size_bytes = 4;
+        else if (ename == "f64" || ename == "i64" || ename == "u64") elem_size_bytes = 8;
+        else if (ename == "i8" || ename == "u8") elem_size_bytes = 1;
+        else if (ename == "i16" || ename == "u16") elem_size_bytes = 2;
+        else {
+            // M28: previously defaulted to 4, undersizing the allocation for
+            // any unrecognized 8-byte element and corrupting the subsequent
+            // memcpy. There is no sensible default for an unknown element type,
+            // so fail loudly instead of silently miscompiling.
+            llvm::report_fatal_error("makeVector: unsupported vector element type '" + ename + "'");
+        }
 
     // Call __ang_vector_new(num_elements, elem_size)
     auto* num_elems_c = llvm::ConstantInt::get(i32_ty, vec_type.size);
