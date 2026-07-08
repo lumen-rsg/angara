@@ -740,7 +740,8 @@ llvm::Value* LLVMBackend::makeVector(llvm::Value* raw_vec, const VectorType& vec
             // any unrecognized 8-byte element and corrupting the subsequent
             // memcpy. There is no sensible default for an unknown element type,
             // so fail loudly instead of silently miscompiling.
-            llvm::report_fatal_error("makeVector: unsupported vector element type '" + ename + "'");
+            llvm::report_fatal_error(llvm::StringRef(
+                "makeVector: unsupported vector element type '" + ename + "'"));
         }
 
     // Call __ang_vector_new(num_elements, elem_size)
