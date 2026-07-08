@@ -85,7 +85,7 @@ void RuntimeBuilder::generateListOps() {
         b.CreateStore(safe_count, b.CreateStructGEP(m_list_type, list_ptr, 1));
         b.CreateStore(safe_count, b.CreateStructGEP(m_list_type, list_ptr, 2));
 
-        auto* elems_mem = b.CreateCall(malloc_fn, {safe_total});
+        auto* elems_mem = b.CreateCall(m_fn_rt_raw_alloc, {safe_total});
         b.CreateCall(m_module.getFunction("memcpy"),
             {elems_mem, b.CreateBitCast(elems, i8_ptr), safe_total});
         b.CreateStore(b.CreateBitCast(elems_mem, PointerType::get(m_ctx, 0)),
@@ -148,7 +148,8 @@ void RuntimeBuilder::generateListOps() {
         auto* alloc_size = bg.CreateMul(new_cap, elem_size);
         auto* old_elems = bg.CreateLoad(PointerType::get(m_ctx, 0), elems_addr);
         auto* old_raw = bg.CreateBitCast(old_elems, i8_ptr);
-        auto* new_raw = bg.CreateCall(realloc_fn, {old_raw, alloc_size}, "new_raw");
+        auto* old_size = bg.CreateMul(cap, elem_size);
+        auto* new_raw = bg.CreateCall(m_fn_rt_raw_realloc, {old_raw, old_size, alloc_size}, "new_raw");
         bg.CreateStore(bg.CreateBitCast(new_raw, PointerType::get(m_ctx, 0)), elems_addr);
         bg.CreateStore(new_cap, cap_addr);
         bg.CreateBr(store_bb);
@@ -464,7 +465,7 @@ void RuntimeBuilder::generateRawArrayOps() {
         b.CreateStore(elem_size,
                       b.CreateStructGEP(m_raw_array_type, arr_ptr, 3));             // elem_size
         // element buffer
-        auto* buf_mem = b.CreateCall(malloc_fn, {safe_buf});
+        auto* buf_mem = b.CreateCall(m_fn_rt_raw_alloc, {safe_buf});
         b.CreateStore(b.CreateBitCast(buf_mem, PointerType::get(m_ctx, 0)),
                       b.CreateStructGEP(m_raw_array_type, arr_ptr, 4));
 
@@ -509,7 +510,8 @@ void RuntimeBuilder::generateRawArrayOps() {
         auto* alloc_size = bg.CreateMul(new_cap, esize64);
         auto* old_buf = bg.CreateLoad(PointerType::get(m_ctx, 0), buf_addr);
         auto* old_raw = bg.CreateBitCast(old_buf, i8_ptr);
-        auto* new_raw = bg.CreateCall(realloc_fn, {old_raw, alloc_size}, "new_raw");
+        auto* old_size = bg.CreateMul(cap, esize64);
+        auto* new_raw = bg.CreateCall(m_fn_rt_raw_realloc, {old_raw, old_size, alloc_size}, "new_raw");
         bg.CreateStore(bg.CreateBitCast(new_raw, PointerType::get(m_ctx, 0)), buf_addr);
         bg.CreateStore(new_cap, cap_addr);
         bg.CreateBr(store_bb);
@@ -779,7 +781,8 @@ void RuntimeBuilder::generateRecordOps() {
             m_module.getDataLayout().getTypeAllocSize(m_record_entry_type));
         auto* alloc_size = bg.CreateMul(new_cap, entry_size);
         auto* old_raw = bg.CreateBitCast(entries, i8_ptr);
-        auto* new_raw = bg.CreateCall(realloc_fn, {old_raw, alloc_size});
+        auto* old_size = bg.CreateMul(cap, entry_size);
+        auto* new_raw = bg.CreateCall(m_fn_rt_raw_realloc, {old_raw, old_size, alloc_size});
         auto* new_entries = bg.CreateBitCast(new_raw, PointerType::get(m_ctx, 0));
         bg.CreateStore(new_entries, entries_addr);
         bg.CreateStore(new_cap, cap_addr);

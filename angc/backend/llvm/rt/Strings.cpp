@@ -186,8 +186,10 @@ void RuntimeBuilder::generateStringOps() {
                 auto* doubled = bg.CreateShl(a_cap, 1, "doubled");
                 auto* new_cap = bg.CreateSelect(
                     bg.CreateICmpUGT(doubled, new_len), doubled, new_len);
-                auto* new_buf = bg.CreateCall(realloc_fn,
-                    {a_chars, bg.CreateAdd(new_cap, ConstantInt::get(i64_ty, 1))}, "grown_buf");
+                auto* old_size = bg.CreateAdd(a_cap, ConstantInt::get(i64_ty, 1));
+                auto* new_size = bg.CreateAdd(new_cap, ConstantInt::get(i64_ty, 1));
+                auto* new_buf = bg.CreateCall(m_fn_rt_raw_realloc,
+                    {a_chars, old_size, new_size}, "grown_buf");
                 bg.CreateStore(new_buf, a_chars_ptr);
                 bg.CreateStore(new_cap, bg.CreateStructGEP(m_string_type, a_str, 2));
                 bg.CreateBr(inplace_append_bb);
@@ -226,7 +228,7 @@ void RuntimeBuilder::generateStringOps() {
                     bc.CreateStructGEP(m_string_type, a_str, 3), "a_chars");
 
                 auto* new_len = bc.CreateAdd(a_len, b_len, "new_len");
-                auto* buf = bc.CreateCall(malloc_fn,
+                auto* buf = bc.CreateCall(m_fn_rt_raw_alloc,
                     {bc.CreateAdd(new_len, ConstantInt::get(i64_ty, 1))}, "buf");
                 bc.CreateCall(memcpy_fn, {buf, a_chars, a_len});
                 bc.CreateCall(memcpy_fn,
@@ -299,7 +301,7 @@ void RuntimeBuilder::generateStringOps() {
 
         IRBuilder<> ba(alloc_bb);
         auto* buf_size = ba.CreateAdd(new_len, ConstantInt::get(i64_ty, 1));
-        auto* buf = ba.CreateCall(malloc_fn, {buf_size}, "buf");
+        auto* buf = ba.CreateCall(m_fn_rt_raw_alloc, {buf_size}, "buf");
         ba.CreateBr(loop_bb);
 
         IRBuilder<> bl(loop_bb);

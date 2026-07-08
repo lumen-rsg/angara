@@ -167,6 +167,8 @@ public:
     // --- Memory management (direct malloc/free via the allocator) ---
 
     llvm::FunctionCallee getAllocFunc()           const { return m_fn_rt_alloc; }
+    llvm::FunctionCallee getRawAllocFunc()        const { return m_fn_rt_raw_alloc; }
+    llvm::FunctionCallee getRawReallocFunc()      const { return m_fn_rt_raw_realloc; }
     llvm::FunctionCallee getStoreTrackFunc()      const { return m_fn_rt_clear_unique; }
     llvm::FunctionCallee getPushFrameFunc()       const { return m_fn_rt_push_frame; }
     llvm::FunctionCallee getPopFrameFunc()        const { return m_fn_rt_pop_frame; }
@@ -342,6 +344,10 @@ private:
     llvm::GlobalVariable* m_g_allocator             = nullptr;
 
     llvm::FunctionCallee m_fn_rt_alloc;
+    // Raw (no-header) vtable-routed allocation, for backing buffers (list/record
+    // element arrays, string chars). Honors __ang_allocator_set uniformly.
+    llvm::FunctionCallee m_fn_rt_raw_alloc;
+    llvm::FunctionCallee m_fn_rt_raw_realloc;
     llvm::FunctionCallee m_fn_rt_clear_unique;
     llvm::FunctionCallee m_fn_rt_push_frame;
     llvm::FunctionCallee m_fn_rt_pop_frame;

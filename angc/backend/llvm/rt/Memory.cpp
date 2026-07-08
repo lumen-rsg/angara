@@ -149,6 +149,47 @@ void RuntimeBuilder::generateMemoryManagement() {
         b.CreateRetVoid();
     }
 
+    // --- __ang_rt_raw_alloc(i64 size) -> ptr : vtable alloc, NO header stamp ---
+    // For backing buffers (list element arrays, record entry tables, string
+    // chars) that are raw memory, not tracked objects. Routing these through the
+    // vtable means __ang_allocator_set is honored uniformly across every heap
+    // path — including the growth buffers that previously called libc malloc
+    // directly. No ObjHeader is written (the parent object owns the buffer).
+    {
+        auto* fn = createRuntimeFunc("__ang_rt_raw_alloc",
+            FunctionType::get(i8_ptr, {i64_ty}, false));
+        m_fn_rt_raw_alloc = FunctionCallee(fn);
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+        auto* size_arg = fn->arg_begin();
+        auto* alloc_ptr = b.CreateLoad(PointerType::get(m_ctx, 0), m_g_allocator, "allocator");
+        auto* alloc_fn_slot = b.CreateStructGEP(m_allocator_type, alloc_ptr, 0, "alloc_slot");
+        auto* alloc_fn_val = b.CreateLoad(PointerType::get(m_ctx, 0), alloc_fn_slot, "alloc_fn");
+        auto* mem = b.CreateCall(alloc_fn_ty, alloc_fn_val, {size_arg}, "mem");
+        b.CreateRet(mem);
+    }
+
+    // --- __ang_rt_raw_realloc(ptr old, i64 old_size, i64 new_size) -> ptr ---
+    // vtable realloc for backing-buffer growth (list/raw_array/record table
+    // expansion). The middle old_size arg matches the vtable's realloc slot
+    // signature; the default libc-backed impl ignores it.
+    {
+        auto* fn = createRuntimeFunc("__ang_rt_raw_realloc",
+            FunctionType::get(i8_ptr, {i8_ptr, i64_ty, i64_ty}, false));
+        m_fn_rt_raw_realloc = FunctionCallee(fn);
+        auto* entry = BasicBlock::Create(m_ctx, "entry", fn);
+        IRBuilder<> b(entry);
+        auto* old_arg     = fn->arg_begin();
+        auto* old_sz_arg  = fn->arg_begin() + 1;
+        auto* new_sz_arg  = fn->arg_begin() + 2;
+        auto* alloc_ptr = b.CreateLoad(PointerType::get(m_ctx, 0), m_g_allocator, "allocator");
+        auto* realloc_fn_slot = b.CreateStructGEP(m_allocator_type, alloc_ptr, 1, "realloc_slot");
+        auto* realloc_fn_val = b.CreateLoad(PointerType::get(m_ctx, 0), realloc_fn_slot, "realloc_fn");
+        auto* mem = b.CreateCall(realloc_fn_ty, realloc_fn_val,
+            {old_arg, old_sz_arg, new_sz_arg}, "grown");
+        b.CreateRet(mem);
+    }
+
     // ========================================================================
     // No-op stubs (no collection, no safepoints, no barriers)
     // ========================================================================
@@ -279,7 +320,15 @@ void RuntimeBuilder::generateMemoryManagement() {
         auto* nat_finalize_bb = BasicBlock::Create(m_ctx, "nat_finalize", fn);
         auto* free_name_bb    = BasicBlock::Create(m_ctx, "free_name", fn);
 
-        auto* free_fn = m_module.getFunction("free");
+        // Route interior-pointer frees through __ang_rt_free (the vtable free
+        // slot) instead of raw libc free, so a swapped allocator (set via
+        // __ang_allocator_set) frees via the matching free fn. Size is unknown
+        // for these backing buffers; pass 0 (the default libc impl ignores it,
+        // and custom allocators treat 0 as "unknown size").
+        auto* free_fn = m_module.getFunction("__ang_rt_free");
+        auto* free_ty = FunctionType::get(Type::getVoidTy(m_ctx),
+            {i8_ptr, Type::getInt64Ty(m_ctx)}, false);
+        auto* rt_free_size = ConstantInt::get(Type::getInt64Ty(m_ctx), 0);
 
         // --- entry: load type tag and switch ---
         {
@@ -309,7 +358,7 @@ void RuntimeBuilder::generateMemoryManagement() {
             b.CreateCondBr(not_null, free_chars_bb, done_bb);
 
             IRBuilder<> b2(free_chars_bb);
-            b2.CreateCall(free_fn, {chars});
+            b2.CreateCall(free_ty, free_fn, {chars, rt_free_size});
             b2.CreateBr(done_bb);
         }
 
@@ -324,7 +373,7 @@ void RuntimeBuilder::generateMemoryManagement() {
             b.CreateCondBr(not_null, free_elems_bb, done_bb);
 
             IRBuilder<> b2(free_elems_bb);
-            b2.CreateCall(free_fn, {elems});
+            b2.CreateCall(free_ty, free_fn, {elems, rt_free_size});
             b2.CreateBr(done_bb);
         }
 
@@ -353,13 +402,13 @@ void RuntimeBuilder::generateMemoryManagement() {
             auto* entry_ptr = blf.CreateGEP(m_record_entry_type, entries_typed, {phi});
             auto* key = blf.CreateLoad(PointerType::get(m_ctx, 0),
                 blf.CreateStructGEP(m_record_entry_type, entry_ptr, 0), "key");
-            blf.CreateCall(free_fn, {key});
+            blf.CreateCall(free_ty, free_fn, {key, rt_free_size});
             auto* next_i = blf.CreateAdd(phi, ConstantInt::get(Type::getInt64Ty(m_ctx), 1));
             phi->addIncoming(next_i, rec_free_key);
             blf.CreateBr(rec_loop_check);
 
             IRBuilder<> bfe(free_entries_bb);
-            bfe.CreateCall(free_fn, {entries});
+            bfe.CreateCall(free_ty, free_fn, {entries, rt_free_size});
             bfe.CreateBr(done_bb);
         }
 
@@ -374,7 +423,7 @@ void RuntimeBuilder::generateMemoryManagement() {
             b.CreateCondBr(not_null, free_env_bb, done_bb);
 
             IRBuilder<> b2(free_env_bb);
-            b2.CreateCall(free_fn, {env});
+            b2.CreateCall(free_ty, free_fn, {env, rt_free_size});
             b2.CreateBr(done_bb);
         }
 
@@ -389,7 +438,7 @@ void RuntimeBuilder::generateMemoryManagement() {
             b.CreateCondBr(not_null, free_buf_bb, done_bb);
 
             IRBuilder<> b2(free_buf_bb);
-            b2.CreateCall(free_fn, {buf});
+            b2.CreateCall(free_ty, free_fn, {buf, rt_free_size});
             b2.CreateBr(done_bb);
         }
 
@@ -404,7 +453,7 @@ void RuntimeBuilder::generateMemoryManagement() {
             b.CreateCondBr(not_null, free_args_bb, done_bb);
 
             IRBuilder<> b2(free_args_bb);
-            b2.CreateCall(free_fn, {args});
+            b2.CreateCall(free_ty, free_fn, {args, rt_free_size});
             b2.CreateBr(done_bb);
         }
 
@@ -437,7 +486,7 @@ void RuntimeBuilder::generateMemoryManagement() {
             b3.CreateCondBr(has_name, free_name_bb2, done_bb);
 
             IRBuilder<> b4(free_name_bb2);
-            b4.CreateCall(free_fn, {name_val});
+            b4.CreateCall(free_ty, free_fn, {name_val, rt_free_size});
             b4.CreateBr(done_bb);
         }
 
