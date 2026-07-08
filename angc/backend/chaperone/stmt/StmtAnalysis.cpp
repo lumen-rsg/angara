@@ -484,6 +484,13 @@ void Chaperone::analyzeStmt(Context& ctx,
                 state[dn.lexeme] = State::Uninit;
                 // Look up the element's type in the symbol table to check for ref<T>
                 auto sym = ctx.tc.getSymbolTable().resolve(dn.lexeme);
+                // M6: register builtin heap types (string, list, record, ...) so a
+                // leaked destructured element is reported as W521 (warning), not
+                // E501 (hard error) — matching how non-destructured decls are
+                // handled (see ~line 645).
+                if (sym && sym->type && isBuiltinHeapType(*sym->type)) {
+                    ctx.builtin_heap_vars.insert(dn.lexeme);
+                }
                 if (sym && sym->type && sym->type->kind == TypeKind::REF) {
                     // If the initializer is a tracked variable, record the borrow
                     if (auto* src_ve = dynamic_cast<const VarExpr*>(
