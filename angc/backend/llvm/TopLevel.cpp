@@ -889,6 +889,11 @@ void LLVMBackend::codegenClassDecl(const ClassStmt& stmt) {
             namedVals = std::move(saved_values);
             namedTypes = std::move(saved_types);
             namedKinds = std::move(saved_kinds);
+
+            // L12: clear the debug location after each method so a stale line
+            // loc doesn't bleed into the next method's prologue (matches the
+            // post-function clear at line ~282/599). Only meaningful with -g.
+            if (m_debug) builder->SetCurrentDebugLocation(llvm::DebugLoc());
         }
     }
 
@@ -1360,6 +1365,14 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
     std::vector<llvm::Value*> cArgs(func_type->param_types.size(), nullptr);
     std::vector<bool> filled(func_type->param_types.size(), false);
 
+    // M25: trampoline callback contexts allocated during marshalling. Each
+    // foreign-func callback gets a heap-allocated context holding the closure;
+    // the C call invokes the callback synchronously (the trampoline path is for
+    // `foreign func` only — stored/async callbacks go through native modules
+    // that manage their own lifetimes). So the context is safe to free once the
+    // C call below returns. We accumulate them here and free after the call.
+    std::vector<llvm::Value*> callback_contexts;
+
     // First pass: marshal wrapper params (non-userdata)
     for (size_t wi = 0; wi < wrapper_to_c.size(); wi++) {
         size_t ci = wrapper_to_c[wi];
@@ -1384,8 +1397,13 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
                 m_errorHandler.warning(stmt.name,
                     "Callback parameter '" + stmt.params[ci].name.lexeme
                     + "' has no matching *void userdata parameter — "
-                    + "callback context will be leaked");
+                    + "the callback cannot be invoked from C");
             }
+            // M25: the context is reachable only during the C call (synchronous
+            // trampoline path). Free it after the call returns whether or not a
+            // userdata slot was found — in the no-slot case C never sees it, so
+            // it's dead immediately; in the slot case it's dead once the call ends.
+            callback_contexts.push_back(m_pending_callback_context);
             m_pending_callback_context = nullptr;
         }
     }
@@ -1398,6 +1416,25 @@ void LLVMBackend::codegenForeignFuncDecl(const FuncStmt& stmt) {
     }
 
     llvm::CallInst* cResult = builder->CreateCall(cFunc, cArgs);
+
+    // M25: the C call has returned, so every trampoline callback context it was
+    // handed is no longer reachable — free them now. (The trampoline path serves
+    // synchronous `foreign func` callbacks only; async/stored callbacks go
+    // through native modules that own their lifetimes.) Mirrors the get-or-declare
+    // pattern for `free` used elsewhere in the backend.
+    if (!callback_contexts.empty()) {
+        auto* free_fn = mod->getFunction("free");
+        if (!free_fn) {
+            auto* free_type = llvm::FunctionType::get(
+                llvm::Type::getVoidTy(*ctx),
+                {llvm::PointerType::get(*ctx, 0)}, false);
+            free_fn = llvm::Function::Create(free_type, llvm::Function::ExternalLinkage,
+                                             "free", mod.get());
+        }
+        for (auto* ctx_ptr : callback_contexts) {
+            builder->CreateCall(free_fn, {ctx_ptr});
+        }
+    }
 
     // Repack C result -> AngaraObject
     if (returnsVoid) {
