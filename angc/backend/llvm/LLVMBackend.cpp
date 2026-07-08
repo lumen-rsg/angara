@@ -997,44 +997,51 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
 
         // RT-1: wrap the callback invocation in a setjmp/try so a throw lands
         // inside the trampoline (not across C frames). Mirrors cgTry exactly.
-        // H8: Use the single definition from RuntimeBuilder.
-        auto* frameType = rt->getExcFrameType();
-        auto* frame = builder->CreateAlloca(frameType);
-        auto* frame_raw = builder->CreateBitCast(frame, llvm::PointerType::get(*ctx, 0));
-        auto* prev_addr = builder->CreateStructGEP(frameType, frame, 1);
-        auto* old_chain = builder->CreateLoad(llvm::PointerType::get(*ctx, 0),
-            rt->getExceptionChain(), "old_chain");
-        builder->CreateStore(old_chain, prev_addr);
-        builder->CreateStore(frame_raw, rt->getExceptionChain());
-
-        auto* jmp_buf_ptr = builder->CreateStructGEP(frameType, frame, 0);
-        auto* i8_ptr_ty = llvm::PointerType::get(*ctx, 0);
-        // FFI/FS: declare setjmp on demand if absent (freestanding mode skips
-        // declareCLibFunctions, so getFunction returns null → null callee →
-        // compiler SIGSEGV). See the matching fix in cgTry (StmtCodegen.cpp).
-        auto* setjmp_fn = mod->getFunction("setjmp");
-        if (!setjmp_fn) {
-            auto setjmp_callee = mod->getOrInsertFunction(
-                "setjmp", llvm::FunctionType::get(llvm::Type::getInt32Ty(*ctx), {i8_ptr_ty}, false));
-            setjmp_fn = llvm::cast<llvm::Function>(setjmp_callee.getCallee());
-            setjmp_fn->addFnAttr(llvm::Attribute::ReturnsTwice);
-        }
-        auto* sr = builder->CreateCall(
-            llvm::FunctionType::get(llvm::Type::getInt32Ty(*ctx), {i8_ptr_ty}, false),
-            setjmp_fn,
-            {builder->CreateBitCast(jmp_buf_ptr, i8_ptr_ty)}, "setjmp_result");
-        if (auto* ci = llvm::dyn_cast<llvm::CallInst>(sr)) {
-            ci->addFnAttr(llvm::Attribute::ReturnsTwice);
-        }
-
+        // --kernel skips this entirely: exceptions are hard-errored upstream
+        // (E900/E901), the kernel shim provides no setjmp/longjmp, and kernel
+        // FFI is no-throw by contract — so the @on_throw fallback can't fire.
         auto* tram = trampoline;
         auto* normalBB = llvm::BasicBlock::Create(*ctx, "cb_normal", tram);
         auto* caughtBB = llvm::BasicBlock::Create(*ctx, "cb_caught", tram);
-        builder->CreateCondBr(
-            builder->CreateICmpEQ(sr, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0)),
-            normalBB, caughtBB);
+        if (!m_kernel) {
+            // H8: Use the single definition from RuntimeBuilder.
+            auto* frameType = rt->getExcFrameType();
+            auto* frame = builder->CreateAlloca(frameType);
+            auto* frame_raw = builder->CreateBitCast(frame, llvm::PointerType::get(*ctx, 0));
+            auto* prev_addr = builder->CreateStructGEP(frameType, frame, 1);
+            auto* old_chain = builder->CreateLoad(llvm::PointerType::get(*ctx, 0),
+                rt->getExceptionChain(), "old_chain");
+            builder->CreateStore(old_chain, prev_addr);
+            builder->CreateStore(frame_raw, rt->getExceptionChain());
 
-        // Normal path: run the callback, pop the frame, marshal + ret.
+            auto* jmp_buf_ptr = builder->CreateStructGEP(frameType, frame, 0);
+            auto* i8_ptr_ty = llvm::PointerType::get(*ctx, 0);
+            // FFI/FS: declare setjmp on demand if absent (freestanding mode skips
+            // declareCLibFunctions, so getFunction returns null → null callee →
+            // compiler SIGSEGV). See the matching fix in cgTry (StmtCodegen.cpp).
+            auto* setjmp_fn = mod->getFunction("setjmp");
+            if (!setjmp_fn) {
+                auto setjmp_callee = mod->getOrInsertFunction(
+                    "setjmp", llvm::FunctionType::get(llvm::Type::getInt32Ty(*ctx), {i8_ptr_ty}, false));
+                setjmp_fn = llvm::cast<llvm::Function>(setjmp_callee.getCallee());
+                setjmp_fn->addFnAttr(llvm::Attribute::ReturnsTwice);
+            }
+            auto* sr = builder->CreateCall(
+                llvm::FunctionType::get(llvm::Type::getInt32Ty(*ctx), {i8_ptr_ty}, false),
+                setjmp_fn,
+                {builder->CreateBitCast(jmp_buf_ptr, i8_ptr_ty)}, "setjmp_result");
+            if (auto* ci = llvm::dyn_cast<llvm::CallInst>(sr)) {
+                ci->addFnAttr(llvm::Attribute::ReturnsTwice);
+            }
+            builder->CreateCondBr(
+                builder->CreateICmpEQ(sr, llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), 0)),
+                normalBB, caughtBB);
+        } else {
+            // Kernel: no try frame; fall straight into the callback.
+            builder->CreateBr(normalBB);
+        }
+
+        // Normal path: run the callback, pop the frame (if any), marshal + ret.
         builder->SetInsertPoint(normalBB);
         auto* call_result = callRtByName("__ang_call", {
             closure,
@@ -1042,7 +1049,9 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
             builder->CreateBitCast(args_array, llvm::PointerType::get(*ctx, 0))
         });
         // Pop the exception frame (restore the chain to the outer frame).
-        callRtByName("__ang_try_end", {});
+        // No-op-safe in kernel: there's no frame to pop, but __ang_try_end is
+        // stubbed to a no-op in generateKernelRuntime.
+        if (!m_kernel) callRtByName("__ang_try_end", {});
         auto* c_result = marshalAngaraToC(call_result, func_type->return_type);
         if (func_type->return_type->kind == TypeKind::VOID) {
             builder->CreateRetVoid();
@@ -1059,6 +1068,8 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
         } else {
             builder->CreateRet(llvm::ConstantInt::get(c_return_type, throw_ret, true));
         }
+        // Kernel mode never branches to caughtBB (no setjmp), but LLVM requires
+        // every BB to terminate — the ret above satisfies that.
 
         builder->restoreIP(saved_insert_point);
 

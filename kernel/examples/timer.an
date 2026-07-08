@@ -1,0 +1,33 @@
+// ============================================================================
+// timer.an — Angara side of a kernel timer example (pull model).
+//
+// This demonstrates the kernel-safe callback pattern: rather than handing an
+// Angara closure into a C API that stores it (the M25 trampoline path, which
+// is synchronous-only and frees the context after the foreign call returns),
+// the C side OWNS the timer and calls this exported func on each tick. No
+// trampoline, no setjmp, no freed context.
+//
+// The Angara side is pure per-tick logic: it processes the tick count with
+// the full runtime (lists, strings) and returns a status the C side can log.
+//
+// Build contract: timer_glue.c's init_module calls __ang_strlit_init_timer()
+// once before __ang_timer_on_tick.
+// ============================================================================
+
+// Called by the C timer callback every tick. `count` is the number of ticks
+// elapsed so far. Returns the new cumulative count (the C side stores it).
+// Exercises the string runtime so the allocator path is proven on each tick.
+export func on_tick(count as i64) -> i64 {
+    let next = count + 1;
+    // Build a status string (exercises __ang_to_string + concat → kmalloc).
+    let status = "tick #" + string(next);
+    // Returning the length keeps the value in i64 (no heap return over FFI).
+    return len(status);
+}
+
+// A second export that uses a list, proving the growth path (raw_realloc →
+// vtable → kmalloc) works under repeated kernel timer load.
+export func accumulate(history as i64) -> i64 {
+    // Pure arithmetic on the running total — the C side maintains the list.
+    return history * 2 + 1;
+}
