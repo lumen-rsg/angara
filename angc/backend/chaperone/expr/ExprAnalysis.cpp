@@ -854,11 +854,17 @@ void Chaperone::analyzeExpr(Context& ctx,
         return;
     }
 
-    // TernaryExpr: walk all three.
+    // TernaryExpr (cond ? then : else): analyze each branch on its own
+    // snapshot, then join — mirroring IfStmt / the C1 MatchExpr fix. Previously
+    // both branches shared the same mutable state, so a consumption in the
+    // then-branch (e.g. cond ? consume(x) : x) corrupted the else-branch's
+    // view of x (false E502/E507).
     if (auto* tern = dynamic_cast<const TernaryExpr*>(expr.get())) {
         analyzeExpr(ctx, tern->condition, state);
-        analyzeExpr(ctx, tern->thenBranch, state);
-        analyzeExpr(ctx, tern->elseBranch, state);
+        StateMap then_state = state, else_state = state;
+        if (tern->thenBranch) analyzeExpr(ctx, tern->thenBranch, then_state);
+        if (tern->elseBranch) analyzeExpr(ctx, tern->elseBranch, else_state);
+        state = join_maps(then_state, else_state);
         return;
     }
 
