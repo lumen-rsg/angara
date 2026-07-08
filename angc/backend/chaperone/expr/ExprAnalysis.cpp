@@ -620,9 +620,13 @@ void Chaperone::analyzeExpr(Context& ctx,
         } else {
             // H2: Check for closure call summary via the callee's FunctionType.
             // Each LambdaExpr creates a unique FunctionType that flows through
-            // variable assignments, so looking up by the callee VarExpr's type
-            // finds the right summary.
-            if (dynamic_cast<const VarExpr*>(call->callee.get())) {
+            // variable assignments, so looking up by the callee's type finds the
+            // right summary.
+            // M3: also handle GetExpr callees (obj.callback()) — a closure stored
+            // in a field has its FunctionType resolved by the type checker just
+            // like a VarExpr callee, so the same lookup applies.
+            if (dynamic_cast<const VarExpr*>(call->callee.get()) ||
+                dynamic_cast<const GetExpr*>(call->callee.get())) {
                 auto tit = ctx.tc.getExpressionTypes().find(call->callee.get());
                 if (tit != ctx.tc.getExpressionTypes().end() && tit->second &&
                     tit->second->kind == TypeKind::FUNCTION) {
