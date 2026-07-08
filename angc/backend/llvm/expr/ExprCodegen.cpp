@@ -1838,7 +1838,8 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                     // Allocate heap array for the extra arguments
                     auto* malloc_fn = this->mod->getFunction("malloc");
                     auto* arr_size = llvm::ConstantInt::get(llvm::Type::getInt64Ty(*ctx),
-                        (uint64_t)n_args * 16); // sizeof(AngaraObject) = 16
+                        (uint64_t)n_args *
+                        mod->getDataLayout().getTypeAllocSize(objType).getFixedValue());
                     auto* args_mem = builder->CreateCall(malloc_fn, {arr_size}, "spawn_args");
                     auto* arr_type = llvm::ArrayType::get(objType, n_args);
                     for (int i = 0; i < n_args; i++) {
