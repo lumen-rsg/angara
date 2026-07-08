@@ -1793,7 +1793,16 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             }
             return makeNil();
         }
-        if (namedVals.find(sanitize(fn)) != namedVals.end()) {
+        // C8: a closure-typed variable may live in namedVals (sync code) or in
+        // an async frame slot (async code, where namedVals is cleared). Check
+        // both so a closure stored in an async local is dispatched through
+        // cgClosureCall rather than falling through to a direct function call
+        // (which resolved to an undefined Angara_<fn> symbol).
+        bool is_local = namedVals.find(sanitize(fn)) != namedVals.end();
+        if (!is_local && m_in_async_function) {
+            is_local = m_async_local_slots.find(sanitize(fn)) != m_async_local_slots.end();
+        }
+        if (is_local) {
             auto type_it = m_type_checker.getExpressionTypes().find(expr.callee.get());
             bool is_callable = false;
             if (type_it != m_type_checker.getExpressionTypes().end()) {
@@ -3003,6 +3012,16 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     auto* saved_ret_alloca = m_inlined_main_ret_alloca;
     auto* saved_cleanup_bb = m_inlined_main_cleanup_bb;
     auto* saved_exc_chain = m_exc_chain_save;
+    // C8: a lambda is its own function — NOT part of the enclosing async state
+    // machine. While generating its body, async state must be neutralized so
+    // variable loads/stores resolve through namedVals (the lambda's captures +
+    // params) instead of GEP-ing into the outer async frame, which produced
+    // malformed IR (GEP referencing %frame, br to async_suspend) from inside
+    // the lambda function. Save + clear, restore after the body.
+    bool saved_in_async = m_in_async_function;
+    auto saved_async_slots = std::move(m_async_local_slots);
+    m_in_async_function = false;
+    m_async_local_slots.clear();
     m_inlined_main_ret_alloca = nullptr;
     m_inlined_main_cleanup_bb = nullptr;
     namedVals.clear();
@@ -3054,6 +3073,9 @@ llvm::Value* LLVMBackend::cgLambda(const LambdaExpr& e) {
     m_inlined_main_ret_alloca = saved_ret_alloca;
     m_inlined_main_cleanup_bb = saved_cleanup_bb;
     m_exc_chain_save = saved_exc_chain;
+    // C8: restore the enclosing async state (see save above).
+    m_in_async_function = saved_in_async;
+    m_async_local_slots = std::move(saved_async_slots);
 
     if (saved_insert_block) {
         builder->SetInsertPoint(saved_insert_block);

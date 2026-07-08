@@ -1,0 +1,43 @@
+// C8 regression: a lambda defined inside an async function that captures an
+// async-local variable, used both before and after an await. Previously this
+// produced malformed IR (the lambda body GEP'd into the outer async frame and
+// branched to async_suspend from inside the lambda function). All futures
+// resolve synchronously — no event loop needed.
+// exit: 0
+attach io;
+
+async func identity(x as i64) -> i64 {
+    return x;
+}
+
+// Lambda captures an async-local (x), is called before AND after an await.
+async func lambda_around_await(n as i64) -> i64 {
+    let x = 100;
+    let add = func(y as i64) -> i64 { return x + y; };
+    let before = add(5);            // 105 — capture used before await
+    let v = await identity(n);      // suspension point
+    let after = add(v);             // capture used after await
+    return before + after;
+}
+
+// Lambda capturing two async-locals, with an await between its uses.
+async func multi_capture(a as i64, b as i64) -> i64 {
+    let sum = func(y as i64) -> i64 { return a + b + y; };
+    let s1 = sum(1);
+    let v = await identity(10);
+    let s2 = sum(v);
+    return s1 + s2;                 // (a+b+1) + (a+b+10) = 2a+2b+11
+}
+
+export func main() -> i64 {
+    // Test 1: single capture, await in the middle.
+    let f1 = lambda_around_await(7);
+    drop f1;                        // 105 + 107 = 212
+
+    // Test 2: two captures, await in the middle.
+    let f2 = multi_capture(3, 4);
+    drop f2;                        // 2*3 + 2*4 + 11 = 25
+
+    io.println(1, "OK: async lambda capture passed");
+    return 0;
+}
