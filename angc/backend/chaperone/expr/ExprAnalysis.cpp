@@ -250,6 +250,15 @@ void Chaperone::analyzeExpr(Context& ctx,
                 return;  // borrow — source stays Live, no leak on the target
             }
 
+            // M7: a ref<T> reassigned to a non-borrow RHS (fresh allocation,
+            // nil, function return, etc.) no longer borrows its old referent.
+            // Clear any stale borrow entry so a later drop of the OLD referent
+            // doesn't spuriously fire E509 against this ref. (The borrow path
+            // above already overwrites the entry correctly.)
+            if (isRefVarExpr(ctx, *tgt)) {
+                ctx.borrows.erase(tgt->name.lexeme);
+            }
+
             // S7: overwriting a Live tracked variable leaks the old allocation.
             // (Moved/Dropped/Escaped targets are already invalid — no leak.)
             if (tit->second == State::Live) {
