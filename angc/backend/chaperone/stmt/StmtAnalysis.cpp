@@ -403,14 +403,26 @@ static std::set<std::string> collectGuaranteedDrops(const std::shared_ptr<Stmt>&
         if (auto* ve = dynamic_cast<const VarExpr*>(d->target.get())) {
             result.insert(ve->name.lexeme);
         } else if (auto* get = dynamic_cast<const GetExpr*>(d->target.get())) {
+            // M5: walk the full GetExpr chain so nested field access
+            // (obj.inner.field) yields the complete dotted key, not just the
+            // outermost level. The root is either `this` or a variable; each
+            // GetExpr contributes its ".field". (Today the DropStmt handler
+            // itself rejects nested fields with E503, so this is consistency
+            // hardening — if nested drops are ever supported, both sites match.)
+            std::string key = get->name.lexeme;
+            const Expr* cur = get->object.get();
+            while (auto* inner = dynamic_cast<const GetExpr*>(cur)) {
+                key = inner->name.lexeme + "." + key;
+                cur = inner->object.get();
+            }
             std::string obj_name;
-            if (dynamic_cast<const ThisExpr*>(get->object.get())) {
+            if (dynamic_cast<const ThisExpr*>(cur)) {
                 obj_name = "this";
-            } else if (auto* ove = dynamic_cast<const VarExpr*>(get->object.get())) {
+            } else if (auto* ove = dynamic_cast<const VarExpr*>(cur)) {
                 obj_name = ove->name.lexeme;
             }
             if (!obj_name.empty()) {
-                result.insert(obj_name + "." + get->name.lexeme);
+                result.insert(obj_name + "." + key);
             }
         }
         return result;
