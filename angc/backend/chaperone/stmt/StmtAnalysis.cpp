@@ -970,22 +970,32 @@ void Chaperone::analyzeStmt(Context& ctx,
                     ctx.var_to_closure.erase(vtc);
                 }
             } else {
-                // H1: the return value is not a bare VarExpr (e.g.
-                // `return obj.field`, `return make()`). analyzeExpr already
-                // walked it, but the ownership escape transition above only
-                // fired for VarExpr. Generalize: collect every variable
-                // referenced in the return expression and transition any that
-                // is tracked Live to Escaped, so a returned field/constructor
-                // doesn't silently keep its source Live (false leak E501) or
-                // escape untracked. Respect current_function_returns_ref: a
-                // ref<T> return is a borrow, not an ownership transfer.
-                std::set<std::string> refs;
-                collectExprVarRefs(ret->value, refs);
-                for (const auto& name : refs) {
-                    auto rit = state.find(name);
-                    if (rit != state.end() && rit->second == State::Live &&
-                        !ctx.current_function_returns_ref) {
-                        rit->second = State::Escaped;
+                // H1: the return value is not a bare VarExpr. analyzeExpr already
+                // walked it for UAF/borrow checks. Ownership escape only applies
+                // to a tracked FIELD that is returned by value — the field's
+                // allocation leaves the function, so transition the field key.
+                // Crucially, a variable that is merely *referenced* inside the
+                // return expression (a method-call receiver `x.get()`, or the
+                // object of a field read `x.field`) is BORROWED, not transferred —
+                // transitioning it would both mask the real leak of a tracked
+                // local (E501, see chaperone case 26) and produce false E503 at
+                // the call site of a borrowing closure (chaperone case 09).
+                if (!ctx.current_function_returns_ref) {
+                    if (auto* get = dynamic_cast<const GetExpr*>(ret->value.get())) {
+                        std::string field_key;
+                        if (dynamic_cast<const ThisExpr*>(get->object.get())) {
+                            field_key = "this." + get->name.lexeme;
+                        } else if (auto* ove = dynamic_cast<const VarExpr*>(get->object.get())) {
+                            field_key = ove->name.lexeme + "." + get->name.lexeme;
+                        }
+                        if (!field_key.empty()) {
+                            auto fit = state.find(field_key);
+                            if (fit != state.end() && fit->second == State::Live) {
+                                // Only the field's tracked allocation escapes; the
+                                // owning variable stays Live.
+                                fit->second = State::Escaped;
+                            }
+                        }
                     }
                 }
             }
@@ -1053,18 +1063,30 @@ void Chaperone::analyzeStmt(Context& ctx,
                 ctx.var_to_closure.erase(vtc);
             }
         } else {
-            // H2: the thrown value is not a bare VarExpr (e.g. throw obj.field
-            // or throw make()). Generalize escape like ReturnStmt (H1):
-            // collect every variable referenced in the throw expression and
-            // transition any tracked Live one to Escaped, so a thrown
-            // field/constructor doesn't silently stay Live. Throws always
-            // escape ownership (no ref-return analogue).
-            std::set<std::string> refs;
-            collectExprVarRefs(thr->expression, refs);
-            for (const auto& name : refs) {
-                auto rit = state.find(name);
-                if (rit != state.end() && rit->second == State::Live) {
-                    rit->second = State::Escaped;
+            // H2: the thrown value is not a bare VarExpr. analyzeExpr already
+            // walked it for UAF/borrow checks. As with ReturnStmt (H1), a
+            // variable merely *referenced* inside the throw expression (a
+            // method-call receiver `throw err.getMsg()`, or the object of a
+            // field read) is BORROWED, not transferred — transitioning it would
+            // mask real leaks (E501) and produce false escapes at closure call
+            // sites. Only a tracked FIELD thrown by value (`throw this.f`) has
+            // its allocation escape — and only its field key. Throws have no
+            // ref-return analogue, so no current_function_returns_ref guard.
+            if (auto* get = dynamic_cast<const GetExpr*>(thr->expression.get())) {
+                std::string field_key;
+                if (dynamic_cast<const ThisExpr*>(get->object.get())) {
+                    field_key = "this." + get->name.lexeme;
+                } else if (auto* ove = dynamic_cast<const VarExpr*>(get->object.get())) {
+                    field_key = ove->name.lexeme + "." + get->name.lexeme;
+                }
+                if (!field_key.empty()) {
+                    auto fit = state.find(field_key);
+                    if (fit != state.end() && fit->second == State::Live) {
+                        // Only the field's tracked allocation escapes; the
+                        // owning variable stays Live so the leak check below
+                        // still fires for genuine locals.
+                        fit->second = State::Escaped;
+                    }
                 }
             }
         }
@@ -1423,6 +1445,29 @@ void Chaperone::analyzeStmt(Context& ctx,
         }
         ctx.in_unsafe = was_unsafe;
         return;
+    }
+
+    // L4: Anything still unhandled here is a declaration-like statement
+    // (AttachStmt, ClassStmt, TraitStmt, ContractStmt, DataStmt, EnumStmt,
+    // TypeAliasStmt) or an EmptyStmt. EmptyStmt is benign; the declaration
+    // kinds are normally top-level and analyzed separately, but if one appears
+    // inside a function body it would otherwise be silently skipped with no
+    // data-flow coverage. Emit a low-key W-L4 so it isn't invisible.
+    if (!dynamic_cast<const EmptyStmt*>(stmt.get())) {
+        // Best-effort location: each of these carries a `name` token.
+        Token loc;
+        const Token* np = nullptr;
+        if (auto* a = dynamic_cast<const AttachStmt*>(stmt.get())) np = &a->modulePath;
+        else if (auto* c = dynamic_cast<const ClassStmt*>(stmt.get())) np = &c->name;
+        else if (auto* t = dynamic_cast<const TraitStmt*>(stmt.get())) np = &t->name;
+        else if (auto* k = dynamic_cast<const ContractStmt*>(stmt.get())) np = &k->name;
+        else if (auto* d = dynamic_cast<const DataStmt*>(stmt.get())) np = &d->name;
+        else if (auto* e = dynamic_cast<const EnumStmt*>(stmt.get())) np = &e->name;
+        else if (auto* ta = dynamic_cast<const TypeAliasStmt*>(stmt.get())) np = &ta->name;
+        if (np) loc = *np;
+        warn(ctx, loc,
+             "nested declaration statement not analyzed by ownership checker",
+             "W-L4");
     }
 }
 

@@ -1,0 +1,26 @@
+// Chaperone positive test — borrowing return of a field access (H1 narrowing).
+// `return inner.v;` reads a field (a borrow) — it does NOT transfer ownership
+// of `inner`. So the caller may still drop `inner` afterward without a false
+// E503. This guards the H1 narrowing: only a bare `return x` escapes a tracked
+// variable; a variable merely referenced inside the return expression (as the
+// object of a field read or a method call) is borrowed.
+//
+// exit: 7
+
+class Buf {
+    public:
+    let v as i64;
+    func init(this, x as i64) { this.v = x; }
+}
+
+// A getter that returns inner.v (an i64) — borrows inner, does not transfer it.
+func read_v(inner as Buf) -> i64 {
+    return inner.v;
+}
+
+export func main() -> i64 {
+    let b = Buf(7);
+    let result = read_v(b);  // b is borrowed, not transferred
+    drop b;                  // legitimate — read_v did not take ownership
+    return result;
+}
