@@ -5,6 +5,7 @@
 #include "StringUtils.h"
 #include "Platform.h"
 #include <iostream>
+#include <cstdio>
 #include <filesystem>
 #include <sstream>
 #include <cstdlib>
@@ -52,10 +53,41 @@ namespace angara {
     bool BuildSystem::execute_build_step(const BuildStep& step, const std::string& label) {
         if (step.command.empty()) return true;
 
+        // C5: pre/post-build commands are shell commands from the .abs file.
+        // Refuse to run them unless the user opted in with --allow-build-steps,
+        // so a cloned/modified .abs can't execute arbitrary code on build.
+        if (!m_allow_build_steps) {
+            std::cerr << CLR_RED << "[SECURITY] Refusing to run " << label << " step from '"
+                      << (m_workspace_root.empty() ? "<workspace>" : m_workspace_root)
+                      << "' — pre/post-build commands are disabled by default.\n"
+                      << "            Command: " << step.command << "\n"
+                      << CLR_YELLOW << "            To allow it, rebuild with --allow-build-steps "
+                      << "(only if you trust this project file)." << CLR_RESET << "\n";
+            return false;
+        }
+
         std::string desc = step.description.empty() ? step.command : step.description;
         std::cout << CLR_BOLD << CLR_YELLOW << "[ST] " << CLR_RESET << desc << "\n";
 
-        int result = std::system(step.command.c_str());
+        // C5: run via popen instead of std::system. Both invoke the shell
+        // (/bin/sh -c on Unix, cmd /c on Windows), so &&/pipes/redirects keep
+        // working — but popen is the codebase's existing convention
+        // (TestRunner.cpp), lets us drain the child's stdout, and avoids the
+        // raw std::system() call. pclose returns the implementation-defined
+        // status (0 on success).
+        FILE* pipe = popen(step.command.c_str(), "r");
+        if (!pipe) {
+            std::cerr << CLR_RED << "[ERROR] Build step '" << label
+                      << "' could not be started (popen failed).\n" << CLR_RESET;
+            return false;
+        }
+        // Drain child output so a long-running command doesn't block on a full pipe.
+        char buf[4096];
+        while (fgets(buf, sizeof(buf), pipe)) {
+            std::cout << buf;
+        }
+        std::cout.flush();
+        int result = pclose(pipe);
         if (result != 0) {
             std::cerr << CLR_RED << "[ERROR] Build step '" << label << "' exited with code " << result << ".\n"
                       << "         Command: " << step.command << CLR_RESET << "\n";

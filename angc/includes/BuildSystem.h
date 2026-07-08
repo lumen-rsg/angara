@@ -53,6 +53,12 @@ namespace angara {
         /// TOOL-2: forces a full rebuild, ignoring the incremental cache.
         void set_force_rebuild(bool v) { m_force_rebuild = v; }
 
+        /// C5: opt-in gate for pre/post-build shell commands. Build steps from
+        /// .abs files are NOT executed unless the user passes
+        /// --allow-build-steps, so a cloned/modified .abs can't run arbitrary
+        /// code on `angc build` without explicit consent.
+        void set_allow_build_steps(bool v) { m_allow_build_steps = v; }
+
         /// Returns the resolved packages (available after a successful build).
         const std::vector<ResolvedPackage>& get_resolved_packages() const {
             return m_resolved_packages;
@@ -72,6 +78,7 @@ namespace angara {
         // TOOL-2: parallel + incremental compilation flags.
         int m_jobs = 0;
         bool m_force_rebuild = false;
+        bool m_allow_build_steps = false;  // C5: opt-in gate for build commands
 
         // TOOL-1: package manager integration.
         std::string m_packages_dir;

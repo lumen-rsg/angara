@@ -39,6 +39,7 @@ struct CliFlags {
     std::string error_format = "text";
     int jobs = 0;           // TOOL-2: 0 = auto (hardware_concurrency)
     bool force_rebuild = false;  // TOOL-2: ignore incremental cache
+    bool allow_build_steps = false;  // C5: opt-in for pre/post-build commands
 };
 
 // Free functions (declared here, defined in CliUtils.cpp / HelpText.cpp / etc.)

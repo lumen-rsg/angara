@@ -13,6 +13,7 @@ static void applyCliFlags(CLI& cli, BuildSystem& builder) {
     const auto& flags = cli.getFlags();
     if (flags.jobs > 0) builder.set_jobs(flags.jobs);
     if (flags.force_rebuild) builder.set_force_rebuild(true);
+    if (flags.allow_build_steps) builder.set_allow_build_steps(true);
     if (flags.release) builder.set_build_mode(BuildMode::RELEASE);
     if (flags.debug) builder.set_build_mode(BuildMode::DEBUG);
 }

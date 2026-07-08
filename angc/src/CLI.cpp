@@ -76,6 +76,12 @@ void CLI::parseFlags(std::vector<std::string>& args) {
             // TOOL-2: force full rebuild (ignore incremental cache)
             m_flags.force_rebuild = true;
             args.erase(args.begin() + i);
+        } else if (args[i] == "--allow-build-steps") {
+            // C5: opt in to running pre/post-build shell commands from .abs
+            // files (refused by default to prevent a cloned .abs from running
+            // arbitrary code on `angc build`).
+            m_flags.allow_build_steps = true;
+            args.erase(args.begin() + i);
         } else {
             ++i;
         }
