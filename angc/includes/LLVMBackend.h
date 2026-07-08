@@ -37,9 +37,12 @@ namespace angara {
         /// @param errorHandler  Error handler for reporting codegen failures.
         /// @param target_triple LLVM target triple (empty = host default).
         /// @param freestanding  If true, skip libc dependencies.
+        /// @param kernel        If true, emit a kernel-mode object (no entry
+        ///                      point, kernel runtime subset, no libc link).
         LLVMBackend(TypeChecker& type_checker, ErrorHandler& errorHandler,
                     const std::string& target_triple = "",
                     bool freestanding = false,
+                    bool kernel = false,
                     bool dump_ir = false,
                     bool debug = false,
                     bool emit_llvm = false,
@@ -429,6 +432,7 @@ namespace angara {
         llvm::Value* m_pending_callback_context = nullptr;
 
         bool m_freestanding = false;
+        bool m_kernel = false;
         bool m_dump_ir = false;
         bool m_emit_llvm = false;
         bool m_debug = false;

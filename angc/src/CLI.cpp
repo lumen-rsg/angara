@@ -40,6 +40,13 @@ void CLI::parseFlags(std::vector<std::string>& args) {
         } else if (args[i] == "--freestanding") {
             m_flags.freestanding = true;
             args.erase(args.begin() + i);
+        } else if (args[i] == "--kernel") {
+            // Kernel-mode target: emit a relocatable object with the kernel
+            // runtime subset, no _start/main, no libc link step. Mutually
+            // exclusive with --freestanding (kernel keeps the full runtime,
+            // just minus libc-incompatible generators).
+            m_flags.kernel = true;
+            args.erase(args.begin() + i);
         } else if (args[i] == "--nostdlib") {
             m_flags.nostdlib = true;
             args.erase(args.begin() + i);

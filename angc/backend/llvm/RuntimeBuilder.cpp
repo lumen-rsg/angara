@@ -7,8 +7,8 @@ using namespace llvm;
 
 namespace angara {
 
-RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>& builder, bool freestanding, unsigned jmp_buf_size)
-    : m_ctx(context), m_module(module), m_builder(builder), m_freestanding(freestanding), m_jmp_buf_size(jmp_buf_size) {
+RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>& builder, bool freestanding, bool kernel, unsigned jmp_buf_size)
+    : m_ctx(context), m_module(module), m_builder(builder), m_freestanding(freestanding), m_kernel(kernel), m_jmp_buf_size(jmp_buf_size) {
 }
 
 RuntimeBuilder::~RuntimeBuilder() = default;
@@ -18,6 +18,11 @@ void RuntimeBuilder::generateRuntime() {
 
     if (m_freestanding) {
         generateFreestandingStubs();
+        return;
+    }
+
+    if (m_kernel) {
+        generateKernelRuntime();
         return;
     }
 
@@ -186,9 +191,13 @@ void RuntimeBuilder::generateTypes() {
         ArrayType::get(Type::getInt8Ty(m_ctx), 64)
     }, "AngaraMutex");
 
+    // InternalLinkage (not CommonLinkage): the global has an explicit zero
+    // initializer, so it is a real .bss symbol, never COMMON. COMMON symbols
+    // are rejected by the Linux module loader ("please compile with -fno-common"),
+    // which matters for the --kernel target.
     m_g_exception_chain = new GlobalVariable(
         m_module, PointerType::get(m_ctx, 0),
-        false, GlobalValue::CommonLinkage,
+        false, GlobalValue::InternalLinkage,
         ConstantPointerNull::get(PointerType::get(m_ctx, 0)),
         "__ang_exception_chain");
 

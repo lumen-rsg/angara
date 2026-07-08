@@ -1,0 +1,9 @@
+// Kernel-mode gate test: `throw` must be rejected under --kernel (E900).
+// expect: E900
+// mode: --kernel
+export func risky(x as i64) -> i64 {
+    if (x < 0) {
+        throw Exception("negative value");
+    }
+    return x * 2;
+}

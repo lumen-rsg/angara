@@ -1,0 +1,8 @@
+// Kernel-mode gate test: `spawn()` must be rejected under --kernel (E902).
+// expect: E902
+// mode: --kernel
+func work() -> i64 { return 1; }
+export func main() -> i64 {
+    let t = spawn(work);
+    return 0;
+}

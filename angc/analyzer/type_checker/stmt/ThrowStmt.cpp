@@ -2,6 +2,10 @@
 namespace angara {
 
     void TypeChecker::visit(std::shared_ptr<const ThrowStmt> stmt) {
+        if (m_is_in_kernel_mode) {
+            error(stmt->keyword, "'throw' is not allowed in --kernel mode (exceptions require setjmp/longjmp/printf/exit, which the kernel does not provide). Use return codes or 'match' instead.", "E900");
+            return;
+        }
         stmt->expression->accept(*this);
         auto thrown_type = popType();
 

@@ -25,8 +25,10 @@ void RuntimeBuilder::generateMemoryManagement() {
     auto* i8_ptr  = PointerType::get(m_ctx, 0);
 
     // --- Thread-state TLS (used by thread setup codegen) ---
+    // InternalLinkage (not CommonLinkage): COMMON TLS symbols are rejected by
+    // the Linux module loader; the explicit zero init makes this a .tbss symbol.
     m_g_thread_state_tls = new GlobalVariable(
-        m_module, i8_ptr, false, GlobalValue::CommonLinkage,
+        m_module, i8_ptr, false, GlobalValue::InternalLinkage,
         ConstantPointerNull::get(i8_ptr), "__ang_rt_thread_state");
     m_g_thread_state_tls->setThreadLocal(true);
 

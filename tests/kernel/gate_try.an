@@ -1,0 +1,10 @@
+// Kernel-mode gate test: `try`/`catch` must be rejected under --kernel (E901).
+// expect: E901
+// mode: --kernel
+export func main() -> i64 {
+    try {
+        return 1;
+    } catch (e as Exception) {
+        return 0;
+    }
+}

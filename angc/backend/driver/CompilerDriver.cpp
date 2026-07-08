@@ -673,6 +673,7 @@ namespace angara {
         // dependencies (safe without lock since shared_ptr is thread-safe for
         // reads).  New cache insertions are locked below.
         TypeChecker typeChecker(*this, errorHandler, disc.name);
+        typeChecker.set_kernel_mode(m_kernel_mode);
         try {
             if (!typeChecker.check(statements)) {
                 std::lock_guard<std::mutex> lock(m_cache_mutex);
@@ -733,7 +734,7 @@ namespace angara {
 
         try {
             LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple,
-                                     m_freestanding, m_dump_ir, m_debug,
+                                     m_freestanding, m_kernel_mode, m_dump_ir, m_debug,
                                      m_emit_llvm, m_lto, m_dwarf_version);
             if (!m_build_dir.empty()) {
                 llvmBackend.set_output_dir(m_build_dir);
@@ -963,6 +964,7 @@ namespace angara {
         if (errorHandler.hadError()) { errorHandler.printSummary(); m_had_error = true; return nullptr; }
 
         TypeChecker typeChecker(*this, errorHandler, module_name);
+        typeChecker.set_kernel_mode(m_kernel_mode);
         try {
         if (!typeChecker.check(statements)) { errorHandler.printSummary(); m_had_error = true; return nullptr; }
         } catch (const std::exception& e) {
@@ -994,7 +996,7 @@ namespace angara {
                 return nullptr;
             }
 
-            LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding, m_dump_ir, m_debug, m_emit_llvm, m_lto, m_dwarf_version);
+            LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding, m_kernel_mode, m_dump_ir, m_debug, m_emit_llvm, m_lto, m_dwarf_version);
             if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
                 m_had_error = true;
                 return nullptr;

@@ -2,6 +2,10 @@
 namespace angara {
 
     void TypeChecker::visit(std::shared_ptr<const TryStmt> stmt) {
+        if (m_is_in_kernel_mode) {
+            error(stmt->catchName, "'try'/'catch' is not allowed in --kernel mode (exceptions require setjmp/longjmp/printf/exit, which the kernel does not provide). Use return codes or 'match' instead.", "E901");
+            return;
+        }
         stmt->tryBlock->accept(*this, stmt->tryBlock);
 
         m_symbols.enterScope();

@@ -49,8 +49,11 @@ public:
     /// @param module       Target LLVM module to emit into.
     /// @param builder      IR builder for generating instructions.
     /// @param freestanding If true, generates stubs instead of libc-dependent implementations.
+    /// @param kernel       If true, generates the kernel-mode runtime subset (full
+    ///                     collections/strings, kernel IO via printk, no exceptions/
+    ///                     threads/glibc-IO). Mutually exclusive with freestanding.
     RuntimeBuilder(llvm::LLVMContext& context, llvm::Module& module, llvm::IRBuilder<>& builder,
-                   bool freestanding = false, unsigned jmp_buf_size = 1024);
+                   bool freestanding = false, bool kernel = false, unsigned jmp_buf_size = 1024);
 
     /// Destructor — defined in RuntimeBuilder.cpp where RuntimeBuilder is complete.
     ~RuntimeBuilder();
@@ -223,6 +226,15 @@ private:
     void generateMiscOps();
     /// Generates IO functions: print, println, write, flush, read_line, read_all.
     void generateIOOps();
+    /// Generates the kernel-mode runtime subset (full collections/strings +
+    /// kernel IO via printk; no exceptions/threads/glibc-IO).
+    void generateKernelRuntime();
+    /// Emits no-op stubs for exception runtime symbols (needed because
+    /// generateModuleAPIVTable references __ang_exception_new/__ang_throw).
+    void stubKernelExceptions();
+    /// Generates kernel IO: print/println/write route to angara_kernel_print
+    /// (shim → printk); flush is a no-op; read_line/read_all return nil.
+    void generateKernelIO();
     /// Generates minimal stub functions for freestanding (bare-metal) targets.
     void generateFreestandingStubs();
     /// Builds the AngaraAPI vtable struct for native module interop.
@@ -345,6 +357,7 @@ private:
     llvm::FunctionCallee m_fn_rt_safepoint;
 
     bool m_freestanding = false;
+    bool m_kernel = false;
     unsigned m_jmp_buf_size = 1024;   ///< Safe minimum jmp_buf size for the target (see LLVMBackend::getJmpBufSize)
 };
 

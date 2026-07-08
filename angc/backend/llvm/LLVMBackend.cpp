@@ -38,8 +38,8 @@ unsigned LLVMBackend::getJmpBufSize(const llvm::Triple& target) {
     return 1024;      // conservative fallback for unknown targets
 }
 
-LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool dump_ir, bool debug, bool emit_llvm, bool lto, int dwarf_version)
-    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm), m_lto(lto), m_dwarf_version(dwarf_version) {
+LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool kernel, bool dump_ir, bool debug, bool emit_llvm, bool lto, int dwarf_version)
+    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_kernel(kernel), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm), m_lto(lto), m_dwarf_version(dwarf_version) {
     ctx = std::make_unique<llvm::LLVMContext>();
     mod = std::make_unique<llvm::Module>("angara_module", *ctx);
     builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
@@ -79,7 +79,7 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
         m_di_cu = diCU;
     }
 
-    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding, getJmpBufSize(targetTriple));
+    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding, m_kernel, getJmpBufSize(targetTriple));
     rt->generateRuntime();
     objType = rt->getAngaraObjType();
     // C7: build the canonical header via an explicit vector (NOT a braced-init-
@@ -148,7 +148,7 @@ LLVMBackend::generateIR(const std::vector<std::shared_ptr<Stmt>>& stmts,
         auto func = std::dynamic_pointer_cast<const FuncStmt>(stmt);
         if (func && func->name.lexeme == "main") { has_user_main = true; break; }
     }
-    if (has_user_main) {
+    if (has_user_main && !m_kernel) {
         codegenMainFunction(stmts, moduleName, allMods);
     }
     return {std::move(mod), std::move(ctx)};
@@ -164,7 +164,9 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
         auto func = std::dynamic_pointer_cast<const FuncStmt>(stmt);
         if (func && func->name.lexeme == "main") { has_user_main = true; break; }
     }
-    if (has_user_main) {
+    // Kernel mode: emit no entry point (_start/main). The module's init is the
+    // C-side init_module, which must call __ang_strlit_init_<module> first.
+    if (has_user_main && !m_kernel) {
         codegenMainFunction(stmts, moduleName, allMods);
     }
     std::string base = m_output_dir.empty()

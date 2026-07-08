@@ -112,7 +112,7 @@ ANGC_SRCS := $(shell find angc -name "*.cpp")
 ANGC_OBJS := $(patsubst %.cpp,build/obj/%.o,$(ANGC_SRCS))
 ANGC_OUT  := build/angc
 
-.PHONY: all logo clean install uninstall lint install_vim uninstall_vim test test-ci test-cpp test-chaperone test-lang
+.PHONY: all logo clean install uninstall lint install_vim uninstall_vim test test-ci test-cpp test-chaperone test-lang test-kernel
 
 all: logo $(ANGC_OUT)
 	@printf "$(BOLD)$(GREEN)>>> Build Completed Successfully <<<$(RESET)\n"
@@ -528,14 +528,21 @@ else
 	@./tests/lang/run_tests.sh ./$(ANGC_OUT) || true
 endif
 
+# Kernel-mode gate suite (try/spawn/Mutex/native-attach → E900-E903, plus
+# positive: valid --kernel code emits a relocatable object with no entry point).
+test-kernel: $(ANGC_OUT)
+	@printf "$(CYAN)[TS] $(RESET) Running kernel-mode gate tests\n"
+	@./tests/kernel/run_kernel_tests.sh ./$(ANGC_OUT)
+
 # Aggregate: all tests (local use — non-fatal).
-test: test-cpp test-chaperone test-lang
+test: test-cpp test-chaperone test-lang test-kernel
 
 # Aggregate: all tests (CI use — failures propagate).
 test-ci:
 	@$(MAKE) test-cpp
 	@$(MAKE) test-chaperone
 	@$(MAKE) test-lang CI_MODE=1
+	@$(MAKE) test-kernel
 
 clean:
 	@printf "$(RED)[CL] $(RESET) Cleaning build directory...\n"

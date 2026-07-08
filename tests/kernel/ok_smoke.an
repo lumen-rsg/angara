@@ -1,0 +1,12 @@
+// Kernel-mode gate test: valid --kernel code compiles to a relocatable object
+// with no entry point. This is the positive case.
+// expect: PASS (object emitted, no _start/main)
+// mode: --kernel
+export func angara_sum(a as i64, b as i64) -> i64 {
+    let xs = [a, b];
+    let total = 0;
+    for (item in xs) {
+        total = total + item;
+    }
+    return total;
+}

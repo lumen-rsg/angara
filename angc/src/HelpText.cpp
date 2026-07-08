@@ -50,6 +50,7 @@ void print_help() {
     std::cout << "  --target <triple>           Cross-compile for target triple\n";
     std::cout << "  --sysroot <path>            Set sysroot for cross-compilation linker\n";
     std::cout << "  --freestanding              Freestanding mode (no libc, bare-metal)\n";
+    std::cout << "  --kernel                    Kernel mode (emit relocatable .o for a Linux module)\n";
     std::cout << "  --nostdlib                  Don't link standard libraries\n";
     std::cout << std::endl;
 }

@@ -71,6 +71,10 @@ namespace angara {
         void set_nostdlib(bool val) { m_nostdlib = val; }
         bool is_nostdlib() const { return m_nostdlib; }
 
+        /// Enables or disables kernel-mode (Linux loadable module) target.
+        void set_kernel_mode(bool val) { m_kernel_mode = val; }
+        bool is_kernel_mode() const { return m_kernel_mode; }
+
         /// Enables or disables check-only mode (lex + parse + typecheck, skip LLVM codegen).
         void set_check_only(bool val) { m_check_only = val; }
         bool is_check_only() const { return m_check_only; }
@@ -230,6 +234,7 @@ namespace angara {
 
         bool m_freestanding = false;
         bool m_nostdlib = false;
+        bool m_kernel_mode = false;
         bool m_check_only = false;
         bool m_quiet = false;
         bool m_dump_ir = false;

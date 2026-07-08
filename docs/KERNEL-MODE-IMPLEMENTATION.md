@@ -1,6 +1,42 @@
 # Angara Kernel Mode — Implementation Plan & Linux Driver Guide
 
-> **Status:** Design document. Based on the angc codebase state as of the soundness-audit close-out (July 2026). This is an engineering plan, not a finished feature.
+> **Status: FULLY VERIFIED END-TO-END (July 2026).** The `/dev/angara`
+> character driver built from `.an` source loads and runs inside a running
+> Linux kernel on asahi arm64:
+> - `insmod angara_drv.ko` → `angara: /dev/angara ready (major=503)` (the
+>   Angara `__ang_strlit_init_driver` + record-building smoke test both ran
+>   in-kernel, allocating through `kmalloc`/`kstrdup` via the libc shim).
+> - `echo 7 > /dev/angara` → `head -c8 /dev/angara` → `0000000000000001`
+>   round-trip through two exported Angara funcs (`angara_format`, which
+>   builds a string; `angara_status`, which builds a record).
+>
+> Phases 1–5 are implemented and verified:
+> - `--kernel` flag, curated kernel runtime (`generateKernelRuntime` + kernel
+>   IO via `printk`), entry-point suppression (no `_start`/`main`), libc link
+>   skip with `-o` honoring + cross-device (`EXDEV`) fallback.
+> - Frontend hard-error gates: `throw` E900, `try`/`catch` E901, `spawn` E902,
+>   `Mutex` E903, `attach` of a native module E904. Gated tests in
+>   `tests/kernel/` (`make test-kernel`, 4/4).
+> - The worked `/dev/angara` driver, libc shim (`kernel/kernel_runtime.c`),
+>   and Kbuild bridge in `kernel/`.
+>
+> **Two findings from the actual insmod:**
+> 1. **A gcc-built kernel works with `CC=gcc`** — the original doc's "must use
+>    CC=clang" was overly conservative. Angara objects are plain relocatable
+>    ELF with standard relocations, so they link cleanly against either
+>    toolchain. `CC=clang` only works if the *kernel itself* was clang-built
+>    (a gcc-built kernel's CFLAGS use gcc-specific flags clang rejects). For
+>    the asahi host (gcc-built), use `CC=gcc`.
+> 2. **The Linux module loader rejects COMMON symbols** (`__ang_exception_chain`
+>    was `CommonLinkage` → insmod failed with "please compile with
+>    -fno-common"). Fixed at the compiler source: both `__ang_exception_chain`
+>    (`RuntimeBuilder.cpp:194`) and `__ang_rt_thread_state` (`Memory.cpp:28`)
+>    are now `InternalLinkage` with explicit zero init, so all `--kernel`
+>    modules are COMMON-free by default.
+>
+> **Several load-bearing assumptions in the original design were CORRECTED by
+> reading the source** — these are marked `✅ CORRECTION` below. The original
+> prose is retained for context; the corrections are authoritative.
 
 ## TL;DR
 
@@ -54,23 +90,33 @@ Runtime hooks:
 vtable whose functions wrap `kmalloc`/`krealloc`/`kfree`. Every Angara allocation
 then lands in the kernel allocator with zero changes to the codegen.
 
-> ⚠️ **Verify before relying on this (this is the single biggest risk in the plan).**
-> Spot-check `angc/backend/llvm/rt/Collections.cpp` shows the swappable allocator is
-> used for object **headers** (`__ang_rt_alloc`), but several runtime constructors
-> allocate **backing buffers** with a *raw libc* `malloc_fn`/`realloc_fn` call:
+> ⚠️ **✅ CORRECTION (verified by source, July 2026): the "~30 bypass sites" do
+> NOT block kernel mode.** Every `malloc_fn`/`realloc_fn`/`free_fn` call across
+> `Collections.cpp`, `Strings.cpp`, `Conversions.cpp`, `IO.cpp`,
+> `ControlFlow.cpp`, `ModuleAPI.cpp`, `ExprCodegen.cpp`, `LLVMBackend.cpp`, and
+> `TopLevel.cpp` resolves to the *single* module-level `malloc`/`realloc`/`free`
+> declaration in `declareCLibFunctions` (`RuntimeBuilder.cpp:227-229`). So if the
+> kernel shim maps those three to `kmalloc`/`krealloc`/`kfree`, **every**
+> allocation path — vtable-backed *and* the "raw" call sites *and* the interior
+> `free()` calls in `__ang_rt_finalize` (`Memory.cpp:310-438`) — lands in the
+> kernel allocator uniformly. Verified: a `--kernel` object's UND surface is
+> exactly `malloc/realloc/free/memcpy/snprintf/strdup/strlen` (`nm -u`).
+>
+> The original concern below (rewrite the ~30 codegen sites) is now **deferred
+> optional hardening**, not a prerequisite. It would only matter if you wanted a
+> non-`kmalloc` allocator routed via `__ang_allocator_set` (e.g. a per-CPU arena).
+>
+> Original notes (retained for context, now non-blocking):
+> Spot-check `Collections.cpp` showed the swappable allocator was used for object
+> **headers** (`__ang_rt_alloc`) but several runtime constructors allocate
+> **backing buffers** with a raw libc `malloc_fn`/`realloc_fn` call: the
 > `RawArray` element buffer (`Collections.cpp:467`), list growth (`:151`,`:512`),
-> record entry table (`:782`). These bypass `__ang_allocator_set`.
-> **This means** that in kernel mode, lists/records/strings (when their backing
-> store grows) would call libc `malloc` directly — which doesn't exist in a kernel.
-> **Two fixes are possible** (pick before Phase 1):
->   (a) **CodeGen fix (recommended):** change those ~5 raw `malloc_fn`/`realloc_fn`
->       call sites to route through `__ang_rt_alloc`/a runtime realloc hook, so the
->       swap is honored uniformly. Small, localized change.
->   (b) **Shim fix:** make the kernel's libc-compat layer provide `malloc`/`realloc`
->       that wrap `kmalloc`. Fragile (header sizing, `free` size ambiguity).
-> Audit every `CreateCall(malloc_fn...)` / `realloc_fn` / `strcmp_fn` in
-> `Collections.cpp` and `Memory.cpp` — that enumeration *is* the shim's required
-> surface.
+> record entry table (`:782`). There are ~30 such sites tree-wide
+> (`Strings.cpp`, `Conversions.cpp`, `IO.cpp`, `ControlFlow.cpp`, `ModuleAPI.cpp`,
+> `ExprCodegen.cpp`, `LLVMBackend.cpp`, `TopLevel.cpp`). All funnel through the
+> single `malloc`/`realloc`/`free` declaration, so the shim handles them. The
+> swappable-allocator (`__ang_allocator_set`) routing of these sites remains a
+> future optimization, not a v1 requirement.
 
 ### 1.3 FFI (`foreign func`)
 
@@ -103,6 +149,21 @@ that lets C call back into Angara (the trampoline path, now leak-free — see M2
 ## 2. What needs to be built — work breakdown
 
 ### Phase 1: Kernel runtime shim (the core missing piece)
+
+> **✅ CORRECTION (verified by source, July 2026): the shim provides NO `__ang_*`
+> symbols.** Every `__ang_*` runtime function is emitted *directly into the
+> compiled module* as `InternalLinkage` IR by `RuntimeBuilder::createRuntimeFunc`
+> (`RuntimeBuilder.cpp:46-52`). There is no `libangara_rt.a`; the `rt/*.cpp` files
+> are `RuntimeBuilder` methods that *generate IR*. `__ang_fatal` (referenced in
+> the original sketch below) **does not exist anywhere** in the codebase.
+>
+> The real shim (`kernel/kernel_runtime.c`, implemented) is a pure **libc bridge**:
+> it maps `malloc`/`realloc`/`free`/`strdup` → `kmalloc`/`krealloc`/`kfree`/
+> `kstrdup`, provides `angara_kernel_print*` (the entry points `generateKernelIO`
+> calls, → `printk`), and defensive `exit`/`strtod` stubs. The original sketch's
+> `__ang_allocator_set` extern + vtable-swap is unnecessary: satisfying
+> `malloc`/`realloc`/`free` directly routes all allocations to the kernel
+> allocator. The swappable-allocator feature remains orthogonal/future.
 
 The freestanding runtime still emits libc-backed allocator defaults. For a kernel,
 you need a small C shim that the Angara program links against, providing:
@@ -376,15 +437,42 @@ is. Do not estimate them; read the code.
    unwinding, or is it setjmp-based? `ControlFlow.cpp` uses `setjmp`/`__ang_try_*`
    — likely portable to kernel with a `setjmp` from kernel headers, but verify a
    throw inside Angara code (not crossing FFI) actually unwinds in-kernel.
+   **✅ ANSWERED (verified by source):** try/catch is **setjmp/longjmp-based,
+   not DWARF-unwind** — `cgTry` calls `setjmp` *directly* via
+   `mod->getFunction("setjmp")` (`StmtCodegen.cpp:492`), `__ang_throw` calls
+   `longjmp` (`ControlFlow.cpp:276`). BUT: `declareCLibFunctions()` (which
+   declares setjmp) is skipped in freestanding mode, so `getFunction("setjmp")`
+   returns null → `CreateCall(null)` **crashes the compiler at IR-build time** on
+   any `try`/`catch` in freestanding mode (and the FFI trampoline at
+   `LLVMBackend.cpp:1010` has the same defect). For `--kernel` we chose to
+   **hard-error try/catch/throw** (E900/E901) in the type-checker, sidestepping
+   this entirely. Supporting in-kernel exceptions would require declaring
+   setjmp/longjmp in the kernel path + providing them in the shim + emitting a
+   real `__ang_throw` — deferred.
 2. **Object file ABI:** does the Angara-emitted `.o` use relocations the kernel
    linker accepts? Test with `ld -r angara_module.o -o combined.o` early.
+   **✅ ANSWERED:** the Angara object is a standard ELF relocatable
+   (`Reloc::PIC_`, `CodeModel::Small`); the C-glue `extern` decls resolve to
+   the object's mangled exports (`__ang_<mod>_<fn>`), and `AngaraObject` =
+   `{i32 tag, i64 payload}` (16 B) matches the C `{int tag; long payload}`.
+   `ld -r` of glue + Angara object succeeds (ABI verified). arm64 modules are
+   position-independent, so **`Reloc::PIC_` is correct** for the native-host
+   target — the original "want `Reloc::Static`" note is wrong for arm64.
 3. **String/list/record allocation is NOT fully routed through the swappable
    allocator** (see the ⚠️ in §1.2). The header allocations are; the backing
    buffers (raw `malloc_fn`/`realloc_fn` in `Collections.cpp`) are not. This must
    be fixed in codegen (route them through `__ang_rt_alloc`) **before** Phase 1's
    shim can be trusted. This is now the first real work item, not an open question.
+   **✅ CORRECTION:** this was the original plan's first work item and it is
+   **not required**. All "raw" sites resolve to the single `malloc`/`realloc`/
+   `free` declaration, which the shim maps to `kmalloc`/`krealloc`/`kfree`. See
+   the §1.2 correction above. Routed through the swappable allocator only
+   matters for a future non-kmalloc allocator.
 4. **Concurrency:** kernel code is preemptible/SMP. The Angara allocator vtable
    swap is global. Decide whether per-CPU allocators or a spinlock-guarded
    allocator is needed (kmalloc is already GFP-safe, so likely fine).
+   **✅ RESOLVED for v1:** the kernel shim provides plain `kmalloc`/`kfree`
+   (`GFP_KERNEL`, already SMP-safe); `__ang_allocator` is read-only in this
+   model. Per-CPU arenas remain a future optimization.
 
 Resolve these with small spike programs in QEMU before building the full driver.

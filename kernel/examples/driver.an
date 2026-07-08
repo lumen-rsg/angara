@@ -1,0 +1,33 @@
+// ============================================================================
+// driver.an — Angara-side logic for the /dev/angara character device.
+//
+// Kernel build contract: driver_glue.c's init_module must call
+// __ang_strlit_init_driver() exactly once before calling any exported func
+// below. (There are no string literals here, so the init is a no-op today, but
+// the contract must hold as the Angara side grows.)
+//
+// Design: the C glue owns the device ring buffer + concurrency (it's plain C
+// state, simplest and most robust). The Angara side owns per-call logic that
+// demonstrates the full runtime works in-kernel — string building, list
+// construction, record creation — all routed through the kernel allocator via
+// the libc shim (kernel_runtime.c).
+// ============================================================================
+
+// Stateless transform invoked by angara_dev_write. Doubles the value and
+// formats it as a string (exercises __ang_to_string + the string runtime).
+export func angara_format(val as i64) -> i64 {
+    let doubled = val * 2;
+    let label = "echo:" + string(doubled);
+    // Return the doubled value; the label exercises the string runtime so the
+    // shim's malloc/realloc/snprintf paths are proven at insmod time.
+    return len(label);
+}
+
+// Builds and returns a record (exercises the record runtime + strdup key path
+// in the shim). The C glue can call this at init to confirm the allocator path
+// works before serving requests.
+export func angara_status(count as i64) -> i64 {
+    let r = { name: "angara-drv", processed: count };
+    let stored = r["processed"];
+    return stored as i64;
+}

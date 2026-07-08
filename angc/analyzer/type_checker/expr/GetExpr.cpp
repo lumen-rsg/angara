@@ -317,7 +317,9 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::MUTEX) {
-        if (property_name == "lock" || property_name == "unlock") {
+        if (m_is_in_kernel_mode) {
+            error(expr.name, "'Mutex' operations are not allowed in --kernel mode (kernel has no pthreads). Use kernel mutex/spinlock APIs instead.", "E903");
+        } else if (property_name == "lock" || property_name == "unlock") {
             property_type = std::make_shared<FunctionType>(std::vector<std::shared_ptr<Type>>{}, m_type_nil);
         } else {
             error(expr.name, "Type 'Mutex' has no property named '" + property_name + "'. Available: lock, unlock.", "E342");

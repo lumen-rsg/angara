@@ -29,6 +29,7 @@ struct CliFlags {
     bool emit_llvm = false;
     bool freestanding = false;
     bool nostdlib = false;
+    bool kernel = false;       // Kernel-mode target (Linux loadable module)
     bool release = false;
     bool debug = false;
     int dwarf_version = 0;  // 0 = auto-detect by platform

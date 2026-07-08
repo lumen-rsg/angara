@@ -118,6 +118,7 @@ int angara::CLI::cmdCompileSingleFile(const std::string& source_file) {
     if (!resolved_target.empty()) driver.set_target(resolved_target);
     if (!m_flags.sysroot.empty()) driver.set_sysroot(m_flags.sysroot);
     if (m_flags.freestanding) driver.set_freestanding(true);
+    if (m_flags.kernel) driver.set_kernel_mode(true);
     if (m_flags.nostdlib) driver.set_nostdlib(true);
     if (m_flags.dump_ir) driver.set_dump_ir(true);
     if (m_flags.emit_llvm) driver.set_emit_llvm(true);
@@ -166,6 +167,40 @@ int angara::CLI::cmdCompileSingleFile(const std::string& source_file) {
         std::cout << CLR_CYAN << "  Link with your bare-metal toolchain, e.g.:" << CLR_RESET << "\n";
         std::cout << CLR_GRAY << "  aarch64-unknown-none-elf-gcc -nostdlib -T linker.ld -o kernel "
                   << obj_output << CLR_RESET << "\n";
+        return 0;
+    }
+
+    // Kernel mode: emit a relocatable object for linking into a Linux kernel
+    // module via Kbuild. Do NOT invoke the hosted clang link step (no libc,
+    // no _start, no PIE/pthread/m).
+    if (m_flags.kernel) {
+        // Honor -o if given; otherwise default to <source-base>.o. (The
+        // freestanding block above has the same -o honoring via output_name.)
+        std::string obj_output = m_flags.output_name.empty()
+            ? (base_name + ".o")
+            : m_flags.output_name;
+        const auto& objs = driver.get_generated_object_files();
+        if (objs.size() == 1) {
+            // fs::rename cannot cross filesystem boundaries (the build cache
+            // may live on a different device than -o, e.g. /tmp). Fall back to
+            // copy+remove on EXDEV.
+            std::error_code ec;
+            fs::rename(*objs.begin(), obj_output, ec);
+            if (ec) {
+                fs::copy_file(*objs.begin(), obj_output,
+                              fs::copy_options::overwrite_existing, ec);
+                fs::remove(*objs.begin(), ec);
+            }
+        } else {
+            obj_output = *objs.begin();
+        }
+        auto total_end = std::chrono::high_resolution_clock::now();
+        double total_time = std::chrono::duration<double>(total_end - build_start).count();
+        std::cout << CLR_BOLD << CLR_GREEN << "[OK] " << CLR_RESET << "Kernel object emitted: " << obj_output << CLR_DIM << " (" << total_time << "s)" << CLR_RESET << "\n";
+        std::cout << CLR_CYAN << "  Link into a kernel module via Kbuild, e.g.:" << CLR_RESET << "\n";
+        std::cout << CLR_GRAY << "  obj-m := angara_drv.o" << CLR_RESET << "\n";
+        std::cout << CLR_GRAY << "  angara_drv-y := driver_glue.o kernel_runtime.o " << obj_output << CLR_RESET << "\n";
+        std::cout << CLR_GRAY << "  make -C /lib/modules/$(uname -r)/build M=$(pwd) modules" << CLR_RESET << "\n";
         return 0;
     }
 

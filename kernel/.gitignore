@@ -1,0 +1,13 @@
+# kbuild artifacts
+.*.cmd
+*.o
+*.o.d
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+Module.symvers
+modules.order
+.module-common.o
+# angc incremental cache
+.angara/

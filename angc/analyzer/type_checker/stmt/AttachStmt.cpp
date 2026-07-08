@@ -13,6 +13,14 @@ namespace angara {
             return;
         }
 
+        // --kernel: native modules (.so/.dylib/.dll) are loaded via dlopen at
+        // resolve time, which has no equivalent in a kernel. Refuse them.
+        // Pure-Angara-source modules are compiled in and remain allowed.
+        if (m_is_in_kernel_mode && module_type->is_native) {
+            error(stmt.modulePath, "attach of native module '" + module_path + "' is not allowed in --kernel mode (a kernel has no dynamic loader). Use a pure-Angara module or declare the dependency via 'foreign func'.", "E904");
+            return;
+        }
+
         m_module_resolutions[&stmt] = module_type;
 
         if (!stmt.names.empty()) {

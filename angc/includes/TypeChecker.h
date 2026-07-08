@@ -83,6 +83,9 @@ namespace angara {
         /// Returns true if the checker is currently inside an @unsafe block.
         [[nodiscard]] bool isInUnsafeContext() const { return m_is_in_unsafe_context; }
 
+        /// Enables --kernel mode (hard-error try/spawn/Mutex/native-attach).
+        void set_kernel_mode(bool v) { m_is_in_kernel_mode = v; }
+
     private:
         // --- Expression visitors ---
 
@@ -351,6 +354,7 @@ namespace angara {
         std::map<const AttachStmt*, std::shared_ptr<ModuleType>> m_module_resolutions;
         std::set<UsedNativeSymbol> m_used_native_symbols;
         bool m_is_in_unsafe_context = false;
+        bool m_is_in_kernel_mode = false;   // --kernel: hard-error try/spawn/Mutex/native-attach
 
         // Downward-flowing expected type for bidirectional inference (e.g., list<i64> -> [] element type)
         std::shared_ptr<Type> m_expected_type;

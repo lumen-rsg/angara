@@ -77,8 +77,18 @@ namespace angara {
 
         if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
             if (var_expr->name.lexeme == "spawn") {
+                if (m_is_in_kernel_mode) {
+                    error(expr.paren, "'spawn()' is not allowed in --kernel mode (kernel has no pthreads). Use a kernel workqueue/kthread instead.", "E902");
+                    pushAndSave(&expr, m_type_error);
+                    return {};
+                }
                 check_spawn_call(expr, arg_types);
                 pushAndSave(&expr, m_hadError ? m_type_error : m_type_thread);
+                return {};
+            }
+            if (var_expr->name.lexeme == "Mutex" && m_is_in_kernel_mode) {
+                error(expr.paren, "'Mutex' is not allowed in --kernel mode (kernel has no pthreads). Use kernel mutex/spinlock APIs instead.", "E903");
+                pushAndSave(&expr, m_type_error);
                 return {};
             }
         }
