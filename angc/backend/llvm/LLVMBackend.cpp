@@ -143,6 +143,7 @@ LLVMBackend::generateIR(const std::vector<std::shared_ptr<Stmt>>& stmts,
     moduleName = moduleType ? moduleType->name : "main";
     createStrlitInitFn();
     createAllocatorInitFn();
+    createModFiniFn();
     codegenTopLevelDecls(stmts);
     bool has_user_main = false;
     for (const auto& stmt : stmts) {
@@ -152,6 +153,11 @@ LLVMBackend::generateIR(const std::vector<std::shared_ptr<Stmt>>& stmts,
     if (has_user_main && !m_kernel) {
         codegenMainFunction(stmts, moduleName, allMods);
     }
+    // Build the mod-fini body LAST — makeStr is called during codegen of both
+    // top-level decls AND main (main is skipped in codegenTopLevelDecls, so its
+    // literals are only cached once codegenMainFunction runs). Calling finalize
+    // before main would miss main's string literals.
+    finalizeModFiniFn();
     return {std::move(mod), std::move(ctx)};
 }
 
@@ -160,6 +166,7 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     moduleName = moduleType ? moduleType->name : "main";
     createStrlitInitFn();
     createAllocatorInitFn();
+    createModFiniFn();
     codegenTopLevelDecls(stmts);
     bool has_user_main = false;
     for (const auto& stmt : stmts) {
@@ -171,6 +178,9 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     if (has_user_main && !m_kernel) {
         codegenMainFunction(stmts, moduleName, allMods);
     }
+    // Build the mod-fini body LAST (see generateIR for why — main's literals
+    // are only cached once codegenMainFunction runs).
+    finalizeModFiniFn();
     std::string base = m_output_dir.empty()
         ? "ang_" + moduleName
         : m_output_dir + "/ang_" + moduleName;
@@ -324,6 +334,72 @@ void LLVMBackend::createAllocatorInitFn() {
     // it exists by generate() time. Signature: void(ptr).
     b.CreateCall(mod->getFunction("__ang_allocator_set"),
                  {m_allocator_init_fn->arg_begin()});
+    b.CreateRetVoid();
+}
+
+void LLVMBackend::createModFiniFn() {
+    if (m_mod_fini_fn) return;
+    // External linkage + module-unique name so the C glue's module_exit can
+    // finalize+free the module's persistent heap state (string-literal globals,
+    // module-var globals) — the things only the compiler knows about. The body
+    // is built in a second pass (finalizeModFiniFn) once all string literals
+    // are cached, so it can iterate m_string_literal_cache in one shot. There
+    // is no live-object list to walk (the GC-era alloc-list was deliberately
+    // removed), so fini covers the *enumerable* persistent globals, not every
+    // heap object.
+    auto* fn_type = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(*ctx), false);
+    std::string fini_name = "__ang_mod_fini_" + moduleName;
+    m_mod_fini_fn = llvm::Function::Create(fn_type,
+        llvm::Function::ExternalLinkage,
+        fini_name, mod.get());
+    // Entry block terminated by finalizeModFiniFn (or left ret-void if empty).
+    auto* entry_bb = llvm::BasicBlock::Create(*ctx, "entry", m_mod_fini_fn);
+    llvm::IRBuilder<>(entry_bb).CreateRetVoid();
+}
+
+void LLVMBackend::finalizeModFiniFn() {
+    if (!m_mod_fini_fn) return;
+    // Drop the placeholder ret-void from the entry block and rebuild the body.
+    auto* entry = &m_mod_fini_fn->getEntryBlock();
+    if (auto* term = entry->getTerminator()) term->eraseFromParent();
+    llvm::IRBuilder<> b(entry);
+
+    auto* i8_ptr = llvm::PointerType::get(*ctx, 0);
+    auto* i64_ty = llvm::Type::getInt64Ty(*ctx);
+    auto* zero64 = llvm::ConstantInt::get(i64_ty, 0);
+
+    // For each string-literal global: load it, skip if nil (uninitialized /
+    // unreferenced), else finalize (frees the chars interior) + free (frees the
+    // string header via the vtable), then store nil. Mirrors cgDrop's parent
+    // free at StmtCodegen.cpp:764-766. Module-var globals holding heap objects
+    // would go here too (deferred — driver/timer have none).
+    for (auto& [lit_str, global] : m_string_literal_cache) {
+        (void)lit_str;
+        auto* val = b.CreateLoad(objType, global, "lit");
+        // Nil check: a literal global is zero-initialized; if __ang_strlit_init
+        // never ran (or it's unreferenced) the payload is 0 → skip.
+        auto* tag = b.CreateExtractValue(val, {0}, "tag");
+        auto* is_nil = b.CreateICmpEQ(tag,
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(*ctx), TAG_NIL));
+        auto* free_bb = llvm::BasicBlock::Create(*ctx, "free_lit", m_mod_fini_fn);
+        auto* next_bb = llvm::BasicBlock::Create(*ctx, "next_lit", m_mod_fini_fn);
+        b.CreateCondBr(is_nil, next_bb, free_bb);
+
+        b.SetInsertPoint(free_bb);
+        auto* payload = b.CreateExtractValue(val, {1}, "payload");
+        auto* ptr_i64 = b.CreateBitCast(payload, i64_ty);
+        auto* obj_ptr = b.CreateIntToPtr(ptr_i64, i8_ptr);
+        // Finalize frees the interior (chars buffer) via the vtable; free frees
+        // the string header. Both route through the swapped allocator if any.
+        b.CreateCall(mod->getFunction("__ang_rt_finalize"), {obj_ptr});
+        b.CreateCall(mod->getFunction("__ang_rt_free"), {obj_ptr, zero64});
+        // Clear the global so a second fini call is a no-op (idempotent).
+        b.CreateStore(makeNil(), global);
+        b.CreateBr(next_bb);
+
+        b.SetInsertPoint(next_bb);
+    }
     b.CreateRetVoid();
 }
 

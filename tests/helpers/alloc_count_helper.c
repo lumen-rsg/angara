@@ -60,6 +60,19 @@ long angara_install_counting_allocator(void) {
     return 0;
 }
 
+// The module's generated teardown (ExternalLinkage). The .an program can't
+// declare its own fini as `foreign func` (that collides with the compiler-
+// generated definition), so the helper invokes it. Mirrors the kernel glue's
+// module_exit calling __ang_mod_fini_<mod>.
+#define ANG_FINI_SYM(mod) ANG_PASTE(__ang_mod_fini, mod)
+extern void ANG_FINI_SYM(ANG_ALLOCATOR_MODULE)(void);
+
+// foreign func angara_call_mod_fini() -> i64
+long angara_call_mod_fini(void) {
+    ANG_FINI_SYM(ANG_ALLOCATOR_MODULE)();
+    return 0;
+}
+
 // foreign func angara_alloc_count() -> i64
 long angara_alloc_count(void) {
     return g_alloc_count;

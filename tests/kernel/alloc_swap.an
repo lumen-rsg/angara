@@ -7,6 +7,9 @@ foreign func angara_install_counting_allocator() -> i64;
 foreign func angara_alloc_count() -> i64;
 foreign func angara_free_count() -> i64;
 foreign func angara_reset_count() -> i64;
+// Invoke the compiler-generated __ang_mod_fini_<mod> via the helper (can't
+// declare it as `foreign func` here — that collides with the generated def).
+foreign func angara_call_mod_fini() -> i64;
 
 attach io;
 
@@ -29,12 +32,22 @@ export func main() -> i64 {
     let after = angara_alloc_count();
     let grew = after - before;
 
-    io.println(1, "swap OK: " + string(grew) + " allocs, s=" + s);
+    // 3. Run the module teardown. This frees the module's string-literal
+    //    globals (the literals in this file: "angara", "count=", " list=",
+    //    etc.) through the counting allocator's free slot. Each global free
+    //    → finalize (chars interior) + free (string header) → counts here.
+    let frees_before = angara_free_count();
+    angara_call_mod_fini();
+    let frees_after = angara_free_count();
+    let freed = frees_after - frees_before;
 
-    // 3. Assert: the swap routed traffic (grew > 0 means the counting vtable
-    //    was invoked, not the default libc allocator).
-    if (grew > 0) {
+    io.println(1, "swap OK: " + string(grew) + " allocs, " + string(freed) + " fini frees, s=" + s);
+
+    // 4. Assert both: the swap routed allocations (grew > 0) AND the teardown
+    //    reclaimed the persistent globals (freed > 0). freed == 0 would mean
+    //    the string-literal globals leak — the bug this test guards against.
+    if (grew > 0 && freed > 0) {
         return 0;   // success
     }
-    return 1;       // failure: swap didn't route allocations
+    return 1;       // failure
 }

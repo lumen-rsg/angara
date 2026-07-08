@@ -32,6 +32,7 @@ static inline long ang_unbox_i64(AngaraObject o) {
 // Angara exports (defined in timer.o = timer.an).
 extern void          __ang_strlit_init_timer(void);
 extern void          __ang_allocator_init_timer(void *allocator);
+extern void          __ang_mod_fini_timer(void);
 extern AngaraObject  __ang_timer_on_tick(AngaraObject count);
 extern AngaraObject  __ang_timer_accumulate(AngaraObject history);
 
@@ -88,6 +89,7 @@ static void __exit angara_timer_exit(void) {
     pr_info("angara-timer: disarmed after %ld ticks (final acc=%ld)\n",
             atomic_long_read(&tick_count),
             atomic_long_read(&accumulate_acc));
+    __ang_mod_fini_timer();
     angara_report_arena_stats();
 }
 

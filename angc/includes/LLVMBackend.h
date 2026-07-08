@@ -248,6 +248,15 @@ namespace angara {
         /// (ptr) -> void, which forwards to the internal __ang_allocator_set.
         /// Lets external C (kernel init / host harness) swap the allocator.
         void createAllocatorInitFn();
+        /// Emits the module-qualified external __ang_mod_fini_<module>() -> void,
+        /// which finalizes+frees the module's persistent heap state (string-
+        /// literal globals, module-var globals). Called from module_exit
+        /// (kernel) so rmmod reclaims what only the compiler knows about.
+        void createModFiniFn();
+        /// Builds the __ang_mod_fini body: for each cached string-literal
+        /// global, emit load → nil-check → __ang_rt_finalize + __ang_rt_free.
+        /// Called once at the end of codegen, after makeStr has cached all lits.
+        void finalizeModFiniFn();
 
         /// Extracts the i64 payload from an AngaraObject.
         llvm::Value* getI64(llvm::Value* obj);
@@ -366,6 +375,9 @@ namespace angara {
         // (executed first) and reads zeroinitializer (NIL).
         llvm::Function* m_strlit_init_fn = nullptr;
         llvm::Function* m_allocator_init_fn = nullptr;
+        // Module-teardown fini fn: finalizes+frees persistent globals. Built
+        // eagerly (empty); makeStr appends a per-literal fini as it caches each.
+        llvm::Function* m_mod_fini_fn = nullptr;
 
         std::map<std::string, std::string> constructorLookup;
         std::map<std::string, int> enumVariantIndex;  // "EnumName.VariantName" -> declaration order index

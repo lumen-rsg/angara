@@ -44,6 +44,7 @@ static inline long ang_unbox_i64(AngaraObject o) {
 // --- Angara exports (defined in angara_module.o = driver.an) ---------------
 extern void          __ang_strlit_init_driver(void);
 extern void          __ang_allocator_init_driver(void *allocator);
+extern void          __ang_mod_fini_driver(void);
 extern AngaraObject  __ang_driver_angara_format(AngaraObject val);
 extern AngaraObject  __ang_driver_angara_status(AngaraObject count);
 
@@ -164,6 +165,10 @@ static void __exit angara_mod_exit(void) {
     class_destroy(angara_class);
     cdev_del(&angara_cdev);
     unregister_chrdev(major, "angara");
+    // Reclaim the Angara module's persistent heap state (string-literal globals,
+    // etc.) before reporting arena stats — so freed blocks return to the arena
+    // free list and the stats reflect the finalize/frees.
+    __ang_mod_fini_driver();
     angara_report_arena_stats();
     pr_info("angara: unloaded\n");
 }
