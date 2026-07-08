@@ -2015,12 +2015,24 @@ llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string
     // to TCK_MustTail (guaranteed TCO) only when: callee is on the boxed ABI
     // (not a raw-signature fn), the call supplies exactly ft->getNumParams()
     // args, and the callee returns the boxed objType. Otherwise TCK_Tail.
+    //
+    // FFI: also require the *caller's* parameter count to equal the callee's.
+    // LLVM's musttail verifier rejects "cannot guarantee tail call due to
+    // mismatched parameter counts" when the caller and callee differ in arity
+    // (e.g. a zero-arg function that tail-calls a 1-arg foreign wrapper). TCK_Tail
+    // (a hint, not a guarantee) is always legal, so fall back to it on mismatch.
     llvm::CallInst::TailCallKind tck = llvm::CallInst::TCK_None;
     if (pending_tail) {
         bool exact_arity = (llvmArgs.size() == ft->getNumParams());
         bool callee_boxed = (m_raw_functions.find(mangled) == m_raw_functions.end());
         bool callee_returns_obj = ft->getReturnType() == objType;
-        tck = (exact_arity && callee_boxed && callee_returns_obj && !m_current_raw_return_kind)
+        unsigned caller_params = 0;
+        if (auto* caller = builder->GetInsertBlock()->getParent()) {
+            caller_params = caller->getFunctionType()->getNumParams();
+        }
+        bool caller_callee_arity_match = (caller_params == ft->getNumParams());
+        tck = (exact_arity && callee_boxed && callee_returns_obj
+               && caller_callee_arity_match && !m_current_raw_return_kind)
             ? llvm::CallInst::TCK_MustTail
             : llvm::CallInst::TCK_Tail;
     }
