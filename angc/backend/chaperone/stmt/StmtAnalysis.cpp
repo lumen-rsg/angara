@@ -1300,7 +1300,16 @@ void Chaperone::analyzeStmt(Context& ctx,
         // Merge try + catch paths.
         StateMap merged;
         if (try_term && catch_term) {
-            merged = state;  // Both terminate — nothing falls through.
+            // C2: both blocks terminate, so nothing falls through AFTER the
+            // try/catch — but the finally block (analyzed below on `merged`)
+            // still runs on every path, including the throwing ones. Using the
+            // pre-try `state` here (the old behavior) made the finally see
+            // variables moved/dropped inside the try as Live again, permitting
+            // use-after-move / double-free. The finally must run on a state
+            // reflecting what try/catch actually did: join both paths (symmetric
+            // with the neither-terminates case, since either path could have led
+            // to the finally). Termination of code *after* is handled below.
+            merged = join_maps(try_state, catch_state);
         } else if (try_term) {
             merged = catch_state;
         } else if (catch_term) {
