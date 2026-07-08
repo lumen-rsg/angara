@@ -62,14 +62,20 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
             const auto& param = func.params[i];
             if (!param.destructure_names.empty() && pt->kind == TypeKind::TUPLE) {
                 auto tuple_type = std::dynamic_pointer_cast<TupleType>(pt);
+                // H3: a destructured parameter is tracked (for summary purposes)
+                // if any of its elements is a tracked type. Without this, the
+                // summary-builder ignored destructured tracked params entirely.
+                bool any_tracked = false;
                 for (size_t di = 0; di < param.destructure_names.size() && di < tuple_type->element_types.size(); ++di) {
                     auto& et = tuple_type->element_types[di];
                     if (isTrackedTypeObj(ctx, *et)) {
+                        any_tracked = true;
                         state[param.destructure_names[di].lexeme] = State::Live;
                         param_names.insert(param.destructure_names[di].lexeme);
                         ctx.current_params.insert(param.destructure_names[di].lexeme);
                     }
                 }
+                if (any_tracked) param_tracked[i] = true;
             } else if (isTrackedTypeObj(ctx, *pt)) {
                 state[func.params[i].name.lexeme] = State::Live;
                 param_names.insert(func.params[i].name.lexeme);
