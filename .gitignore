@@ -12,3 +12,6 @@ build/
 # IDE
 .idea/
 cmake-build-*/
+
+# Agent tooling state
+.zcode/
