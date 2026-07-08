@@ -1144,13 +1144,29 @@ void Chaperone::analyzeExpr(Context& ctx,
         // M11: verify all Live tracked variables are Send — they cross a
         // thread boundary when the async function resumes.
         auto& var_types = ctx.tc.getVariableTypes();
-        // M2: Build a name-to-type lookup once to avoid O(n*m) scan per variable.
-        // Still vulnerable to shadowing — a full fix requires storing VarDeclStmt
-        // pointers in the state map.
-        std::map<std::string, const Type*> name_to_type;
-        for (const auto& [decl, vtype] : var_types) {
-            if (decl && vtype) name_to_type[decl->name.lexeme] = vtype.get();
-        }
+        // M1: resolve each variable's type by picking the INNERMOST declaration
+        // visible at the await point, rather than flattening to a name→type map
+        // (which loses to shadowing — an inner `x` shadowing an outer `x` would
+        // resolve to whichever declaration was inserted last). Among all
+        // declarations with a matching name whose source line is ≤ the await's
+        // line, the greatest line is the innermost-in-scope one (declarations
+        // are processed in source order ≈ lexical scope). A full fix would key
+        // the StateMap on VarDeclStmt* pointers; this is a pragmatic partial.
+        int await_line = await_expr->keyword.line;
+        auto resolve_type = [&](const std::string& name) -> const Type* {
+            const VarDeclStmt* best = nullptr;
+            int best_line = -1;
+            for (const auto& [decl, vtype] : var_types) {
+                if (!decl || !vtype) continue;
+                if (decl->name.lexeme != name) continue;
+                int dl = decl->name.line;
+                if (dl <= await_line && dl > best_line) {
+                    best = decl;
+                    best_line = dl;
+                }
+            }
+            return best ? var_types.at(best).get() : nullptr;
+        };
         for (const auto& [name, st] : state) {
             if (st != State::Live) continue;
             // H8: skip field-state entries.
@@ -1159,9 +1175,8 @@ void Chaperone::analyzeExpr(Context& ctx,
             if (ctx.current_params.count(name)) continue;
 
             // Resolve the variable's type and check Send status.
-            auto tit = name_to_type.find(name);
-            if (tit != name_to_type.end() && tit->second) {
-                const Type* t = tit->second;
+            const Type* t = resolve_type(name);
+            if (t) {
                 std::string type_name;
                 if (t->kind == TypeKind::INSTANCE) {
                     auto inst = dynamic_cast<const InstanceType*>(t);
