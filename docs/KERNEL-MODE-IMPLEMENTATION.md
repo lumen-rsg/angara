@@ -34,6 +34,24 @@
 >    are now `InternalLinkage` with explicit zero init, so all `--kernel`
 >    modules are COMMON-free by default.
 >
+> **Swappable allocator now reachable (verified in-kernel):** the
+> `__ang_allocator_set` vtable was InternalLinkage and completely unreachable;
+> the new module-qualified `__ang_allocator_init_<mod>` (External) lets external
+> C install a custom allocator. A per-CPU slab arena in the shim routes real
+> heap traffic through it — `insmod angara_drv.ko` + one write + `rmmod`:
+> ```
+> angara: /dev/angara ready (major=503)
+> angara-arena: 5 allocs, 0 frees, 5 arena hits, 0 kmalloc fallbacks
+> ```
+> **5/5 allocations served by the arena, zero fell through to kmalloc** — the
+> custom vtable exclusively handled the module's heap. (Hosted proof too:
+> `make test-kernel` installs a counting allocator and observes list/record/
+> string growth routing through it.)
+> **Known follow-up:** on `rmmod`, the glue doesn't run `__ang_rt_finalize` on
+> the module's still-live objects, so their buffers are reclaimed only via the
+> arena drain / `kfree`-on-module-free. Normal program flow is sound (Chaperone
+> 96/96); a "drain all live objects" exit hook is a small future addition.
+>
 > **Several load-bearing assumptions in the original design were CORRECTED by
 > reading the source** — these are marked `✅ CORRECTION` below. The original
 > prose is retained for context; the corrections are authoritative.
