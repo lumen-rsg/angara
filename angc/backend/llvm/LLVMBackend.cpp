@@ -1009,7 +1009,16 @@ llvm::Value* LLVMBackend::marshalAngaraToC(llvm::Value* obj, const std::shared_p
 
         auto* jmp_buf_ptr = builder->CreateStructGEP(frameType, frame, 0);
         auto* i8_ptr_ty = llvm::PointerType::get(*ctx, 0);
+        // FFI/FS: declare setjmp on demand if absent (freestanding mode skips
+        // declareCLibFunctions, so getFunction returns null → null callee →
+        // compiler SIGSEGV). See the matching fix in cgTry (StmtCodegen.cpp).
         auto* setjmp_fn = mod->getFunction("setjmp");
+        if (!setjmp_fn) {
+            auto setjmp_callee = mod->getOrInsertFunction(
+                "setjmp", llvm::FunctionType::get(llvm::Type::getInt32Ty(*ctx), {i8_ptr_ty}, false));
+            setjmp_fn = llvm::cast<llvm::Function>(setjmp_callee.getCallee());
+            setjmp_fn->addFnAttr(llvm::Attribute::ReturnsTwice);
+        }
         auto* sr = builder->CreateCall(
             llvm::FunctionType::get(llvm::Type::getInt32Ty(*ctx), {i8_ptr_ty}, false),
             setjmp_fn,

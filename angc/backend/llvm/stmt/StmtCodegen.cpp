@@ -489,7 +489,20 @@ void LLVMBackend::cgTry(const TryStmt& s) {
 
     auto* jmp_buf_ptr = builder->CreateStructGEP(frameType, frame, 0);
     auto* i8_ptr_ty = llvm::PointerType::get(*ctx, 0);
+    // FFI/FS: declare setjmp on demand if it isn't already in the module. In
+    // freestanding mode declareCLibFunctions() is skipped, so a bare
+    // getFunction("setjmp") returns null and the CreateCall below would pass a
+    // null callee — crashing the compiler (SIGSEGV at IR-build time). Falling
+    // back to an external declaration keeps try/catch compilable in any mode;
+    // the freestanding __ang_try_begin stub and __ang_throw no-op mean a throw
+    // never actually longjmps, but the IR must still be well-formed.
     auto* setjmp_fn = fn->getParent()->getFunction("setjmp");
+    if (!setjmp_fn) {
+        auto setjmp_callee = fn->getParent()->getOrInsertFunction(
+            "setjmp", llvm::FunctionType::get(llvm::Type::getInt32Ty(*ctx), {i8_ptr_ty}, false));
+        setjmp_fn = llvm::cast<llvm::Function>(setjmp_callee.getCallee());
+        setjmp_fn->addFnAttr(llvm::Attribute::ReturnsTwice);
+    }
     auto* sr = builder->CreateCall(
         llvm::FunctionType::get(llvm::Type::getInt32Ty(*ctx), {i8_ptr_ty}, false),
         setjmp_fn,

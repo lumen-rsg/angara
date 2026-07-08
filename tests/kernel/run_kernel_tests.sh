@@ -38,24 +38,37 @@ for test_file in "$SCRIPT_DIR/"*.an; do
     test_name="$(basename "$test_file" .an)"
 
     expected=$(strip_ansi < "$test_file" | /bin/grep -oE "expect: [A-Za-z0-9]+" | head -1 | awk '{print $2}')
-    printf "  ${BOLD}%s${RESET} ${DIM}(expect %s)${RESET}: " "$test_name" "$expected"
+    # mode: --kernel (default) or --freestanding. Freestanding emits _start;
+    # kernel mode emits no entry point.
+    mode=$(strip_ansi < "$test_file" | /bin/grep -oE "mode: --[a-z]+" | head -1 | awk '{print $2}')
+    [ -n "$mode" ] || mode="--kernel"
+    printf "  ${BOLD}%s${RESET} ${DIM}(expect %s, %s)${RESET}: " "$test_name" "$expected" "$mode"
 
     out="$TMPDIR_TEST/${test_name}.o"
-    compile_output=$("$ANGC" --force --kernel "$test_file" -o "$out" 2>&1) || true
+    compile_output=$("$ANGC" --force "$mode" "$test_file" -o "$out" 2>&1) || true
     clean=$(echo "$compile_output" | strip_ansi)
 
     if [ "$expected" = "PASS" ]; then
-        # Positive: must emit a relocatable ELF with NO _start/main.
+        # Positive: must emit a relocatable ELF.
         if [ ! -f "$out" ]; then
             printf "${RED}FAIL${RESET} (no object emitted)\n"
             echo "$clean" | /bin/grep -i error | head -2 | sed 's/^/         /'
             FAIL=$((FAIL + 1)); BUGS+=("$test_name: no object"); continue
         fi
-        if nm "$out" 2>/dev/null | /bin/grep -qwE "_start|main"; then
-            printf "${RED}FAIL${RESET} (object contains _start or main)\n"
-            FAIL=$((FAIL + 1)); BUGS+=("$test_name: entry point present"); continue
+        # Entry-point contract: --kernel must have NO _start/main; --freestanding
+        # MUST have _start.
+        if [ "$mode" = "--kernel" ]; then
+            if nm "$out" 2>/dev/null | /bin/grep -qwE "_start|main"; then
+                printf "${RED}FAIL${RESET} (kernel object contains _start or main)\n"
+                FAIL=$((FAIL + 1)); BUGS+=("$test_name: entry point present"); continue
+            fi
+        else  # --freestanding
+            if ! nm "$out" 2>/dev/null | /bin/grep -qw "_start"; then
+                printf "${RED}FAIL${RESET} (freestanding object missing _start)\n"
+                FAIL=$((FAIL + 1)); BUGS+=("$test_name: no _start"); continue
+            fi
         fi
-        printf "${GREEN}PASS${RESET} (clean relocatable object, no entry point)\n"
+        printf "${GREEN}PASS${RESET} (clean relocatable object)\n"
         PASS=$((PASS + 1))
     else
         # Negative gate: must emit the expected E9xx and fail to compile.

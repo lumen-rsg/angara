@@ -23,6 +23,21 @@ void RuntimeBuilder::generateFreestandingStubs() {
         auto* e = BasicBlock::Create(m_ctx, "entry", fn); IRBuilder<> b(e); b.CreateRet(make_nil(b));
     };
 
+    // FS: declare the libc symbols generateMemoryManagement depends on. The
+    // freestanding path skips declareCLibFunctions(), so without these the
+    // memory layer's getFunction("malloc"/"realloc"/"free") returns null and
+    // CreateCall dereferences a null callee — crashing the compiler (SIGSEGV at
+    // IR-build time) on ANY --freestanding compile. These are external decls;
+    // the freestanding environment (or its linker script) must supply them.
+    {
+        auto* i8_ptr = PointerType::get(m_ctx, 0);
+        auto* i64_ty = Type::getInt64Ty(m_ctx);
+        auto* void_ty = Type::getVoidTy(m_ctx);
+        m_module.getOrInsertFunction("malloc",  FunctionType::get(i8_ptr, {i64_ty}, false));
+        m_module.getOrInsertFunction("realloc", FunctionType::get(i8_ptr, {i8_ptr, i64_ty}, false));
+        m_module.getOrInsertFunction("free",    FunctionType::get(void_ty, {i8_ptr}, false));
+    }
+
     // Memory management stubs (no GC — direct malloc + no-ops)
     generateMemoryManagement();
 

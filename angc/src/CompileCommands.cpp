@@ -154,10 +154,20 @@ int angara::CLI::cmdCompileSingleFile(const std::string& source_file) {
     std::cout << CLR_BOLD << CLR_CYAN << "[CX] " << CLR_RESET << "Codegen complete" << std::endl;
 
     if (m_flags.freestanding) {
-        std::string obj_output = base_name + ".o";
+        std::string obj_output = m_flags.output_name.empty()
+            ? (base_name + ".o")
+            : m_flags.output_name;
         const auto& objs = driver.get_generated_object_files();
         if (objs.size() == 1) {
-            fs::rename(*objs.begin(), obj_output);
+            // Honor -o; fall back to copy+remove on EXDEV (fs::rename can't
+            // cross filesystem boundaries). See the --kernel block below.
+            std::error_code ec;
+            fs::rename(*objs.begin(), obj_output, ec);
+            if (ec) {
+                fs::copy_file(*objs.begin(), obj_output,
+                              fs::copy_options::overwrite_existing, ec);
+                fs::remove(*objs.begin(), ec);
+            }
         } else {
             obj_output = *objs.begin();
         }
