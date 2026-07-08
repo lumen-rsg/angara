@@ -26,6 +26,18 @@ static size_t write_callback(void* contents, size_t size, size_t nmemb, void* us
     return total;
 }
 
+// C6: write downloaded bytes into an std::ofstream. Previously http_download
+// passed WRITEFUNCTION=nullptr with WRITEDATA=&ofstream — libcurl then used
+// its default callback, which calls fwrite() treating WRITEDATA as a FILE*,
+// but an ofstream* is not a FILE*. Returning a short count on write failure
+// makes libcurl abort the transfer (CURLE_WRITE_ERROR).
+static size_t file_write_callback(void* contents, size_t size, size_t nmemb, void* userp) {
+    auto* out = static_cast<std::ofstream*>(userp);
+    size_t total = size * nmemb;
+    out->write(static_cast<char*>(contents), static_cast<std::streamsize>(total));
+    return out->good() ? total : 0;
+}
+
 std::optional<std::string> RegistryClient::http_get(const std::string& url, long* response_code) {
     CURL* curl = curl_easy_init();
     if (!curl) return std::nullopt;
@@ -65,7 +77,7 @@ bool RegistryClient::http_download(const std::string& url, const std::string& de
     }
 
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, nullptr);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, file_write_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &file);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);                      // M16
