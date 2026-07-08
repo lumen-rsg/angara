@@ -33,10 +33,20 @@ void Chaperone::analyzeFunction(Context& ctx, const FuncStmt& func,
     // summary can be positional too (S5: correct multi-param matching).
     std::set<std::string> param_names;  // which names are params (not locals)
     std::vector<bool> param_tracked(func.params.size(), false);
+    // M4: strip any module qualifier ("mod::") from a type name so a ref<T>
+    // borrow matches a tracked param of the same base type even if written with
+    // a module prefix. NOTE: the parser currently produces only bare identifiers
+    // for type annotations (no "::" handling), so a qualifier can't actually
+    // appear here today — this is forward-compatible hardening. The resolved-type
+    // path above already uses sameType() for the semantic case.
+    auto strip_qualifier = [](const std::string& n) -> std::string {
+        auto pos = n.rfind("::");
+        return pos == std::string::npos ? n : n.substr(pos + 2);
+    };
     std::function<std::string(const ASTType*)> base_name = [&](const ASTType* t) -> std::string {
         if (!t) return "";
-        if (auto* s = dynamic_cast<const SimpleType*>(t)) return s->name.lexeme;
-        if (auto* g = dynamic_cast<const GenericType*>(t)) return g->name.lexeme;
+        if (auto* s = dynamic_cast<const SimpleType*>(t)) return strip_qualifier(s->name.lexeme);
+        if (auto* g = dynamic_cast<const GenericType*>(t)) return strip_qualifier(g->name.lexeme);
         if (auto* o = dynamic_cast<const OptionalTypeNode*>(t)) return base_name(o->base_type.get());
         if (auto* ow = dynamic_cast<const OwnedTypeNode*>(t)) return base_name(ow->inner_type.get());
         return "";
