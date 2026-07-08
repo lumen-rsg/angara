@@ -43,8 +43,13 @@ static inline long ang_unbox_i64(AngaraObject o) {
 
 // --- Angara exports (defined in angara_module.o = driver.an) ---------------
 extern void          __ang_strlit_init_driver(void);
+extern void          __ang_allocator_init_driver(void *allocator);
 extern AngaraObject  __ang_driver_angara_format(AngaraObject val);
 extern AngaraObject  __ang_driver_angara_status(AngaraObject count);
+
+// --- per-CPU arena (from kernel_runtime.c) --------------------------------
+int  angara_install_arena_allocator(void (*module_init)(void *));
+void angara_report_arena_stats(void);
 
 // --- device state ----------------------------------------------------------
 static int           major;
@@ -98,7 +103,16 @@ static int __init angara_mod_init(void) {
     //    no-op, but the contract must hold as the Angara side grows.)
     __ang_strlit_init_driver();
 
-    // 2. Smoke-test the allocator path at init: build a record. If the libc
+    // 2. Install the per-CPU arena allocator (optional). This swaps the
+    //    module's default kmalloc-backed vtable for the arena via the external
+    //    __ang_allocator_init_driver entry. Skip if you want plain kmalloc.
+    ret = angara_install_arena_allocator(__ang_allocator_init_driver);
+    if (ret) {
+        pr_err("angara: arena allocator install failed: %d\n", ret);
+        return ret;
+    }
+
+    // 3. Smoke-test the allocator path at init: build a record. If the libc
     //    shim's malloc/realloc/strdup are mis-wired, this oopses here at insmod
     //    rather than on the first user request.
     AngaraObject smoke = __ang_driver_angara_status(ang_box_i64(0));
@@ -150,6 +164,7 @@ static void __exit angara_mod_exit(void) {
     class_destroy(angara_class);
     cdev_del(&angara_cdev);
     unregister_chrdev(major, "angara");
+    angara_report_arena_stats();
     pr_info("angara: unloaded\n");
 }
 

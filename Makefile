@@ -533,6 +533,7 @@ endif
 test-kernel: $(ANGC_OUT)
 	@printf "$(CYAN)[TS] $(RESET) Running kernel-mode gate tests\n"
 	@./tests/kernel/run_kernel_tests.sh ./$(ANGC_OUT)
+	@./tests/kernel/run_alloc_swap_test.sh ./$(ANGC_OUT) clang
 
 # Aggregate: all tests (local use — non-fatal).
 test: test-cpp test-chaperone test-lang test-kernel

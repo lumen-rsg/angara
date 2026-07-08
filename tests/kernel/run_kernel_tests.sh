@@ -38,9 +38,12 @@ for test_file in "$SCRIPT_DIR/"*.an; do
     test_name="$(basename "$test_file" .an)"
 
     expected=$(strip_ansi < "$test_file" | /bin/grep -oE "expect: [A-Za-z0-9]+" | head -1 | awk '{print $2}')
-    # mode: --kernel (default) or --freestanding. Freestanding emits _start;
-    # kernel mode emits no entry point.
-    mode=$(strip_ansi < "$test_file" | /bin/grep -oE "mode: --[a-z]+" | head -1 | awk '{print $2}')
+    # mode: --kernel (default), --freestanding, or hosted. Hosted tests are
+    # run by a separate runner (they link a C helper), so skip them here.
+    mode=$(strip_ansi < "$test_file" | /bin/grep -oE "mode: (hosted|--[a-z]+)" | head -1 | awk '{print $2}')
+    if [ "$mode" = "hosted" ]; then
+        continue   # owned by run_alloc_swap_test.sh
+    fi
     [ -n "$mode" ] || mode="--kernel"
     printf "  ${BOLD}%s${RESET} ${DIM}(expect %s, %s)${RESET}: " "$test_name" "$expected" "$mode"
 

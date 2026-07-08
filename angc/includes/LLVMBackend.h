@@ -244,6 +244,10 @@ namespace angara {
         /// Constructs an AngaraObject string from a compile-time C string literal.
         llvm::Value* makeStr(const std::string& str);
         void createStrlitInitFn();
+        /// Emits the module-qualified external __ang_allocator_init_<module>
+        /// (ptr) -> void, which forwards to the internal __ang_allocator_set.
+        /// Lets external C (kernel init / host harness) swap the allocator.
+        void createAllocatorInitFn();
 
         /// Extracts the i64 payload from an AngaraObject.
         llvm::Value* getI64(llvm::Value* obj);
@@ -361,6 +365,7 @@ namespace angara {
         // init code lives in function B (compiled first) is loaded by function A
         // (executed first) and reads zeroinitializer (NIL).
         llvm::Function* m_strlit_init_fn = nullptr;
+        llvm::Function* m_allocator_init_fn = nullptr;
 
         std::map<std::string, std::string> constructorLookup;
         std::map<std::string, int> enumVariantIndex;  // "EnumName.VariantName" -> declaration order index

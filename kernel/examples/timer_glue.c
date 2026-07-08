@@ -31,8 +31,13 @@ static inline long ang_unbox_i64(AngaraObject o) {
 
 // Angara exports (defined in timer.o = timer.an).
 extern void          __ang_strlit_init_timer(void);
+extern void          __ang_allocator_init_timer(void *allocator);
 extern AngaraObject  __ang_timer_on_tick(AngaraObject count);
 extern AngaraObject  __ang_timer_accumulate(AngaraObject history);
+
+// Per-CPU arena (from kernel_runtime.c).
+int  angara_install_arena_allocator(void (*module_init)(void *));
+void angara_report_arena_stats(void);
 
 static struct timer_list ang_timer;
 static atomic_long_t     tick_count     = ATOMIC_LONG_INIT(0);
@@ -66,6 +71,9 @@ static void ang_timer_cb(struct timer_list *t) {
 static int __init angara_timer_init(void) {
     // Initialize the Angara module's string literals first.
     __ang_strlit_init_timer();
+    // Then install the per-CPU arena allocator (optional).
+    int ret = angara_install_arena_allocator(__ang_allocator_init_timer);
+    if (ret) return ret;
 
     stopping = false;
     timer_setup(&ang_timer, ang_timer_cb, 0);
@@ -80,6 +88,7 @@ static void __exit angara_timer_exit(void) {
     pr_info("angara-timer: disarmed after %ld ticks (final acc=%ld)\n",
             atomic_long_read(&tick_count),
             atomic_long_read(&accumulate_acc));
+    angara_report_arena_stats();
 }
 
 module_init(angara_timer_init);

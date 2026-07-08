@@ -1,0 +1,40 @@
+// Hosted swap-allocator test: prove __ang_allocator_init_<mod> routes heap
+// traffic through a swapped vtable. Uses a counting allocator (linked via
+// tests/helpers/alloc_count_helper.c) to observe allocations.
+// expect: PASS
+// mode: hosted   (run by run_alloc_swap_test.sh, NOT the --kernel gate runner)
+foreign func angara_install_counting_allocator() -> i64;
+foreign func angara_alloc_count() -> i64;
+foreign func angara_free_count() -> i64;
+foreign func angara_reset_count() -> i64;
+
+attach io;
+
+export func main() -> i64 {
+    // 1. Install the counting allocator (swaps the module's vtable).
+    angara_install_counting_allocator();
+    angara_reset_count();
+
+    let before = angara_alloc_count();
+
+    // 2. Force allocations across every heap path the vtable must cover:
+    //    - list growth (raw_realloc via the vtable)
+    let xs = [1];
+    for (let i = 0; i < 30; i = i + 1) { xs.push(i); }
+    //    - record construction + key strdup (raw_alloc + strdup)
+    let r = { name: "angara", processed: len(xs) };
+    //    - string concat (raw_alloc + raw_realloc in-place growth)
+    let s = "count=" + string(r["processed"]) + " list=" + string(len(xs));
+
+    let after = angara_alloc_count();
+    let grew = after - before;
+
+    io.println(1, "swap OK: " + string(grew) + " allocs, s=" + s);
+
+    // 3. Assert: the swap routed traffic (grew > 0 means the counting vtable
+    //    was invoked, not the default libc allocator).
+    if (grew > 0) {
+        return 0;   // success
+    }
+    return 1;       // failure: swap didn't route allocations
+}

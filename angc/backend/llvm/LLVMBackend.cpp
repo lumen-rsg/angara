@@ -142,6 +142,7 @@ LLVMBackend::generateIR(const std::vector<std::shared_ptr<Stmt>>& stmts,
                         std::vector<std::string>& allMods) {
     moduleName = moduleType ? moduleType->name : "main";
     createStrlitInitFn();
+    createAllocatorInitFn();
     codegenTopLevelDecls(stmts);
     bool has_user_main = false;
     for (const auto& stmt : stmts) {
@@ -158,6 +159,7 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     const std::shared_ptr<ModuleType>& moduleType, std::vector<std::string>& allMods) {
     moduleName = moduleType ? moduleType->name : "main";
     createStrlitInitFn();
+    createAllocatorInitFn();
     codegenTopLevelDecls(stmts);
     bool has_user_main = false;
     for (const auto& stmt : stmts) {
@@ -299,6 +301,30 @@ void LLVMBackend::createStrlitInitFn() {
         init_name, mod.get());
     auto* entry_bb = llvm::BasicBlock::Create(*ctx, "entry", m_strlit_init_fn);
     llvm::IRBuilder<>(entry_bb).CreateRetVoid();
+}
+
+void LLVMBackend::createAllocatorInitFn() {
+    if (m_allocator_init_fn) return;
+    // External linkage + module-unique name so external C (kernel init / host
+    // harness) can swap this module's allocator. The body forwards to the
+    // module-internal __ang_allocator_set (InternalLinkage, emitted by the
+    // runtime ctor), which the default-allocator setup leaves pointing at the
+    // libc-backed vtable. Naming is module-unique (mirrors __ang_strlit_init_)
+    // so N modules link without symbol collision.
+    auto* fn_type = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(*ctx),
+        {llvm::PointerType::get(*ctx, 0)}, false);
+    std::string init_name = "__ang_allocator_init_" + moduleName;
+    m_allocator_init_fn = llvm::Function::Create(fn_type,
+        llvm::Function::ExternalLinkage,
+        init_name, mod.get());
+    auto* entry_bb = llvm::BasicBlock::Create(*ctx, "entry", m_allocator_init_fn);
+    llvm::IRBuilder<> b(entry_bb);
+    // __ang_allocator_set is InternalLinkage IR built in the runtime ctor;
+    // it exists by generate() time. Signature: void(ptr).
+    b.CreateCall(mod->getFunction("__ang_allocator_set"),
+                 {m_allocator_init_fn->arg_begin()});
+    b.CreateRetVoid();
 }
 
 llvm::Value* LLVMBackend::makeStr(const std::string& s) {
