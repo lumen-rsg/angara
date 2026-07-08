@@ -41,16 +41,25 @@
 > heap traffic through it — `insmod angara_drv.ko` + one write + `rmmod`:
 > ```
 > angara: /dev/angara ready (major=503)
-> angara-arena: 5 allocs, 0 frees, 5 arena hits, 0 kmalloc fallbacks
+> angara-arena: 5 allocs, 4 frees, 5 arena hits, 0 kmalloc fallbacks
 > ```
 > **5/5 allocations served by the arena, zero fell through to kmalloc** — the
-> custom vtable exclusively handled the module's heap. (Hosted proof too:
-> `make test-kernel` installs a counting allocator and observes list/record/
-> string growth routing through it.)
-> **Known follow-up:** on `rmmod`, the glue doesn't run `__ang_rt_finalize` on
-> the module's still-live objects, so their buffers are reclaimed only via the
-> arena drain / `kfree`-on-module-free. Normal program flow is sound (Chaperone
-> 96/96); a "drain all live objects" exit hook is a small future addition.
+> custom vtable exclusively handled the module's heap. The 4 frees are the
+> module's 2 string-literal globals reclaimed at `rmmod` via
+> `__ang_mod_fini_<mod>` (each: chars interior + string header = 2 frees × 2
+> literals). (Hosted proof too: `make test-kernel` installs a counting
+> allocator and observes list/record/string growth routing through it, plus the
+> fini freeing the literals.)
+>
+> **rmmod reclaims module-persistent state (`__ang_mod_fini_<mod>`):** a
+> module-qualified External teardown finalizes+frees the string-literal globals
+> (and the mechanism extends to module-var globals) via the runtime's
+> `__ang_rt_finalize`+`__ang_rt_free`, routed through the swapped allocator.
+> A literal "walk all live objects" is impossible — `ObjHeader.next` is dead
+> (vestigial from the removed GC; `CHAPERONE.md` decision #10) — so fini covers
+> the *enumerable* persistent globals, not every heap object. Per-call leaks
+> *inside* exported funcs (the Chaperone's W501) are a separate, programmer-
+> responsibility problem, not fixable by an rmmod hook.
 >
 > **Several load-bearing assumptions in the original design were CORRECTED by
 > reading the source** — these are marked `✅ CORRECTION` below. The original
