@@ -139,7 +139,8 @@ void LLVMBackend::setDebugLoc(int line, int col) {
 std::pair<std::unique_ptr<llvm::Module>, std::unique_ptr<llvm::LLVMContext>>
 LLVMBackend::generateIR(const std::vector<std::shared_ptr<Stmt>>& stmts,
                         const std::shared_ptr<ModuleType>& moduleType,
-                        std::vector<std::string>& allMods) {
+                        std::vector<std::string>& allMods,
+                        const std::vector<std::string>& native_module_names) {
     moduleName = moduleType ? moduleType->name : "main";
     createStrlitInitFn();
     createAllocatorInitFn();
@@ -151,7 +152,7 @@ LLVMBackend::generateIR(const std::vector<std::shared_ptr<Stmt>>& stmts,
         if (func && func->name.lexeme == "main") { has_user_main = true; break; }
     }
     if (has_user_main && !m_kernel) {
-        codegenMainFunction(stmts, moduleName, allMods);
+        codegenMainFunction(stmts, moduleName, allMods, native_module_names);
     }
     // Build the mod-fini body LAST — makeStr is called during codegen of both
     // top-level decls AND main (main is skipped in codegenTopLevelDecls, so its
@@ -162,7 +163,8 @@ LLVMBackend::generateIR(const std::vector<std::shared_ptr<Stmt>>& stmts,
 }
 
 bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
-    const std::shared_ptr<ModuleType>& moduleType, std::vector<std::string>& allMods) {
+    const std::shared_ptr<ModuleType>& moduleType, std::vector<std::string>& allMods,
+    const std::vector<std::string>& native_module_names) {
     moduleName = moduleType ? moduleType->name : "main";
     createStrlitInitFn();
     createAllocatorInitFn();
@@ -176,7 +178,7 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     // Kernel mode: emit no entry point (_start/main). The module's init is the
     // C-side init_module, which must call __ang_strlit_init_<module> first.
     if (has_user_main && !m_kernel) {
-        codegenMainFunction(stmts, moduleName, allMods);
+        codegenMainFunction(stmts, moduleName, allMods, native_module_names);
     }
     // Build the mod-fini body LAST (see generateIR for why — main's literals
     // are only cached once codegenMainFunction runs).

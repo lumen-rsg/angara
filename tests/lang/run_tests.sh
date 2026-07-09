@@ -63,20 +63,25 @@ find_binary() {
 
 printf "${BOLD}${CYAN}── Positive Tests (should compile & run correctly) ──${RESET}\n\n"
 
-for test_file in "$SCRIPT_DIR/positive/"*.an; do
-    [ -f "$test_file" ] || continue
-    test_name="$(basename "$test_file" .an)"
-    binary="$TMPDIR_TEST/${test_name}"
+# run_positive_test <test_name> <compile_file> <markers_file>
+# Compiles <compile_file>, runs the resulting binary, and asserts the `// exit:`
+# and `// stdout:` markers read from <markers_file>. Shared by the single-file
+# and multi-file (directory) positive loops.
+run_positive_test() {
+    local test_name="$1"
+    local compile_file="$2"
+    local markers_file="$3"
+    local binary="$TMPDIR_TEST/${test_name}"
 
     # Read expected runtime exit code from `// exit: N` (default 0).
     # Read expected stdout substrings from `// stdout: <pattern>` (optional, may repeat).
-    expect_exit=$(strip_ansi < "$test_file" | /bin/grep -oE "exit: -?[0-9]+" | head -1 | awk '{print $2}' || true)
+    expect_exit=$(strip_ansi < "$markers_file" | /bin/grep -oE "exit: -?[0-9]+" | head -1 | awk '{print $2}' || true)
     [ -z "$expect_exit" ] && expect_exit=0
-    mapfile -t expect_stdout < <(strip_ansi < "$test_file" | /bin/grep -oP 'stdout:\s*\K.*' || true)
+    mapfile -t expect_stdout < <(strip_ansi < "$markers_file" | /bin/grep -oP 'stdout:\s*\K.*' || true)
 
     printf "  ${BOLD}${test_name}${RESET} ${DIM}(exit $expect_exit)${RESET}: "
 
-    compile_output=$("$ANGC" "$test_file" -o "$binary" 2>&1) && compile_rc=$? || compile_rc=$?
+    compile_output=$("$ANGC" "$compile_file" -o "$binary" 2>&1) && compile_rc=$? || compile_rc=$?
 
     if [ $compile_rc -ne 0 ]; then
         if echo "$compile_output" | strip_ansi | grep -qi "linker\|Undefined symbol"; then
@@ -91,7 +96,7 @@ for test_file in "$SCRIPT_DIR/positive/"*.an; do
         fi
         echo "$compile_output" | strip_ansi | grep -i "error" | head -3 | sed 's/^/         /'
         FAIL=$((FAIL + 1))
-        continue
+        return
     fi
 
     actual_binary="$(find_binary "$test_name" "$binary")"
@@ -99,7 +104,7 @@ for test_file in "$SCRIPT_DIR/positive/"*.an; do
         printf "${RED}NO BINARY${RESET} (compiled but binary not found)\n"
         BUGS+=("BUG [$test_name]: Binary not found after successful compile")
         FAIL=$((FAIL + 1))
-        continue
+        return
     fi
 
     run_output=$("$actual_binary" 2>&1) && run_rc=$? || run_rc=$?
@@ -117,7 +122,7 @@ for test_file in "$SCRIPT_DIR/positive/"*.an; do
             BUGS+=("BUG [$test_name]: Exit code $run_rc, expected $expect_exit")
         fi
         FAIL=$((FAIL + 1))
-        continue
+        return
     fi
 
     # Check stdout patterns if any are declared.
@@ -132,11 +137,30 @@ for test_file in "$SCRIPT_DIR/positive/"*.an; do
     done
     if [ $stdout_fail -eq 1 ]; then
         FAIL=$((FAIL + 1))
-        continue
+        return
     fi
 
     printf "${GREEN}PASS${RESET}\n"
     PASS=$((PASS + 1))
+}
+
+# Single-file positive tests.
+for test_file in "$SCRIPT_DIR/positive/"*.an; do
+    [ -f "$test_file" ] || continue
+    test_name="$(basename "$test_file" .an)"
+    run_positive_test "$test_name" "$test_file" "$test_file"
+done
+
+# Multi-file positive tests. Each subdirectory of positive/ contains a main.an
+# entry point plus one or more helper .an files imported via `attach ... from`.
+# The entry (main.an) carries the `// exit:` and `// stdout:` markers. Compiling
+# main.an triggers discovery and compilation of the imported helpers.
+printf "\n${BOLD}${CYAN}── Multi-file Positive Tests (cross-module imports) ──${RESET}\n\n"
+for test_dir in "$SCRIPT_DIR/positive/"*/; do
+    [ -d "$test_dir" ] || continue
+    [ -f "$test_dir/main.an" ] || continue
+    test_name="mf_$(basename "$test_dir")"
+    run_positive_test "$test_name" "$test_dir/main.an" "$test_dir/main.an"
 done
 
 printf "\n${BOLD}${CYAN}── Negative Tests (should produce compilation errors) ──${RESET}\n\n"

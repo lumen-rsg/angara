@@ -188,7 +188,7 @@ ANGC_SRCS := $(shell find angc -name "*.cpp")
 ANGC_OBJS := $(patsubst %.cpp,build/obj/%.o,$(ANGC_SRCS))
 ANGC_OUT  := build/angc
 
-.PHONY: all logo clean install uninstall lint install_vim uninstall_vim test test-ci test-cpp test-chaperone test-lang test-kernel vendor-gui install_docs uninstall_docs
+.PHONY: all logo clean install uninstall lint install_vim uninstall_vim test test-ci test-cpp test-chaperone test-lang test-build test-kernel vendor-gui install_docs uninstall_docs
 
 all: logo $(ANGC_OUT)
 	@printf "$(BOLD)$(GREEN)>>> Build Completed Successfully <<<$(RESET)\n"
@@ -675,6 +675,16 @@ else
 	@./tests/lang/run_tests.sh ./$(ANGC_OUT) || true
 endif
 
+# .abs build-system suite: native-module linking (Bug 2) + multi-file wrappers
+# (Bug 1) through the project build path.
+test-build: $(ANGC_OUT)
+	@printf "$(CYAN)[TS] $(RESET) Running .abs build-system tests\n"
+ifeq ($(CI_MODE),1)
+	@./tests/build_system/run_abs_tests.sh ./$(ANGC_OUT)
+else
+	@./tests/build_system/run_abs_tests.sh ./$(ANGC_OUT) || true
+endif
+
 # Kernel-mode gate suite (try/spawn/Mutex/native-attach → E900-E903, plus
 # positive: valid --kernel code emits a relocatable object with no entry point).
 test-kernel: $(ANGC_OUT)
@@ -683,13 +693,14 @@ test-kernel: $(ANGC_OUT)
 	@./tests/kernel/run_alloc_swap_test.sh ./$(ANGC_OUT) clang
 
 # Aggregate: all tests (local use — non-fatal).
-test: test-cpp test-chaperone test-lang test-kernel
+test: test-cpp test-chaperone test-lang test-build test-kernel
 
 # Aggregate: all tests (CI use — failures propagate).
 test-ci:
 	@$(MAKE) test-cpp
 	@$(MAKE) test-chaperone
 	@$(MAKE) test-lang CI_MODE=1
+	@$(MAKE) test-build CI_MODE=1
 	@$(MAKE) test-kernel
 
 clean:

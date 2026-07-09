@@ -1,0 +1,8 @@
+// Helper imported by the .abs test entry. Attaches the same native module (io)
+// as main.an, so the .abs linker sees two object files each emitting __ang_io_*
+// wrappers — the Bug 1 regression path through the build system.
+attach io;
+
+export func helper_line() -> string {
+    return "from-abs-helper";
+}

@@ -1514,7 +1514,8 @@ void LLVMBackend::codegenEnumDecl(const EnumStmt& stmt) {
 
 void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& statements,
                                         const std::string& module_name,
-                                        const std::vector<std::string>& all_module_names) {
+                                        const std::vector<std::string>& all_module_names,
+                                        const std::vector<std::string>& native_module_names) {
     std::string entry_name = m_freestanding ? "_start" : "main";
     auto* main_type = llvm::FunctionType::get(
         m_freestanding ? llvm::Type::getVoidTy(*ctx) : llvm::Type::getInt32Ty(*ctx), false);
@@ -1557,15 +1558,10 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
             auto* init_fn_type = llvm::FunctionType::get(ptr_ty,
                 {llvm::PointerType::get(i32_ty, 0), ptr_ty}, false);
 
-            for (const auto& stmt : statements) {
-                auto attach = std::dynamic_pointer_cast<const AttachStmt>(stmt);
-                if (!attach) continue;
-                auto res_it = m_type_checker.getModuleResolutions().find(attach.get());
-                if (res_it == m_type_checker.getModuleResolutions().end()) continue;
-                auto& mod_type = res_it->second;
-                if (!mod_type || !mod_type->is_native) continue;
-
-                std::string init_name = "Angara_" + mod_type->name + "_Init";
+            // Helper: emit an `Angara_<mod>_Init(out_count, vtable)` call.
+            // Returns the module name so callers can record it as initialized.
+            auto emit_native_init = [&](const std::string& mod_name) {
+                std::string init_name = "Angara_" + mod_name + "_Init";
                 auto* init_fn = mod->getFunction(init_name);
                 if (!init_fn) {
                     init_fn = llvm::Function::Create(init_fn_type, llvm::Function::ExternalLinkage,
@@ -1574,9 +1570,34 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
                 auto* def_count_alloca = builder->CreateAlloca(i32_ty);
                 builder->CreateStore(llvm::ConstantInt::get(i32_ty, 0), def_count_alloca);
                 builder->CreateCall(init_fn, {def_count_alloca, vtable});
+            };
+
+            // Initialize native modules attached in THIS (entry) file.
+            std::set<std::string> inited_native;
+            for (const auto& stmt : statements) {
+                auto attach = std::dynamic_pointer_cast<const AttachStmt>(stmt);
+                if (!attach) continue;
+                auto res_it = m_type_checker.getModuleResolutions().find(attach.get());
+                if (res_it == m_type_checker.getModuleResolutions().end()) continue;
+                auto& mod_type = res_it->second;
+                if (!mod_type || !mod_type->is_native) continue;
+                emit_native_init(mod_type->name);
+                inited_native.insert(mod_type->name);
+            }
+
+            // BUG 4 fix: also initialize native modules attached only in OTHER
+            // (imported) translation units. Without this, a native call executed
+            // from within an imported function segfaults — the module was never
+            // initialized, since its Init call was only ever emitted here, in the
+            // entry file's main(), and the entry file didn't attach that module.
+            for (const auto& mod_name : native_module_names) {
+                if (inited_native.count(mod_name)) continue;
+                emit_native_init(mod_name);
+                inited_native.insert(mod_name);
             }
         }
     }
+
 
     // Initialize all interned string literals before any user code runs.
     // The init function is created eagerly in generate()/generateIR() and
@@ -1965,7 +1986,13 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
                         int total_args = mpc + 1;
                         std::vector<llvm::Type*> mwp(total_args, objType);
                         auto* mwt = llvm::FunctionType::get(objType, mwp, false);
-                        auto* mw = llvm::Function::Create(mwt, llvm::Function::ExternalLinkage, mwn, mod.get());
+                        // BUG 1 fix: native-module wrappers are emitted once per TU
+                        // that attaches the module, so they'd collide as "multiple
+                        // definition" under ExternalLinkage. Use LinkOnceODR + comdat
+                        // so the linker folds identical copies. The wrapper body is a
+                        // pure forwarder (deterministic per name), so ODR holds.
+                        auto* mw = llvm::Function::Create(mwt, llvm::Function::LinkOnceODRLinkage, mwn, mod.get());
+                        mw->setComdat(mod->getOrInsertComdat(mwn));
                         auto* me = llvm::BasicBlock::Create(*ctx, "entry", mw);
                         auto* ms = builder->GetInsertBlock();
                         builder->SetInsertPoint(me);
@@ -2024,7 +2051,11 @@ void LLVMBackend::codegenNativeModuleDecls(const std::vector<std::shared_ptr<Stm
 
             std::vector<llvm::Type*> wpt(param_count, objType);
             auto* wft = llvm::FunctionType::get(objType, wpt, false);
-            auto* wf = llvm::Function::Create(wft, llvm::Function::ExternalLinkage, wrapper_name, mod.get());
+            // BUG 1 fix: see the method-wrapper site above — LinkOnceODR + comdat
+            // lets each attaching TU emit an identical copy that the linker folds,
+            // avoiding "multiple definition of __ang_<mod>_<fn>".
+            auto* wf = llvm::Function::Create(wft, llvm::Function::LinkOnceODRLinkage, wrapper_name, mod.get());
+            wf->setComdat(mod->getOrInsertComdat(wrapper_name));
             auto* we = llvm::BasicBlock::Create(*ctx, "entry", wf);
             auto* sb = builder->GetInsertBlock();
             builder->SetInsertPoint(we);

@@ -1890,7 +1890,23 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         const std::vector<std::pair<size_t, std::shared_ptr<TraitType>>>* boxed_idx = nullptr;
         auto bit = m_type_checker.getGenericBoxedArgs().find(&expr);
         if (bit != m_type_checker.getGenericBoxedArgs().end()) boxed_idx = &bit->second;
-        return callModuleFn(moduleName, fn, getArgs(expr), param_types, boxed_idx);
+        // BUG 3 fix: for a symbol imported via `attach <name> from "file.an"`,
+        // the function is defined in the *importing* file's peer module, not in
+        // this file. callModuleFn mangles the call target as `__ang_<mod>_<fn>`,
+        // so we must pass the *defining* module's name (Symbol::from_module), not
+        // the current file's moduleName — otherwise the caller emits e.g.
+        // `Angara_app_main_<fn>` and the link fails with an undefined reference.
+        // We also pass from_module through so callModuleFn can declare the
+        // cross-TU symbol external (vs. falling back to the native ABI name).
+        std::string call_mod = moduleName;
+        const ModuleType* from_module = nullptr;
+        auto vr_it = m_type_checker.getVariableResolutions().find(var);
+        if (vr_it != m_type_checker.getVariableResolutions().end() &&
+            vr_it->second && vr_it->second->from_module) {
+            from_module = vr_it->second->from_module.get();
+            call_mod = from_module->name;
+        }
+        return callModuleFn(call_mod, fn, getArgs(expr), param_types, boxed_idx, from_module);
     }
     return makeNil();
 }
@@ -1898,10 +1914,24 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
 llvm::Value* LLVMBackend::callModuleFn(const std::string& mod, const std::string& fn,
                                         const std::vector<std::shared_ptr<Expr>>& args,
                                         const std::vector<std::shared_ptr<Type>>* param_types,
-                                        const std::vector<std::pair<size_t, std::shared_ptr<TraitType>>>* boxed_idx) {
+                                        const std::vector<std::pair<size_t, std::shared_ptr<TraitType>>>* boxed_idx,
+                                        const ModuleType* from_module) {
     std::string mangled = mangle(mod, fn);
     llvm::Function* f = this->mod->getFunction(mangled);
     if (!f) f = this->mod->getFunction("__ang_"+sanitize(fn));
+
+    // BUG 3 fix: for a user-source import (from_module set and non-native),
+    // the target is `__ang_<mod>_<fn>` defined in another translation unit, not
+    // a native ABI symbol. Declare it external so the linker resolves it, and
+    // skip the native Angara_<mod>_<fn> fallback (which is only correct for
+    // dlopen'd .so modules). The `!f` guard means no wrapper was found in this
+    // TU's IR; for a same-module call the function is already present, so this
+    // path only fires for genuine cross-TU imports.
+    if (!f && from_module && !from_module->is_native) {
+        auto* fnTy = llvm::FunctionType::get(objType,
+            std::vector<llvm::Type*>(args.size(), objType), false);
+        f = llvm::Function::Create(fnTy, llvm::Function::ExternalLinkage, mangled, this->mod.get());
+    }
 
     // If no fixed-arity wrapper exists, check for the native (argc, ptr)
     // convention — this is how variadic module functions are called.

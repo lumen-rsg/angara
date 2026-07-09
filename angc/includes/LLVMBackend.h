@@ -60,7 +60,8 @@ namespace angara {
         /// @return True if code generation and object emission succeeded.
         bool generate(const std::vector<std::shared_ptr<Stmt>>& statements,
                       const std::shared_ptr<ModuleType>& module_type,
-                      std::vector<std::string>& all_module_names);
+                      std::vector<std::string>& all_module_names,
+                      const std::vector<std::string>& native_module_names = {});
 
         /// Sets the output directory for object and IR files.
         /// When set, files are written to `<dir>/ang_<module>.o` instead of CWD.
@@ -77,7 +78,8 @@ namespace angara {
         std::pair<std::unique_ptr<llvm::Module>, std::unique_ptr<llvm::LLVMContext>>
         generateIR(const std::vector<std::shared_ptr<Stmt>>& statements,
                    const std::shared_ptr<ModuleType>& module_type,
-                   std::vector<std::string>& all_module_names);
+                   std::vector<std::string>& all_module_names,
+                   const std::vector<std::string>& native_module_names = {});
 
     private:
         std::unique_ptr<llvm::LLVMContext> ctx;
@@ -130,10 +132,15 @@ namespace angara {
         llvm::Value* cgClosureCall(llvm::Value* callee, const std::vector<llvm::Value*>& args);
 
         /// Calls a function from a resolved module by name.
+        /// @param from_module  If non-null and non-native, `fn` is a user-source
+        ///                     import defined in another TU as __ang_<mod>_<fn>;
+        ///                     declare it external instead of falling back to the
+        ///                     native Angara_<mod>_<fn> convention. Null otherwise.
         llvm::Value* callModuleFn(const std::string& mod, const std::string& fn,
                                    const std::vector<std::shared_ptr<Expr>>& args,
                                    const std::vector<std::shared_ptr<Type>>* param_types = nullptr,
-                                   const std::vector<std::pair<size_t, std::shared_ptr<TraitType>>>* boxed_idx = nullptr);
+                                   const std::vector<std::pair<size_t, std::shared_ptr<TraitType>>>* boxed_idx = nullptr,
+                                   const ModuleType* from_module = nullptr);
 
         /// Calls a variadic foreign C function directly, marshalling fixed and variadic args.
         llvm::Value* callVariadicForeignFn(const std::string& c_func_name,
@@ -225,7 +232,8 @@ namespace angara {
         /// Generates the C-compatible main() or _start entry point.
         void codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& statements,
                                  const std::string& module_name,
-                                 const std::vector<std::string>& all_module_names);
+                                 const std::vector<std::string>& all_module_names,
+                                 const std::vector<std::string>& native_module_names);
 
         /// Constructs an AngaraObject with TAG_NIL.
         llvm::Value* makeNil();

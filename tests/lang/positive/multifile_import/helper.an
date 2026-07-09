@@ -1,0 +1,27 @@
+// Helper module imported by main.an. Exercises a native module call (fs.exists)
+// from within an imported user function — this is the Bug 4 regression case: a
+// native module attached only here must still be initialized at runtime even
+// though the entry file does not attach it.
+attach fs;
+
+// Returns the length of the hostname string, or 0 if /etc/hostname is absent.
+// Uses the fs native module so its Init must run before this executes.
+export func hostname_present() -> i64 {
+    if (fs.exists("/etc/hostname")) {
+        return 1;
+    }
+    return 0;
+}
+
+// Pure cross-module call with no native dependency — the Bug 3 core case.
+// The caller must mangle this as __ang_helper_pure_answer, not
+// Angara_app_main_pure_answer.
+export func pure_answer() -> i64 {
+    return 42;
+}
+
+// Cross-module call returning a string literal (exercises string return across
+// the module boundary without touching native string allocation).
+export func say_hello() -> string {
+    return "helper-says-hello";
+}

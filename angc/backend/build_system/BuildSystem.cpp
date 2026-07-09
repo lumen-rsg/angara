@@ -666,7 +666,27 @@ namespace angara {
 
         std::set<std::string> all_libs;
         for (const auto& dep : config.dependencies) all_libs.insert(dep.name);
-        for (const auto& lib : discovered_libs) all_libs.insert(lib);
+        // Native Angara modules are .so files loaded at runtime via dlopen, not
+        // static link libraries. They must NOT be passed as `-l<name>` (that
+        // yields "cannot find -l<name>", since lib<name>.so isn't on the link
+        // path). Instead, link the .so by its absolute path so the build-time
+        // references to `Angara_<name>_Init` / `Angara_<name>_<fn>` resolve, and
+        // rely on -rpath (added below) for the runtime loader. This mirrors the
+        // single-file compile path (CompileCommands.cpp).
+        std::set<std::string> linked_native;
+        for (const auto& mod_name : discovered_libs) {
+            fs::path local_mod  = fs::path(m_build_dir) / "modules" / (mod_name + ANGARA_NATIVE_EXT);
+            fs::path native_mod = fs::path(m_native_lib_path) / (mod_name + ANGARA_NATIVE_EXT);
+            fs::path chosen;
+            if (fs::exists(local_mod))       chosen = fs::absolute(local_mod);
+            else if (fs::exists(native_mod)) chosen = native_mod;
+            if (!chosen.empty()) {
+                cmd << " " << angara::shell_escape(chosen.string());
+                linked_native.insert(mod_name);
+            }
+            // If neither exists, fall through silently: a later -l<name> from the
+            // manifest's link_libs (handled below) may still resolve it.
+        }
 
         // TOOL-1: add native package link flags.
         for (const auto& pkg : m_resolved_packages) {

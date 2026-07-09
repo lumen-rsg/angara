@@ -1,0 +1,12 @@
+// Helper that ALSO attaches the `io` native module. The entry file (main.an)
+// attaches `io` too, so both translation units emit the __ang_io_<fn> wrappers.
+// This is the Bug 1 regression case: under ExternalLinkage those wrappers
+// collided as "multiple definition of __ang_io_println"; with LinkOnceODR +
+// comdat the linker folds the identical copies.
+attach io;
+
+// Prints a marker from the helper, using the io native module directly.
+export func helper_greet() -> i64 {
+    io.println(0, "from-helper");
+    return 0;
+}

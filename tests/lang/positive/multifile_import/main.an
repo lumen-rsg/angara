@@ -1,0 +1,28 @@
+// Multi-file positive test: importing functions from a sibling .an module.
+// exit: 42
+// stdout: helper-says-hello
+// Covers:
+//   * Bug 3 — cross-module call mangling (caller must reference
+//     __ang_helper_<fn>, not Angara_app_main_<fn>).
+//   * Bug 4 — a native module (fs) attached only in the imported helper is
+//     initialized at runtime so fs.exists does not segfault.
+attach io;
+attach pure_answer, hostname_present, say_hello from "helper.an";
+
+export func main() -> i64 {
+    // Native-call-inside-helper: relies on fs being initialized (Bug 4).
+    let present = hostname_present();
+
+    // Cross-module call returning a value used directly (Bug 3 core).
+    let n = pure_answer();
+
+    // Cross-module call returning a string, printed via a native module.
+    let s = say_hello();
+    io.println(0, s);
+
+    // Distinguish "helper ran and returned 1" from a coincidental pure_answer.
+    if (present == 1) {
+        return n;          // 42 when /etc/hostname exists (the normal case)
+    }
+    return n + 100;        // fallback if the host has no /etc/hostname
+}

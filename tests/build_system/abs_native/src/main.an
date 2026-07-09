@@ -1,0 +1,13 @@
+// .abs build-system entry. Uses io directly AND imports a helper that uses io.
+// exit: 0
+// stdout: from-abs-main
+// stdout: from-abs-helper
+attach io;
+attach helper_line from "helper.an";
+
+export func main() -> i64 {
+    io.println(0, "from-abs-main");
+    let s = helper_line();
+    io.println(0, s);
+    return 0;
+}

@@ -1,0 +1,18 @@
+# Abs build-system regression test.
+#
+# Covers Bug 2: a project that attaches a native module (io) must link the
+# module's .so by absolute path and NOT emit a spurious `-lio` flag. Before the
+# fix this failed with "cannot find -lio: No such file or directory".
+#
+# The entry imports a helper that also uses io, exercising multi-file + native
+# module interaction through the .abs build path.
+
+[workspace]
+name = abs_native_test
+version = 1.0.0
+
+[project]
+name = abs_native_test
+path = .
+entry = src/main.an
+type = app

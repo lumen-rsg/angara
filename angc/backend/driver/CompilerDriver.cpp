@@ -739,7 +739,7 @@ namespace angara {
             if (!m_build_dir.empty()) {
                 llvmBackend.set_output_dir(m_build_dir);
             }
-            if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
+            if (!llvmBackend.generate(statements, mod, m_angara_module_names, m_native_lib_names)) {
                 std::lock_guard<std::mutex> lock(m_cache_mutex);
                 m_had_error = true;
                 return false;
@@ -997,7 +997,7 @@ namespace angara {
             }
 
             LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding, m_kernel_mode, m_dump_ir, m_debug, m_emit_llvm, m_lto, m_dwarf_version);
-            if (!llvmBackend.generate(statements, mod, m_angara_module_names)) {
+            if (!llvmBackend.generate(statements, mod, m_angara_module_names, m_native_lib_names)) {
                 m_had_error = true;
                 return nullptr;
             }

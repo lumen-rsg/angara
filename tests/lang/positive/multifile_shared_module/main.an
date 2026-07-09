@@ -1,0 +1,17 @@
+// Multi-file positive test: entry and imported helper both attach the same
+// native module (io).
+// exit: 0
+// stdout: from-main
+// stdout: from-helper
+// Covers Bug 1: two translation units each attaching `io` must not produce
+// "multiple definition of __ang_io_<fn>". The native wrappers are emitted once
+// per attaching file with LinkOnceODR linkage + comdat, so the linker folds
+// them. Both files call into io independently and must print their markers.
+attach io;
+attach helper_greet from "helper.an";
+
+export func main() -> i64 {
+    io.println(0, "from-main");
+    helper_greet();      // helper also uses io → exercises the shared wrapper
+    return 0;
+}
