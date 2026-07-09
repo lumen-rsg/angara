@@ -1070,19 +1070,28 @@ void Chaperone::analyzeExpr(Context& ctx,
         // seeded as Live rather than Escaped in the lambda's state map.
         if (is_callee) {
             // IIFE: captures are safe — no E505, no Escaped transition.
-            // Seed captures as Escaped in the lambda state to prevent false
-            // E501 leak reports inside the body (the captured vars don't need
-            // to be dropped inside the lambda — they belong to the outer scope).
+            // Seed ONLY genuine tracked captures (enclosing-scope Live vars) as
+            // Live so the body may use them (e.g. b.get()), and register them
+            // in ctx.current_params so they're excluded from E501 leak checks
+            // (they belong to the outer scope, not the closure). Excluding
+            // non-captures (lambda params, module names like io, builtins,
+            // untracked locals) avoids E507 false positives on their use —
+            // matching analyzeFunction's behavior for regular functions.
             // Still analyze the body for internal memory errors (leaks of
             // lambda-owned values, UAF, double-drops, etc.).
+            std::set<std::string> saved_params;
+            std::swap(saved_params, ctx.current_params);
             StateMap lambda_state;
-            for (const auto& name : referenced)
-                lambda_state[name] = State::Escaped;
+            for (const auto& name : referenced) {
+                auto it = state.find(name);
+                if (it != state.end() && it->second == State::Live) {
+                    lambda_state[name] = State::Live;
+                    ctx.current_params.insert(name);
+                }
+            }
 
             // H2: seed lambda params.
             auto lam_type_it = ctx.tc.getExpressionTypes().find(expr.get());
-            std::set<std::string> saved_params;
-            std::swap(saved_params, ctx.current_params);
             if (lam_type_it != ctx.tc.getExpressionTypes().end() && lam_type_it->second &&
                 lam_type_it->second->kind == TypeKind::FUNCTION) {
                 auto* fn_type = static_cast<const FunctionType*>(lam_type_it->second.get());
@@ -1114,11 +1123,33 @@ void Chaperone::analyzeExpr(Context& ctx,
         // dropped/moved while the closure still has pending holders.
         //
         // Collect captures: only tracked Live variables that are referenced.
+        // This filters `referenced` to genuine enclosing-scope tracked
+        // allocations, excluding lambda params, attached-module names (io/fs),
+        // builtins (string), globals, and untracked captures (i64/bool) — none
+        // of which appear in the enclosing `state` as Live. Seeding the body's
+        // state map from this set (rather than raw `referenced`) matches how
+        // analyzeFunction seeds regular functions and avoids E507 false
+        // positives on those non-capture names.
         std::set<std::string> live_captures;
         for (const auto& name : referenced) {
             auto it = state.find(name);
             if (it != state.end() && it->second == State::Live)
                 live_captures.insert(name);
+        }
+
+        // C4: Analyze the lambda body for memory safety. Start with a fresh
+        // state map seeded ONLY with genuine tracked captures. They are Live
+        // (usable in the body, e.g. b.get()) and registered in current_params
+        // so the body's E501 leak check excludes them (they belong to the outer
+        // scope, not the closure). Walk each statement — the handlers report
+        // leaks, use-after-free, and other violations for lambda-owned values
+        // just like regular functions.
+        std::set<std::string> saved_params;
+        std::swap(saved_params, ctx.current_params);
+        StateMap lambda_state;
+        for (const auto& name : live_captures) {
+            lambda_state[name] = State::Live;
+            ctx.current_params.insert(name);
         }
 
         // Look up the FunctionType for this LambdaExpr — it serves as the
@@ -1137,24 +1168,12 @@ void Chaperone::analyzeExpr(Context& ctx,
         // we fall through with nothing pending — the closure doesn't affect
         // any tracked variable.
 
-        // C4: Analyze the lambda body for memory safety. Start with a fresh
-        // state map containing captured variables as Escaped (they come from
-        // outside). Walk each statement — the individual statement handlers
-        // (ReturnStmt, function exit, etc.) will report leaks, use-after-free,
-        // and other violations just like they do for regular functions.
-        StateMap lambda_state;
-        for (const auto& name : referenced) {
-            lambda_state[name] = State::Escaped;
-        }
 
         // H2: Seed lambda parameters into lambda_state so drops/escapes/moves
         // of params are tracked during body analysis. Without this, the summary
         // can't see what the closure does to its arguments.
-        // Also save/restore ctx.current_params so that lambda params are
-        // excluded from E501 leak checks (just like regular function params).
-        // (lam_type_it was resolved above in the L21 deferred-capture block.)
-        std::set<std::string> saved_params;
-        std::swap(saved_params, ctx.current_params);
+        // current_params is already saved/restored above (it now also carries
+        // captures, so they're excluded from E501 leak checks like params).
         if (lam_type_it != ctx.tc.getExpressionTypes().end() && lam_type_it->second &&
             lam_type_it->second->kind == TypeKind::FUNCTION) {
             auto* fn_type = static_cast<const FunctionType*>(lam_type_it->second.get());

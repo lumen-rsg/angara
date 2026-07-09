@@ -1,0 +1,29 @@
+// Test 55: Lambda untracked params and module references.
+// Regression test for a Chaperone E507 false positive (commit 71fdb40):
+// collectVarRefs gathered every VarExpr name in a lambda body and seeded them
+// all as Escaped in the body's state map, so reads of untracked params
+// (x as i64) and attached modules (io) fired "Escaped molecule" — even though
+// neither is a tracked allocation. The fix seeds only genuine tracked captures.
+// exit: 0
+// stdout: 42
+// stdout: from-lambda
+attach io;
+
+export func main() -> i64 {
+    // Lambda with an untracked i64 param used in the body — previously
+    // E507 on `x` at `return x * 2`.
+    let double = func(x as i64) -> i64 {
+        return x * 2;
+    };
+    io.println(1, string(double(21)));          // 42
+
+    // Lambda that references an attached module (io) inside the body —
+    // previously E507 on `io` at the io.println call.
+    let greet = func(x as i64) -> i64 {
+        io.println(0, "from-lambda");
+        return x;
+    };
+    let _ = greet(7);                            // prints from-lambda
+
+    return 0;
+}
