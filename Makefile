@@ -1,5 +1,6 @@
 INSTALL_MOD_DIR := /opt/angara/modules
 INSTALL_BIN_DIR := /usr/local/bin
+INSTALL_DOC_DIR := /opt/angara/docs
 
 ESC     := \033
 RESET   := $(ESC)[0m
@@ -187,7 +188,7 @@ ANGC_SRCS := $(shell find angc -name "*.cpp")
 ANGC_OBJS := $(patsubst %.cpp,build/obj/%.o,$(ANGC_SRCS))
 ANGC_OUT  := build/angc
 
-.PHONY: all logo clean install uninstall lint install_vim uninstall_vim test test-ci test-cpp test-chaperone test-lang test-kernel vendor-gui
+.PHONY: all logo clean install uninstall lint install_vim uninstall_vim test test-ci test-cpp test-chaperone test-lang test-kernel vendor-gui install_docs uninstall_docs
 
 all: logo $(ANGC_OUT)
 	@printf "$(BOLD)$(GREEN)>>> Build Completed Successfully <<<$(RESET)\n"
@@ -587,6 +588,21 @@ uninstall:
 	@rm -f $(DESTDIR)$(INSTALL_BIN_DIR)/angc
 	@rm -rf $(DESTDIR)$(INSTALL_MOD_DIR)
 	@printf "$(BOLD)$(GREEN)>>> Uninstall Complete <<<$(RESET)\n"
+
+install_docs:
+	@printf "$(MAGENTA)[IN] $(RESET) Installing Documentation to %s\n" "$(DESTDIR)$(INSTALL_DOC_DIR)"
+	@mkdir -p $(DESTDIR)$(INSTALL_DOC_DIR)
+	@cp README.md $(DESTDIR)$(INSTALL_DOC_DIR)/
+	@cp CHAPERONE.md $(DESTDIR)$(INSTALL_DOC_DIR)/
+	@cp SECURITY.md $(DESTDIR)$(INSTALL_DOC_DIR)/
+	@cp LICENSE $(DESTDIR)$(INSTALL_DOC_DIR)/
+	@cp -r docs/*.md $(DESTDIR)$(INSTALL_DOC_DIR)/
+	@printf "$(BOLD)$(GREEN)>>> Docs Installed to $(DESTDIR)$(INSTALL_DOC_DIR) <<<$(RESET)\n"
+
+uninstall_docs:
+	@printf "$(RED)[RM] $(RESET) Removing documentation from %s\n" "$(DESTDIR)$(INSTALL_DOC_DIR)"
+	@rm -rf $(DESTDIR)$(INSTALL_DOC_DIR)
+	@printf "$(BOLD)$(GREEN)>>> Docs Uninstalled <<<$(RESET)\n"
 
 ifeq ($(NVIM_RUNTIME),)
     NVIM_RUNTIME := $(HOME)/.local/share/nvim/site
