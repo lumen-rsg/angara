@@ -1,0 +1,26 @@
+attach gui;
+attach Window from gui;
+
+let _r as i64 = 0;
+
+func frame(win as Window) -> nil {
+    // Static red rectangle at top-left — should ALWAYS show
+    gui.rect(10, 10, 100, 100, 255, 0, 0, 255);
+    
+    // Moving green rectangle
+    _r = _r + 1;
+    gui.rect(_r % 400, 150, 50, 50, 0, 255, 0, 255);
+    
+    // UI
+    gui.begin("Diagnostic");
+    gui.text("FPS: " + string(gui.fps()));
+    gui.text("r: " + string(_r));
+    gui.end();
+}
+
+export func main() -> i64 {
+    let win = gui.Window("Diag", 500, 400);
+    win.run(frame);
+    drop win;
+    return 0;
+}

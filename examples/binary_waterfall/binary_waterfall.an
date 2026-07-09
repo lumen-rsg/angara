@@ -1,0 +1,408 @@
+// Binary Waterfall — raw binary file visualiser
+// Reads any file as raw bytes and renders them as a scrolling waterfall of
+// coloured pixels, à la ffmpeg -f rawvideo.  Settings live in an ImGUI panel.
+attach gui;
+attach Window from gui;
+attach fs;
+
+// ---- pixel-format list (null-separated, double-null-terminated) ------------
+// Used by gui.combo() — each entry separated by \0, list ended by \0\0.
+const FORMAT_ITEMS as string =
+    b"gray8\x00heatmap\x00rgb24\x00rgba\x00bgr24\x00bgra\x00argb\x00abgr\x00\x00";
+
+// bytes-per-pixel lookup (indexed by combo position)
+let _bpp_table as list<i64> = [];   // filled once on first frame
+
+// ---- settings --------------------------------------------------------------
+let _file_path   as string = "/proc/self/exe";   // default: visualise ourselves
+let _cols        as i64    = 128;
+let _rows_count  as i64    = 64;
+let _cell        as i64    = 6;
+let _speed       as i64    = 2;
+let _format_idx  as i64    = 1;    // heatmap
+let _paused      as bool   = false;
+
+// last-committed dimensions (detect changes → reallocate buffer)
+let _committed_cols as i64 = 0;
+let _committed_rows as i64 = 0;
+
+// ---- file data -------------------------------------------------------------
+let _data     as string = "";
+let _data_len as i64    = 0;
+let _pos      as i64    = 0;
+
+// ---- display buffer --------------------------------------------------------
+let _pixels as list<i64> = [];   // each element is packed ARGB: (r<<16)|(g<<8)|b
+let _total  as i64       = 0;
+
+// ---- misc ------------------------------------------------------------------
+let _status    as string = "";
+let _init_done as bool   = false;
+
+// ---- file browser state ----------------------------------------------------
+let _browser_open        as bool        = false;
+let _browser_path        as string      = ".";
+let _browser_entries     as list<string> = [];
+let _browser_needs_list  as bool        = true;
+let _browser_error       as string      = "";
+
+// =============================================================================
+// helpers
+// =============================================================================
+
+// Read a single byte from _data at offset (wraps modulo _data_len).
+// Returns 0 when _data is empty (no file loaded).
+func data_byte(offset as i64) -> i64 {
+    if (_data_len == 0) { return 0; }
+    let idx = offset % _data_len;
+    if (idx < 0) { idx = idx + _data_len; }
+    return gui.byte_at(_data, idx);
+}
+
+// Convert bytes at `pos` in _data to a packed colour according to the current
+// pixel format.  Advances `pos` by _bpp bytes (wrapping is handled by data_byte).
+func bytes_to_packed(pos as i64) -> i64 {
+    let fmt = _format_idx;
+    let packed as i64 = 0;
+    if (fmt == 0) {
+        // gray8 — 1 byte → R=G=B=byte
+        let v = data_byte(pos);
+        packed = (v << 16) | (v << 8) | v;
+    } else if (fmt == 1) {
+        // heatmap — 1 byte → blue(0)→cyan→green→yellow→red(255)
+        let v = data_byte(pos);
+        let r as i64 = 0;
+        let g as i64 = 0;
+        let b as i64 = 0;
+        if (v < 128) {
+            g = (v * 2) as i64;
+            b = (255 - v * 2) as i64;
+        } else {
+            let v2 = v - 128;
+            r = (v2 * 2) as i64;
+            g = (255 - v2 * 2) as i64;
+        }
+        packed = (r << 16) | (g << 8) | b;
+    } else if (fmt == 2) {
+        // rgb24 — 3 bytes → R, G, B
+        let r = data_byte(pos);
+        let g = data_byte(pos + 1);
+        let b = data_byte(pos + 2);
+        packed = (r << 16) | (g << 8) | b;
+    } else if (fmt == 3) {
+        // rgba — 4 bytes → R, G, B (skip A)
+        let r = data_byte(pos);
+        let g = data_byte(pos + 1);
+        let b = data_byte(pos + 2);
+        packed = (r << 16) | (g << 8) | b;
+    } else if (fmt == 4) {
+        // bgr24 — 3 bytes → B, G, R
+        let b = data_byte(pos);
+        let g = data_byte(pos + 1);
+        let r = data_byte(pos + 2);
+        packed = (r << 16) | (g << 8) | b;
+    } else if (fmt == 5) {
+        // bgra — 4 bytes → B, G, R, A (skip A)
+        let b = data_byte(pos);
+        let g = data_byte(pos + 1);
+        let r = data_byte(pos + 2);
+        packed = (r << 16) | (g << 8) | b;
+    } else if (fmt == 6) {
+        // argb — 4 bytes → A, R, G, B (skip A)
+        let r = data_byte(pos + 1);
+        let g = data_byte(pos + 2);
+        let b = data_byte(pos + 3);
+        packed = (r << 16) | (g << 8) | b;
+    } else {
+        // abgr — 4 bytes → A, B, G, R (skip A)
+        let b = data_byte(pos + 1);
+        let g = data_byte(pos + 2);
+        let r = data_byte(pos + 3);
+        packed = (r << 16) | (g << 8) | b;
+    }
+    return packed;
+}
+
+// =============================================================================
+// load_file — called when the user clicks Load
+// =============================================================================
+func load_file(path as string) -> bool {
+    if (len(path) == 0) {
+        _status = "Please enter a file path.";
+        return false;
+    }
+    let raw = fs.read_file(path);
+    if (raw == nil) {
+        _status = "Cannot open: " + path;
+        drop raw;   // raw is nil, but silences the leak warning
+        return false;
+    }
+    _data     = raw;
+    _data_len = len(raw);
+    _pos      = 0;
+    _status   = "";
+    return true;
+}
+
+// =============================================================================
+// refill_buffer — re-read _pixels from current _data starting at _pos
+// =============================================================================
+func refill_buffer() -> nil {
+    let i as i64 = 0;
+    let bpp = _bpp_table[_format_idx];
+    while (i < _total) {
+        _pixels[i] = bytes_to_packed(_pos + i * bpp);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// allocate_buffer — create a fresh _pixels list of _total elements (all zeros)
+// =============================================================================
+func allocate_buffer() -> nil {
+    _pixels = [];           // drop old list
+    let i as i64 = 0;
+    while (i < _total) {
+        _pixels.push(0);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// file-browser helpers
+// =============================================================================
+
+// Join a directory path and an entry name, handling the root case.
+func join_path(dir as string, name as string) -> string {
+    if (dir == "/") { return "/" + name; }
+    return dir + "/" + name;
+}
+
+// Refresh _browser_entries from fs.list_dir on _browser_path.
+func browser_refresh() -> nil {
+    _browser_entries = [];
+    _browser_error   = "";
+    let raw = fs.list_dir(_browser_path);
+    if (raw == nil) {
+        _browser_error = "Cannot read directory.";
+        drop raw;
+        return;
+    }
+    // First pass: collect directories, then files (so dirs appear first).
+    let dirs as list<string> = [];
+    let files as list<string> = [];
+    let ri as i64 = 0;
+    while (ri < len(raw)) {
+        let entry = raw[ri];
+        let full = join_path(_browser_path, entry);
+        if (fs.is_dir(full)) {
+            dirs.push(entry);
+        } else {
+            files.push(entry);
+        }
+        ri = ri + 1;
+    }
+    let di as i64 = 0;
+    while (di < len(dirs)) { _browser_entries.push(dirs[di]); di = di + 1; }
+    let fi as i64 = 0;
+    while (fi < len(files)) { _browser_entries.push(files[fi]); fi = fi + 1; }
+}
+
+// Navigate the browser to a new directory.
+func browser_navigate(dir as string) -> nil {
+    _browser_path = dir;
+    _browser_needs_list = true;
+}
+
+// =============================================================================
+// frame — called once per frame by Window.run()
+// =============================================================================
+func frame(win as Window) -> nil {
+    // --- one-time initialisation ---------------------------------------------
+    if (!_init_done) {
+        // build bpp lookup table
+        _bpp_table.push(1);   // gray8
+        _bpp_table.push(1);   // heatmap
+        _bpp_table.push(3);   // rgb24
+        _bpp_table.push(4);   // rgba
+        _bpp_table.push(3);   // bgr24
+        _bpp_table.push(4);   // bgra
+        _bpp_table.push(4);   // argb
+        _bpp_table.push(4);   // abgr
+
+        _committed_cols = _cols;
+        _committed_rows = _rows_count;
+        _total = _cols * _rows_count;
+        allocate_buffer();
+
+        // attempt to load the default file
+        let ok = load_file(_file_path);
+        if (ok) { refill_buffer(); }
+
+        _init_done = true;
+    }
+
+    // --- detect dimension changes → reallocate -------------------------------
+    if (_cols != _committed_cols  ||  _rows_count != _committed_rows) {
+        _committed_cols = _cols;
+        _committed_rows = _rows_count;
+        _total = _cols * _rows_count;
+        allocate_buffer();
+        if (_data_len > 0) { refill_buffer(); }
+    }
+
+    let bpp  = _bpp_table[_format_idx];
+    let step = _speed * _cols * bpp;   // bytes consumed per frame
+
+    // --- scroll & fill (unless paused and we paused after init) ---------------
+    if (_data_len > 0  &&  !_paused) {
+        // shift existing rows down by _speed rows (walk backwards)
+        let src as i64 = _total - _cols * _speed - 1;
+        while (src >= 0) {
+            _pixels[src + _cols * _speed] = _pixels[src];
+            src = src - 1;
+        }
+        // fill the top _speed rows from file data
+        let dst as i64 = 0;
+        while (dst < _cols * _speed) {
+            _pixels[dst] = bytes_to_packed(_pos + dst * bpp);
+            dst = dst + 1;
+        }
+        _pos = _pos + step;
+    }
+
+    // ---- draw the pixel grid ------------------------------------------------
+    let ridx as i64 = 0;
+    let r as i64 = 0;
+    while (r < _rows_count) {
+        let c as i64 = 0;
+        while (c < _cols) {
+            let packed = _pixels[ridx];
+            let red   = (packed >> 16) & 0xFF;
+            let green = (packed >> 8)  & 0xFF;
+            let blue  =  packed        & 0xFF;
+            gui.rect(c * _cell, r * _cell, _cell, _cell, red, green, blue, 255);
+            ridx = ridx + 1;
+            c = c + 1;
+        }
+        r = r + 1;
+    }
+
+    // ---- settings panel -----------------------------------------------------
+    gui.begin("Settings");
+
+    // file row
+    gui.text("File:");
+    gui.same_line();
+    _file_path = gui.input_text("##file", _file_path, 512);
+    gui.same_line();
+    if (gui.button("Load")) {
+        let ok = load_file(_file_path);
+        if (ok) { refill_buffer(); }
+    }
+    gui.same_line();
+    if (gui.button("Browse...")) {
+        _browser_open = true;
+        _browser_path = ".";
+        browser_refresh();
+    }
+
+    // dimension / speed sliders
+    _cols       = gui.slider_int("Width",     _cols,       16,  512);
+    _rows_count = gui.slider_int("Height",    _rows_count, 8,   256);
+    _cell       = gui.slider_int("Cell size", _cell,       1,   20);
+    _speed      = gui.slider_int("Speed",     _speed,      1,   30);
+
+    // format combo
+    _format_idx = gui.combo("Format", _format_idx, FORMAT_ITEMS);
+    gui.same_line();
+    _paused = gui.checkbox("Pause", _paused);
+
+    // status line
+    gui.text("");   // spacer
+    if (len(_status) > 0) {
+        gui.text("ERROR: " + _status);
+    } else if (_data_len > 0) {
+        let pct as i64 = 0;
+        if (_data_len > 0) { pct = (_pos * 100) / _data_len; }
+        gui.text(string(_data_len) + " bytes  |  pos " +
+                 string(_pos) + " (" + string(pct) + "%)");
+    } else {
+        gui.text("No file loaded.");
+    }
+    gui.text("FPS: " + string(gui.fps()));
+
+    gui.end();  // Settings
+
+    // ---- file browser window -------------------------------------------------
+    if (_browser_open) {
+        gui.begin("File Browser");
+
+        // Refresh on demand
+        if (_browser_needs_list) {
+            browser_refresh();
+            _browser_needs_list = false;
+        }
+
+        // Path bar + close button
+        gui.text("Path: " + _browser_path);
+        gui.same_line();
+        if (gui.button("X")) { _browser_open = false; }
+
+        // Parent directory
+        if (_browser_path != "/") {
+            if (gui.button(".. (parent)")) {
+                let dots = "/..";
+                let with_dots = _browser_path + dots;
+                let parent = fs.canonical(with_dots);
+                browser_navigate(parent);
+            }
+        }
+
+        // Error message
+        if (len(_browser_error) > 0) {
+            gui.text("Error: " + _browser_error);
+        }
+
+        // Entry list
+        let idx as i64 = 0;
+        while (idx < len(_browser_entries)) {
+            // Read entry once — compute full path and type from it.
+            let entry  = _browser_entries[idx];
+            let with_slash = _browser_path + "/";
+            let full   = with_slash + entry;
+            let is_dir = fs.is_dir(full);
+
+            // Re-read the entry name for the button label (first read was
+            // consumed by the path concatenation above).
+            let name = _browser_entries[idx];
+            if (gui.button(name)) {
+                if (is_dir) {
+                    browser_navigate(full);
+                } else {
+                    _file_path = full;
+                    let ok = load_file(_file_path);
+                    if (ok) { refill_buffer(); }
+                    _browser_open = false;
+                }
+            }
+            idx = idx + 1;
+        }
+
+        gui.end();  // File Browser
+    }
+}
+
+// =============================================================================
+// main
+// =============================================================================
+export func main() -> i64 {
+    let w = _cols * _cell + 320;   // extra width for the settings panel
+    let h = _rows_count * _cell + 40;
+    if (w < 640) { w = 640; }
+    if (h < 480) { h = 480; }
+    let win = gui.Window("Binary Waterfall", w, h);
+    win.run(frame);
+    drop win;
+    return 0;
+}

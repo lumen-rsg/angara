@@ -37,7 +37,7 @@ else
 endif
 
 ifneq ($(WIN32),1)
-    SONAME_ARG := $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$$(@F)
+    SONAME_ARG = $(SONAME_FLAG),$(INSTALL_MOD_DIR)/$(@F)
 else
     SONAME_ARG :=
 endif
@@ -69,6 +69,14 @@ endif
 
 CFLAGS   := -fPIC -Wall -Wextra $(OPT_FLAGS) $(DBG_FLAGS) -MMD -MP -Iangc/includes
 CXXFLAGS := -std=c++23 -fPIC -Wall -Wextra $(OPT_FLAGS) $(DBG_FLAGS) -MMD -MP -Wno-trigraphs -Iangc/includes $(EXTRA_CXXFLAGS)
+
+# Platform-specific SIMD flags (x86_64 gets AVX2+FMA, aarch64 gets baseline NEON).
+UNAME_M := $(shell uname -m)
+ifneq (,$(findstring x86_64,$(UNAME_M)))
+    SIMD_CFLAGS := -mavx2 -mfma
+else
+    SIMD_CFLAGS :=
+endif
 
 # pkg-config helper: warn if a required package is missing.
 # Usage: $(call pkg_warn,<pkg-name>)
@@ -108,11 +116,78 @@ MOD_OUTS := $(foreach f,$(MOD_SRCS),build/modules/$(notdir $(patsubst %.c,%.$(SO
 JSON_BR_SRC := modules/data/json_bridge.cpp
 JSON_BR_OBJ := build/obj/modules/data/json_bridge.o
 
+# ── GUI module (Dear ImGui + GLFW + OpenGL), vendored ───────────────────────
+# This is an OPTIONAL module. It requires the system's GL driver + window-system
+# dev headers (present on any graphical machine; see docs/20-native-modules.md),
+# but ImGui and GLFW are built from vendored sources under modules/gui/vendor/.
+# If the prereqs are missing the module is silently skipped — `make modules`
+# and `make modules-minimal` both succeed without it. Toggle with
+#   make GUI=1 modules          # force-enable (errors if prereqs missing)
+#   make GUI=0 modules          # force-disable
+IMGUI_DIR := modules/gui/vendor/imgui
+GLFW_DIR  := modules/gui/vendor/glfw
+GLFW_BUILD_DIR := build/third_party/glfw
+IMGUI_INC := -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends -I$(GLFW_DIR)/include
+
+# GL profile: "gl33" (desktop OpenGL 3.3, default) or "gles3" (OpenGL ES 3.0,
+# the native fast path on Asahi/Mesa ARM). Override with GUI_GL_PROFILE=gles3.
+GUI_GL_PROFILE ?= gl33
+ifeq ($(GUI_GL_PROFILE),gles3)
+    IMGUI_GL_DEFS := -DIMGUI_IMPL_OPENGL_ES3
+    GUI_GL_LIBS   := -lGLESv2 -lEGL
+else ifeq ($(UNAME_S),Darwin)
+    IMGUI_GL_DEFS :=
+    GUI_GL_LIBS   := -framework OpenGL
+else ifeq ($(WIN32),1)
+    IMGUI_GL_DEFS :=
+    GUI_GL_LIBS   := -lopengl32
+else
+    IMGUI_GL_DEFS :=
+    GUI_GL_LIBS   := -lGL
+endif
+
+# Source list for ImGui core + the two backends we use.
+IMGUI_SRCS := \
+	$(IMGUI_DIR)/imgui.cpp \
+	$(IMGUI_DIR)/imgui_draw.cpp \
+	$(IMGUI_DIR)/imgui_tables.cpp \
+	$(IMGUI_DIR)/imgui_widgets.cpp \
+	$(IMGUI_DIR)/imgui_demo.cpp \
+	$(IMGUI_DIR)/backends/imgui_impl_glfw.cpp \
+	$(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
+IMGUI_OBJS := $(patsubst $(IMGUI_DIR)/%.cpp,build/obj/third_party/imgui/%.o,$(IMGUI_SRCS))
+
+# Detect whether the gui module can build: cmake present + GL runtime + a
+# window-system backend (X11 or Wayland). Detection is best-effort: missing
+# pieces cause a graceful skip rather than a hard failure, unless GUI=1.
+GUI_CAN_BUILD := 0
+ifeq ($(GUI),0)
+    GUI_CAN_BUILD := 0
+else ifeq ($(shell command -v cmake 2>/dev/null),)
+    GUI_CAN_BUILD := 0
+else ifneq (,$(wildcard /usr/lib64/libGL.so* /usr/lib64/libEGL.so* /usr/lib/libGL.so* /usr/lib/libEGL.so*))
+    GUI_CAN_BUILD := 1
+endif
+# Need at least one window-system backend available for GLFW to target.
+ifeq ($(GUI_CAN_BUILD),1)
+    ifeq ($(wildcard /usr/include/X11/Xlib.h /usr/include/wayland-client.h),)
+        GUI_CAN_BUILD := 0
+    endif
+endif
+ifeq ($(GUI),1)
+    ifneq ($(GUI_CAN_BUILD),1)
+        $(error GUI=1 but gui prerequisites are missing (need cmake + GL/EGL runtime + X11 or Wayland dev headers))
+    endif
+endif
+ifeq ($(GUI_CAN_BUILD),1)
+    MOD_OUTS += build/modules/gui.$(SO_EXT)
+endif
+
 ANGC_SRCS := $(shell find angc -name "*.cpp")
 ANGC_OBJS := $(patsubst %.cpp,build/obj/%.o,$(ANGC_SRCS))
 ANGC_OUT  := build/angc
 
-.PHONY: all logo clean install uninstall lint install_vim uninstall_vim test test-ci test-cpp test-chaperone test-lang test-kernel
+.PHONY: all logo clean install uninstall lint install_vim uninstall_vim test test-ci test-cpp test-chaperone test-lang test-kernel vendor-gui
 
 all: logo $(ANGC_OUT)
 	@printf "$(BOLD)$(GREEN)>>> Build Completed Successfully <<<$(RESET)\n"
@@ -172,6 +247,14 @@ logo:
 	@printf "$(CYAN) ██║  ██║██║ ╚████║╚██████╔╝██║  ██║██║  ██║██║  ██║ $(RESET)\n"
 	@printf "$(CYAN) ╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ $(RESET)\n"
 	@printf "$(MAGENTA)[MK] Building Angara v3 (LLVM) // cv2 was here$(RESET)\n\n"
+
+# Fetch the vendored ImGui + GLFW sources (git submodules). Prerequisite for
+# the gui module objects. No-op if the sources are already present.
+vendor-gui:
+ifeq ($(wildcard $(IMGUI_DIR)/imgui.h),)
+	@printf "$(CYAN)[SUB]$(RESET) Initializing gui vendor submodules...\n"
+	@git submodule update --init --recursive modules/gui/vendor
+endif
 
 build/obj/%.o: %.c
 	@mkdir -p $(@D)
@@ -263,7 +346,7 @@ build/obj/modules/data/postgres.o: modules/data/postgres.c
 build/obj/modules/simd/simd.o: modules/simd/simd.c
 	@mkdir -p $(@D)
 	@printf "$(GREEN)[CC]  $(RESET) %s (SIMD)\n" "$<"
-	@$(CC) $(CFLAGS) -mavx2 -mfma -c $< -o $@
+	@$(CC) $(CFLAGS) $(SIMD_CFLAGS) -c $< -o $@
 
 build/modules/http.$(SO_EXT): build/obj/modules/net/http.o
 	@mkdir -p $(@D)
@@ -415,6 +498,10 @@ build/modules/random.$(SO_EXT): build/obj/modules/math/random.o
 build/modules/csv.$(SO_EXT): build/obj/modules/data/csv.o
 build/modules/config.$(SO_EXT): build/obj/modules/data/config.o
 build/modules/sort.$(SO_EXT): build/obj/modules/data/sort.o
+build/modules/cli.$(SO_EXT): build/obj/modules/data/cli.o
+build/modules/yaml.$(SO_EXT): build/obj/modules/data/yaml.o
+build/modules/msgpack.$(SO_EXT): build/obj/modules/data/msgpack.o
+build/modules/protobuf.$(SO_EXT): build/obj/modules/data/protobuf.o
 build/modules/args.$(SO_EXT): build/obj/modules/data/args.o
 build/modules/assert.$(SO_EXT): build/obj/modules/testing/assert.o
 build/modules/calltest.$(SO_EXT): build/obj/modules/testing/calltest.o
@@ -428,7 +515,9 @@ build/modules/watch.$(SO_EXT) \
 build/modules/adv_string.$(SO_EXT) build/modules/regex.$(SO_EXT) build/modules/encoding.$(SO_EXT) \
 build/modules/hash.$(SO_EXT) build/modules/uuid.$(SO_EXT) build/modules/random.$(SO_EXT) \
 build/modules/csv.$(SO_EXT) build/modules/config.$(SO_EXT) build/modules/sort.$(SO_EXT) \
-build/modules/args.$(SO_EXT) build/modules/assert.$(SO_EXT) build/modules/calltest.$(SO_EXT):
+build/modules/args.$(SO_EXT) build/modules/assert.$(SO_EXT) build/modules/calltest.$(SO_EXT) \
+build/modules/cli.$(SO_EXT) build/modules/yaml.$(SO_EXT) \
+build/modules/msgpack.$(SO_EXT) build/modules/protobuf.$(SO_EXT):
 	@mkdir -p $(@D)
 	@printf "$(MAGENTA)[MD] $(RESET) %s\n" "$@"
 	@$(CC) $< -shared $(SONAME_ARG) -o $@
@@ -438,13 +527,55 @@ $(ANGC_OUT): $(ANGC_OBJS)
 	@printf "$(CYAN)[BN] $(RESET) %s\n" "$@"
 	@$(CXX) $^ $(LDFLAGS_BIN) -o $@
 
+# ── GUI module build rules (ImGui + GLFW + OpenGL) ─────────────────────────
+# All rules are gated by GUI_CAN_BUILD so that a missing GL/Wayland/X11 setup
+# makes the whole subsystem a silent no-op rather than a build error.
+
+# GLFW as a static library, built once via CMake.
+$(GLFW_BUILD_DIR)/src/libglfw3.a: | vendor-gui
+	@mkdir -p $(@D)
+	@printf "$(CYAN)[CM] $(RESET) Configuring GLFW (static)...\n"
+	@cmake -S $(GLFW_DIR) -B $(GLFW_BUILD_DIR) \
+		-DBUILD_SHARED_LIBS=OFF \
+		-DGLFW_BUILD_EXAMPLES=OFF -DGLFW_BUILD_TESTS=OFF -DGLFW_BUILD_DOCS=OFF \
+		-DCMAKE_C_COMPILER=$(CC) >/dev/null
+	@printf "$(CYAN)[CM] $(RESET) Building GLFW...\n"
+	@cmake --build $(GLFW_BUILD_DIR) --parallel >/dev/null
+
+# ImGui core + backends. Each object needs the ImGui and GLFW headers and the
+# GL profile defines (for the opengl3 backend's bundled loader).
+build/obj/third_party/imgui/%.o: $(IMGUI_DIR)/%.cpp | vendor-gui
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CX] $(RESET) %s (IMGUI)\n" "$<"
+	@$(CXX) $(CXXFLAGS) $(IMGUI_INC) $(IMGUI_GL_DEFS) -c $< -o $@
+
+# The gui module itself (C++).
+build/obj/modules/gui/gui.o: modules/gui/gui.cpp | vendor-gui
+	@mkdir -p $(@D)
+	@printf "$(GREEN)[CX] $(RESET) %s (GUI)\n" "$<"
+	@$(CXX) $(CXXFLAGS) $(IMGUI_INC) $(IMGUI_GL_DEFS) -c $< -o $@
+
+ifeq ($(GUI_CAN_BUILD),1)
+build/modules/gui.$(SO_EXT): build/obj/modules/gui/gui.o $(IMGUI_OBJS) $(GLFW_BUILD_DIR)/src/libglfw3.a
+	@mkdir -p $(@D)
+	@printf "$(MAGENTA)[MD] $(RESET) %s (IMGUI+GLFW+GL)\n" "$@"
+	@$(CXX) build/obj/modules/gui/gui.o $(IMGUI_OBJS) $(GLFW_BUILD_DIR)/src/libglfw3.a \
+		-shared $(SONAME_ARG) $(GUI_GL_LIBS) -o $@
+else
+# Prereqs missing — emit a no-op stub so the prerequisites list resolves, but
+# never actually create the .so. The aggregate `modules` target tolerates the
+# absence; GUI=1 is the explicit way to demand it (and errors at parse time).
+build/modules/gui.$(SO_EXT):
+	@printf "$(YELLOW)[SKIP]$(RESET) gui module (missing GL/Wayland/X11 prereqs; use GUI=1 to require)\n"
+endif
+
 install: install_libraries install_executables
 	@printf "$(BOLD)$(GREEN)>>> Full Installation Complete <<<$(RESET)\n"
 
 install_libraries: $(MOD_OUTS)
 	@printf "$(MAGENTA)[IN] $(RESET) Installing Modules to %s\n" "$(DESTDIR)$(INSTALL_MOD_DIR)"
 	@mkdir -p $(DESTDIR)$(INSTALL_MOD_DIR)
-	@cp build/modules/*.$(SO_EXT) $(DESTDIR)$(INSTALL_MOD_DIR)/
+	@install -m 755 build/modules/*.$(SO_EXT) $(DESTDIR)$(INSTALL_MOD_DIR)/
 
 install_executables: $(ANGC_OUT)
 	@printf "$(CYAN)[IN] $(RESET) Installing Executable to %s\n" "$(DESTDIR)$(INSTALL_BIN_DIR)"

@@ -25,6 +25,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
+#include <assert.h>    // static_assert / _Static_assert (C11+); no-op in C++
 
 #ifdef __cplusplus
 extern "C" {

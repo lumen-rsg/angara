@@ -1,0 +1,41 @@
+attach gui;
+attach Window from gui;
+
+let _list as list<i64> = [];
+let _init_done as bool = false;
+
+func frame(win as Window) -> nil {
+    // Draw a big green rect first — should ALWAYS show
+    gui.rect(50, 50, 200, 200, 0, 255, 0, 255);
+    
+    if (!_init_done) {
+        // Pre-fill the list — must use .push() because subscript assignment
+        // on an empty list is a silent no-op (lists don't auto-grow).
+        let i as i64 = 0;
+        while (i < 100) {
+            _list.push(i);
+            i = i + 1;
+        }
+        _init_done = true;
+    }
+    
+    // Draw bars based on list values
+    let j as i64 = 0;
+    while (j < 100) {
+        let v = _list[j];
+        gui.rect(j * 6, 300, 5, 50, (v & 0xFF) as i64, 100, 200, 255);
+        j = j + 1;
+    }
+    
+    gui.begin("diag3");
+    gui.text("init: " + string(_init_done));
+    gui.text("FPS: " + string(gui.fps()));
+    gui.end();
+}
+
+export func main() -> i64 {
+    let win = gui.Window("diag3", 700, 400);
+    win.run(frame);
+    drop win;
+    return 0;
+}

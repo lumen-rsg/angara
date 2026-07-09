@@ -373,6 +373,8 @@ Angara ships with a rich set of native modules written in C, loaded dynamically 
 | `encoding` | Encoding/decoding utilities (Base64, etc.) |
 | `assert` | Assertion utilities for testing |
 | `unistd` | POSIX standard utilities |
+| `gui` | Dear ImGui windowing (windows, controls, textures) |
+| `eventloop` | Asynchronous event loop (epoll, timers, channels) |
 
 Modules are imported with `attach`:
 
@@ -454,9 +456,12 @@ angara/
 │   ├── json.c                     # JSON support
 │   ├── http.c                     # HTTP client/server
 │   ├── websocket.c                # WebSocket server
+│   ├── gui/gui.cpp                # Dear ImGui windowing (C++)
 │   └── ...                        # 20+ modules
 ├── examples/
-│   └── ankernel/                  # Bare-metal ARM64 kernel example
+│   ├── ankernel/                  # Bare-metal ARM64 kernel example
+│   ├── angfetch/                  # System-info tool (fastfetch clone)
+│   └── binary_waterfall/          # ImGui byte-waterfall visualiser
 ├── tests/                         # Test suite
 ├── Makefile                       # Build system
 └── angara.jpg                     # Project logo

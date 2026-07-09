@@ -1,0 +1,22 @@
+attach gui;
+attach Window from gui;
+
+func frame(win as Window) -> nil {
+    gui.begin("diag2");
+    gui.text("FPS: " + string(gui.fps()));
+    gui.end();
+    
+    // Simple rects in a while loop
+    let i as i64 = 0;
+    while (i < 100) {
+        gui.rect(i * 5, 100, 4, 50, 255, 100, 0, 255);
+        i = i + 1;
+    }
+}
+
+export func main() -> i64 {
+    let win = gui.Window("diag2", 600, 400);
+    win.run(frame);
+    drop win;
+    return 0;
+}

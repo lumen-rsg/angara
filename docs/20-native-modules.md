@@ -149,3 +149,33 @@ static const AngaraClassDef my_class = {
     "MyClass", my_fields, my_methods
 };
 ```
+
+## C++ Modules (e.g. `gui`)
+
+Native modules can be written in C++ when the backing library is C++ (e.g. Dear ImGui). Include `Angara.h` inside `extern "C" {}` — the header is already `extern "C"`-guarded, so you can include it directly from a `.cpp` file. Store `ang_api` as a `static const AngaraAPI*` (declared by `Angara.h`).
+
+The **gui module** (`modules/gui/gui.cpp`) is a concrete example: it links Dear ImGui + GLFW (built from vendored sources) into a C++ shared library. Key patterns it demonstrates:
+
+- **One-time global initialisation** — `ImGui::CreateContext()` and `glfwInit()` are called inside the first `Window` constructor, guarded by static flags.
+- **Per-frame callback loop** — `Window.run(frame_fn)` mirrors `eventloop.Loop.run()`: `api->incref(frame_fn)`, a `while(!glfwWindowShouldClose)` poll, `api->call(frame_fn, 1, winArg)` each frame, then `decref` on exit.
+- **Native-instance state** — `WindowData { GLFWwindow* win; }` and `TextureData { GLuint tex; int w, h; }` are stored via `api->native_instance_new` with `finalize_*` callbacks that decrement GL resources.
+- **Immediate-mode widgets** — `gui.button`, `gui.text`, `gui.slider_float`, etc. are plain module-level functions that call ImGui inside the frame callback.
+
+Usage from Angara:
+
+```angara
+attach gui;
+
+func on_frame(_) -> nil {
+    if (gui.button("Quit")) { return nil; }
+    gui.text("Hello from ImGui!");
+}
+
+export func main() -> i64 {
+    let win = gui.Window("Hello", 800, 600);
+    win.run(on_frame);
+    return 0;
+}
+```
+
+See `examples/binary_waterfall/` for a complete demo.

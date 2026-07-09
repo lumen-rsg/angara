@@ -462,10 +462,15 @@ void RuntimeBuilder::generateModuleAPIVTable() {
     auto* fn_defer_push = m_module.getFunction("__ang_api_defer_push");
     auto* fn_defer_run  = m_module.getFunction("__ang_api_defer_run");
 
-    std::vector<Type*> api_fields(33, ptr_ty);
+    std::vector<Type*> api_fields;
+    api_fields.push_back(i32_ty);          // api_version (uint32_t)
+    api_fields.push_back(i32_ty);          // padding to align next ptr
+    api_fields.insert(api_fields.end(), 33, ptr_ty);
     auto* api_type = StructType::create(m_ctx, api_fields, "AngaraAPI");
 
     std::vector<Constant*> fields = {
+        ConstantInt::get(i32_ty, 1),   // api_version = ANGARA_API_VERSION
+        ConstantInt::get(i32_ty, 0),   // padding
         fn_string,
         fn_string_len,
         fn_string_no_copy,
