@@ -107,15 +107,24 @@ void Chaperone::analyzeExpr(Context& ctx,
                     "transferred to another variable and is used here. Read the new "
                     "owner instead.",
                     "E507");
-            } else if (it->second == State::Escaped &&
-                       ctx.thread_escaped.count(ve->name.lexeme)) {
-                // M11: variable was transferred to another thread via spawn().
-                diag(ctx, ve->name,
-                    "🧵 Thread escape — `" + ve->name.lexeme + "` had its ownership "
-                    "transferred to another thread via `spawn()`. Using it in the "
-                    "parent thread is a data race / use-after-transfer. Access the "
-                    "value through the spawned thread's lifecycle instead.",
-                    "E510");
+            } else if (it->second == State::Escaped) {
+                // Variable's ownership was transferred to a function call
+                // (C2 conservative path) or to another thread (spawn).
+                if (ctx.thread_escaped.count(ve->name.lexeme)) {
+                    diag(ctx, ve->name,
+                        "🧵 Thread escape — `" + ve->name.lexeme + "` had its ownership "
+                        "transferred to another thread via `spawn()`. Using it in the "
+                        "parent thread is a data race / use-after-transfer. Access the "
+                        "value through the spawned thread's lifecycle instead.",
+                        "E510");
+                } else {
+                    diag(ctx, ve->name,
+                        "📤 Escaped molecule — `" + ve->name.lexeme + "` had its ownership "
+                        "transferred to a function call and is used here. The callee took "
+                        "ownership of the value; use the function's return value instead, "
+                        "or restructure to avoid using the variable after the call.",
+                        "E507");
+                }
             }
         }
         // S3: if this is a ref<T> being read, check its referent is still live.
@@ -732,16 +741,26 @@ void Chaperone::analyzeExpr(Context& ctx,
             }
         } else {
             // C2: Unknown function (no summary, no @consumes/@escape annotations).
-            // Conservatively mark all tracked Live arguments as Escaped — an
-            // unknown callee (e.g., FFI) may take ownership. Previously the default
-            // was Borrow, which silently missed use-after-free when a foreign
-            // function actually freed the argument.
-            for (size_t i = 0; i < effective_args.size(); i++) {
-                auto* arg = effective_args[i].get();
-                if (auto* ve3 = dynamic_cast<const VarExpr*>(arg)) {
-                    auto st_it = state.find(ve3->name.lexeme);
-                    if (st_it != state.end() && st_it->second == State::Live) {
-                        st_it->second = State::Escaped;
+            // Only mark arguments as Escaped when the callee is a foreign/FFI
+            // function — those may take ownership.  Regular Angara functions
+            // default to Borrow (they may access the value but won't free it).
+            bool is_foreign = false;
+            if (!callee_name.empty()) {
+                auto& sym_table = ctx.tc.getSymbolTable();
+                auto sym = sym_table.resolve(callee_name);
+                if (sym && sym->type && sym->type->kind == TypeKind::FUNCTION) {
+                    auto* ft = dynamic_cast<const FunctionType*>(sym->type.get());
+                    if (ft && ft->is_foreign) is_foreign = true;
+                }
+            }
+            if (is_foreign) {
+                for (size_t i = 0; i < effective_args.size(); i++) {
+                    auto* arg = effective_args[i].get();
+                    if (auto* ve3 = dynamic_cast<const VarExpr*>(arg)) {
+                        auto st_it = state.find(ve3->name.lexeme);
+                        if (st_it != state.end() && st_it->second == State::Live) {
+                            st_it->second = State::Escaped;
+                        }
                     }
                 }
             }

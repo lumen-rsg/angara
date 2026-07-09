@@ -129,6 +129,7 @@ namespace angara {
         bool is_exported = false;
         bool is_unsafe = false;
         bool is_foreign = false;
+        bool is_manual = false;   // @manual — programmer takes ownership, Chaperone skips
 
         // LANG-10: when non-empty, this is a destructuring declaration
         // (e.g. `let (a, b) = expr;`). `name` is unused in this case.

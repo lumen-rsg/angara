@@ -480,7 +480,7 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
 
     // G1: module-level (global) tracked allocations. They have no enclosing
     // scope to drop them in, so a tracked global leaks by construction — the
-    // programmer must manage it manually (future: @manual). Report E501 so it's
+    // programmer must manage it manually (@manual). Report E501 so it's
     // not invisible. (Top-level lets inside the program vector only — class
     // fields are handled by cascade-drops, not here.)
     // Phase B: built-in types (string, list, etc.) get W521 warnings instead
@@ -488,6 +488,7 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
     for (const auto& stmt : program) {
         if (!stmt) continue;
         if (auto* var = dynamic_cast<const VarDeclStmt*>(stmt.get())) {
+            if (var->is_manual) continue;   // @manual — programmer handles it
             if (isTrackedVar(ctx, *var)) {
                 bool is_builtin = false;
                 auto& types = ctx.tc.getVariableTypes();
@@ -497,7 +498,7 @@ bool Chaperone::run(const std::vector<std::shared_ptr<Stmt>>& program,
                     is_builtin = true;
                 auto msg = "🧬 Unfolded molecule — `" + var->name.lexeme + "` is a tracked "
                            "allocation at module scope, which has no scope to drop it in. "
-                           "It leaks by construction; manage it manually (future: @manual).";
+                           "It leaks by construction; manage it manually (@manual).";
                 if (is_builtin)
                     warn(ctx, var->name, msg, "W521");
                 else

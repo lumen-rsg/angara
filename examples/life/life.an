@@ -1,0 +1,285 @@
+// Conway's Game of Life — interactive ImGUI demo
+// Click cells to toggle (when paused), controls for play/pause/step/speed.
+// Pattern presets: Random, Glider, LWSS, Pulsar, Glider Gun.
+attach gui;
+attach Window from gui;
+
+const PATTERN_ITEMS as string =
+    b"Random\x00Glider\x00LWSS\x00Pulsar\x00Gun\x00\x00";
+
+// ---- state ----------------------------------------------------------------
+let _grid_w      as i64       = 80;
+let _grid_h      as i64       = 60;
+let _cell        as i64       = 8;
+let _grid        as list<i64>  = [];
+let _next        as list<i64>  = [];
+let _total       as i64       = 0;
+let _running     as bool      = false;
+let _speed       as i64       = 10;
+let _generation  as i64       = 0;
+let _population  as i64       = 0;
+let _pattern_idx as i64       = 0;    // combo index
+let _init_done   as bool      = false;
+let _mouse_gx    as i64       = -1;
+let _mouse_gy    as i64       = -1;
+
+// ---- pattern helpers ------------------------------------------------------
+func randomize_grid() -> nil {
+    let i as i64 = 0;
+    while (i < _total) {
+        let r = (i * 1103515245 + 12345) & 0xFFFF;
+        if (r < 22937) { _grid[i] = 1; }   // ~35% density
+        else           { _grid[i] = 0; }
+        i = i + 1;
+    }
+    _generation = 0;
+}
+
+func clear_grid() -> nil {
+    let i as i64 = 0;
+    while (i < _total) { _grid[i] = 0; i = i + 1; }
+    _generation = 0;
+    _population = 0;
+}
+// Place a pattern at (ox, oy). Pattern is a list of "x,y" packed as x*100+y.
+func place_pattern(ox as i64, oy as i64, cells as list<i64>) -> nil {
+    let i as i64 = 0;
+    while (i < len(cells)) {
+        let v = cells[i];
+        let px = ox + (v / 100);
+        let py = oy + (v % 100);
+        if (px >= 0 && px < _grid_w && py >= 0 && py < _grid_h) {
+            _grid[py * _grid_w + px] = 1;
+        }
+        i = i + 1;
+    }
+}
+
+func set_pattern() -> nil {
+    clear_grid();
+    let cx = _grid_w / 2;
+    let cy = _grid_h / 2;
+
+    if (_pattern_idx == 1) {
+        // Glider (3x3, moves SE)
+        let p as list<i64> = [];
+        p.push(1*100+0); p.push(2*100+1); p.push(0*100+2);
+        p.push(1*100+2); p.push(2*100+2);
+        place_pattern(cx - 1, cy - 1, p);
+    } else if (_pattern_idx == 2) {
+        // LWSS — lightweight spaceship (5x4, moves right)
+        let p as list<i64> = [];
+        p.push(1*100+0); p.push(4*100+0);              // . O . . O
+        p.push(0*100+1);                                // O . . . .
+        p.push(0*100+2);                                // O . . . O
+        p.push(0*100+3); p.push(1*100+3); p.push(2*100+3); p.push(3*100+3);
+        place_pattern(cx - 2, cy - 2, p);
+    } else if (_pattern_idx == 3) {
+        // Pulsar (13x13, period 3) — top-left quadrant, mirrored
+        let rows as list<i64> = [];
+        // row patterns as bitmasks at y offsets
+        rows.push(2); rows.push(3); rows.push(4);  // rows with dots
+        rows.push(0); rows.push(0);                 // spacers
+        // Actually, just hardcode a simple approximation
+        let p as list<i64> = [];
+        // Top section
+        let coords as list<i64> = [];
+        // row 2: . . O O O . . . O O O
+        coords.push(2*100+2); coords.push(2*100+3); coords.push(2*100+4);
+        coords.push(2*100+8); coords.push(2*100+9); coords.push(2*100+10);
+        // row 3: .
+        // row 4: O . . . O . . . O . . . O
+        coords.push(4*100+0); coords.push(4*100+4);
+        coords.push(4*100+8); coords.push(4*100+12);
+        // row 5: O . . . O . . . O . . . O
+        coords.push(5*100+0); coords.push(5*100+4);
+        coords.push(5*100+8); coords.push(5*100+12);
+        // row 6: O . . . O . . . O . . . O
+        coords.push(6*100+0); coords.push(6*100+4);
+        coords.push(6*100+8); coords.push(6*100+12);
+        // row 7: . . O O O . . . O O O
+        coords.push(7*100+2); coords.push(7*100+3); coords.push(7*100+4);
+        coords.push(7*100+8); coords.push(7*100+9); coords.push(7*100+10);
+        place_pattern(cx - 6, cy - 4, coords);
+    } else if (_pattern_idx == 4) {
+        // Gosper Glider Gun — simplified 36x9
+        let p as list<i64> = [];
+        // Left block
+        p.push(0*100+4); p.push(0*100+5);
+        p.push(1*100+4); p.push(1*100+5);
+        // Right block
+        p.push(0*100+34); p.push(0*100+35);
+        p.push(1*100+34); p.push(1*100+35);
+        // Main structure (approximate)
+        p.push(2*100+14); p.push(2*100+15);
+        p.push(3*100+13); p.push(3*100+17);
+        p.push(4*100+12); p.push(4*100+18);
+        p.push(5*100+12); p.push(5*100+16); p.push(5*100+18); p.push(5*100+19);
+        p.push(6*100+12); p.push(6*100+18);
+        p.push(7*100+13); p.push(7*100+17);
+        p.push(8*100+14); p.push(8*100+15);
+        // Glider-output eater
+        p.push(4*100+22); p.push(4*100+23);
+        p.push(5*100+22); p.push(5*100+23);
+        p.push(6*100+22); p.push(6*100+23);
+        p.push(3*100+24);
+        p.push(2*100+25); p.push(2*100+26);
+        p.push(6*100+24);
+        p.push(7*100+25); p.push(7*100+26);
+        place_pattern(cx - 18, cy - 4, p);
+    } else {
+        randomize_grid();
+    }
+}
+
+// ---- simulation -----------------------------------------------------------
+func step_generation() -> nil {
+    let pop as i64 = 0;
+    let y as i64 = 0;
+    while (y < _grid_h) {
+        let x as i64 = 0;
+        while (x < _grid_w) {
+            let n as i64 = 0;
+            let dy as i64 = -1;
+            while (dy <= 1) {
+                let dx as i64 = -1;
+                while (dx <= 1) {
+                    if (dx != 0 || dy != 0) {
+                        let nx = x + dx;
+                        let ny = y + dy;
+                        if (nx >= 0 && nx < _grid_w && ny >= 0 && ny < _grid_h) {
+                            n = n + _grid[ny * _grid_w + nx];
+                        }
+                    }
+                    dx = dx + 1;
+                }
+                dy = dy + 1;
+            }
+            let idx = y * _grid_w + x;
+            let alive = _grid[idx];
+            if (alive == 1) {
+                pop = pop + 1;
+                if (n == 2 || n == 3) { _next[idx] = 1; }
+                else                   { _next[idx] = 0; }
+            } else {
+                if (n == 3) { _next[idx] = 1; }
+                else        { _next[idx] = 0; }
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    _population = pop;
+    // Auto-reseed if everything died
+    if (pop == 0 && _generation > 0) {
+        randomize_grid();
+        return;
+    }
+    // Copy _next back into _grid
+    let i as i64 = 0;
+    while (i < _total) { _grid[i] = _next[i]; i = i + 1; }
+    _generation = _generation + 1;
+}
+
+// ---- frame callback -------------------------------------------------------
+func frame(win as Window) -> nil {
+    if (!_init_done) {
+        _total = _grid_w * _grid_h;
+        let i as i64 = 0;
+        while (i < _total) { _grid.push(0); _next.push(0); i = i + 1; }
+        set_pattern();
+        _init_done = true;
+    }
+
+    if (_running) {
+        let ticks = _speed;
+        let t as i64 = 0;
+        while (t < ticks) {
+            step_generation();
+            t = t + 1;
+        }
+    }
+
+    // ---- draw the grid ---------------------------------------------------
+    let py as i64 = 0;
+    while (py < _grid_h) {
+        let px as i64 = 0;
+        while (px < _grid_w) {
+            let alive = _grid[py * _grid_w + px];
+            if (alive == 1) {
+                gui.rect(px * _cell, py * _cell, _cell, _cell, 80, 220, 80, 255);
+            } else {
+                gui.rect(px * _cell, py * _cell, _cell, _cell, 20, 20, 28, 255);
+            }
+            px = px + 1;
+        }
+        py = py + 1;
+    }
+
+    if (_mouse_gx >= 0 && _mouse_gy >= 0 &&
+        _mouse_gx < _grid_w && _mouse_gy < _grid_h) {
+        gui.rect(_mouse_gx * _cell, _mouse_gy * _cell, _cell, _cell,
+                 255, 255, 100, 120);
+    }
+
+    // ---- mouse interaction ------------------------------------------------
+    let ox = gui.cursor_screen_x();
+    let oy = gui.cursor_screen_y();
+    let mx = gui.mouse_x();
+    let my = gui.mouse_y();
+    let gx = i64((mx - ox) / f64(_cell));
+    let gy = i64((my - oy) / f64(_cell));
+
+    if (gx >= 0 && gx < _grid_w && gy >= 0 && gy < _grid_h) {
+        _mouse_gx = gx;
+        _mouse_gy = gy;
+    } else {
+        _mouse_gx = -1;
+        _mouse_gy = -1;
+    }
+
+    if (!_running && gui.mouse_clicked(0) &&
+        gx >= 0 && gx < _grid_w && gy >= 0 && gy < _grid_h) {
+        let idx = gy * _grid_w + gx;
+        _grid[idx] = 1 - _grid[idx];
+    }
+
+    // ---- controls panel --------------------------------------------------
+    gui.begin("Controls");
+
+    if (_running) {
+        if (gui.button("Pause")) { _running = false; }
+    } else {
+        if (gui.button("Play")) { _running = true; }
+    }
+    gui.same_line();
+    if (!_running) {
+        if (gui.button("Step")) { step_generation(); }
+    }
+    gui.same_line();
+    let prev = _pattern_idx;
+    _pattern_idx = gui.combo("##pat", _pattern_idx, PATTERN_ITEMS);
+    if (_pattern_idx != prev) { set_pattern(); }
+    gui.same_line();
+    if (gui.button("Clear")) { clear_grid(); }
+
+    _speed = gui.slider_int("Speed", _speed, 1, 60);
+    gui.text("Gen: " + string(_generation) +
+             "  Pop: " + string(_population) +
+             "  Grid: " + string(_grid_w) + "x" + string(_grid_h));
+    gui.text("FPS: " + string(gui.fps()));
+
+    gui.end();
+}
+
+// ---- main ----------------------------------------------------------------
+export func main() -> i64 {
+    let win_w = _grid_w * _cell + 260;
+    let win_h = _grid_h * _cell + 40;
+    if (win_w < 500) { win_w = 500; }
+    if (win_h < 400) { win_h = 400; }
+    let win = gui.Window("Conway's Game of Life", win_w, win_h);
+    win.run(frame);
+    drop win;
+    return 0;
+}

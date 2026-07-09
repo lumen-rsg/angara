@@ -45,6 +45,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 // Angara.h's own extern "C" block closes at its end, so we reopen one here
 // so that every Angara-exported function below gets C linkage.  The compiler
@@ -335,6 +336,47 @@ AngaraObject Angara_Texture_upload(int arg_count, AngaraObject* args) {
     return ang_nil();
 }
 
+// texture.upload_packed(pixels as list<i64>) -> nil
+// Each i64 is a packed RGBA8 pixel: (a<<24)|(b<<16)|(g<<8)|r.
+// The list must have at least width*height entries (1 element per pixel).
+AngaraObject Angara_Texture_upload_packed(int arg_count, AngaraObject* args) {
+    if (arg_count < 2) {
+        ang_api->throw_error("texture.upload_packed(pixels): expected a packed-pixel list.");
+        return ang_nil();
+    }
+    TextureData* t = (TextureData*)ang_api->native_instance_data(args[0]);
+    if (!t || !t->tex) { ang_api->throw_error("texture.upload_packed: invalid texture."); return ang_nil(); }
+    if (ang_api->obj_type(args[1]) != ANG_OBJ_LIST) {
+        ang_api->throw_error("texture.upload_packed: expected a list<i64> of packed pixels.");
+        return ang_nil();
+    }
+
+    size_t pixel_count = (size_t)t->w * (size_t)t->h;
+    size_t got = ang_api->list_len(args[1]);
+    if (got < pixel_count) {
+        ang_api->throw_error("texture.upload_packed: pixel list too short (need w*h).");
+        return ang_nil();
+    }
+
+    size_t byte_count = pixel_count * 4;
+    unsigned char* buf = (unsigned char*)std::malloc(byte_count);
+    if (!buf) { ang_api->throw_error("texture.upload_packed: out of memory."); return ang_nil(); }
+    for (size_t i = 0; i < pixel_count; i++) {
+        int64_t packed = ang_as_i64(ang_api->list_get(args[1], (int64_t)i));
+        size_t off = i * 4;
+        buf[off + 0] = (unsigned char)( packed        & 0xFF);  // R
+        buf[off + 1] = (unsigned char)((packed >> 8)  & 0xFF);  // G
+        buf[off + 2] = (unsigned char)((packed >> 16) & 0xFF);  // B
+        buf[off + 3] = (unsigned char)((packed >> 24) & 0xFF);  // A
+    }
+
+    glBindTexture(GL_TEXTURE_2D, t->tex);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, t->w, t->h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    std::free(buf);
+    return ang_nil();
+}
+
 // texture.width() -> i64 / texture.height() -> i64
 AngaraObject Angara_Texture_width(int arg_count, AngaraObject* args) {
     (void)arg_count;
@@ -526,12 +568,114 @@ AngaraObject Angara_gui_combo(int arg_count, AngaraObject* args) {
         ang_api->throw_error("gui.combo(label, current_idx, items): bad arguments.");
         return ang_nil();
     }
-    const char* label = ang_api->as_cstr(args[0]);
-    int current       = (int)ang_as_i64(args[1]);
-    const char* items = ang_api->as_cstr(args[2]);
+    const char* label  = ang_api->as_cstr(args[0]);
+    int current        = (int)ang_as_i64(args[1]);
+    size_t items_len   = ang_api->str_len(args[2]);
+    const char* items_buf = ang_api->as_cstr(args[2]);
 
-    ImGui::Combo(label, &current, items);
+    // Split the null-separated items string into an array of char* pointers.
+    std::vector<const char*> item_ptrs;
+    const char* p   = items_buf;
+    const char* end = items_buf + items_len;
+    while (p < end) {
+        item_ptrs.push_back(p);
+        while (p < end && *p != '\0') p++;
+        if (p < end && *p == '\0') p++;
+    }
+    while (!item_ptrs.empty() && item_ptrs.back()[0] == '\0')
+        item_ptrs.pop_back();
+
+    if (!item_ptrs.empty()) {
+        ImGui::Combo(label, &current, item_ptrs.data(), (int)item_ptrs.size());
+    }
     return ang_i64((int64_t)current);
+}
+
+// =============================================================================
+// §4b  Mouse / keyboard input helpers
+// =============================================================================
+
+// gui.is_item_hovered() -> bool
+AngaraObject Angara_gui_is_item_hovered(int arg_count, AngaraObject* args) {
+    (void)arg_count; (void)args;
+    return ang_bool(ImGui::IsItemHovered());
+}
+
+// gui.mouse_clicked(button as i64) -> bool
+AngaraObject Angara_gui_mouse_clicked(int arg_count, AngaraObject* args) {
+    if (arg_count < 1 || !ang_is_i64(args[0])) {
+        ang_api->throw_error("gui.mouse_clicked(button): expected i64.");
+        return ang_nil();
+    }
+    int btn = (int)ang_as_i64(args[0]);
+    return ang_bool(ImGui::IsMouseClicked(btn));
+}
+
+// gui.mouse_down(button as i64) -> bool
+AngaraObject Angara_gui_mouse_down(int arg_count, AngaraObject* args) {
+    if (arg_count < 1 || !ang_is_i64(args[0])) {
+        ang_api->throw_error("gui.mouse_down(button): expected i64.");
+        return ang_nil();
+    }
+    int btn = (int)ang_as_i64(args[0]);
+    return ang_bool(ImGui::IsMouseDown(btn));
+}
+
+// gui.mouse_drag_x(button as i64) -> f64
+AngaraObject Angara_gui_mouse_drag_x(int arg_count, AngaraObject* args) {
+    int btn = 0;
+    if (arg_count >= 1 && ang_is_i64(args[0])) btn = (int)ang_as_i64(args[0]);
+    return ang_f64((double)ImGui::GetMouseDragDelta(btn).x);
+}
+
+// gui.mouse_drag_y(button as i64) -> f64
+AngaraObject Angara_gui_mouse_drag_y(int arg_count, AngaraObject* args) {
+    int btn = 0;
+    if (arg_count >= 1 && ang_is_i64(args[0])) btn = (int)ang_as_i64(args[0]);
+    return ang_f64((double)ImGui::GetMouseDragDelta(btn).y);
+}
+
+// gui.mouse_wheel() -> f64
+AngaraObject Angara_gui_mouse_wheel(int arg_count, AngaraObject* args) {
+    (void)arg_count; (void)args;
+    return ang_f64((double)ImGui::GetIO().MouseWheel);
+}
+
+// gui.is_mouse_hovering_rect(x, y, w, h) -> bool
+AngaraObject Angara_gui_is_mouse_hovering_rect(int arg_count, AngaraObject* args) {
+    if (arg_count < 4 || !ang_is_i64(args[0]) || !ang_is_i64(args[1]) ||
+        !ang_is_i64(args[2]) || !ang_is_i64(args[3])) {
+        ang_api->throw_error("gui.is_mouse_hovering_rect(x,y,w,h): expected 4 i64.");
+        return ang_nil();
+    }
+    float x = (float)ang_as_i64(args[0]);
+    float y = (float)ang_as_i64(args[1]);
+    float w = (float)ang_as_i64(args[2]);
+    float h = (float)ang_as_i64(args[3]);
+    return ang_bool(ImGui::IsMouseHoveringRect(ImVec2(x, y), ImVec2(x + w, y + h)));
+}
+
+// gui.mouse_x() -> f64  /  gui.mouse_y() -> f64
+// Mouse position in absolute screen coordinates.
+AngaraObject Angara_gui_mouse_x(int arg_count, AngaraObject* args) {
+    (void)arg_count; (void)args;
+    return ang_f64((double)ImGui::GetMousePos().x);
+}
+AngaraObject Angara_gui_mouse_y(int arg_count, AngaraObject* args) {
+    (void)arg_count; (void)args;
+    return ang_f64((double)ImGui::GetMousePos().y);
+}
+
+// gui.cursor_screen_x() -> f64  /  gui.cursor_screen_y() -> f64
+// Top-left of the window content area in absolute screen coordinates.
+// Used to convert mouse screen coords to draw-list coords.
+AngaraObject Angara_gui_cursor_screen_x(int arg_count, AngaraObject* args) {
+    (void)arg_count; (void)args;
+    return ang_f64((double)ImGui::GetCursorScreenPos().x);
+}
+AngaraObject Angara_gui_cursor_screen_y(int arg_count, AngaraObject* args) {
+    (void)arg_count; (void)args;
+    return ang_f64((double)ImGui::GetCursorScreenPos().y);
 }
 
 // gui.nil_texture() -> Texture?  — returns nil typed as optional Texture.
@@ -557,10 +701,11 @@ static const AngaraMethodDef WINDOW_METHODS[] = {
 static const AngaraClassDef WINDOW_CLASS = { "Window", NULL, WINDOW_METHODS };
 
 static const AngaraMethodDef TEXTURE_METHODS[] = {
-    {"upload", (AngaraMethodFn)Angara_Texture_upload, "l<i>->n"},
-    {"draw",   (AngaraMethodFn)Angara_Texture_draw,   "ii->n"},
-    {"width",  (AngaraMethodFn)Angara_Texture_width,  "->i"},
-    {"height", (AngaraMethodFn)Angara_Texture_height, "->i"},
+    {"upload",        (AngaraMethodFn)Angara_Texture_upload,        "l<i>->n"},
+    {"upload_packed", (AngaraMethodFn)Angara_Texture_upload_packed, "l<i>->n"},
+    {"draw",          (AngaraMethodFn)Angara_Texture_draw,          "ii->n"},
+    {"width",         (AngaraMethodFn)Angara_Texture_width,         "->i"},
+    {"height",        (AngaraMethodFn)Angara_Texture_height,        "->i"},
     {NULL, NULL, NULL}
 };
 static const AngaraClassDef TEXTURE_CLASS = { "Texture", NULL, TEXTURE_METHODS };
@@ -585,6 +730,19 @@ static const AngaraFuncDef GUI_EXPORTS[] = {
     {"input_text",  Angara_gui_input_text,  "ssi->s"},
     {"combo",       Angara_gui_combo,       "sis->i"},
     {"nil_texture", Angara_gui_nil_texture, "->Texture?"},
+
+    // Mouse / keyboard input
+    {"is_item_hovered", Angara_gui_is_item_hovered, "->b"},
+    {"mouse_clicked",   Angara_gui_mouse_clicked,   "i->b"},
+    {"mouse_down",      Angara_gui_mouse_down,      "i->b"},
+    {"mouse_drag_x",    Angara_gui_mouse_drag_x,    "i->d"},
+    {"mouse_drag_y",    Angara_gui_mouse_drag_y,    "i->d"},
+    {"mouse_wheel",     Angara_gui_mouse_wheel,     "->d"},
+    {"is_mouse_hovering_rect", Angara_gui_is_mouse_hovering_rect, "iiii->b"},
+    {"mouse_x",       Angara_gui_mouse_x,       "->d"},
+    {"mouse_y",       Angara_gui_mouse_y,       "->d"},
+    {"cursor_screen_x", Angara_gui_cursor_screen_x, "->d"},
+    {"cursor_screen_y", Angara_gui_cursor_screen_y, "->d"},
 
     ANGARA_FUNC_END
 };

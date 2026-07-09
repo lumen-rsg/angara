@@ -634,7 +634,13 @@ void Chaperone::analyzeStmt(Context& ctx,
                 diag(ctx, var->name, msg, "E501");
         }
         bool tracked = isTrackedVar(ctx, *var);
-        state[var->name.lexeme] = tracked ? State::Live : State::Uninit;
+        // @manual annotation: programmer takes full ownership responsibility.
+        // The Chaperone skips tracking entirely — no state entry, no diagnostics.
+        if (var->is_manual) tracked = false;
+        if (tracked)
+            state[var->name.lexeme] = State::Live;
+        else
+            state[var->name.lexeme] = State::Uninit;
 
         // M12: struct-literal borrow tracking. When a non-owned data struct
         // is initialized with a RecordExpr, any ref<T> fields that are

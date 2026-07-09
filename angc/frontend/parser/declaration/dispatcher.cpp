@@ -13,6 +13,7 @@ namespace angara {
             bool pending_unsendable = false;
             bool pending_sync = false;
             bool pending_unsync = false;
+            bool pending_manual = false;
             std::set<int> pending_consumes;
             std::set<int> pending_escapes;
 
@@ -77,6 +78,9 @@ namespace angara {
                 } else if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "unsync") {
                     advance();
                     pending_unsync = true;
+                } else if (ann.type == TokenType::IDENTIFIER && ann.lexeme == "manual") {
+                    advance();
+                    pending_manual = true;
                 } else {
                     // Not a recognized annotation — restore and break out.
                     m_current = saved;
@@ -187,9 +191,11 @@ namespace angara {
             } else if (match({TokenType::CONST})) {
                 decl_stmt = varDeclaration(true);
                 std::static_pointer_cast<VarDeclStmt>(decl_stmt)->is_exported = is_exported;
+                std::static_pointer_cast<VarDeclStmt>(decl_stmt)->is_manual = pending_manual;
             } else if (match({TokenType::LET})) {
                 decl_stmt = varDeclaration(false);
                 std::static_pointer_cast<VarDeclStmt>(decl_stmt)->is_exported = is_exported;
+                std::static_pointer_cast<VarDeclStmt>(decl_stmt)->is_manual = pending_manual;
             } else if (match({TokenType::ATTACH})) {
                 if (is_exported) {
                     throw error(previous(), "'attach' statements import symbols and cannot be marked 'export'.", "E137");

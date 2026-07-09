@@ -433,7 +433,7 @@ llvm::Value* LLVMBackend::makeStr(const std::string& s) {
     auto savedIP = builder->saveIP();
     auto& init_entry = m_strlit_init_fn->getEntryBlock();
     builder->SetInsertPoint(&init_entry, init_entry.getFirstInsertionPt());
-    auto* new_str = callRtByName("__ang_string_from_c", {gsptr});
+    auto* new_str = callRtByName("__ang_api_string_len", {gsptr, builder->getInt64(s.size())});
     // Pin the string literal so the runtime never collects it.
     // String literals are stored in globals, not root frames, so without
     // pinning they'd be invisible to the collector and freed as unreachable.

@@ -1,0 +1,220 @@
+// Mandelbrot Explorer — interactive ImGUI demo
+// Click + drag to pan, scroll wheel to zoom, controls panel for iterations
+// and colour scheme.  Renders to a Texture for efficient display.
+attach gui;
+attach Window from gui;
+attach math;
+
+const SCHEME_ITEMS as string =
+    b"Classic\x00Fire\x00Rainbow\x00Grayscale\x00\x00";
+
+// ---- state ----------------------------------------------------------------
+@manual let _tex            = gui.nil_texture();  // GPU texture, managed manually
+let _tex_w          as i64       = 400;
+let _tex_h          as i64       = 300;
+let _center_x       as f64       = -0.5;
+let _center_y       as f64       = 0.0;
+let _zoom           as f64       = 1.0;
+let _iterations     as i64       = 200;
+let _colour_scheme  as i64       = 0;
+let _needs_render   as bool      = true;
+let _pixels         as list<i64>  = [];
+let _init_done      as bool      = false;
+let _status         as string    = "Rendering...";
+
+// drag state
+let _dragging       as bool      = false;
+let _drag_start_cx  as f64       = 0.0;
+let _drag_start_cy  as f64       = 0.0;
+
+// ---- colour helpers -------------------------------------------------------
+func colour_classic(t as f64) -> i64 {
+    let r = i64(t * t * 255.0);        if (r > 255) { r = 255; }
+    let g = i64(t * t * t * t * 180.0); if (g > 255) { g = 255; }
+    let b = i64(math.sqrt(t) * 255.0);  if (b > 255) { b = 255; }
+    return (255 << 24) | (r << 16) | (g << 8) | b;
+}
+
+func colour_fire(t as f64) -> i64 {
+    let r as i64 = 0; let g as i64 = 0; let b as i64 = 0;
+    if (t < 0.33) {
+        r = i64(t * 3.0 * 255.0);
+    } else if (t < 0.66) {
+        r = 255;
+        g = i64((t - 0.33) * 3.0 * 255.0);
+    } else {
+        r = 255; g = 255;
+        b = i64((t - 0.66) * 3.0 * 255.0);
+    }
+    if (r > 255) { r = 255; }
+    if (g > 255) { g = 255; }
+    if (b > 255) { b = 255; }
+    return (255 << 24) | (r << 16) | (g << 8) | b;
+}
+
+func colour_rainbow(t as f64) -> i64 {
+    let pi23 = 2.0 * math.PI() / 3.0;
+    let r = i64((math.sin(t * 6.283)        * 0.5 + 0.5) * 255.0);
+    let g = i64((math.sin(t * 6.283 - pi23) * 0.5 + 0.5) * 255.0);
+    let b = i64((math.sin(t * 6.283 + pi23) * 0.5 + 0.5) * 255.0);
+    if (r > 255) { r = 255; }
+    if (g > 255) { g = 255; }
+    if (b > 255) { b = 255; }
+    return (255 << 24) | (r << 16) | (g << 8) | b;
+}
+
+func colour_grayscale(t as f64) -> i64 {
+    let v = i64(t * 255.0); if (v > 255) { v = 255; }
+    return (255 << 24) | (v << 16) | (v << 8) | v;
+}
+
+func pixel_colour(t as f64) -> i64 {
+    if (_colour_scheme == 0) { return colour_classic(t); }
+    if (_colour_scheme == 1) { return colour_fire(t); }
+    if (_colour_scheme == 2) { return colour_rainbow(t); }
+    return colour_grayscale(t);
+}
+
+// ---- Mandelbrot renderer --------------------------------------------------
+func render_mandelbrot() -> nil {
+    _status = "Rendering...";
+    let w        = _tex_w;
+    let h        = _tex_h;
+    let max_iter = _iterations;
+    let scale    = 4.0 / (_zoom * f64(h));
+
+    let py as i64 = 0;
+    while (py < h) {
+        let ci = _center_y + (f64(py) - f64(h) * 0.5) * scale;
+        let px as i64 = 0;
+        while (px < w) {
+            let cr = _center_x + (f64(px) - f64(w) * 0.5) * scale;
+
+            let zr as f64 = 0.0;
+            let zi as f64 = 0.0;
+            let iter as i64 = 0;
+            let escaped as bool = false;
+            let esc_iter as i64 = 0;
+            let esc_zr as f64 = 0.0;
+            let esc_zi as f64 = 0.0;
+
+            while (iter < max_iter) {
+                let zr2 = zr * zr;
+                let zi2 = zi * zi;
+                if (zr2 + zi2 > 4.0) {
+                    escaped   = true;
+                    esc_iter  = iter;
+                    esc_zr    = zr;
+                    esc_zi    = zi;
+                    iter = max_iter;
+                } else {
+                    zi = 2.0 * zr * zi + ci;
+                    zr = zr2 - zi2 + cr;
+                    iter = iter + 1;
+                }
+            }
+
+            let idx = py * w + px;
+            if (escaped) {
+                let mag2   = esc_zr * esc_zr + esc_zi * esc_zi;
+                let log_zn = math.log2(mag2) * 0.5;
+                let smooth = f64(esc_iter) + 1.0 - math.log2(log_zn);
+                let t = smooth / f64(max_iter);
+                if (t < 0.0) { t = 0.0; }
+                if (t > 1.0) { t = 1.0; }
+                _pixels[idx] = pixel_colour(t);
+            } else {
+                _pixels[idx] = (255 << 24);
+            }
+            px = px + 1;
+        }
+        py = py + 1;
+    }
+    if (_tex != nil) {
+        let t = _tex;
+        t.upload_packed(_pixels);
+    }
+    _status = "";
+    _needs_render = false;
+}
+
+// ---- frame callback -------------------------------------------------------
+func frame(win as Window) -> nil {
+    if (!_init_done) {
+        _tex = gui.Texture(_tex_w, _tex_h);
+        let total = _tex_w * _tex_h;
+        let i as i64 = 0;
+        while (i < total) {
+            _pixels.push(0);
+            i = i + 1;
+        }
+        _init_done = true;
+    }
+
+    if (_needs_render) { render_mandelbrot(); }
+
+    // draw the texture (guarded because _tex is Texture?)
+    if (_tex != nil) {
+        let t = _tex;
+        t.draw(_tex_w, _tex_h);
+    }
+
+    // ---- mouse interaction on the texture ----
+    let hovering = gui.is_item_hovered();
+
+    if (hovering) {
+        let wheel = gui.mouse_wheel();
+        if (wheel > 0.0)      { _zoom = _zoom * 1.5; _needs_render = true; }
+        else if (wheel < 0.0) { _zoom = _zoom / 1.5; _needs_render = true; }
+        if (_zoom < 0.01) { _zoom = 0.01; }
+
+        if (gui.mouse_clicked(0)) {
+            _drag_start_cx = _center_x;
+            _drag_start_cy = _center_y;
+            _dragging = true;
+        }
+        if (_dragging && gui.mouse_down(0)) {
+            let dx = gui.mouse_drag_x(0);
+            let dy = gui.mouse_drag_y(0);
+            if (dx != 0.0 || dy != 0.0) {
+                let s = 4.0 / (_zoom * f64(_tex_h));
+                _center_x = _drag_start_cx - dx * s;
+                _center_y = _drag_start_cy - dy * s;
+                _needs_render = true;
+            }
+        }
+        if (!gui.mouse_down(0)) { _dragging = false; }
+    }
+
+    // ---- controls panel ---------------------------------------------------
+    gui.begin("Controls");
+
+    let new_iter = gui.slider_int("Iterations", _iterations, 50, 2000);
+    if (new_iter != _iterations) { _iterations = new_iter; _needs_render = true; }
+
+    let new_scheme = gui.combo("Colour", _colour_scheme, SCHEME_ITEMS);
+    if (new_scheme != _colour_scheme) { _colour_scheme = new_scheme; _needs_render = true; }
+
+    gui.text("Zoom:  " + string(i64(_zoom)) + "x");
+    gui.text("Center: " + string(i64(_center_x * 1000000.0)) +
+             ", " + string(i64(_center_y * 1000000.0)) + "  (e6)");
+
+    if (gui.button("Reset view")) {
+        _center_x = -0.5; _center_y = 0.0; _zoom = 1.0;
+        _needs_render = true;
+    }
+
+    gui.text("Tex: " + string(_tex_w) + "x" + string(_tex_h));
+    if (len(_status) > 0) { gui.text("Status: " + _status); }
+    gui.text("FPS: " + string(gui.fps()));
+
+    gui.end();
+}
+
+// ---- main ----------------------------------------------------------------
+export func main() -> i64 {
+    let win = gui.Window("Mandelbrot Explorer", 720, 540);
+    win.run(frame);
+    drop win;
+    return 0;
+}
