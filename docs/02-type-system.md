@@ -25,6 +25,8 @@ Primitive types, compound types, generics, and user-defined types.
 | Optional | `T?` | Null-safe wrapper |
 | Pointer | `*i8`, `*void` | FFI pointer |
 | Fixed Array | `i8[256]` | Inline C array for FFI |
+| Borrow | `ref<T>` | Non-owning borrow reference (Chaperone-tracked) |
+| Future | `Future<T>` | Async computation result (returned by `async func`) |
 
 ## User-Defined Types
 
@@ -33,6 +35,19 @@ Primitive types, compound types, generics, and user-defined types.
 - **Enums** -- algebraic data types with associated data
 - **Contracts** -- interfaces requiring fields and methods
 - **Traits** -- interfaces requiring methods only
+- **Owned types** -- heap-allocated tracked types with ownership semantics (`owned` keyword)
+
+## Ownership and References
+
+Angara's Chaperone system tracks ownership of heap allocations at compile time.
+Two special types support this:
+
+- **`ref<T>`** -- a non-owning borrow. Use `&value` to create a `ref<T>` to a tracked
+  variable. The Chaperone ensures the referent outlives the borrow (E509: dangling borrow).
+- **`owned`** -- declares a type with ownership semantics. An `owned` type's allocations
+  are tracked by the Chaperone and must be explicitly dropped.
+
+For the full memory model, see [CHAPERONE.md](../CHAPERONE.md).
 
 ## Generics
 

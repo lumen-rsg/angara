@@ -338,13 +338,12 @@ change, only the escape annotations get more precise):**
   programmer feedback even in unsafe code, while allowing intentional
   rule-breaking. This is the universal opt-out.
 - **`ref<T>`** — a non-owning borrow (see "The `ref<T>` borrow check" below).
+- **`@manual`** — annotation on a `let` declaration that excludes the variable
+  from Chaperone tracking entirely. The programmer assumes full responsibility
+  for the variable's lifetime. Use for GPU textures, foreign handles, and other
+  resources managed by external code. The Chaperone will not warn about leaks,
+  use-after-free, or double-free for `@manual` variables.
 
-> **Not yet implemented**:
-> - **`@manual`** — annotation to exclude a variable from tracking. Today the
->   only opt-out is `@unsafe`.
-> - **`Rc<T>` / `weak<T>`** — explicit ARC for genuinely shared ownership. Not
->   present; model shared ownership with `ref<T>` + manual lifecycle for now.
->
 > **Implemented** (v5.1, 2026-07-07):
 > - **`@consumes` / `@escape`** — annotations on foreign/module declarations to
 >   mark that a callee frees or stores an argument. Stored on `FunctionType` so
@@ -392,8 +391,11 @@ to mark `o` arguments that are freed or stored by the C API.
 | **W514** | (warning) | A `ref<T>` to a Sync type crosses a thread boundary — type is Sync but ensure proper synchronization (e.g., Mutex). |
 | **W510** | (warning) | Variable handled differently on if/else branches. |
 
-> **E508** is reserved (unused). **E510–E516** are M11 concurrency-safety diagnostics. **W514** is the Sync-ref-across-threads warning.
-> except `W510`. Inside an `@unsafe` block, *all* codes are downgraded to
+> **E508** is reserved (unused). **E510–E516** are concurrency-safety diagnostics.
+> **W514** is the Sync-ref-across-threads warning.
+> **W510** is the asymmetric-branch handling warning.
+>
+> Inside an `@unsafe` block, *all* codes are downgraded to
 > warnings — the Chaperone still analyzes the block and reports, but does not
 > enforce.
 

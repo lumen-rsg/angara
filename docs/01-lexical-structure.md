@@ -27,6 +27,7 @@ public private protected inherits signs uses
 true false nil this super
 trait contract union type
 is as static drop from
+async await function owned void ref
 ```
 
 ## Literals

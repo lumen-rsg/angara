@@ -29,6 +29,7 @@ void print_help() {
     std::cout << "  fmt       Format source files (-w to write in place)\n";
     std::cout << "  watch     Watch for file changes and rebuild\n";
     std::cout << "  explain   Explain a compiler error or warning code\n";
+    std::cout << "              e.g., angc explain W003, angc explain E501\n";
     std::cout << "  lsp       Start Language Server Protocol server\n";
     std::cout << "  repl      Start interactive read-eval-print loop\n";
     std::cout << "\n" << CLR_BOLD << "Options:" << CLR_RESET << "\n";

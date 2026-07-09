@@ -123,6 +123,12 @@ let sorted = SortBy(items, func(a, b) { return a < b; });
 |--------|-------------|
 | `assert` | Assertion utilities for unit testing |
 
+## GUI
+
+| Module | Description |
+|--------|-------------|
+| `gui` | Dear ImGui + GLFW bindings for native GUI applications. Provides windows, widgets (buttons, sliders, text inputs, etc.), OpenGL texture rendering, and event handling. Used by the `binary_waterfall`, `mandelbrot`, and `life` examples. |
+
 ## Embedded
 
 | Module | Description |

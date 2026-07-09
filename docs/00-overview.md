@@ -1,6 +1,6 @@
 # Angara Language Reference
 
-**Version 3.1** | [Lumina Labs](https://github.com/lumen-rsg)
+**Version 5.1** | [Lumina Labs](https://github.com/lumen-rsg)
 
 ---
 
@@ -17,9 +17,9 @@ Source files use the `.an` extension.
 | Section | Description |
 |---------|-------------|
 | [01 - Lexical Structure](01-lexical-structure.md) | Comments, keywords, literals, and tokens |
-| [02 - Type System](02-type-system.md) | Primitives, compound types, generics, user-defined types |
+| [02 - Type System](02-type-system.md) | Primitives, compound types, generics, user-defined types, `ref<T>`, `owned` |
 | [03 - Variables and Constants](03-variables-and-constants.md) | `let`, `const`, type annotations, inference |
-| [04 - Functions](04-functions.md) | Declarations, generics, lambdas, closures, higher-order |
+| [04 - Functions](04-functions.md) | Declarations, generics, lambdas, closures, async/await, Futures |
 | [05 - Control Flow](05-control-flow.md) | `if`/`orif`/`else`, loops, ternary, `break`/`continue` |
 | [06 - Data Classes](06-data-classes.md) | Value types, auto-constructors, deep copy, generics |
 | [07 - Enums and Pattern Matching](07-enums-and-matching.md) | Algebraic data types, `match`, destructuring |
@@ -29,19 +29,21 @@ Source files use the `.an` extension.
 | [11 - Optionals and Null Safety](11-optionals.md) | `T?`, `?.`, `??`, nil checks |
 | [12 - Exception Handling](12-exceptions.md) | `try`/`catch`, `throw`, `Exception` |
 | [13 - Type Inspection with `is`](13-type-inspection.md) | Runtime type checking, type narrowing |
-| [14 - `any` and `@unsafe`](14-unsafe.md) | Dynamic typing, escape hatches |
+| [14 - Annotations and Escape Hatches](14-unsafe.md) | `@unsafe`, `@manual`, `@consumes`, `@escape`, `@sendable`, `@sync` |
 | [15 - Foreign Function Interface](15-ffi.md) | C interop, pointers, structs, callbacks |
 | [16 - Module System](16-modules.md) | `attach`, `export`, module types |
-| [17 - Concurrency](17-concurrency.md) | `Thread`, `Mutex` |
+| [17 - Concurrency](17-concurrency.md) | `spawn`, `Thread`, `Mutex`, async/await, `@sendable`, `@sync` |
 
 ## Reference
 
 | Section | Description |
 |---------|-------------|
 | [18 - Operators](18-operators.md) | All operators and precedence table |
-| [19 - Standard Library](19-stdlib.md) | 20+ modules: I/O, networking, crypto, data |
+| [19 - Standard Library](19-stdlib.md) | 20+ modules: I/O, networking, crypto, data, GUI |
 | [20 - Native Module API](20-native-modules.md) | C API for writing custom modules |
 | [21 - Build System](21-build-system.md) | `.abs` files, project scaffolding |
 | [22 - Compiler CLI](22-compiler-cli.md) | All commands and flags |
 | [23 - Bare-Metal Programming](23-bare-metal.md) | Freestanding mode, intrinsics, kernel development |
 | [24 - Editor Support](24-editor-support.md) | VS Code, Neovim, Vim, Tree-sitter |
+
+> **Memory Model Reference**: See [CHAPERONE.md](../CHAPERONE.md) for the full design of Angara's compile-time ownership and borrow checker — including the `@manual`, `@consumes`, `@escape`, `@sendable`, and `@sync` annotation system, and all Chaperone diagnostic codes (E501–E516, W510–W522).

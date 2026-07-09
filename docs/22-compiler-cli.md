@@ -17,6 +17,9 @@ angc clean                  Remove build artifacts
 angc publish                Build and copy to publish directory
 angc modules                List installed native modules
 angc fmt [-w] <files>       Format source files (-w writes in place)
+angc watch                  Watch for file changes and rebuild
+angc explain <code>         Show detailed help for an error or warning code
+                            e.g., angc explain W003, angc explain E501
 angc lsp                    Start LSP server
 angc repl                   Start interactive REPL
 ```
@@ -27,14 +30,17 @@ angc repl                   Start interactive REPL
 |------|-------------|
 | `-v`, `--version` | Show version information |
 | `-h`, `--help` | Show help message |
+| `-V`, `--verbose` | Show extra diagnostic output |
 | `--target <triple>` | Cross-compile for a target triple |
 | `--sysroot <path>` | Set sysroot for cross-compilation |
 | `--freestanding` | Bare-metal mode (no libc) |
+| `--kernel` | Kernel mode — emit a relocatable `.o` for a Linux kernel module |
 | `--nostdlib` | Don't link standard libraries (libc, libm, pthread) |
 | `--release` | Optimization level 2 |
 | `--debug` | Debug mode (O0 + DWARF debug info) |
 | `--dump-ast` | Print the Abstract Syntax Tree |
 | `--dump-ir` | Emit unoptimized LLVM IR |
+| `--emit-llvm` | Emit LLVM IR to stdout instead of compiling |
 | `-Wall` | Enable all warnings |
 | `-Werror` | Treat warnings as errors |
 | `-Wno-XXX` | Suppress specific warning |
