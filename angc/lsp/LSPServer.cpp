@@ -20,6 +20,135 @@ namespace fs = std::filesystem;
 
 namespace angara {
 
+// ── Static reference tables for hover / completion ─────────────
+// The LSP runs the full type-checker, so diagnostics already flow. These tables
+// add awareness of language builtins (annotations, intrinsics, keywords) that
+// are not in any user symbol table.
+
+struct AnnotationInfo {
+    const char* name;     // "@unsafe", "@inline", ...
+    const char* detail;   // one-line description
+    bool isBlock;         // true = block form (@unsafe/@privileged), false = decl prefix
+};
+
+static const AnnotationInfo kAnnotations[] = {
+    {"@unsafe",      "Block: opt out of the type system and borrow checker. Required for asm(...) and raw pointer casts.", true},
+    {"@privileged",  "Block: required for privilege-transition intrinsics (eret/set_spsr/set_elr). Implies @unsafe.", true},
+    {"@inline",      "Function: hint to inline the body at call sites (SIMD-2).", false},
+    {"@on_throw",    "Function (foreign): error code returned when the C call fails (RT-1). Takes an integer argument.", false},
+    {"@consumes",    "Function: mark parameters whose ownership transfers to the callee (v5). Takes integer indices.", false},
+    {"@escape",      "Function: mark parameters that escape the function's lifetime (v5). Takes integer indices.", false},
+    {"@sendable",    "Class/data: marks the type as safe to share across async boundaries (Send bound).", false},
+    {"@unsendable",  "Class/data: explicitly marks the type as NOT Send (overrides inference).", false},
+    {"@sync",        "Class/data: marks the type as safe to share mutably across async boundaries (Sync bound).", false},
+    {"@unsync",      "Class/data: explicitly marks the type as NOT Sync.", false},
+    {"@manual",      "Variable (let/const): opt out of automatic deallocation; caller manages lifetime via drop.", false},
+};
+
+struct IntrinsicInfo {
+    const char* name;
+    const char* signature;  // "(addr as i64) -> i64" etc.
+    const char* gate;       // "@unsafe", "@privileged", or ""
+    const char* note;       // short description / lowering
+};
+
+// Sourced from ExprCodegen.cpp name-ladder + docs/23-bare-metal.md tables.
+static const IntrinsicInfo kIntrinsics[] = {
+    // MMIO
+    {"peek8",  "(addr as i64) -> i64",   "@unsafe", "volatile load, 8-bit"},
+    {"peek16", "(addr as i64) -> i64",   "@unsafe", "volatile load, 16-bit"},
+    {"peek32", "(addr as i64) -> i64",   "@unsafe", "volatile load, 32-bit"},
+    {"peek64", "(addr as i64) -> i64",   "@unsafe", "volatile load, 64-bit"},
+    {"poke8",  "(addr as i64, val as i64) -> nil", "@unsafe", "volatile store, 8-bit"},
+    {"poke16", "(addr as i64, val as i64) -> nil", "@unsafe", "volatile store, 16-bit"},
+    {"poke32", "(addr as i64, val as i64) -> nil", "@unsafe", "volatile store, 32-bit"},
+    {"poke64", "(addr as i64, val as i64) -> nil", "@unsafe", "volatile store, 64-bit"},
+    // Control / barriers
+    {"halt",   "() -> nil", "", "llvm.trap + infinite loop (terminal)"},
+    {"nop",    "() -> nil", "", "llvm.donothing"},
+    {"wfi",    "() -> nil", "@unsafe", "wait for interrupt"},
+    {"wfe",    "() -> nil", "@unsafe", "wait for event"},
+    {"sev",    "() -> nil", "@unsafe", "send event (wake other cores)"},
+    {"dmb",    "() -> nil", "@unsafe", "data memory barrier (full-system)"},
+    {"dsb",    "() -> nil", "@unsafe", "data sync barrier (full-system)"},
+    {"isb",    "() -> nil", "@unsafe", "instruction sync barrier"},
+    {"dmb_st", "() -> nil", "@unsafe", "store-store barrier (ishst)"},
+    {"dsb_st", "() -> nil", "@unsafe", "store-store sync (ishst)"},
+    // CPU registers
+    {"get_el",    "() -> i64", "@unsafe", "CurrentEL >> 2 (exception level 0-3)"},
+    {"get_mpidr", "() -> i64", "@unsafe", "MPIDR_EL1 (CPU affinity)"},
+    {"cntfrq",    "() -> i64", "@unsafe", "CNTFRQ_EL0 (timer frequency)"},
+    {"cntpct",    "() -> i64", "@unsafe", "CNTPCT_EL0 (physical timer count)"},
+    // Atomics (monotonic)
+    {"atomic_load",  "(addr as i64) -> i64",                              "@unsafe", "monotonic load"},
+    {"atomic_store", "(addr as i64, val as i64) -> nil",                  "@unsafe", "monotonic store"},
+    {"atomic_cas",   "(addr as i64, expected as i64, desired as i64) -> i64", "@unsafe", "cmpxchg; returns old value (spinlock: while(cas(p,0,1)!=0){})"},
+    {"atomic_add",   "(addr as i64, val as i64) -> i64", "@unsafe", "atomicrmw add; returns old"},
+    {"atomic_sub",   "(addr as i64, val as i64) -> i64", "@unsafe", "atomicrmw sub; returns old"},
+    {"atomic_or",    "(addr as i64, val as i64) -> i64", "@unsafe", "atomicrmw or; returns old"},
+    {"atomic_and",   "(addr as i64, val as i64) -> i64", "@unsafe", "atomicrmw and; returns old"},
+    {"atomic_xor",   "(addr as i64, val as i64) -> i64", "@unsafe", "atomicrmw xor; returns old"},
+    {"atomic_xchg",  "(addr as i64, val as i64) -> i64", "@unsafe", "atomicrmw xchg; returns old"},
+    // Bit manipulation
+    {"clz",  "(x as i64) -> i64", "", "count leading zeros (llvm.ctlz)"},
+    {"ctz",  "(x as i64) -> i64", "", "count trailing zeros (llvm.cttz)"},
+    {"rev",  "(x as i64) -> i64", "", "byte-reverse (llvm.bswap)"},
+    {"rbit", "(x as i64) -> i64", "", "bit-reverse (llvm.bitreverse)"},
+    // Interrupt control (DAIF)
+    {"enable_irq",  "() -> nil",            "@unsafe", "daifclr #2"},
+    {"disable_irq", "() -> nil",            "@unsafe", "daifset #2"},
+    {"enable_fiq",  "() -> nil",            "@unsafe", "daifclr #1"},
+    {"disable_fiq", "() -> nil",            "@unsafe", "daifset #1"},
+    {"get_daif",    "() -> i64",            "@unsafe", "mrs daif"},
+    {"set_daif",    "(daif as i64) -> nil", "@unsafe", "msr daif"},
+    // Cache maintenance
+    {"dc_ivac",  "(addr as i64) -> nil", "@unsafe", "invalidate D-cache to PoC"},
+    {"dc_cvac",  "(addr as i64) -> nil", "@unsafe", "clean D-cache to PoC"},
+    {"dc_civac", "(addr as i64) -> nil", "@unsafe", "clean+invalidate D-cache"},
+    {"ic_ivau",  "(addr as i64) -> nil", "@unsafe", "invalidate I-cache to PoU"},
+    {"dc_csw",   "(set as i64, way as i64, level as i64) -> nil", "@unsafe", "set/way maintenance (encodes CCSIDR geometry)"},
+    // Context switching / vector table
+    {"get_sp",     "() -> i64",            "@unsafe", "current stack pointer"},
+    {"get_fp",     "() -> i64",            "@unsafe", "frame pointer (x29)"},
+    {"ttbr0_el1",  "() -> i64",            "@unsafe", "translation table base (MMU)"},
+    {"set_vbar",   "(addr as i64) -> nil", "@unsafe", "set exception vector base (msr vbar_el1)"},
+    // Tier 5: TLB management (@unsafe)
+    {"tlbi_vmalle1", "() -> nil",            "@unsafe", "invalidate all TLB entries, EL1"},
+    {"tlbi_vaae1",   "(addr as i64) -> nil", "@unsafe", "invalidate TLB by VA, ASID-agnostic"},
+    // Tier 5: privilege switching (@privileged)
+    {"eret",     "() -> nil",            "@privileged", "exception return (terminal; jumps to elr_el1 at spsr_el1 pstate)"},
+    {"set_spsr", "(daif as i64) -> nil", "@privileged", "set saved pstate (msr spsr_el1)"},
+    {"set_elr",  "(addr as i64) -> nil", "@privileged", "set exception link (msr elr_el1)"},
+};
+
+// Keyword completions (from Lexer.cpp keyword table). kind=14 (Keyword).
+static const char* const kKeywords[] = {
+    "let", "const", "if", "orif", "else", "for", "while", "in", "func", "return",
+    "true", "false", "try", "catch", "attach", "nil", "throw", "from", "class",
+    "this", "inherits", "super", "trait", "uses", "static", "export", "as",
+    "contract", "signs", "private", "protected", "public", "break", "continue",
+    "is", "data", "enum", "union", "owned", "type", "drop", "finally", "match",
+    "case", "foreign", "function", "intrinsic", "void", "async", "await", "asm",
+};
+
+// Look up an intrinsic by name. Returns nullptr if not found.
+static const IntrinsicInfo* findIntrinsic(const std::string& name) {
+    for (const auto& ii : kIntrinsics) {
+        if (name == ii.name) return &ii;
+    }
+    return nullptr;
+}
+
+// Look up an annotation by name (with or without leading '@').
+static const AnnotationInfo* findAnnotation(const std::string& word) {
+    std::string name = word;
+    if (!name.empty() && name[0] != '@') name = "@" + name;
+    for (const auto& ai : kAnnotations) {
+        if (name == ai.name) return &ai;
+    }
+    return nullptr;
+}
+
 // ── JSON Serialization ────────────────────────────────────────
 
 std::string JSON::dump() const {
@@ -598,6 +727,17 @@ void LSPServer::buildSymbolCache(AnalysisResult& result, TypeChecker& typeChecke
                 result.callSites.push_back(std::move(csi));
             }
         }
+        // Collect asm(...) call sites for signature help
+        else if (auto* asmExpr = dynamic_cast<const AsmExpr*>(expr)) {
+            CallSiteInfo csi;
+            csi.calleeName = "asm";
+            csi.signature = "(\"template\" (-> type)?, (in|out|inout) \"constraint\" expr, ...)";
+            csi.openParenLine = asmExpr->keyword.line - 1;
+            // The '(' follows the 'asm' keyword (3 chars); use that column so
+            // the enclosing-call detection in handleSignatureHelp matches.
+            csi.openParenCol = asmExpr->keyword.column - 1 + (int)asmExpr->keyword.lexeme.size();
+            result.callSites.push_back(std::move(csi));
+        }
     }
 
     // Build name-indexed symbol table and declaration-position entries
@@ -733,6 +873,12 @@ std::string LSPServer::extractWordAt(const std::string& source, int line, int co
     while (end < (int)(lineEnd - lineStart) && isIdentChar(source[lineStart + end])) end++;
 
     if (end <= start) return "";
+
+    // Include a leading '@' so @unsafe / @privileged / @inline etc. are
+    // captured as whole tokens for hover and annotation-context detection.
+    if (start > 0 && source[lineStart + start - 1] == '@') {
+        start--;
+    }
     return source.substr(lineStart + start, end - start);
 }
 
@@ -758,6 +904,7 @@ JSON LSPServer::handleInitialize(const JSON& params) {
 
     // Completion
     JSON compCaps = JSON_OBJ{};
+    compCaps["triggerCharacters"] = JSON_ARR{"@", "."};
     compCaps["completionItem"] = JSON_OBJ{{"snippetSupport", false}};
     caps["completionProvider"] = compCaps;
 
@@ -825,14 +972,33 @@ void LSPServer::handleDidClose(const JSON& params) {
 
 JSON LSPServer::handleCompletion(const JSON& params) {
     std::string uri = params["textDocument"]["uri"].as_str();
-    // int line = params["position"]["line"].as_int();
-    // int character = params["position"]["character"].as_int();
+    int line = params["position"]["line"].as_int();
+    int character = params["position"]["character"].as_int();
 
     JSON_ARR items;
+    std::set<std::string> seen;
+
     auto it = m_analysis.find(uri);
+    auto& doc = m_documents[uri];
+
+    // ── Context: is the cursor in annotation context (after a '@')? ──
+    // Extract the word at the cursor; if it begins with '@', offer annotations.
+    std::string word = extractWordAt(doc.source, line, character);
+    bool annotationContext = !word.empty() && word[0] == '@';
+
+    if (annotationContext) {
+        for (const auto& ai : kAnnotations) {
+            JSON item = JSON_OBJ{};
+            item["label"] = ai.name;
+            item["kind"] = 14; // Keyword
+            item["detail"] = ai.detail;
+            items.push_back(item);
+        }
+        return items; // annotations only in this context
+    }
+
+    // ── Symbol completions (existing behavior) ──
     if (it != m_analysis.end()) {
-        // Deduplicate by label
-        std::set<std::string> seen;
         for (auto& c : it->second.completions) {
             if (seen.count(c.label)) continue;
             seen.insert(c.label);
@@ -843,6 +1009,17 @@ JSON LSPServer::handleCompletion(const JSON& params) {
             items.push_back(item);
         }
     }
+
+    // ── Keyword completions (low-priority fallback) ──
+    for (const char* kw : kKeywords) {
+        if (seen.count(kw)) continue;
+        seen.insert(kw);
+        JSON item = JSON_OBJ{};
+        item["label"] = kw;
+        item["kind"] = 14; // Keyword
+        items.push_back(item);
+    }
+
     return items;
 }
 
@@ -854,6 +1031,61 @@ JSON LSPServer::handleHover(const JSON& params) {
     auto analysisIt = m_analysis.find(uri);
     if (analysisIt == m_analysis.end()) return JSON(nullptr);
     auto& analysis = analysisIt->second;
+
+    // 0. Builtin hover: annotations, asm keyword, and intrinsic names.
+    // These are language builtins not in the user symbol table.
+    {
+        auto docIt = m_documents.find(uri);
+        if (docIt != m_documents.end()) {
+            std::string word = extractWordAt(docIt->second.source, line, character);
+
+            // @annotation
+            if (auto* ann = findAnnotation(word)) {
+                JSON result = JSON_OBJ{};
+                JSON contents = JSON_OBJ{};
+                contents["kind"] = "markdown";
+                contents["value"] = std::string("**") + ann->name + "**\n\n"
+                    + ann->detail + "\n\n"
+                    + (ann->isBlock ? "Block form: `" + std::string(ann->name) + " { ... }`"
+                                    : "Declaration prefix: `" + std::string(ann->name) + " func/let/const ...`");
+                result["contents"] = contents;
+                return result;
+            }
+
+            // asm keyword
+            if (word == "asm") {
+                JSON result = JSON_OBJ{};
+                JSON contents = JSON_OBJ{};
+                contents["kind"] = "markdown";
+                contents["value"] =
+                    "**asm(...)** — inline assembly\n\n"
+                    "```\n"
+                    "asm(\"template\" (-> type)?, (in|out|inout) \"constraint\" expr, ...)\n"
+                    "```\n\n"
+                    "Requires an `@unsafe` block. The template references operands by position: "
+                    "`$0`, `$1`, …. Operands are integer-typed; `out`/`inout` must be variables "
+                    "(assignable lvalues). The optional `-> type` gives the result type (integer only).";
+                result["contents"] = contents;
+                return result;
+            }
+
+            // intrinsic name
+            if (auto* ii = findIntrinsic(word)) {
+                JSON result = JSON_OBJ{};
+                JSON contents = JSON_OBJ{};
+                contents["kind"] = "markdown";
+                std::string md = std::string("**") + ii->name + "** — intrinsic\n\n"
+                    + "```\n" + ii->name + ii->signature + "\n```\n\n"
+                    + ii->note;
+                if (ii->gate && ii->gate[0] != '\0') {
+                    md += std::string("\n\n⚠ Requires `") + ii->gate + "`.";
+                }
+                contents["value"] = md;
+                result["contents"] = contents;
+                return result;
+            }
+        }
+    }
 
     // 1. Try positional match from expression types
     const SymbolRef* best = nullptr;
