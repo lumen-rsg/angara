@@ -16,6 +16,9 @@ LD      = $(CROSS)ld
 OBJCOPY = $(CROSS)objcopy
 ANGC = angc
 QEMU = qemu-system-aarch64
+# This minimal demo uses only peek/poke/halt — no atomics — so a Cortex-A57
+# (pre-LSE) target is fine here. The sibling qemu_virt example exercises the
+# atomic intrinsics and therefore requires -cpu max (ARMv8.1+ LSE).
 ASFLAGS  = -mcpu=cortex-a57
 LDFLAGS  = -T linker.ld -nostdlib -static
 KERNEL = kernel8.img

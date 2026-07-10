@@ -1,0 +1,10 @@
+// Freestanding gate test: string operations must be rejected (E915).
+// Strings require heap allocation and the string runtime — bare metal provides
+// neither. This covers literals, concatenation, and the len/typeof builtins.
+// expect: E915
+// mode: --freestanding
+intrinsic func halt() -> nil;
+func main() -> nil {
+    let s = "hello";
+    halt();
+}

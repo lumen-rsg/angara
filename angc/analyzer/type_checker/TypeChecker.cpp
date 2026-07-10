@@ -348,7 +348,17 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         if (name == "f64" || name == "float") return m_type_f64;
         if (name == "f32") return m_type_f32;
         if (name == "bool") return m_type_bool;
-        if (name == "string") return m_type_string;
+        if (name == "string") {
+            if (m_is_in_freestanding_mode) {
+                error(simple->name,
+                      "The 'string' type is not available in --freestanding mode "
+                      "(strings require heap allocation and the string runtime). "
+                      "Declare fixed-size buffers as i8 pointers or raw arrays instead.",
+                      "E915");
+                return m_type_error;
+            }
+            return m_type_string;
+        }
         if (name == "char") return m_type_char;  // LANG-4
         if (name == "nil") return m_type_nil;
         if (name == "any") return m_type_any;
@@ -358,10 +368,24 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         if (name == "void") return std::make_shared<VoidType>();
 
         if (name == "record") {
+            if (m_is_in_freestanding_mode) {
+                error(simple->name,
+                      "The 'record' type is not available in --freestanding mode "
+                      "(records require heap allocation and the record runtime).",
+                      "E917");
+                return m_type_error;
+            }
             return std::make_shared<RecordType>(std::map<std::string, std::shared_ptr<Type>>{});
         }
 
         if (name == "list") {
+            if (m_is_in_freestanding_mode) {
+                error(simple->name,
+                      "The 'list' type is not available in --freestanding mode "
+                      "(lists require heap allocation and the list runtime).",
+                      "E916");
+                return m_type_error;
+            }
             return std::make_shared<ListType>(m_type_any);
         }
 
@@ -399,6 +423,13 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         const std::string& base_name = generic->name.lexeme;
 
         if (base_name == "list") {
+            if (m_is_in_freestanding_mode) {
+                error(generic->name,
+                      "The 'list<T>' type is not available in --freestanding mode "
+                      "(lists require heap allocation and the list runtime).",
+                      "E916");
+                return m_type_error;
+            }
             if (generic->arguments.size() != 1) {
                 error(generic->name, "Type 'list' expects exactly one type argument (e.g., 'list<i64>').", "E251");
                 return m_type_error;

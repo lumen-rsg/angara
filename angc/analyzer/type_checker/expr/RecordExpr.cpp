@@ -2,6 +2,17 @@
 namespace angara {
 
     std::any TypeChecker::visit(const RecordExpr& expr) {
+        // Freestanding gate (E917): records are heap-allocated and need the
+        // record runtime, neither of which exists on bare metal.
+        if (m_is_in_freestanding_mode) {
+            error(expr.keys.empty() ? Token() : expr.keys[0],
+                  "Record literals are not available in --freestanding mode "
+                  "(records require heap allocation and the record runtime). "
+                  "Lay data out in plain integer globals or foreign structs instead.",
+                  "E917");
+            pushAndSave(&expr, m_type_error);
+            return {};
+        }
         std::map<std::string, std::shared_ptr<Type>> inferred_fields;
 
         for (size_t i = 0; i < expr.keys.size(); ++i) {

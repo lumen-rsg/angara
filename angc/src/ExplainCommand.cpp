@@ -62,6 +62,17 @@ void printCategoryFallback(const std::string& code, char prefix) {
                       << "and no pthreads.\n\n"
                       << CLR_DIM << "  Remove the unsupported construct or compile without "
                       << "--kernel if you are building a userspace program.\n" << CLR_RESET;
+        } else if (num >= 910 && num <= 924) {
+            std::cout << CLR_BOLD << CLR_RED << code << CLR_RESET
+                      << " is a freestanding-mode restriction error.\n\n"
+                      << "When compiling with --freestanding, the hosted runtime is not "
+                      << "linked: there is no heap, no string/list/record runtime, no "
+                      << "exceptions, no threads, and no dynamic loader. Constructs that "
+                      << "depend on any of these are hard errors (E910-E917), as is misuse "
+                      << "of inline assembly (E920-E924).\n\n"
+                      << CLR_DIM << "  Rewrite the code to use intrinsics + peek/poke for I/O, "
+                      << "fixed-size integer buffers instead of heap types, and return codes "
+                      << "instead of exceptions. See docs/23-bare-metal.md.\n" << CLR_RESET;
         } else {
             std::cout << CLR_BOLD << CLR_RED << code << CLR_RESET
                       << " is a compiler error.\n"
@@ -116,6 +127,8 @@ int CLI::handleExplain(std::vector<std::string> args) {
     //   E248–E471   Type-checker / semantic errors
     //   E501–E516   Chaperone memory-safety errors
     //   E900–E904   Kernel-mode restriction errors
+    //   E910–E917   Freestanding restriction errors
+    //   E920–E924   Inline-assembly restriction errors
     //   W001–W522   Warnings (various)
 
     static const std::map<std::string, std::pair<std::string, std::string>> explanations = {
@@ -1012,6 +1025,96 @@ int CLI::handleExplain(std::vector<std::string> args) {
         "which is not available in the kernel.\n\n"
         "  Fix: Link required functionality statically, or use FFI to call\n"
         "  kernel functions directly."}},
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  FREESTANDING RESTRICTION ERRORS  (E910–E917)
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // When compiling with --freestanding, the hosted runtime is not linked:
+    // no heap, no string/list/record runtime, no exceptions, no threads, and
+    // no dynamic loader. Constructs depending on these are hard errors.
+
+    {"E910", {"'throw' not available in freestanding mode",
+        "Exceptions require setjmp/longjmp and formatted output (printf/exit),\n"
+        "none of which exist on bare metal.\n\n"
+        "  Fix: Use return codes or 'match' instead of exceptions."}},
+
+    {"E911", {"'try'/'catch' not available in freestanding mode",
+        "Exception handling (try/catch) requires runtime support that is not\n"
+        "available on bare metal.\n\n"
+        "  Fix: Use explicit error checking instead of try/catch."}},
+
+    {"E912", {"'spawn()' not available in freestanding mode",
+        "spawn() creates a new thread via pthreads/runtime threads, which do\n"
+        "not exist on bare metal.\n\n"
+        "  Fix: Implement a scheduler or use atomic_cas spinlocks for\n"
+        "  multi-core coordination instead of spawn()."}},
+
+    {"E913", {"'Mutex' not available in freestanding mode",
+        "Mutex uses pthread mutexes, which are not available on bare metal.\n\n"
+        "  Fix: Write spinlock primitives with atomic_cas + dmb_st in inline\n"
+        "  asm instead of Mutex."}},
+
+    {"E914", {"'attach' not available in freestanding mode",
+        "Native module attachment requires the dynamic loader, which does not\n"
+        "exist on bare metal.\n\n"
+        "  Fix: Declare the dependency via 'foreign func' (resolved by your\n"
+        "  linker script / boot stub) instead of attach."}},
+
+    {"E915", {"string operations not available in freestanding mode",
+        "Strings are heap-allocated and require the string runtime, neither of\n"
+        "which exists on bare metal. This covers string literals, concatenation,\n"
+        "interpolation, and the len/typeof/string builtins.\n\n"
+        "  Fix: Use fixed-size i8 buffers with peek/poke for I/O, and format\n"
+        "  values into integer buffers manually."}},
+
+    {"E916", {"list operations not available in freestanding mode",
+        "Lists are heap-allocated and require the list runtime, neither of\n"
+        "which exists on bare metal.\n\n"
+        "  Fix: Use fixed-size i8 arrays or preallocated buffers instead of\n"
+        "  list<T>."}},
+
+    {"E917", {"record/class/data operations not available in freestanding mode",
+        "Heap objects (records, class instances, data instances) require\n"
+        "allocation and the record runtime, neither of which exists on bare\n"
+        "metal.\n\n"
+        "  Fix: Lay data out in plain integer globals or foreign structs\n"
+        "  instead of record/class/data literals."}},
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  INLINE-ASSEMBLY RESTRICTION ERRORS  (E920–E924)
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // Inline assembly bypasses the type system and borrow/escape analysis, so
+    // it is confined to @unsafe blocks and restricted to integer operands.
+
+    {"E920", {"inline assembly outside an '@unsafe' block",
+        "asm(...) bypasses the type system and the borrow/escape analysis, so\n"
+        "it must appear inside an @unsafe block.\n\n"
+        "  Fix: Wrap the asm in '@unsafe { ... }'."}},
+
+    {"E921", {"asm template is not a string literal",
+        "The assembly template (the first argument to asm(...)) must be a\n"
+        "string literal.\n\n"
+        "  Fix: Pass a literal string such as \"nop\".\n"
+        "  Note: this is normally caught earlier as a parser error (E251)."}},
+
+    {"E922", {"'out'/'inout' asm operand is not a variable",
+        "An 'out' or 'inout' operand names the location the instruction writes\n"
+        "back to, so it must be a bare variable (an assignable lvalue) — not\n"
+        "an expression.\n\n"
+        "  Fix: Pass a variable name, e.g. out(\"=r\") result, not an expression."}},
+
+    {"E923", {"asm operand is not integer-typed",
+        "Inline-asm operands are passed in general-purpose registers, so only\n"
+        "integer primitives are permitted.\n\n"
+        "  Fix: Pass an integer-typed value (i8/i16/i32/i64 or unsigned)."}},
+
+    {"E924", {"asm result type is not an integer primitive",
+        "The output register is read back as a machine word, so the '-> type'\n"
+        "clause may only name an integer type.\n\n"
+        "  Fix: Use an integer result type, e.g. '-> i64', or omit the clause\n"
+        "  for a void asm."}},
 
     // ═══════════════════════════════════════════════════════════════════════
     //  WARNINGS  (W001–W522)

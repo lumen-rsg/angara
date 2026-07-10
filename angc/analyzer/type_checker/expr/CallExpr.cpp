@@ -76,6 +76,21 @@ namespace angara {
         if (m_hadError) { pushAndSave(&expr, m_type_error); return {}; }
 
         if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
+            // Freestanding gate (E915): string-producing builtins `len`, `typeof`,
+            // and the `string(...)` conversion all touch the string runtime or
+            // return a heap-allocated string — neither exists on bare metal.
+            if (m_is_in_freestanding_mode &&
+                (var_expr->name.lexeme == "len" ||
+                 var_expr->name.lexeme == "typeof" ||
+                 var_expr->name.lexeme == "string")) {
+                error(expr.paren,
+                      "'" + var_expr->name.lexeme + "()' is not available in --freestanding "
+                      "mode (it depends on the string runtime, which requires heap "
+                      "allocation). Use fixed-size i8 buffers and integer lengths instead.",
+                      "E915");
+                pushAndSave(&expr, m_type_error);
+                return {};
+            }
             if (var_expr->name.lexeme == "spawn") {
                 if (m_is_in_kernel_mode) {
                     error(expr.paren, "'spawn()' is not allowed in --kernel mode (kernel has no pthreads). Use a kernel workqueue/kthread instead.", "E902");
@@ -284,6 +299,15 @@ namespace angara {
             }
         }
         else if (callee_type->kind == TypeKind::CLASS) {
+            if (m_is_in_freestanding_mode) {
+                error(expr.paren,
+                      "Class construction is not available in --freestanding mode "
+                      "(class instances require heap allocation). Lay data out in "
+                      "plain integer globals or foreign structs instead.",
+                      "E917");
+                pushAndSave(&expr, m_type_error);
+                return {};
+            }
             auto class_type = std::dynamic_pointer_cast<ClassType>(callee_type);
             const auto* init_prop = class_type->findProperty("init");
 
@@ -300,6 +324,15 @@ namespace angara {
                 result_type = std::make_shared<InstanceType>(class_type);
             }
         } else if (callee_type->kind == TypeKind::DATA) {
+            if (m_is_in_freestanding_mode) {
+                error(expr.paren,
+                      "Data construction is not available in --freestanding mode "
+                      "(data instances require heap allocation). Lay data out in "
+                      "plain integer globals or foreign structs instead.",
+                      "E917");
+                pushAndSave(&expr, m_type_error);
+                return {};
+            }
             auto data_type = std::dynamic_pointer_cast<DataType>(callee_type);
             // TS-2: for a generic data constructor, infer the type args from the
             // concrete arguments FIRST, substitute the constructor signature, then

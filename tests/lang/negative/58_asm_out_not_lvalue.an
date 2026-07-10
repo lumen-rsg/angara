@@ -1,0 +1,13 @@
+// Negative Test 58: Inline-asm 'out'/'inout' operand must be an lvalue (E922).
+// An 'out' or 'inout' operand names the location the instruction writes back to,
+// so it must be a bare variable (an assignable lvalue) — not an expression.
+// expect: E922
+export func main() -> i64 {
+    let a as i64 = 1;
+    let b as i64 = 2;
+    @unsafe {
+        // (a + b) is an expression, not a writable location.
+        asm("add $0, $1, $2", out("=r") (a + b), in("r") a, in("r") b);
+    }
+    return 0;
+}

@@ -19,9 +19,22 @@ namespace angara {
                 }
                 break;
             case TokenType::NUMBER_FLOAT: type = m_type_f64; break;
-            case TokenType::STRING:       type = m_type_string; break;
-            case TokenType::RAW_STRING:   type = m_type_string; break;  // LANG-6
-            case TokenType::BYTE_STRING:  type = m_type_string; break;  // LANG-6
+            case TokenType::STRING:
+            case TokenType::RAW_STRING:   // LANG-6
+            case TokenType::BYTE_STRING:  // LANG-6
+                // Freestanding gate (E915): strings are heap-allocated and need the
+                // string runtime, neither of which exists on bare metal. Drive MMIO
+                // with peek/poke and fixed-size i8 buffers instead.
+                if (m_is_in_freestanding_mode) {
+                    error(expr.token,
+                          "String literals are not available in --freestanding mode "
+                          "(strings require heap allocation and the string runtime). "
+                          "Use fixed-size i8 buffers with peek/poke instead.",
+                          "E915");
+                    pushAndSave(&expr, m_type_error);
+                    return {};
+                }
+                type = m_type_string; break;
             case TokenType::CHAR:         type = m_type_char; break;  // LANG-4
             case TokenType::TRUE:
             case TokenType::FALSE:        type = m_type_bool; break;

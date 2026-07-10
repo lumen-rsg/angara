@@ -1,0 +1,10 @@
+// Freestanding gate test: list operations must be rejected (E916).
+// Lists require heap allocation and the list runtime — bare metal provides
+// neither. Use fixed-size i8 arrays or preallocated buffers instead.
+// expect: E916
+// mode: --freestanding
+intrinsic func halt() -> nil;
+func main() -> nil {
+    let xs = [1, 2, 3];
+    halt();
+}

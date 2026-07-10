@@ -2,6 +2,17 @@
 namespace angara {
 
     std::any TypeChecker::visit(const ListExpr& expr) {
+        // Freestanding gate (E916): lists are heap-allocated and need the list
+        // runtime, neither of which exists on bare metal.
+        if (m_is_in_freestanding_mode) {
+            error(Token(),
+                  "List literals are not available in --freestanding mode "
+                  "(lists require heap allocation and the list runtime). "
+                  "Use fixed-size i8 arrays or preallocated buffers instead.",
+                  "E916");
+            pushAndSave(&expr, m_type_error);
+            return {};
+        }
         if (expr.elements.empty()) {
             // Bidirectional inference: if an expected type is a list<T>, use T as element type
             std::shared_ptr<Type> element_type = m_type_any;

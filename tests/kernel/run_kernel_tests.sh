@@ -38,6 +38,11 @@ for test_file in "$SCRIPT_DIR/"*.an; do
     test_name="$(basename "$test_file" .an)"
 
     expected=$(strip_ansi < "$test_file" | /bin/grep -oE "expect: [A-Za-z0-9]+" | head -1 | awk '{print $2}')
+    # Skip files with no expect: marker — they belong to a sibling runner
+    # (e.g. fs_ir_probe.an is compiled by run_ir_tests.sh via --emit-llvm).
+    if [ -z "$expected" ]; then
+        continue
+    fi
     # mode: --kernel (default), --freestanding, or hosted. Hosted tests are
     # run by a separate runner (they link a C helper), so skip them here.
     mode=$(strip_ansi < "$test_file" | /bin/grep -oE "mode: (hosted|--[a-z]+)" | head -1 | awk '{print $2}')
@@ -92,4 +97,16 @@ if [ ${#BUGS[@]} -gt 0 ]; then
     printf "${RED}Failures:${RESET}\n"
     for b in "${BUGS[@]}"; do printf "  - %s\n" "$b"; done
 fi
+
+# IR-lowering assertions: emit each freestanding intrinsic's LLVM IR and assert
+# the expected lowering is present. Runs only if the gate suite passed, so a
+# single failing gate isn't masked by an IR crash.
+IR_RC=0
+if [ "$FAIL" -eq 0 ]; then
+    bash "$SCRIPT_DIR/run_ir_tests.sh" "$ANGC" || IR_RC=$?
+    if [ "$IR_RC" -ne 0 ]; then
+        FAIL=$((FAIL + 1)); BUGS+=("IR-lowering suite: see output above")
+    fi
+fi
+
 [ "$FAIL" -eq 0 ]

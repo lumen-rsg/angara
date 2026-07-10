@@ -232,6 +232,14 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::LIST) {
+        if (m_is_in_freestanding_mode) {
+            error(expr.name,
+                  "List operations are not available in --freestanding mode "
+                  "(lists require heap allocation and the list runtime).",
+                  "E916");
+            pushAndSave(&expr, m_type_error);
+            return {};
+        }
         auto list_type = std::dynamic_pointer_cast<ListType>(unwrapped_object_type);
         if (property_name == "push") {
             property_type = std::make_shared<FunctionType>(
@@ -282,6 +290,14 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::RECORD) {
+        if (m_is_in_freestanding_mode) {
+            error(expr.name,
+                  "Record operations are not available in --freestanding mode "
+                  "(records require heap allocation and the record runtime).",
+                  "E917");
+            pushAndSave(&expr, m_type_error);
+            return {};
+        }
         if (property_name == "remove") {
             property_type = std::make_shared<FunctionType>(
                 std::vector<std::shared_ptr<Type>>{m_type_string},

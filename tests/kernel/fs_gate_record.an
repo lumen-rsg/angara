@@ -1,0 +1,11 @@
+// Freestanding gate test: record/class/data operations must be rejected (E917).
+// Heap objects (records, class instances, data instances) require allocation
+// and the record runtime — bare metal provides neither. Lay data out in plain
+// integer globals or foreign structs instead.
+// expect: E917
+// mode: --freestanding
+intrinsic func halt() -> nil;
+func main() -> nil {
+    let r = { a: 1, b: 2 };
+    halt();
+}

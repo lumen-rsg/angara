@@ -1,0 +1,12 @@
+// Negative Test 59: Inline-asm operand must be integer-typed (E923).
+// Operands are passed in general-purpose registers, so only integer primitives
+// are permitted. A floating-point (or string/bool) operand is rejected.
+// expect: E923
+export func main() -> i64 {
+    let f as f64 = 1.0;
+    @unsafe {
+        // f is f64, not an integer — the operand cannot live in a GPR.
+        asm("mov $0, $1", out("=r") f, in("r") f);
+    }
+    return 0;
+}

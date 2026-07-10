@@ -1,0 +1,10 @@
+// Negative Test 60: Inline-asm result type must be an integer primitive (E924).
+// The output register is read back as a machine word, so the `-> type` clause
+// may only name an integer type. `-> f64` (or any non-integer) is rejected.
+// expect: E924
+export func main() -> i64 {
+    @unsafe {
+        let x as f64 = asm("fmov $0, #0.0" -> f64);
+    }
+    return 0;
+}

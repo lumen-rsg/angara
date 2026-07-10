@@ -1,0 +1,69 @@
+// Freestanding IR-lowering probe.
+//
+// Exercises each intrinsic family once so run_ir_tests.sh can assert the
+// emitted LLVM IR contains the expected lowering (atomicrmw/cmpxchg, llvm.ctlz,
+// llvm.trap, the inline-asm register reads, etc.). This catches lowering
+// regressions without needing QEMU.
+//
+// NOT run by run_kernel_tests.sh (no // expect: / // mode: markers) — it is
+// compiled only by run_ir_tests.sh via --emit-llvm. The intrinsic set mirrors
+// fs_intrinsics.an but is trimmed to one call per lowering style.
+// mode: --freestanding   (consumed by run_ir_tests.sh, not the gate runner)
+
+intrinsic func atomic_load(addr as i64) -> i64;
+intrinsic func atomic_store(addr as i64, val as i64) -> nil;
+intrinsic func atomic_cas(addr as i64, expected as i64, desired as i64) -> i64;
+intrinsic func atomic_add(addr as i64, val as i64) -> i64;
+intrinsic func get_mpidr() -> i64;
+intrinsic func cntpct() -> i64;
+intrinsic func clz(x as i64) -> i64;
+intrinsic func rev(x as i64) -> i64;
+intrinsic func rbit(x as i64) -> i64;
+intrinsic func dmb_st() -> nil;
+intrinsic func get_daif() -> i64;
+intrinsic func dc_civac(addr as i64) -> nil;
+intrinsic func dc_csw(set as i64, way as i64, level as i64) -> nil;
+intrinsic func get_sp() -> i64;
+intrinsic func ttbr0_el1() -> i64;
+intrinsic func set_vbar(addr as i64) -> nil;
+intrinsic func poke64(addr as i64, val as i64) -> nil;
+intrinsic func halt() -> nil;
+
+const SCRATCH as i64 = 0x80000000;
+
+func main() -> nil {
+    // Atomics — one of each lowering (load/store, cmpxchg, atomicrmw).
+    atomic_store(SCRATCH, 10);
+    let loaded as i64 = atomic_load(SCRATCH);
+    let cas as i64 = atomic_cas(SCRATCH, 10, 20);
+    let add as i64 = atomic_add(SCRATCH, 5);
+
+    // CPU register reads (mrs inline asm).
+    let cpu as i64 = get_mpidr();
+    let now as i64 = cntpct();
+
+    // Bit manipulation (LLVM intrinsics).
+    let lz as i64 = clz(0x40);
+    let rv as i64 = rev(0x0102030405060708);
+    let rb as i64 = rbit(1);
+
+    // Lighter barrier.
+    dmb_st();
+
+    // DAIF read (mrs daif).
+    let daif as i64 = get_daif();
+
+    // Cache by VA + by set/way (the csselr/ccsidr/cisw encoding).
+    dc_civac(SCRATCH);
+    dc_csw(0, 0, 0);
+
+    // Context switch + vector table.
+    let sp as i64 = get_sp();
+    let ttbr as i64 = ttbr0_el1();
+    set_vbar(SCRATCH);
+
+    // Sink every result so nothing is DCE'd; then trap.
+    let sum as i64 = loaded + cas + add + cpu + now + lz + rv + rb + daif + sp + ttbr;
+    poke64(SCRATCH, sum);
+    halt();
+}

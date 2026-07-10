@@ -93,6 +93,11 @@ address, and `atomic_cas` returns the old value so callers can loop. Lowered to
 LLVM atomic IR (`atomicrmw` / `cmpxchg`), which on AArch64 with LSE emits
 `cas` / `ldadd` / `ldset` / `ldclr` / `ldeor` / `swp`.
 
+> **Requires ARMv8.1+ (LSE).** The atomics lower to LSE atomic instructions and
+> will trap as undefined on a pre-8.1 core (e.g. Cortex-A53/-A57/-A72). Boot
+> with a CPU that advertises LSE — the `examples/qemu_virt` Makefile uses
+> `-cpu max` for this reason. (See the target note below for the full details.)
+
 | Intrinsic | Signature | Lowers to |
 |-----------|-----------|-----------|
 | `atomic_load` | `(addr as i64) -> i64` | `load ... monotonic` |
@@ -299,10 +304,14 @@ are **hard errors at compile time**, not silent no-ops:
 | E912 | `spawn()` | bare metal has no pthreads |
 | E913 | `Mutex` | bare metal has no pthreads |
 | E914 | `attach` of a native (`.so`/`.dylib`/`.dll`) module | bare metal has no dynamic loader |
+| E915 | strings (literals, concat, interpolation, `len`/`typeof`/`string`) | require heap allocation + the string runtime |
+| E916 | lists (literals, `list<T>`, list methods) | require heap allocation + the list runtime |
+| E917 | records, class instances, data instances | require heap allocation + the record runtime |
 
 Use return codes or `match` instead of exceptions; write spinlock primitives in
 inline asm instead of `Mutex`; declare hardware dependencies via
-`foreign func` instead of `attach`.
+`foreign func` instead of `attach`; use fixed-size `i8` buffers with `peek`/`poke`
+instead of strings/lists/records.
 
 ## What works without libc
 
@@ -320,11 +329,12 @@ In freestanding mode you can use:
 
 What is **not** available:
 
-- String operations (require heap allocation).
-- Lists and records (require the runtime).
-- Native module imports (`attach` of `.so`/`.dll`).
-- Exception handling (`try`/`catch`/`throw`).
-- Threading (`spawn`, `Mutex`).
+- String operations — require heap allocation (E915).
+- Lists — require heap allocation + the list runtime (E916).
+- Records, class instances, data instances — require heap allocation (E917).
+- Native module imports (`attach` of `.so`/`.dll`) — no dynamic loader (E914).
+- Exception handling (`try`/`catch`/`throw`) — E910/E911.
+- Threading (`spawn`, `Mutex`) — E912/E913.
 
 ## Building a bare-metal kernel
 

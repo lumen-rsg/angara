@@ -1,10 +1,12 @@
 # Freestanding Intrinsic Expansion — Implementation Plan
 
-> **Status: proposal / ready to implement.** This is a self-contained spec for
-> expanding the `--freestanding` intrinsic set so an agent can implement each
-> batch without re-deriving the patterns. The current intrinsic set and the
+> **Status: Tiers 1–4 implemented and verified.** The intrinsic set and the
 > two-part implementation contract (declare `intrinsic func` + add a name-ladder
-> arm) are verified and shipped (commit `7501bbf`).
+> arm) shipped in commit `7501bbf`; Tiers 1–4 (atomics, bit manipulation, DAIF/
+> cache control, context switching) landed in `be0a6bd` and are covered by the
+> `tests/kernel/` compile-contract tests and the `examples/qemu_virt` QEMU demo.
+> This document now serves as the spec for the lowering patterns and as a
+> roadmap for future tiers (see Tier 5 below).
 
 ## How intrinsics work in Angara (the contract)
 
@@ -146,7 +148,10 @@ before enabling interrupts. The rest are for context switching / crash dumps.
 
 ---
 
-## Suggested implementation order
+## Implementation order (as executed)
+
+Tiers 1–4 were implemented in this order, which worked well and is recommended
+for any future re-derivation:
 
 1. **Atomics (Tier 1)** — unlocks multi-core + lock-free drivers; most common
    reason people fall back to C. ~9 intrinsics, one new lowering style
@@ -157,23 +162,53 @@ before enabling interrupts. The rest are for context switching / crash dumps.
 4. **`enable_irq`/`disable_irq` + `set_vbar` (Tier 3/4)** — when moving to
    real interrupts.
 
-## Suggested verification
+## Verification (done)
 
-- **Tests:** add `tests/lang/positive/` or `tests/kernel/` cases that compile
-  each new intrinsic under `--freestanding` and assert the right LLVM IR
-  (atomic ops produce `atomicrmw`/`cmpxchg`; bit ops produce the matching
-  intrinsic call). Run `bash tests/kernel/run_kernel_tests.sh`.
-- **Demo proof:** extend `examples/qemu_virt/` (or a sibling example) with a
-  multi-core spinlock using `atomic_cas` + `get_mpidr`, and a cycle-count
-  printout using `cntpct`/`cntfrq`. Boot in QEMU with `-smp 2` and confirm.
-- **Docs:** update the intrinsic table in `docs/23-bare-metal.md` to list the
-  new entries, grouped by category.
+- **Compile-contract tests:** `tests/kernel/fs_intrinsics.an` declares and
+  exercises every intrinsic across all four tiers under `--freestanding` and
+  must emit a clean relocatable object with `_start`.
+- **IR-lowering tests:** `tests/kernel/run_ir_tests.sh` compiles
+  `fs_ir_probe.an` with `--emit-llvm` and asserts the expected LLVM IR token
+  for each family (atomic ops → `atomicrmw`/`cmpxchg`; bit ops →
+  `llvm.ctlz`/`bswap`/`bitreverse`; `halt` → `llvm.trap`; register reads → the
+  matching `mrs`/`mov` inline asm). This catches lowering regressions without
+  QEMU. Run via `bash tests/kernel/run_kernel_tests.sh`.
+- **QEMU demo:** `examples/qemu_virt/` boots raw on `qemu-system-aarch64
+  -machine virt -cpu max -smp 2` and exercises the intrinsics end-to-end
+  (`make verify`, `verify-intrinsics`, `verify-tier3`, `verify-smp`).
+- **Docs:** the intrinsic tables in `docs/23-bare-metal.md` list the shipped
+  entries, grouped by category.
+
+---
+
+## Tier 5 — TLB management / privilege switching (future, not yet implemented)
+
+These were previously listed as out-of-scope. They are promoted here as the
+natural next tier once a freestanding program enables its MMU or crosses
+exception levels — but they are sketched, not built. Each follows the existing
+declare-then-name-ladder contract.
+
+### TLB management
+```angara
+intrinsic func tlbi_vmalle1() -> nil;     // "tlbi vmalle1" — invalidate all, EL1
+intrinsic func tlbi_vaae1(addr as i64) -> nil;  // "tlbi vaae1, x0" — by VA, ASID-agnostic
+```
+Only relevant once the MMU is on (a larger effort than intrinsics). Lower to
+inline asm via the `emit_void_asm[_in]` helpers.
+
+### EL-switching
+```angara
+intrinsic func eret() -> nil;             // "eret" — exception return
+intrinsic func set_spsr(daif as i64) -> nil;   // "msr spsr_el1, x0" — set saved pstate
+intrinsic func set_elr(addr as i64) -> nil;    // "msr elr_el1, x0" — set exception link
+```
+`eret`/`hvc`/`smc` are the privilege-transition instructions. These are sharp
+tools: `eret` without a correctly initialised `spsr`/`elr` is an unrecoverable
+fault, and `hvc`/`smc` trap to a hypervisor/secure monitor that may not exist.
+They belong in a boot stub or privilege-management layer rather than general
+driver code, so each should carry a prominent safety note in its gate message.
 
 ## Out of scope (intentionally not proposed)
 
 - Floating-point intrinsics (freestanding already supports `f64` arithmetic;
   no `fenv`/rounding-mode control is worth adding until a concrete need exists).
-- TLB management (`tlbi ...`) — only relevant once an MMU is enabled, which is
-  a much larger effort than intrinsics.
-- EL-switching (`eret`, `hvc`, `smc`) — these belong in the boot stub / a
-  privilege-management layer, not as general-purpose intrinsics.
