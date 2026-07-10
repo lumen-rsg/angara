@@ -617,6 +617,22 @@ std::any Formatter::visit(const AwaitExpr& expr) {
     return "await " + fmtExpr(expr.future);
 }
 
+std::any Formatter::visit(const AsmExpr& expr) {
+    std::string s = "asm(\"" + expr.asmString.lexeme + "\"";
+    if (expr.resultType) {
+        if (auto* t = dynamic_cast<const SimpleType*>(expr.resultType.get())) {
+            s += " -> " + t->name.lexeme;
+        }
+    }
+    for (const auto& op : expr.operands) {
+        const char* dir = (op.dir == AsmDir::IN) ? "in"
+                        : (op.dir == AsmDir::OUT) ? "out" : "inout";
+        s += ", " + std::string(dir) + "(\"" + op.constraint.lexeme + "\") " + fmtExpr(op.expr);
+    }
+    s += ")";
+    return s;
+}
+
 } // namespace angara
 
 #include "Stmt.h"

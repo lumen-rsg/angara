@@ -1,0 +1,11 @@
+// Freestanding gate test: `try`/`catch` must be rejected under --freestanding (E911).
+// Exceptions require setjmp/longjmp/printf/exit, which bare metal does not provide.
+// expect: E911
+// mode: --freestanding
+intrinsic func halt() -> nil;
+func main() -> nil {
+    try {
+        halt();
+    } catch (e as Exception) {
+    }
+}

@@ -13,10 +13,21 @@ The `@unsafe` annotation is Angara's universal escape hatch. It is required when
 - Invoking dynamically-dispatched methods on `any` values
 - Performing operations that bypass static type checking
 - Casting integers to pointers (and vice versa)
+- Writing inline assembly (`asm(...)` — see [Bare-Metal Programming](23-bare-metal.md#inline-assembly))
 
 ```angara
 @unsafe {
     result.push(transform(item));
+}
+```
+
+```angara
+// Inline assembly always requires @unsafe — it bypasses the type system
+// and the borrow/escape analysis.
+let el as i64 = 0;
+@unsafe {
+    asm("msr daifset, #3");
+    el = asm("mrs $0, CurrentEL" -> i64, out("=r") el);
 }
 ```
 

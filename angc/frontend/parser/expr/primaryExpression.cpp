@@ -116,6 +116,10 @@ namespace angara {
             return matchExpression();
         }
 
+        if (match({TokenType::ASM})) {
+            return asmExpression();
+        }
+
         throw error(peek(), "Expected an expression (literal, variable, call, 'if', 'match', list, or record).", "E237");
     }
 

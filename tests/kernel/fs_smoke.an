@@ -1,13 +1,17 @@
-// Freestanding smoke test: a program with try/catch must compile under
-// --freestanding without crashing the compiler. (Both trivial and try/catch
-// programs used to SIGSEGV at IR-build time — generateMemoryManagement
-// dereferenced null malloc/realloc/free, and cgTry dereferenced null setjmp.)
+// Freestanding smoke test: a primitive-only program must compile under
+// --freestanding and emit a relocatable object whose entry point is _start.
+// (This path used to SIGSEGV at IR-build time — generateMemoryManagement
+//  dereferenced null malloc/realloc/free. Fixed; this test guards it.)
 // expect: PASS
 // mode: --freestanding
-export func main() -> i64 {
-    try {
-        return 1;
-    } catch (e as Exception) {
-        return 0;
-    }
+intrinsic func peek32(addr as i64) -> i64;
+intrinsic func poke32(addr as i64, val as i64) -> nil;
+intrinsic func halt() -> nil;
+
+func main() -> nil {
+    // Pure integer + MMIO + intrinsics — no heap, no threads, no exceptions.
+    let a as i64 = 40;
+    let b as i64 = 2;
+    poke32(0x09000000, a + b);  // 42
+    halt();
 }

@@ -1,0 +1,126 @@
+// ============================================================================
+// qemu_virt — A bare-metal Angara "Hello world+" for QEMU aarch64 (raw boot)
+//
+// Boots with no UEFI, no libc, no heap. Demonstrates:
+//   • MMIO via peek32/poke32 to the PL011 UART
+//   • inline `asm` to read the CurrentEL system register
+//   • the dmb/isb barrier intrinsics
+//   • a no-heap hex formatter (shifts/masks only)
+//
+// The only non-Angara code is boot.S (~20 lines: stack, BSS clear, branch to
+// _start). Everything below is pure Angara, compiled with --freestanding.
+// ============================================================================
+
+// --- Intrinsic declarations (compiler-provided, no libc needed) ---
+intrinsic func peek32(addr as i64) -> i64;
+intrinsic func poke32(addr as i64, val as i64) -> nil;
+intrinsic func halt() -> nil;
+intrinsic func dmb() -> nil;
+intrinsic func dsb() -> nil;
+intrinsic func isb() -> nil;
+
+// --- PL011 UART (QEMU virt: base 0x0900_0000) ---
+const UART_DR as i64 = 0x09000000;  // data register
+const UART_FR as i64 = 0x09000018;  // flag register
+
+// Print one character. Spins while the TX FIFO is full (FR bit 5).
+func uart_putc(c as i64) -> nil {
+    while ((peek32(UART_FR) & 0x20) != 0) {}
+    poke32(UART_DR, c);
+}
+
+// Print a single hex nibble (0..15) as one ASCII character.
+func uart_put_hex_digit(nibble as i64) -> nil {
+    if (nibble < 10) {
+        uart_putc(48 + nibble);   // '0'..'9'
+    } else {
+        uart_putc(55 + nibble);   // 'A'..'F' (10 -> 'A')
+    }
+}
+
+// Print an unsigned 64-bit value in hexadecimal, suppressing leading zeros
+// (but always emitting at least one digit, so 0 prints as "0").
+// `started` is 1 once the first non-zero nibble has been printed, else 0.
+func uart_hex_from(value as i64, shift as i64, started as i64) -> nil {
+    let nibble as i64 = (value >> shift) & 0xF;
+    // Whether this nibble should be emitted: always once started, or if non-zero,
+    // or if it's the last nibble (shift == 0) and nothing came before.
+    let will_start as i64 = started;
+    if (started == 0) {
+        if (nibble != 0) {
+            will_start = 1;
+        }
+    }
+
+    if (shift == 0) {
+        // Last nibble: emit if started, or if value is genuinely zero.
+        if (will_start != 0) {
+            uart_put_hex_digit(nibble);
+        } else {
+            uart_putc(48);  // value was 0 — print "0"
+        }
+        return;
+    }
+
+    // Not the last nibble: emit (suppressing leading zeros) and recurse.
+    if (will_start != 0) {
+        uart_put_hex_digit(nibble);
+    }
+    uart_hex_from(value, shift - 4, will_start);
+}
+
+// Print a u64 in hex. Entry point: start at the top nibble (shift 60).
+func uart_hex(value as i64) -> nil {
+    uart_hex_from(value, 60, 0);
+}
+
+// --- Kernel entry point ---
+func main() -> nil {
+    // Read the current Exception Level via inline assembly. QEMU enters the
+    // kernel at EL1, so this should print "1". CurrentEL bits [3:2] hold EL.
+    let el as i64 = 0;
+    @unsafe {
+        el = asm("mrs $0, CurrentEL" -> i64, out("=r") el);
+        el = el >> 2;
+    }
+
+    // Ensure prior writes are ordered before the banner.
+    dmb();
+
+    // Banner: "Angara bare-metal on QEMU virt (AArch64)\r\n"
+    banner();
+
+    // "EL=" + hex(el) + "\r\n"
+    uart_putc(69);   // E
+    uart_putc(76);   // L
+    uart_putc(61);   // =
+    uart_hex(el);
+    uart_putc(13);   // CR
+    uart_putc(10);   // LF
+
+    isb();
+    dsb();
+    halt();
+}
+
+// The banner, printed one byte at a time (no heap → no string type in
+// freestanding mode; lists and records require the runtime). Note: emit() is
+// defined below banner() — a forward reference, which the compiler resolves
+// correctly (definition order is irrelevant in Angara).
+func banner() -> nil {
+    let s as i64 = 32;   // space, reused
+    emit(65);   emit(110); emit(103); emit(97);  emit(114); emit(97);  // Angara
+    emit(s);    emit(98);  emit(97);  emit(114); emit(101); emit(45);  //  bare-
+    emit(109);  emit(101); emit(116); emit(97);  emit(108);            // metal
+    emit(s);    emit(111); emit(110);                                  //  on
+    emit(s);    emit(81);  emit(69);  emit(77);  emit(85);             //  QEMU
+    emit(s);    emit(118); emit(105); emit(114); emit(116);            //  virt
+    emit(s);    emit(40);  emit(65);  emit(65);  emit(114); emit(99);  //  (AArc
+    emit(104);  emit(54);  emit(52);  emit(41);                        // h64)
+    emit(13);   // CR
+    emit(10);   // LF
+}
+
+func emit(c as i64) -> nil {
+    uart_putc(c);
+}

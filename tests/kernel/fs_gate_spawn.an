@@ -1,0 +1,10 @@
+// Freestanding gate test: `spawn()` must be rejected under --freestanding (E912).
+// Bare metal has no pthreads/runtime threads.
+// expect: E912
+// mode: --freestanding
+intrinsic func halt() -> nil;
+func worker() -> nil { halt(); }
+func main() -> nil {
+    spawn(worker);
+    halt();
+}

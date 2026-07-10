@@ -6,6 +6,10 @@ namespace angara {
             error(stmt->keyword, "'throw' is not allowed in --kernel mode (exceptions require setjmp/longjmp/printf/exit, which the kernel does not provide). Use return codes or 'match' instead.", "E900");
             return;
         }
+        if (m_is_in_freestanding_mode) {
+            error(stmt->keyword, "'throw' is not available in --freestanding mode (exceptions require setjmp/longjmp/printf/exit, which bare metal does not provide). Use return codes or 'match' instead.", "E910");
+            return;
+        }
         stmt->expression->accept(*this);
         auto thrown_type = popType();
 

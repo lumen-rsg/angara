@@ -1,0 +1,15 @@
+// Test 28: Inline assembly (@unsafe-gated, value-returning form)
+// exit: 0
+attach io;
+
+export func main() -> i64 {
+    // add two integers via inline asm and print the result.
+    let a as i64 = 40;
+    let b as i64 = 2;
+    let sum as i64 = 0;
+    @unsafe {
+        asm("add $0, $1, $2", out("=r") sum, in("r") a, in("r") b);
+    }
+    io.println(1, string(sum));  // 42
+    return 0;
+}

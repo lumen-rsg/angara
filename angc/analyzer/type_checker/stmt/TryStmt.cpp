@@ -6,6 +6,10 @@ namespace angara {
             error(stmt->catchName, "'try'/'catch' is not allowed in --kernel mode (exceptions require setjmp/longjmp/printf/exit, which the kernel does not provide). Use return codes or 'match' instead.", "E901");
             return;
         }
+        if (m_is_in_freestanding_mode) {
+            error(stmt->catchName, "'try'/'catch' is not available in --freestanding mode (exceptions require setjmp/longjmp/printf/exit, which bare metal does not provide). Use return codes or 'match' instead.", "E911");
+            return;
+        }
         stmt->tryBlock->accept(*this, stmt->tryBlock);
 
         m_symbols.enterScope();

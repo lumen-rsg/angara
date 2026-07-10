@@ -82,12 +82,21 @@ namespace angara {
                     pushAndSave(&expr, m_type_error);
                     return {};
                 }
+                if (m_is_in_freestanding_mode) {
+                    error(expr.paren, "'spawn()' is not available in --freestanding mode (bare metal has no pthreads/runtime threads).", "E912");
+                    pushAndSave(&expr, m_type_error);
+                    return {};
+                }
                 check_spawn_call(expr, arg_types);
                 pushAndSave(&expr, m_hadError ? m_type_error : m_type_thread);
                 return {};
             }
-            if (var_expr->name.lexeme == "Mutex" && m_is_in_kernel_mode) {
-                error(expr.paren, "'Mutex' is not allowed in --kernel mode (kernel has no pthreads). Use kernel mutex/spinlock APIs instead.", "E903");
+            if (var_expr->name.lexeme == "Mutex" && (m_is_in_kernel_mode || m_is_in_freestanding_mode)) {
+                if (m_is_in_kernel_mode) {
+                    error(expr.paren, "'Mutex' is not allowed in --kernel mode (kernel has no pthreads). Use kernel mutex/spinlock APIs instead.", "E903");
+                } else {
+                    error(expr.paren, "'Mutex' is not available in --freestanding mode (bare metal has no pthreads).", "E913");
+                }
                 pushAndSave(&expr, m_type_error);
                 return {};
             }

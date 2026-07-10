@@ -227,6 +227,10 @@ namespace angara {
         /// splitting literal segments and {expression} holes.
         std::shared_ptr<Expr> parseInterpolatedString(const Token& tok);
 
+        /// Parses an inline-asm expression:
+        ///   asm "template" (, (in|out|inout) "constraint" expr)* (-> type)?
+        std::shared_ptr<Expr> asmExpression();
+
         // --- Token-stream helpers ---
 
         /// Checks if the current token matches any of the given types and advances if so.

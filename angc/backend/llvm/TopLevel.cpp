@@ -15,6 +15,22 @@ void LLVMBackend::codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>&
                 m_tracked_types.insert(s->name.lexeme);
     }
 
+    // Forward-declaration pre-pass: declare every source function's signature
+    // (and populate m_raw_functions) BEFORE emitting any body. This makes
+    // function definition order irrelevant — a call to a function defined later
+    // in the source resolves to the correct mangled `__ang_<mod>_<fn>` symbol
+    // instead of falling through to the native-ABI `Angara_<mod>_<fn>(i32,ptr)`
+    // fallback (a different name + signature → undefined reference at link).
+    // Intrinsic/foreign/main/async funcs are skipped here; they are declared
+    // via their own dedicated paths in the main loop below.
+    for (const auto& stmt : statements) {
+        if (auto s = std::dynamic_pointer_cast<const FuncStmt>(stmt)) {
+            if (s->is_intrinsic || s->is_foreign || s->name.lexeme == "main" || s->is_async)
+                continue;
+            declareFunctionSignature(*s, moduleName);
+        }
+    }
+
     for (const auto& stmt : statements) {
         if (auto s = std::dynamic_pointer_cast<const VarDeclStmt>(stmt))
             codegenGlobalVarDecl(*s);
@@ -64,7 +80,7 @@ void LLVMBackend::codegenGlobalVarDecl(const VarDeclStmt& stmt) {
     }
 }
 
-void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& module_name) {
+llvm::Function* LLVMBackend::declareFunctionSignature(const FuncStmt& stmt, const std::string& module_name) {
     const std::string func_name = mangle(module_name, stmt.name.lexeme);
 
     // Resolve semantic function type
@@ -133,6 +149,27 @@ void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& m
         fn = llvm::Function::Create(fn_type, llvm::Function::ExternalLinkage,
                                      func_name, mod.get());
     }
+    return fn;
+}
+
+void LLVMBackend::codegenFunctionDecl(const FuncStmt& stmt, const std::string& module_name) {
+    // Compute the signature (raw vs boxed) and create/reuse the llvm::Function.
+    // The signature pre-pass (codegenTopLevelDecls) has already declared every
+    // function, so this typically returns the existing declaration; the body is
+    // emitted into it below. Keeping the signature logic in declareFunctionSignature
+    // ensures forward references and definitions agree on type.
+    llvm::Function* fn = declareFunctionSignature(stmt, module_name);
+    const std::string func_name = mangle(module_name, stmt.name.lexeme);
+    bool is_raw = (m_raw_functions.count(func_name) > 0);
+    // Re-derive the semantic function type (for parameter type registration
+    // and destructuring) and the raw-info struct (for return-kind handling).
+    // Both were computed inside declareFunctionSignature; re-resolving here
+    // avoids threading them through a return value.
+    auto sem_sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(stmt.name.lexeme);
+    auto sem_fn_type = (sem_sym && sem_sym->type && sem_sym->type->kind == TypeKind::FUNCTION)
+        ? std::dynamic_pointer_cast<FunctionType>(sem_sym->type) : nullptr;
+    RawFuncInfo raw_info;
+    if (is_raw) raw_info = m_raw_functions[func_name];
 
     // SIMD-2: @inline annotation — force inlining at every call site
     if (stmt.is_inline) {
@@ -1542,6 +1579,16 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
     namedVals.clear();
     namedTypes.clear();
     namedKinds.clear();
+
+    // Reset per-function codegen state before emitting main/_start. The last
+    // user function leaves m_exc_chain_save pointing at its alloca; if we don't
+    // clear it, the main body (which in freestanding mode never calls
+    // emitRtPushFrame to install a fresh value) would reuse that stale alloca
+    // in emitRtPopFrame → a module-verify "instruction in another function"
+    // failure and no object emitted. Mirrors the reset in cgFunction.
+    m_exc_chain_save = nullptr;
+    m_inlined_main_ret_alloca = nullptr;
+    m_inlined_main_cleanup_bb = nullptr;
 
     // RT: register main thread and push root frame
     llvm::Value* gc_thread_state = nullptr;

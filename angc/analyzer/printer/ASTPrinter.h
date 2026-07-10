@@ -82,6 +82,7 @@ namespace angara {
         std::any visit(const InterpStringExpr& expr) override;
         std::any visit(const TupleExpr& expr) override;  // LANG-10
         std::any visit(const AwaitExpr& expr) override;  // LIB-4
+        std::any visit(const AsmExpr& expr) override;    // inline assembly
         std::any visit(const NestedPattern& expr) override;
 
         // --- Statement visitors ---

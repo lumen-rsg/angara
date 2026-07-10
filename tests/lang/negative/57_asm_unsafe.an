@@ -1,0 +1,8 @@
+// Negative Test 57: Inline assembly outside @unsafe - should be rejected (E920)
+// Inline asm bypasses the type system and borrow/escape analysis, so it must
+// appear inside an @unsafe block.
+// expect: E920
+export func main() -> i64 {
+    asm("nop");
+    return 0;
+}

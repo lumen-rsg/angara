@@ -43,6 +43,7 @@ namespace angara {
     struct InterpStringExpr;
     struct TupleExpr;  // LANG-10
     struct AwaitExpr;  // LIB-4: await expression
+    struct AsmExpr;    // inline assembly expression
 
     // The Visitor interface for expressions
     class ExprVisitor {
@@ -74,6 +75,7 @@ namespace angara {
         virtual std::any visit(const InterpStringExpr& expr) = 0;
         virtual std::any visit(const TupleExpr& expr) = 0;  // LANG-10
         virtual std::any visit(const AwaitExpr& expr) = 0;  // LIB-4
+        virtual std::any visit(const AsmExpr& expr) = 0;    // inline assembly
         virtual std::any visit(const NestedPattern& expr) = 0;  // nested constructor pattern in match
 
     };
@@ -459,6 +461,42 @@ namespace angara {
 
         AwaitExpr(Token keyword, std::shared_ptr<Expr> future)
                 : keyword(std::move(keyword)), future(std::move(future)) {}
+
+        std::any accept(ExprVisitor& visitor) const override {
+            return visitor.visit(*this);
+        }
+    };
+
+    // Inline assembly expression. Lowered to llvm::InlineAsm at codegen.
+    //
+    //   @unsafe { asm("msr daifset, #3"); }                              // void
+    //   asm("mrs $0, CurrentEL", out("=r") el -> i64);                    // output
+    //   asm("add $0, $1, $2", out("=r") s, in("r") a, in("r") b);         // mixed
+    //
+    // Operands are positional ($0..$N); outputs are listed before inputs in
+    // the constraint string, matching the LLVM/GCC inline-asm convention.
+    // An `out`/`inout` operand must be an assignable lvalue (a VarExpr). A
+    // `-> type` clause gives the asm's result type; with no output operands
+    // the result defaults to nil. Requires an @unsafe block (E920).
+    enum class AsmDir { IN, OUT, INOUT };
+
+    struct AsmOperand {
+        const AsmDir dir;
+        const Token constraint;                 // the constraint STRING literal
+        const std::shared_ptr<Expr> expr;       // value (in) / lvalue (out, inout)
+    };
+
+    struct AsmExpr : Expr {
+        const Token keyword;                    // the 'asm' token
+        const Token asmString;                  // the template STRING literal (lexeme = unescaped text)
+        const std::vector<AsmOperand> operands;
+        const std::shared_ptr<ASTType> resultType;  // optional "-> type" clause (nullptr = nil)
+
+        AsmExpr(Token keyword, Token asmString,
+                std::vector<AsmOperand> operands,
+                std::shared_ptr<ASTType> resultType)
+                : keyword(std::move(keyword)), asmString(std::move(asmString)),
+                  operands(std::move(operands)), resultType(std::move(resultType)) {}
 
         std::any accept(ExprVisitor& visitor) const override {
             return visitor.visit(*this);

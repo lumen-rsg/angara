@@ -674,6 +674,7 @@ namespace angara {
         // reads).  New cache insertions are locked below.
         TypeChecker typeChecker(*this, errorHandler, disc.name);
         typeChecker.set_kernel_mode(m_kernel_mode);
+        typeChecker.set_freestanding_mode(m_freestanding);
         try {
             if (!typeChecker.check(statements)) {
                 std::lock_guard<std::mutex> lock(m_cache_mutex);
@@ -965,6 +966,7 @@ namespace angara {
 
         TypeChecker typeChecker(*this, errorHandler, module_name);
         typeChecker.set_kernel_mode(m_kernel_mode);
+        typeChecker.set_freestanding_mode(m_freestanding);
         try {
         if (!typeChecker.check(statements)) { errorHandler.printSummary(); m_had_error = true; return nullptr; }
         } catch (const std::exception& e) {

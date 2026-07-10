@@ -86,6 +86,10 @@ namespace angara {
         /// Enables --kernel mode (hard-error try/spawn/Mutex/native-attach).
         void set_kernel_mode(bool v) { m_is_in_kernel_mode = v; }
 
+        /// Enables --freestanding mode (hard-error try/throw/spawn/Mutex/native-
+        /// attach: no heap/threading/dynamic-loader on bare metal).
+        void set_freestanding_mode(bool v) { m_is_in_freestanding_mode = v; }
+
     private:
         // --- Expression visitors ---
 
@@ -114,6 +118,7 @@ namespace angara {
         std::any visit(const InterpStringExpr& expr) override;
         std::any visit(const TupleExpr& expr) override;  // LANG-10
         std::any visit(const AwaitExpr& expr) override;  // LIB-4
+        std::any visit(const AsmExpr& expr) override;    // inline assembly
         std::any visit(const NestedPattern& expr) override;
 
         // --- Statement visitors ---
@@ -355,6 +360,7 @@ namespace angara {
         std::set<UsedNativeSymbol> m_used_native_symbols;
         bool m_is_in_unsafe_context = false;
         bool m_is_in_kernel_mode = false;   // --kernel: hard-error try/spawn/Mutex/native-attach
+        bool m_is_in_freestanding_mode = false;  // --freestanding: hard-error heap/threading/native-attach
 
         // Downward-flowing expected type for bidirectional inference (e.g., list<i64> -> [] element type)
         std::shared_ptr<Type> m_expected_type;

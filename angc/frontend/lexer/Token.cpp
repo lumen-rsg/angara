@@ -115,6 +115,7 @@ namespace angara {
             case TokenType::FOREIGN: return "FOREIGN";
             case TokenType::INTRINSIC: return "INTRINSIC";
             case TokenType::UNION: return "UNION";
+            case TokenType::ASM: return "ASM";
 
             // Type Keywords
             case TokenType::TYPE_STRING: return "TYPE_STRING";

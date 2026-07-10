@@ -1,0 +1,9 @@
+// Freestanding gate test: `Mutex` must be rejected under --freestanding (E913).
+// Bare metal has no pthreads.
+// expect: E913
+// mode: --freestanding
+intrinsic func halt() -> nil;
+func main() -> nil {
+    let m as Mutex = Mutex();
+    halt();
+}

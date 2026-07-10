@@ -120,6 +120,8 @@ namespace angara {
         llvm::Value* cgTuple(const TupleExpr& e);
         /// LIB-4: lowers an await expression (currently synchronous — extracts result).
         llvm::Value* cgAwait(const AwaitExpr& e);
+        /// Lowers an inline-asm expression to llvm::InlineAsm.
+        llvm::Value* cgAsm(const AsmExpr& e);
         llvm::Value* cgMatch(const MatchExpr& e);
         llvm::Value* cgLambda(const LambdaExpr& e);
 
@@ -164,6 +166,11 @@ namespace angara {
         void codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>& statements);
         void codegenGlobalVarDecl(const VarDeclStmt& stmt);
         void codegenFunctionDecl(const FuncStmt& stmt, const std::string& module_name);
+        /// Forward-declares a function's signature (name + raw/boxed LLVM type)
+        /// without emitting its body. Used by the pre-pass so that calls to
+        /// functions defined later in the same module resolve to the correct
+        /// mangled symbol instead of the native-ABI fallback.
+        llvm::Function* declareFunctionSignature(const FuncStmt& stmt, const std::string& module_name);
 
         // --- Unboxed primitive support ---
         /// Kind of local variable storage: boxed (AngaraObject) or raw LLVM primitive.

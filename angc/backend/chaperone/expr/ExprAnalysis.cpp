@@ -31,6 +31,11 @@ void Chaperone::collectExprVarRefs(const std::shared_ptr<Expr>& expr,
     if (auto* l = dynamic_cast<const ListExpr*>(expr.get())) { for (const auto& e : l->elements) collectExprVarRefs(e, out); return; }
     if (auto* tup = dynamic_cast<const TupleExpr*>(expr.get())) { for (const auto& e : tup->elements) collectExprVarRefs(e, out); return; }  // LANG-10
     if (auto* await_e = dynamic_cast<const AwaitExpr*>(expr.get())) { collectExprVarRefs(await_e->future, out); return; }  // LIB-4
+    if (auto* asm_e = dynamic_cast<const AsmExpr*>(expr.get())) {
+        // Every asm operand references (in) or assigns (out/inout) a variable.
+        for (const auto& op : asm_e->operands) collectExprVarRefs(op.expr, out);
+        return;
+    }
     if (auto* lo = dynamic_cast<const LogicalExpr*>(expr.get())) { collectExprVarRefs(lo->left, out); collectExprVarRefs(lo->right, out); return; }
     if (auto* su = dynamic_cast<const SubscriptExpr*>(expr.get())) { collectExprVarRefs(su->object, out); collectExprVarRefs(su->index, out); return; }
     if (auto* re = dynamic_cast<const RecordExpr*>(expr.get())) { for (const auto& v : re->values) collectExprVarRefs(v, out); return; }
@@ -1297,6 +1302,15 @@ void Chaperone::analyzeExpr(Context& ctx,
                 }
             }
         }
+        return;
+    }
+
+    // Inline assembly: analyze each operand expression. Operands are
+    // integer-typed values (type-checked E923), so there are no tracked
+    // allocations to transition — but we still walk them to surface any
+    // use-after-drop/move on integer variables holding boxed values.
+    if (auto* asm_e = dynamic_cast<const AsmExpr*>(expr.get())) {
+        for (const auto& op : asm_e->operands) analyzeExpr(ctx, op.expr, state);
         return;
     }
 

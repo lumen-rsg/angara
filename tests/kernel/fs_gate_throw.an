@@ -1,0 +1,9 @@
+// Freestanding gate test: `throw` must be rejected under --freestanding (E910).
+// Exceptions require setjmp/longjmp/printf/exit, which bare metal does not provide.
+// expect: E910
+// mode: --freestanding
+intrinsic func halt() -> nil;
+func main() -> nil {
+    throw Exception("nope");
+    halt();
+}

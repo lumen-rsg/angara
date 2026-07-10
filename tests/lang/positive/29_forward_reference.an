@@ -1,0 +1,30 @@
+// Test 29: Forward references / mutual recursion
+// exit: 0
+// A caller may be defined before its callee; definition order is irrelevant.
+// Also exercises mutual recursion (is_even ↔ is_odd) and a raw-signature
+// forward reference (add, which the compiler lowers to an unboxed i64 ABI).
+// Regression test for the forward-reference codegen bug where a call to a
+// not-yet-emitted same-module function fell through to the native-ABI
+// Angara_<mod>_<fn>(i32,ptr) name and failed at link with an undefined ref.
+attach io;
+
+export func main() -> i64 {
+    io.println(1, string(add(2, 3)));       // 5  (forward ref to raw-sig add)
+    io.println(1, string(is_even(10)));     // true (mutual recursion)
+    io.println(1, string(is_odd(7)));       // true
+    return 0;
+}
+
+func add(a as i64, b as i64) -> i64 {
+    return a + b;
+}
+
+func is_even(n as i64) -> bool {
+    if (n == 0) { return true; }
+    return is_odd(n - 1);
+}
+
+func is_odd(n as i64) -> bool {
+    if (n == 0) { return false; }
+    return is_even(n - 1);
+}

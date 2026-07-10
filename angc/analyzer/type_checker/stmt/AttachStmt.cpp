@@ -16,9 +16,16 @@ namespace angara {
         // --kernel: native modules (.so/.dylib/.dll) are loaded via dlopen at
         // resolve time, which has no equivalent in a kernel. Refuse them.
         // Pure-Angara-source modules are compiled in and remain allowed.
-        if (m_is_in_kernel_mode && module_type->is_native) {
-            error(stmt.modulePath, "attach of native module '" + module_path + "' is not allowed in --kernel mode (a kernel has no dynamic loader). Use a pure-Angara module or declare the dependency via 'foreign func'.", "E904");
-            return;
+        // --freestanding: same restriction — bare metal has no dynamic loader.
+        if (module_type->is_native) {
+            if (m_is_in_kernel_mode) {
+                error(stmt.modulePath, "attach of native module '" + module_path + "' is not allowed in --kernel mode (a kernel has no dynamic loader). Use a pure-Angara module or declare the dependency via 'foreign func'.", "E904");
+                return;
+            }
+            if (m_is_in_freestanding_mode) {
+                error(stmt.modulePath, "attach of native module '" + module_path + "' is not available in --freestanding mode (bare metal has no dynamic loader). Use a pure-Angara module or declare the dependency via 'foreign func'.", "E914");
+                return;
+            }
         }
 
         m_module_resolutions[&stmt] = module_type;

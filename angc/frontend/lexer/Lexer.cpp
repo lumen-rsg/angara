@@ -56,6 +56,7 @@ namespace angara {
             {"void",      TokenType::TYPE_VOID},
             {"async",    TokenType::ASYNC},
             {"await",    TokenType::AWAIT},
+            {"asm",      TokenType::ASM},
     };
 
     Lexer::Lexer(std::string source, std::shared_ptr<std::string> filename, ErrorHandler& errorHandler)

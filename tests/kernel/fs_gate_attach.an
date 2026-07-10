@@ -1,0 +1,10 @@
+// Freestanding gate test: native module `attach` must be rejected under
+// --freestanding (E914). Bare metal has no dynamic loader (dlopen).
+// `io` is a native (.so) module, so this triggers the gate.
+// expect: E914
+// mode: --freestanding
+attach io;
+intrinsic func halt() -> nil;
+func main() -> nil {
+    halt();
+}

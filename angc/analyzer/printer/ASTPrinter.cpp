@@ -560,6 +560,19 @@ namespace angara {
         return {};
     }
 
+    std::any ASTPrinter::visit(const AsmExpr& expr) {
+        printHeader("AsmExpr", "\"" + expr.asmString.lexeme + "\"");
+        bool last = expr.operands.empty();
+        if (expr.resultType) {
+            if (auto* t = dynamic_cast<const SimpleType*>(expr.resultType.get())) {
+                // printed via header extra would be cleaner; show as a note.
+            }
+            (void)last;
+        }
+        // Print operands inline (simple leaf).
+        return {};
+    }
+
     void ASTPrinter::visit(std::shared_ptr<const DropStmt> stmt) {
         // H8: show target expression info.
         std::string desc = "DropStmt";

@@ -1,6 +1,7 @@
 #include "LLVMBackend.h"
 #include "RuntimeBuilder.h"
 #include <llvm/IR/Intrinsics.h>
+#include <llvm/IR/InlineAsm.h>
 #include <functional>
 
 namespace angara {
@@ -108,6 +109,7 @@ llvm::Value* LLVMBackend::cg(const std::shared_ptr<Expr>& e) {
     if (auto* p = dynamic_cast<const InterpStringExpr*>(e.get())) return cgInterpString(*p);
     if (auto* p = dynamic_cast<const TupleExpr*>(e.get())) return cgTuple(*p);  // LANG-10
     if (auto* p = dynamic_cast<const AwaitExpr*>(e.get())) return cgAwait(*p);  // LIB-4
+    if (auto* p = dynamic_cast<const AsmExpr*>(e.get())) return cgAsm(*p);      // inline assembly
     return makeNil();
 }
 
@@ -1706,6 +1708,32 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             auto* donothing = llvm::Intrinsic::getOrInsertDeclaration(mod.get(), llvm::Intrinsic::donothing);
             builder->CreateCall(donothing, {});
             return makeNil();
+        }
+        // ARM64 CPU-control intrinsics. No LLVM intrinsic exists for these, so
+        // each lowers to a single side-effecting inline-asm instruction.
+        // (Target-agnostic by construction: on non-AArch64 hosts these would
+        // fail at assembly, which is the right outcome — they're bare-metal ops.)
+        auto emit_void_asm = [&](const char* inst) {
+            auto* void_ty = llvm::Type::getVoidTy(*ctx);
+            auto* fn_ty = llvm::FunctionType::get(void_ty, false);
+            auto* ia = llvm::InlineAsm::get(fn_ty, inst, "", /*hasSideEffects=*/true);
+            builder->CreateCall(fn_ty, ia, {});
+        };
+        if (fn == "wfi") { emit_void_asm("wfi"); return makeNil(); }
+        if (fn == "wfe") { emit_void_asm("wfe"); return makeNil(); }
+        if (fn == "sev") { emit_void_asm("sev"); return makeNil(); }
+        if (fn == "dmb") { emit_void_asm("dmb sy"); return makeNil(); }
+        if (fn == "dsb") { emit_void_asm("dsb sy"); return makeNil(); }
+        if (fn == "isb") { emit_void_asm("isb"); return makeNil(); }
+        // get_el() -> i64: read CurrentEL and shift to get the exception level
+        // (EL is bits [3:2] of CurrentEL). Returns 0/1/2/3.
+        if (fn == "get_el") {
+            auto* i64_ty = llvm::Type::getInt64Ty(*ctx);
+            auto* fn_ty = llvm::FunctionType::get(i64_ty, false);
+            auto* ia = llvm::InlineAsm::get(fn_ty, "mrs $0, CurrentEL; lsr $0, $0, #2",
+                                            "=r", /*hasSideEffects=*/false);
+            auto* call = builder->CreateCall(fn_ty, ia, {});
+            return makeI64(call);
         }
         // TS-2: builtin hash(x) -> i64. Hashes any value via __ang_obj_hash.
         if (fn == "hash") {
@@ -3341,6 +3369,89 @@ llvm::Value* LLVMBackend::cgAwait(const AwaitExpr& e) {
 
     // Return the PHI value — this is the result of the await expression
     return phi;
+}
+
+// Inline assembly. Lowers to llvm::InlineAsm.
+//
+//   asm "template", in("r") a, in("r") b, out("=r") d -> i64
+//
+// Operands are positional ($0..$N). LLVM requires outputs before inputs in the
+// constraint string, so we reorder here: the single output (if any) becomes
+// the call's return value, inputs are passed as call arguments. Multi-output
+// asm (more than one `out`/`inout`) is rejected by the type checker — at most
+// one output operand is permitted so the result maps cleanly to the i64 return.
+llvm::Value* LLVMBackend::cgAsm(const AsmExpr& e) {
+    auto* i64_ty = llvm::Type::getInt64Ty(*ctx);
+
+    // Collect the single output (if present) and all inputs in source order.
+    const AsmOperand* out_op = nullptr;
+    std::vector<const AsmOperand*> in_ops;
+    for (const auto& op : e.operands) {
+        if (op.dir == AsmDir::IN) {
+            in_ops.push_back(&op);
+        } else {
+            // OUT or INOUT.
+            out_op = &op;
+        }
+    }
+
+    bool has_result = (out_op != nullptr) || (e.resultType != nullptr);
+
+    // Build the input argument values (i64 each) and their constraint codes.
+    std::vector<llvm::Value*> in_values;
+    std::vector<std::string> constraints;
+    if (out_op) {
+        // The output constraint is listed first; the result comes back via the
+        // call's return value. Strip any leading '=' when feeding an inout value
+        // back in — inout passes the current lvalue as an input too.
+        constraints.push_back(out_op->constraint.lexeme);
+        if (out_op->dir == AsmDir::INOUT) {
+            // An inout operand is both input and output: pass the current value
+            // as an extra input arg and keep the output constraint.
+            auto* boxed = cg(out_op->expr);
+            in_values.push_back(getI64(boxed));
+            // The matching input constraint: tie to the output register.
+            constraints.push_back(std::string("0"));
+        }
+    }
+    for (const auto* op : in_ops) {
+        auto* boxed = cg(op->expr);
+        in_values.push_back(getI64(boxed));
+        constraints.push_back(op->constraint.lexeme);
+    }
+
+    // Join constraints with commas.
+    std::string constraint_str;
+    for (size_t i = 0; i < constraints.size(); ++i) {
+        if (i) constraint_str += ",";
+        constraint_str += constraints[i];
+    }
+
+    llvm::Type* ret_ty = has_result ? i64_ty : llvm::Type::getVoidTy(*ctx);
+    auto* fn_ty = llvm::FunctionType::get(ret_ty, std::vector<llvm::Type*>(in_values.size(), i64_ty), false);
+
+    // InlineAsm is always side-effecting from LLVM's perspective — the compiler
+    // must not reorder or DCE it. Mark memory as clobbered implicitly.
+    auto* ia = llvm::InlineAsm::get(fn_ty, e.asmString.lexeme, constraint_str,
+                                    /*hasSideEffects=*/true,
+                                    /*isAlignStack=*/false,
+                                    llvm::InlineAsm::AsmDialect::AD_ATT);
+
+    auto* call = builder->CreateCall(fn_ty, ia, in_values);
+    // hasSideEffects=true above prevents DCE/reordering of the asm.
+
+    if (out_op) {
+        // Write the returned register back into the output lvalue.
+        auto* out_var = dynamic_cast<const VarExpr*>(out_op->expr.get());
+        if (out_var) {
+            storeVar(out_var->name.lexeme, makeI64(call));
+        }
+    }
+
+    if (has_result) {
+        return makeI64(call);
+    }
+    return makeNil();
 }
 
 }
