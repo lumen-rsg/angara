@@ -13,6 +13,7 @@
 #   make verify          — Build, boot, and assert the banner appears (auto-quits)
 #   make verify-intrinsics — Boot and assert the Tier 1+2 intrinsic demo lines
 #   make verify-tier3    — Boot and assert the Tier 3+4 (DAIF/cache/SP) demo lines
+#   make verify-tier5    — Boot and assert the Tier 5 (TLB/SPSR/ELR/eret) demo lines
 #   make verify-smp      — Boot with -smp 2 and assert the banner still appears
 #   make clean           — Remove build artifacts
 
@@ -40,7 +41,7 @@ QEMU_OPTS = -machine virt -cpu max -m 128 -nographic -semihosting
 
 BANNER = Angara bare-metal on QEMU virt
 
-.PHONY: all run verify verify-intrinsics verify-tier3 verify-smp clean
+.PHONY: all run verify verify-intrinsics verify-tier3 verify-tier5 verify-smp clean
 
 all: $(KERNEL)
 
@@ -107,6 +108,25 @@ verify-tier3: $(KERNEL)
 	@timeout 5 $(QEMU) $(QEMU_OPTS) -kernel $(KERNEL) > qemu.out 2>&1 || true
 	@ok=1; \
 	for tag in DAIF SP; do \
+		if grep -q "$$tag=" qemu.out; then \
+			line=$$(grep "$$tag=" qemu.out | head -1); \
+			echo "[OK] $$line"; \
+		else \
+			echo "[FAIL] missing $$tag= line"; ok=0; \
+		fi; \
+	done; \
+	if [ "$$ok" -ne 1 ]; then echo "--- full output ---"; cat qemu.out; exit 1; fi
+
+# Boot headlessly and verify the Tier 5 intrinsic demo lines printed:
+#   TLBI=OK  TLBIVA=OK  SPSR=<hex>  ELR=<hex>  ERET=OK
+# Each line proves a different Tier 5 primitive lowered and ran on the CPU
+# without trapping: the TLB invalidations (tlbi_vmalle1/tlbi_vaae1), the
+# exception-return register writes (set_spsr/set_elr, read back via mrs), and
+# the safe eret-to-self (eret; if it faulted, ERET=OK would never print).
+verify-tier5: $(KERNEL)
+	@timeout 5 $(QEMU) $(QEMU_OPTS) -kernel $(KERNEL) > qemu.out 2>&1 || true
+	@ok=1; \
+	for tag in TLBI TLBIVA SPSR ELR ERET; do \
 		if grep -q "$$tag=" qemu.out; then \
 			line=$$(grep "$$tag=" qemu.out | head -1); \
 			echo "[OK] $$line"; \

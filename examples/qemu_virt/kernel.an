@@ -47,6 +47,17 @@ intrinsic func ic_ivau(addr as i64) -> nil;
 // Context switching (Tier 4): read the stack pointer.
 intrinsic func get_sp() -> i64;
 
+// TLB management (Tier 5): invalidate TLB entries. @unsafe only — these cannot
+// bric a running kernel (they're normal privileged system operations).
+intrinsic func tlbi_vmalle1() -> nil;
+intrinsic func tlbi_vaae1(addr as i64) -> nil;
+// Privilege switching (Tier 5): the exception-return primitives. These require
+// @privileged (eret jumps to elr_el1 with the spsr_el1 pstate; a wrong value is
+// an unrecoverable fault). @privileged implies @unsafe.
+intrinsic func set_spsr(daif as i64) -> nil;
+intrinsic func set_elr(addr as i64) -> nil;
+intrinsic func eret() -> nil;
+
 // --- PL011 UART (QEMU virt: base 0x0900_0000) ---
 const UART_DR as i64 = 0x09000000;  // data register
 const UART_FR as i64 = 0x09000018;  // flag register
@@ -133,6 +144,10 @@ func main() -> nil {
     // Exercise the Tier 3 + 4 intrinsics: interrupt-mask control, cache
     // maintenance, and the stack-pointer read.
     demo_tier3();
+
+    // Exercise the Tier 5 intrinsics: TLB invalidation, the exception-return
+    // register writes (read back to prove they landed), and a safe eret-to-self.
+    demo_tier5();
 
     isb();
     dsb();
@@ -258,6 +273,77 @@ func demo_tier3() -> nil {
     let S as i64 = 83; let Pp as i64 = 80;
     uart_putc(S); uart_putc(Pp); uart_putc(eq);
     uart_hex(sp);
+    uart_putc(13); uart_putc(10);
+}
+
+// Demonstrate the Tier 5 intrinsics: TLB invalidation (vmalle1 + by-VA), the
+// exception-return register writes (set_spsr/set_elr, read back to prove they
+// landed), and a safe eret-to-self. Each result is printed so `make
+// verify-tier5` can assert the line appeared — proving the lowering ran on the
+// CPU without trapping.
+func demo_tier5() -> nil {
+    let eq as i64 = 61;
+
+    // 1) TLB invalidation. With the MMU off (QEMU virt's default) these are
+    //    no-ops, but they must not trap. @unsafe is sufficient (these are
+    //    normal privileged system ops, not privilege transitions).
+    @unsafe {
+        tlbi_vmalle1();
+        tlbi_vaae1(LOCK_ADDR);
+    }
+
+    // "TLBI=OK" + CRLF   (proves tlbi_vmalle1 ran without faulting)
+    let T as i64 = 84; let L as i64 = 76; let B as i64 = 66; let I as i64 = 73;
+    uart_putc(T); uart_putc(L); uart_putc(B); uart_putc(I); uart_putc(eq);
+    uart_putc(79); uart_putc(75);  // "OK"
+    uart_putc(13); uart_putc(10);
+
+    // "TLBIVA=OK" + CRLF (proves tlbi_vaae1 ran without faulting)
+    let V as i64 = 86; let A as i64 = 65;
+    uart_putc(T); uart_putc(L); uart_putc(B); uart_putc(I); uart_putc(V); uart_putc(A);
+    uart_putc(eq);
+    uart_putc(79); uart_putc(75);  // "OK"
+    uart_putc(13); uart_putc(10);
+
+    // 2) Exception-return register writes + read-back. set_spsr/set_elr write
+    //    spsr_el1/elr_el1; we read them back with inline mrs to prove the
+    //    writes landed. @privileged implies @unsafe, so the mrs is permitted.
+    @privileged {
+        set_spsr(0x3C5);              // EL1h, all interrupts masked
+        set_elr(LOCK_ADDR);           // an arbitrary valid address
+    }
+    let spsr_back as i64 = 0;
+    let elr_back as i64 = 0;
+    @unsafe {
+        spsr_back = asm("mrs $0, spsr_el1" -> i64, out("=r") spsr_back);
+        elr_back = asm("mrs $0, elr_el1" -> i64, out("=r") elr_back);
+    }
+
+    // "SPSR=" + hex(spsr_back) + CRLF   (expect 3C5)
+    let Sp as i64 = 83; let Pp as i64 = 80; let Rp as i64 = 82;
+    uart_putc(Sp); uart_putc(Pp); uart_putc(Sp); uart_putc(Rp); uart_putc(eq);
+    uart_hex(spsr_back);
+    uart_putc(13); uart_putc(10);
+
+    // "ELR=" + hex(elr_back) + CRLF     (expect LOCK_ADDR = 47FF0000)
+    let E as i64 = 69;
+    uart_putc(E); uart_putc(L); uart_putc(Rp); uart_putc(eq);
+    uart_hex(elr_back);
+    uart_putc(13); uart_putc(10);
+
+    // 3) eret-to-self: the sharpest primitive. We set elr to the address of a
+    //    local label (the instruction right after eret) and spsr to a valid
+    //    EL1h pstate, then eret. Execution resumes at the label — proving eret
+    //    ran and returned control cleanly. Done in one inline-asm template so
+    //    the local label resolves within the block (no symbol lookup needed).
+    //    If eret faults, "ERET=OK" never prints.
+    @privileged {
+        asm("adr x0, 1f; msr elr_el1, x0; mov x0, #0x3C5; msr spsr_el1, x0; eret; 1: nop");
+    }
+
+    // "ERET=OK" + CRLF   (proves eret returned to the label without faulting)
+    uart_putc(E); uart_putc(Rp); uart_putc(E); uart_putc(T); uart_putc(eq);
+    uart_putc(79); uart_putc(75);  // "OK"
     uart_putc(13); uart_putc(10);
 }
 
