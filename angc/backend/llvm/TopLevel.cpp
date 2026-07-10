@@ -415,6 +415,8 @@ void LLVMBackend::collectAwaitStatesStmt(const std::shared_ptr<Stmt>& stmt,
         if (trys->finallyBlock) collectAwaitStatesStmt(trys->finallyBlock, awaits);
     } else if (auto* uns = dynamic_cast<const UnsafeBlockStmt*>(stmt.get())) {
         for (auto& s : uns->block->statements) collectAwaitStatesStmt(s, awaits);
+    } else if (auto* prv = dynamic_cast<const PrivilegedBlockStmt*>(stmt.get())) {
+        for (auto& s : prv->block->statements) collectAwaitStatesStmt(s, awaits);
     }
     // DropStmt, BreakStmt, ContinueStmt, EmptyStmt: no expressions to scan
 }
@@ -457,6 +459,8 @@ void LLVMBackend::collectAsyncLocals(const std::shared_ptr<Stmt>& stmt,
         if (trys->finallyBlock) collectAsyncLocals(trys->finallyBlock, locals, local_kinds, next_slot);
     } else if (auto* uns = dynamic_cast<const UnsafeBlockStmt*>(stmt.get())) {
         for (auto& s : uns->block->statements) collectAsyncLocals(s, locals, local_kinds, next_slot);
+    } else if (auto* prv = dynamic_cast<const PrivilegedBlockStmt*>(stmt.get())) {
+        for (auto& s : prv->block->statements) collectAsyncLocals(s, locals, local_kinds, next_slot);
     }
     // ExpressionStmt, ReturnStmt, DropStmt, BreakStmt, ContinueStmt, ThrowStmt:
     // no VarDeclStmt children.

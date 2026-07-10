@@ -37,6 +37,7 @@ namespace angara {
     struct DataStmt;
     struct EnumStmt;
     struct UnsafeBlockStmt;
+    struct PrivilegedBlockStmt;
     struct DropStmt;
     struct TypeAliasStmt;
 
@@ -65,6 +66,7 @@ namespace angara {
         virtual void visit(std::shared_ptr<const DataStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const EnumStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const UnsafeBlockStmt> stmt) = 0;
+        virtual void visit(std::shared_ptr<const PrivilegedBlockStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const DropStmt> stmt) = 0;
         virtual void visit(std::shared_ptr<const TypeAliasStmt> stmt) = 0;
     };
@@ -548,6 +550,22 @@ namespace angara {
 
         void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
             visitor.visit(std::static_pointer_cast<const UnsafeBlockStmt>(self));
+        }
+    };
+
+    // @privileged { ... } — a stronger escape hatch than @unsafe, for the
+    // privilege-transition intrinsics (eret, set_spsr, set_elr). Entering a
+    // @privileged block implies @unsafe too, so inline asm is permitted inside
+    // without a nested @unsafe wrapper. Structurally identical to UnsafeBlockStmt.
+    struct PrivilegedBlockStmt final : Stmt {
+        const Token keyword; // The '@' token
+        const std::shared_ptr<BlockStmt> block;
+
+        PrivilegedBlockStmt(Token keyword, std::shared_ptr<BlockStmt> block)
+            : keyword(std::move(keyword)), block(std::move(block)) {}
+
+        void accept(StmtVisitor& visitor, const std::shared_ptr<const Stmt> self) override {
+            visitor.visit(std::static_pointer_cast<const PrivilegedBlockStmt>(self));
         }
     };
 

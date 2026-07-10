@@ -91,6 +91,17 @@ assert "get_sp → mov sp"           'mov $0, sp'
 assert "set_vbar → msr vbar_el1"   "msr vbar_el1"
 echo ""
 
+printf "${BOLD}Tier 5: TLB management (inline asm)${RESET}\n"
+assert "tlbi_vmalle1 → tlbi vmalle1"   "tlbi vmalle1"
+assert "tlbi_vaae1 → tlbi vaae1"       "tlbi vaae1"
+echo ""
+
+printf "${BOLD}Tier 5: privilege switching (inline asm)${RESET}\n"
+assert "eret → eret"                "eret"
+assert "set_spsr → msr spsr_el1"    "msr spsr_el1"
+assert "set_elr → msr elr_el1"      "msr elr_el1"
+echo ""
+
 printf "${BOLD}IR-lowering results: ${GREEN}%d passed${RESET}, ${RED}%d failed${RESET}\n\n" "$PASS" "$FAIL"
 if [ ${#BUGS[@]} -gt 0 ]; then
     printf "${RED}Failures:${RESET}\n"

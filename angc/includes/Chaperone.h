@@ -93,6 +93,7 @@ private:
         // to Borrow. Key: variable name → Value: function name.
         std::map<std::string, std::string> function_aliases;
         bool in_unsafe = false;
+        bool in_privileged = false;  // inside @privileged (implies in_unsafe)
         // During the interprocedural fixed-point convergence passes, suppress
         // diagnostics (they'd duplicate); emit only on the final pass.
         bool suppress_diag = false;

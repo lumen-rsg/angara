@@ -62,7 +62,7 @@ void printCategoryFallback(const std::string& code, char prefix) {
                       << "and no pthreads.\n\n"
                       << CLR_DIM << "  Remove the unsupported construct or compile without "
                       << "--kernel if you are building a userspace program.\n" << CLR_RESET;
-        } else if (num >= 910 && num <= 924) {
+        } else if (num >= 910 && num <= 925) {
             std::cout << CLR_BOLD << CLR_RED << code << CLR_RESET
                       << " is a freestanding-mode restriction error.\n\n"
                       << "When compiling with --freestanding, the hosted runtime is not "
@@ -128,7 +128,7 @@ int CLI::handleExplain(std::vector<std::string> args) {
     //   E501–E516   Chaperone memory-safety errors
     //   E900–E904   Kernel-mode restriction errors
     //   E910–E917   Freestanding restriction errors
-    //   E920–E924   Inline-assembly restriction errors
+    //   E920–E925   Inline-assembly / privilege restriction errors
     //   W001–W522   Warnings (various)
 
     static const std::map<std::string, std::pair<std::string, std::string>> explanations = {
@@ -1115,6 +1115,14 @@ int CLI::handleExplain(std::vector<std::string> args) {
         "clause may only name an integer type.\n\n"
         "  Fix: Use an integer result type, e.g. '-> i64', or omit the clause\n"
         "  for a void asm."}},
+
+    {"E925", {"privilege-transition intrinsic outside '@privileged'",
+        "eret/set_spsr/set_elr change the exception-return state. eret jumps to\n"
+        "elr_el1 with the pstate in spsr_el1, so an incorrect value is an\n"
+        "unrecoverable fault. They may only be called inside an '@privileged'\n"
+        "block (which also implies '@unsafe').\n\n"
+        "  Fix: Wrap the call in '@privileged { ... }'. These primitives belong\n"
+        "  in a boot stub or privilege-management layer."}},
 
     // ═══════════════════════════════════════════════════════════════════════
     //  WARNINGS  (W001–W522)

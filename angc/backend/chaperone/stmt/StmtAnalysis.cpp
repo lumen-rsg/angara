@@ -1453,6 +1453,23 @@ void Chaperone::analyzeStmt(Context& ctx,
         return;
     }
 
+    // --- PrivilegedBlockStmt: like @unsafe, but also marks the privileged
+    // context (implies unsafe for diagnostic downgrading). ---
+    if (auto* priv = dynamic_cast<const PrivilegedBlockStmt*>(stmt.get())) {
+        bool was_unsafe = ctx.in_unsafe;
+        bool was_priv = ctx.in_privileged;
+        ctx.in_unsafe = true;
+        ctx.in_privileged = true;
+        if (priv->block) {
+            bool blk_term = false;
+            state = analyzeScopedBlock(ctx, priv->block->statements, state, blk_term);
+            if (blk_term) terminates = true;
+        }
+        ctx.in_unsafe = was_unsafe;
+        ctx.in_privileged = was_priv;
+        return;
+    }
+
     // L4: Anything still unhandled here is a declaration-like statement
     // (AttachStmt, ClassStmt, TraitStmt, ContractStmt, DataStmt, EnumStmt,
     // TypeAliasStmt) or an EmptyStmt. EmptyStmt is benign; the declaration

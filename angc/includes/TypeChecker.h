@@ -42,6 +42,11 @@ namespace angara {
         /// Visits an @unsafe block, enabling dynamic operations within.
         void visit(std::shared_ptr<const UnsafeBlockStmt> stmt) override;
 
+        /// Visits an @privileged block — a stronger opt-in for the
+        /// privilege-transition intrinsics (eret/set_spsr/set_elr). Implies
+        /// @unsafe, so inline asm is permitted inside without nesting.
+        void visit(std::shared_ptr<const PrivilegedBlockStmt> stmt) override;
+
         /// v5: visits a `drop` statement — marks the variable as dropped.
         void visit(std::shared_ptr<const DropStmt> stmt) override;
 
@@ -82,6 +87,10 @@ namespace angara {
 
         /// Returns true if the checker is currently inside an @unsafe block.
         [[nodiscard]] bool isInUnsafeContext() const { return m_is_in_unsafe_context; }
+
+        /// Returns true if the checker is currently inside an @privileged block
+        /// (required for the privilege-transition intrinsics: eret/set_spsr/set_elr).
+        [[nodiscard]] bool isInPrivilegedContext() const { return m_is_in_privileged_context; }
 
         /// Enables --kernel mode (hard-error try/spawn/Mutex/native-attach).
         void set_kernel_mode(bool v) { m_is_in_kernel_mode = v; }
@@ -359,6 +368,7 @@ namespace angara {
         std::map<const AttachStmt*, std::shared_ptr<ModuleType>> m_module_resolutions;
         std::set<UsedNativeSymbol> m_used_native_symbols;
         bool m_is_in_unsafe_context = false;
+        bool m_is_in_privileged_context = false;  // inside @privileged (eret/set_spsr/set_elr)
         bool m_is_in_kernel_mode = false;   // --kernel: hard-error try/spawn/Mutex/native-attach
         bool m_is_in_freestanding_mode = false;  // --freestanding: hard-error heap/threading/native-attach
 

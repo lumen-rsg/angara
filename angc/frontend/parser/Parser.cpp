@@ -178,13 +178,18 @@ namespace angara {
         if (match({TokenType::AT_SIGN})) {
             Token at_token = previous();
             Token annotation = consume(TokenType::IDENTIFIER, "Expected annotation name after '@'.", "E112");
-            if (annotation.lexeme != "unsafe") {
-                throw error(annotation, "Unknown annotation '@" + annotation.lexeme + "'. Only '@unsafe' is supported.", "E113");
+            if (annotation.lexeme == "unsafe") {
+                consume(TokenType::LEFT_BRACE, "Expected '{' to begin '@unsafe' block.", "E114");
+                auto block_node = std::make_shared<BlockStmt>(block());
+                return std::make_shared<UnsafeBlockStmt>(at_token, block_node);
             }
-
-            consume(TokenType::LEFT_BRACE, "Expected '{' to begin '@unsafe' block.", "E114");
-            auto block_node = std::make_shared<BlockStmt>(block());
-            return std::make_shared<UnsafeBlockStmt>(at_token, block_node);
+            if (annotation.lexeme == "privileged") {
+                consume(TokenType::LEFT_BRACE, "Expected '{' to begin '@privileged' block.", "E114");
+                auto block_node = std::make_shared<BlockStmt>(block());
+                return std::make_shared<PrivilegedBlockStmt>(at_token, block_node);
+            }
+            throw error(annotation, "Unknown annotation '@" + annotation.lexeme +
+                          "'. Only '@unsafe' and '@privileged' are supported.", "E113");
         }
 
         return expressionStatement();

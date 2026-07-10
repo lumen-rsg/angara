@@ -26,6 +26,12 @@ intrinsic func dc_csw(set as i64, way as i64, level as i64) -> nil;
 intrinsic func get_sp() -> i64;
 intrinsic func ttbr0_el1() -> i64;
 intrinsic func set_vbar(addr as i64) -> nil;
+// Tier 5: TLB management (@unsafe) + privilege switching (@privileged).
+intrinsic func tlbi_vmalle1() -> nil;
+intrinsic func tlbi_vaae1(addr as i64) -> nil;
+intrinsic func eret() -> nil;
+intrinsic func set_spsr(daif as i64) -> nil;
+intrinsic func set_elr(addr as i64) -> nil;
 intrinsic func poke64(addr as i64, val as i64) -> nil;
 intrinsic func halt() -> nil;
 
@@ -66,4 +72,22 @@ func main() -> nil {
     let sum as i64 = loaded + cas + add + cpu + now + lz + rv + rb + daif + sp + ttbr;
     poke64(SCRATCH, sum);
     halt();
+}
+
+// Tier 5: TLB management + privilege switching. This function is never called
+// from _start (eret is terminal and would trap under QEMU); it exists purely
+// so its LLVM IR lowering can be asserted by run_ir_tests.sh.
+func tier5_probe() -> nil {
+    // TLB invalidation — normal privileged system ops, @unsafe only.
+    @unsafe {
+        tlbi_vmalle1();
+        tlbi_vaae1(SCRATCH);
+    }
+    // Privilege switching — requires @privileged (implies @unsafe). eret is
+    // last because it never returns.
+    @privileged {
+        set_spsr(0x3C5);
+        set_elr(SCRATCH);
+        eret();
+    }
 }

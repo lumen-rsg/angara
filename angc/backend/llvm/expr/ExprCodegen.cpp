@@ -1974,6 +1974,35 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             emit_void_asm_in("msr vbar_el1, $0", getI64(cg(getArgs(expr)[0])));
             return makeNil();
         }
+        // ── Tier 5: TLB management ────────────────────────────────────────
+        // tlbi invalidates TLB entries. vmalle1 = all, EL1; vaae1 = by VA,
+        // ASID-agnostic. These are normal privileged system ops and only need
+        // @unsafe (they cannot bric a correctly-running kernel).
+        if (fn == "tlbi_vmalle1") {
+            emit_void_asm("tlbi vmalle1");
+            return makeNil();
+        }
+        if (fn == "tlbi_vaae1" && !getArgs(expr).empty()) {
+            emit_void_asm_in("tlbi vaae1, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        // ── Tier 5: privilege switching ───────────────────────────────────
+        // eret/set_spsr/set_elr are the exception-return primitives. eret jumps
+        // to elr_el1 with the pstate in spsr_el1 — a wrong value is an
+        // unrecoverable fault, so the type checker gates these on @privileged
+        // (E925). They still lower to plain asm here.
+        if (fn == "eret") {
+            emit_void_asm("eret");
+            return makeNil();
+        }
+        if (fn == "set_spsr" && !getArgs(expr).empty()) {
+            emit_void_asm_in("msr spsr_el1, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        if (fn == "set_elr" && !getArgs(expr).empty()) {
+            emit_void_asm_in("msr elr_el1, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
         // TS-2: builtin hash(x) -> i64. Hashes any value via __ang_obj_hash.
         if (fn == "hash") {
             if (!getArgs(expr).empty()) {

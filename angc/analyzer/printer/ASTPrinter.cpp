@@ -503,6 +503,11 @@ namespace angara {
         printChild("block", stmt->block, true);
     }
 
+    void ASTPrinter::visit(std::shared_ptr<const PrivilegedBlockStmt> stmt) {
+        printHeader("PrivilegedBlock");
+        printChild("block", stmt->block, true);
+    }
+
     std::any ASTPrinter::visit(const LambdaExpr& expr) {
         printHeader("LambdaExpr");
         for (size_t i = 0; i < expr.body.size(); ++i) {

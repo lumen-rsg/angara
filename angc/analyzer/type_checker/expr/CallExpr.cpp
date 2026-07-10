@@ -91,6 +91,23 @@ namespace angara {
                 pushAndSave(&expr, m_type_error);
                 return {};
             }
+            // Privilege gate (E925): eret/set_spsr/set_elr are the privilege-
+            // transition primitives. eret jumps to elr with the spsr pstate, so
+            // a wrong value is an unrecoverable fault — they require @privileged.
+            // Keys on intrinsic name (not on mode) so it fires anywhere.
+            if (!m_is_in_privileged_context &&
+                (var_expr->name.lexeme == "eret" ||
+                 var_expr->name.lexeme == "set_spsr" ||
+                 var_expr->name.lexeme == "set_elr")) {
+                error(expr.paren,
+                      "'" + var_expr->name.lexeme + "()' is a privilege-transition "
+                      "primitive and may only be called inside an '@privileged' block "
+                      "(it changes the exception return state; an incorrect spsr/elr "
+                      "is an unrecoverable fault).",
+                      "E925");
+                pushAndSave(&expr, m_type_error);
+                return {};
+            }
             if (var_expr->name.lexeme == "spawn") {
                 if (m_is_in_kernel_mode) {
                     error(expr.paren, "'spawn()' is not allowed in --kernel mode (kernel has no pthreads). Use a kernel workqueue/kthread instead.", "E902");

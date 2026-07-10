@@ -1,4 +1,4 @@
-// Freestanding intrinsic-set smoke test (Tier 1 + 2 + 3 + 4):
+// Freestanding intrinsic-set smoke test (Tier 1 + 2 + 3 + 4 + 5):
 // Exercises every intrinsic added by the freestanding-intrinsics expansion so a
 // regression in the ExprCodegen name-ladder fails here. Compiles under
 // --freestanding and must emit a clean relocatable object with _start.
@@ -14,6 +14,8 @@
 //   • dc_csw → csselr write + isb + ccsidr read + ctlz encode + dc cisw
 //   • get_sp/get_fp/ttbr0_el1 → mov $0,sp / mov $0,x29 / mrs ttbr0_el1
 //   • set_vbar → msr vbar_el1, x0
+//   • tlbi_vmalle1/tlbi_vaae1 → tlbi vmalle1 / tlbi vaae1, x0
+//   • eret/set_spsr/set_elr → eret / msr spsr_el1, x0 / msr elr_el1, x0
 // expect: PASS
 // mode: --freestanding
 
@@ -65,6 +67,13 @@ intrinsic func get_sp() -> i64;
 intrinsic func get_fp() -> i64;
 intrinsic func ttbr0_el1() -> i64;
 intrinsic func set_vbar(addr as i64) -> nil;
+
+// --- Tier 5: TLB management (tlbi) + privilege switching (eret/set_spsr/set_elr) ---
+intrinsic func tlbi_vmalle1() -> nil;
+intrinsic func tlbi_vaae1(addr as i64) -> nil;
+intrinsic func eret() -> nil;
+intrinsic func set_spsr(daif as i64) -> nil;
+intrinsic func set_elr(addr as i64) -> nil;
 
 // --- Existing intrinsics used as the I/O substrate ---
 intrinsic func poke64(addr as i64, val as i64) -> nil;
@@ -159,6 +168,14 @@ func main() -> nil {
     let ttbr as i64 = ttbr0_el1();
     set_vbar(SCRATCH);
 
+    // --- Tier 5: TLB management ---
+    // Invalidate the TLB (all-entries and by-VA). @unsafe only — these cannot
+    // bric a running kernel. Kept live by the store ordering after.
+    @unsafe {
+        tlbi_vmalle1();
+        tlbi_vaae1(SCRATCH);
+    }
+
     // Sink every result so nothing is DCE'd. The sum is written via poke64.
     // The void cache/DAIF ops above are kept live by this store ordering after.
     let sum as i64 = loaded + a_add + a_sub + a_or + a_and + a_xor + a_xhg
@@ -166,4 +183,15 @@ func main() -> nil {
                    + saved_daif + sp + fp + ttbr;
     poke64(SCRATCH, sum);
     halt();
+}
+
+// Tier 5 privilege-switch probe. Never called from main (eret is terminal and
+// would trap), but the function body is emitted so its lowering is part of the
+// compiled object. Requires @privileged (implies @unsafe).
+func tier5_eret_probe() -> nil {
+    @privileged {
+        set_spsr(0x3C5);
+        set_elr(SCRATCH);
+        eret();
+    }
 }

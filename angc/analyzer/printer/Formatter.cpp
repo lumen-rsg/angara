@@ -398,6 +398,10 @@ void Formatter::visit(std::shared_ptr<const UnsafeBlockStmt> stmt) {
     write("@unsafe "); fmtBlock(stmt->block.get());
 }
 
+void Formatter::visit(std::shared_ptr<const PrivilegedBlockStmt> stmt) {
+    write("@privileged "); fmtBlock(stmt->block.get());
+}
+
 void Formatter::visit(std::shared_ptr<const EmptyStmt>) { writeLine(";"); }
 
 

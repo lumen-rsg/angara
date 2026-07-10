@@ -1,12 +1,12 @@
 # Freestanding Intrinsic Expansion — Implementation Plan
 
-> **Status: Tiers 1–4 implemented and verified.** The intrinsic set and the
+> **Status: Tiers 1–5 implemented and verified.** The intrinsic set and the
 > two-part implementation contract (declare `intrinsic func` + add a name-ladder
 > arm) shipped in commit `7501bbf`; Tiers 1–4 (atomics, bit manipulation, DAIF/
-> cache control, context switching) landed in `be0a6bd` and are covered by the
-> `tests/kernel/` compile-contract tests and the `examples/qemu_virt` QEMU demo.
-> This document now serves as the spec for the lowering patterns and as a
-> roadmap for future tiers (see Tier 5 below).
+> cache control, context switching) landed in `be0a6bd`; Tier 5 (TLB management,
+> privilege switching behind the new `@privileged` block) followed. All are
+> covered by the `tests/kernel/` compile-contract tests + IR-lowering suite and
+> the `examples/qemu_virt` QEMU demo.
 
 ## How intrinsics work in Angara (the contract)
 
@@ -181,34 +181,44 @@ for any future re-derivation:
 
 ---
 
-## Tier 5 — TLB management / privilege switching (future, not yet implemented)
+## Tier 5 — TLB management / privilege switching
 
-These were previously listed as out-of-scope. They are promoted here as the
-natural next tier once a freestanding program enables its MMU or crosses
-exception levels — but they are sketched, not built. Each follows the existing
-declare-then-name-ladder contract.
+These were previously out-of-scope and are now **implemented**. They are the
+primitives needed once a freestanding program enables its MMU or crosses
+exception levels. Each follows the existing declare-then-name-ladder contract.
 
-### TLB management
+The privilege-transition intrinsics (`eret`/`set_spsr`/`set_elr`) are gated on
+a new **`@privileged`** block — a stronger opt-in than `@unsafe`, because
+`eret` jumps to `elr_el1` with the `spsr_el1` pstate and a wrong value is an
+unrecoverable fault. Calling them outside `@privileged` is E925. `@privileged`
+implies `@unsafe`, so inline asm inside needs no nested wrapper. The TLB
+intrinsics only need `@unsafe` (they cannot bric a running kernel).
+
+### TLB management (`@unsafe`)
 ```angara
-intrinsic func tlbi_vmalle1() -> nil;     // "tlbi vmalle1" — invalidate all, EL1
+intrinsic func tlbi_vmalle1() -> nil;           // "tlbi vmalle1" — invalidate all, EL1
 intrinsic func tlbi_vaae1(addr as i64) -> nil;  // "tlbi vaae1, x0" — by VA, ASID-agnostic
 ```
-Only relevant once the MMU is on (a larger effort than intrinsics). Lower to
-inline asm via the `emit_void_asm[_in]` helpers.
+Lower to inline asm via the `emit_void_asm[_in]` helpers. Only relevant once
+the MMU is on (a larger effort than intrinsics).
 
-### EL-switching
+### Privilege switching (`@privileged`)
 ```angara
-intrinsic func eret() -> nil;             // "eret" — exception return
-intrinsic func set_spsr(daif as i64) -> nil;   // "msr spsr_el1, x0" — set saved pstate
-intrinsic func set_elr(addr as i64) -> nil;    // "msr elr_el1, x0" — set exception link
+intrinsic func eret() -> nil;                   // "eret" — exception return
+intrinsic func set_spsr(daif as i64) -> nil;    // "msr spsr_el1, x0" — set saved pstate
+intrinsic func set_elr(addr as i64) -> nil;     // "msr elr_el1, x0" — set exception link
 ```
-`eret`/`hvc`/`smc` are the privilege-transition instructions. These are sharp
-tools: `eret` without a correctly initialised `spsr`/`elr` is an unrecoverable
-fault, and `hvc`/`smc` trap to a hypervisor/secure monitor that may not exist.
-They belong in a boot stub or privilege-management layer rather than general
-driver code, so each should carry a prominent safety note in its gate message.
+These are the exception-return primitives. `eret` without a correctly
+initialised `spsr`/`elr` is an unrecoverable fault, so the type checker
+hard-errors (E925) unless they appear inside `@privileged { ... }`. They belong
+in a boot stub or privilege-management layer rather than general driver code.
+
+> **Note:** `hvc`/`smc` (hypervisor/secure-monitor calls) are intentionally
+> *not* included — they trap to a hypervisor/secure monitor that may not exist,
+> and are better exposed through a dedicated privilege API than as intrinsics.
 
 ## Out of scope (intentionally not proposed)
 
 - Floating-point intrinsics (freestanding already supports `f64` arithmetic;
   no `fenv`/rounding-mode control is worth adding until a concrete need exists).
+- `hvc`/`smc` (see the Tier 5 note above).

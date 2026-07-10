@@ -1,0 +1,13 @@
+// Gate test: privilege-transition intrinsics (eret/set_spsr/set_elr) must be
+// inside an @privileged block (E925). They change the exception-return state;
+// an incorrect spsr/elr is an unrecoverable fault, so @unsafe alone is not enough.
+// expect: E925
+// mode: --freestanding
+intrinsic func eret() -> nil;
+intrinsic func halt() -> nil;
+func main() -> nil {
+    @unsafe {
+        eret();
+    }
+    halt();
+}

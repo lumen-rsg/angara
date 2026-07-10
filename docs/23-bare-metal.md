@@ -190,6 +190,37 @@ it**; loop over the whole buffer in line-size strides (read from `CTR_EL0`).
 | `ttbr0_el1` | `() -> i64` | `mrs ttbr0_el1` (translation table base — meaningful once an MMU is enabled) |
 | `set_vbar` | `(addr as i64) -> nil` | `msr vbar_el1, x0` (one-shot boot call: point the exception vector at your table before enabling interrupts) |
 
+#### TLB management (`@unsafe`)
+
+Invalidate TLB entries once the MMU is enabled. These are normal privileged
+system operations and only require `@unsafe`.
+
+| Intrinsic | Signature | Lowers to |
+|-----------|-----------|-----------|
+| `tlbi_vmalle1` | `() -> nil` | `tlbi vmalle1` (invalidate all entries, EL1) |
+| `tlbi_vaae1` | `(addr as i64) -> nil` | `tlbi vaae1, x0` (invalidate by VA, ASID-agnostic) |
+
+#### Privilege switching (`@privileged`)
+
+The exception-return primitives. `eret` jumps to `elr_el1` with the `spsr_el1`
+pstate, so an incorrect value is an unrecoverable fault. These require the
+**`@privileged`** block (which implies `@unsafe`); calling them outside it is
+**E925**. They belong in a boot stub or privilege-management layer.
+
+| Intrinsic | Signature | Lowers to |
+|-----------|-----------|-----------|
+| `eret` | `() -> nil` | `eret` (exception return — terminal; never returns) |
+| `set_spsr` | `(daif as i64) -> nil` | `msr spsr_el1, x0` (set the saved pstate for the next `eret`) |
+| `set_elr` | `(addr as i64) -> nil` | `msr elr_el1, x0` (set the exception link register for the next `eret`) |
+
+```angara
+@privileged {
+    set_spsr(0x3C5);       // EL1, IRQ unmasked, etc.
+    set_elr(0x80000000);   // where to resume
+    eret();                // never returns
+}
+```
+
 The `wfi`/`wfe`/`sev`/`dmb`/`dsb`/`isb`/`dmb_st`/`dsb_st` intrinsics, the
 `mrs`/`msr`-based DAIF/cache/register operations, and the `mov`/`msr` context
 intrinsics are all AArch64 instructions; they assemble correctly when targeting
@@ -291,6 +322,17 @@ position: `$0`, `$1`, …
 | E922 | An `out`/`inout` operand is not an assignable lvalue. |
 | E923 | An asm operand is not integer-typed. |
 | E924 | The `-> type` clause names a non-integer type. |
+| E925 | A privilege-transition intrinsic (`eret`/`set_spsr`/`set_elr`) outside a `@privileged` block. |
+
+### `@privileged` — the privilege-transition escape hatch
+
+`@unsafe` is the standard opt-out from the type system and borrow checker. The
+privilege-transition intrinsics (`eret`, `set_spsr`, `set_elr`) need a stronger
+gate: `eret` jumps to `elr_el1` with the `spsr_el1` pstate, so a wrong value is
+an unrecoverable fault. They require **`@privileged { ... }`**, which implies
+`@unsafe` (so inline asm inside needs no nested `@unsafe` wrapper). Calling them
+outside `@privileged` is E925. Reserve `@privileged` for a boot stub or
+privilege-management layer.
 
 ## Freestanding gates
 

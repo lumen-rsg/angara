@@ -53,6 +53,14 @@ void LLVMBackend::cgStmt(const std::shared_ptr<Stmt>& s) {
             }
         }
     }
+    else if (auto* p = dynamic_cast<const PrivilegedBlockStmt*>(s.get())) {
+        if (p->block) {
+            for (auto& st : p->block->statements) {
+                if (builder->GetInsertBlock()->getTerminator()) break;
+                cgStmt(st);
+            }
+        }
+    }
 }
 
 void LLVMBackend::cgVarDecl(const VarDeclStmt& s) {
