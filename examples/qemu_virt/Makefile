@@ -8,10 +8,13 @@
 #   - qemu-system-aarch64
 #
 # Usage:
-#   make          — Build kernel8.img
-#   make run      — Build and boot in QEMU (Ctrl-A X to quit)
-#   make verify   — Build, boot, and assert the banner appears (auto-quits)
-#   make clean    — Remove build artifacts
+#   make                 — Build kernel8.img
+#   make run             — Build and boot in QEMU (Ctrl-A X to quit)
+#   make verify          — Build, boot, and assert the banner appears (auto-quits)
+#   make verify-intrinsics — Boot and assert the Tier 1+2 intrinsic demo lines
+#   make verify-tier3    — Boot and assert the Tier 3+4 (DAIF/cache/SP) demo lines
+#   make verify-smp      — Boot with -smp 2 and assert the banner still appears
+#   make clean           — Remove build artifacts
 
 # Prefer a locally-built compiler (../../build/angc) so the example tracks
 # in-tree changes; fall back to an installed `angc` on PATH.
@@ -29,12 +32,15 @@ LDFLAGS  = -T linker.ld -nostdlib -static
 
 KERNEL   = kernel8.img
 
-# QEMU virt: cortex-a57, 128 MiB RAM, PL011 UART on the serial console.
-QEMU_OPTS = -machine virt -cpu cortex-a57 -m 128 -nographic -semihosting
+# QEMU virt: a modern ARMv8.x CPU (`-cpu max`) so LSE atomics (cas/ldadd/...)
+# are available for the intrinsic demo, 128 MiB RAM, PL011 UART on the console.
+# (The previous -cpu cortex-a57 predates the LSE extension, so cmpxchg-based
+#  atomics trap; `max` advertises LSE and is the modern virt default.)
+QEMU_OPTS = -machine virt -cpu max -m 128 -nographic -semihosting
 
 BANNER = Angara bare-metal on QEMU virt
 
-.PHONY: all run verify clean
+.PHONY: all run verify verify-intrinsics verify-tier3 verify-smp clean
 
 all: $(KERNEL)
 
@@ -68,6 +74,60 @@ verify: $(KERNEL)
 		grep -A1 "$(BANNER)" qemu.out | head -2; \
 	else \
 		echo "[FAIL] banner not found in QEMU output:"; \
+		cat qemu.out; \
+		exit 1; \
+	fi
+
+# Boot headlessly and verify the Tier 1 + 2 intrinsic demo lines printed:
+#   LOCK=1  CPU=0  CYC=<hex>  FRQ=<hex>  CLZ=2B  RBIT=<hex>
+# Each line proves a different intrinsic family lowered and ran on the CPU:
+# the monotonic-cas spinlock (atomic_cas/load/store), the CPU register reads
+# (get_mpidr/cntfrq/cntpct), and the LLVM-intrinsic bit ops (clz/rbit).
+verify-intrinsics: $(KERNEL)
+	@timeout 5 $(QEMU) $(QEMU_OPTS) -kernel $(KERNEL) > qemu.out 2>&1 || true
+	@ok=1; \
+	for tag in LOCK CPU CYC FRQ CLZ RBIT; do \
+		if grep -q "$$tag=" qemu.out; then \
+			line=$$(grep "$$tag=" qemu.out | head -1); \
+			echo "[OK] $$line"; \
+		else \
+			echo "[FAIL] missing $$tag= line"; ok=0; \
+		fi; \
+	done; \
+	if [ "$$ok" -ne 1 ]; then echo "--- full output ---"; cat qemu.out; exit 1; fi
+
+# Boot headlessly and verify the Tier 3 + 4 intrinsic demo lines printed:
+#   DAIF=<hex>  SP=<hex>
+# Each line proves a different intrinsic family lowered and ran on the CPU
+# without trapping: the DAIF interrupt-mask round-trip (get_daif/set_daif/
+# disable_irq/enable_irq), the cache maintenance ops (dc_civac/ic_ivau, which
+# run as no-ops on QEMU but must not fault), and the stack-pointer read (get_sp).
+# Values are CPU-state-dependent, so we only assert the tag prefix appears.
+verify-tier3: $(KERNEL)
+	@timeout 5 $(QEMU) $(QEMU_OPTS) -kernel $(KERNEL) > qemu.out 2>&1 || true
+	@ok=1; \
+	for tag in DAIF SP; do \
+		if grep -q "$$tag=" qemu.out; then \
+			line=$$(grep "$$tag=" qemu.out | head -1); \
+			echo "[OK] $$line"; \
+		else \
+			echo "[FAIL] missing $$tag= line"; ok=0; \
+		fi; \
+	done; \
+	if [ "$$ok" -ne 1 ]; then echo "--- full output ---"; cat qemu.out; exit 1; fi
+
+# Multi-core boot sanity check (2 CPUs). boot.S parks CPU1 in a wfe loop, so
+# this confirms the kernel still boots cleanly and prints its banner when more
+# than one core is present — it does NOT run Angara on CPU1 (that needs a
+# secondary-release path in boot.S, a separate effort). Use verify-intrinsics
+# for the functional intrinsic demo.
+verify-smp: $(KERNEL)
+	@timeout 5 $(QEMU) $(QEMU_OPTS) -smp 2 -kernel $(KERNEL) > qemu.out 2>&1 || true
+	@if grep -q "$(BANNER)" qemu.out; then \
+		echo "[OK] booted on 2 CPUs, banner printed:"; \
+		grep -A1 "$(BANNER)" qemu.out | head -2; \
+	else \
+		echo "[FAIL] banner not found in 2-CPU boot:"; \
 		cat qemu.out; \
 		exit 1; \
 	fi

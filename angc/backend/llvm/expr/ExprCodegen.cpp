@@ -1713,11 +1713,29 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         // each lowers to a single side-effecting inline-asm instruction.
         // (Target-agnostic by construction: on non-AArch64 hosts these would
         // fail at assembly, which is the right outcome — they're bare-metal ops.)
+        auto* arm_i64_ty = llvm::Type::getInt64Ty(*ctx);
         auto emit_void_asm = [&](const char* inst) {
             auto* void_ty = llvm::Type::getVoidTy(*ctx);
             auto* fn_ty = llvm::FunctionType::get(void_ty, false);
             auto* ia = llvm::InlineAsm::get(fn_ty, inst, "", /*hasSideEffects=*/true);
             builder->CreateCall(fn_ty, ia, {});
+        };
+        // Single-input side-effecting asm:  inst $0. Used by the Tier 3 cache
+        // ops (dc ivac/cvac/civac, ic ivau) and DAIF/VBAR writes that take one
+        // GPR input. Constraint "r" = any integer register.
+        auto emit_void_asm_in = [&](const char* inst, llvm::Value* in_val) {
+            auto* void_ty = llvm::Type::getVoidTy(*ctx);
+            auto* fn_ty = llvm::FunctionType::get(void_ty, {arm_i64_ty}, false);
+            auto* ia = llvm::InlineAsm::get(fn_ty, inst, "r", /*hasSideEffects=*/true);
+            builder->CreateCall(fn_ty, ia, {in_val});
+        };
+        // Output-only register read: "mrs $0, <reg>" (or any single-output
+        // template). hasSideEffects=false because it only reads a register.
+        auto emit_read_reg = [&](const char* tmpl) -> llvm::Value* {
+            auto* fn_ty = llvm::FunctionType::get(arm_i64_ty, false);
+            auto* ia = llvm::InlineAsm::get(fn_ty, tmpl, "=r",
+                                            /*hasSideEffects=*/false);
+            return builder->CreateCall(fn_ty, ia, {});
         };
         if (fn == "wfi") { emit_void_asm("wfi"); return makeNil(); }
         if (fn == "wfe") { emit_void_asm("wfe"); return makeNil(); }
@@ -1728,12 +1746,233 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         // get_el() -> i64: read CurrentEL and shift to get the exception level
         // (EL is bits [3:2] of CurrentEL). Returns 0/1/2/3.
         if (fn == "get_el") {
+            return makeI64(emit_read_reg("mrs $0, CurrentEL; lsr $0, $0, #2"));
+        }
+        // Sibling CPU-register reads: each is a single `mrs` into an output
+        // GPR. hasSideEffects=false because they only read a register.
+        //   get_mpidr → MPIDR_EL1 (CPU affinity; tells cores apart)
+        //   cntfrq    → CNTFRQ_EL0 (timer frequency)
+        //   cntpct    → CNTPCT_EL0 (physical timer count — zero-glue cycles)
+        {
+            const char* mrs_reg = nullptr;
+            if (fn == "get_mpidr") mrs_reg = "mpidr_el1";
+            else if (fn == "cntfrq") mrs_reg = "cntfrq_el0";
+            else if (fn == "cntpct") mrs_reg = "cntpct_el0";
+            if (mrs_reg) {
+                std::string tmpl = "mrs $0, " + std::string(mrs_reg);
+                return makeI64(emit_read_reg(tmpl.c_str()));
+            }
+        }
+        // ── Atomic memory operations ──────────────────────────────────────
+        // Single biggest freestanding gap: lock-free multi-core and DMA-buffer
+        // access. Lowered to LLVM atomic IR. All monotonic (cheapest correct
+        // ordering); add _acq/_rel variants only if a concrete need arises.
+        // Pointer args arrive as i64 addresses; IntToPtr yields an i64*.
+        if (fn == "atomic_load" && !getArgs(expr).empty()) {
             auto* i64_ty = llvm::Type::getInt64Ty(*ctx);
-            auto* fn_ty = llvm::FunctionType::get(i64_ty, false);
-            auto* ia = llvm::InlineAsm::get(fn_ty, "mrs $0, CurrentEL; lsr $0, $0, #2",
-                                            "=r", /*hasSideEffects=*/false);
-            auto* call = builder->CreateCall(fn_ty, ia, {});
-            return makeI64(call);
+            auto* addr = getI64(cg(getArgs(expr)[0]));
+            auto* ptr = builder->CreateIntToPtr(addr, llvm::PointerType::get(*ctx, 0));
+            auto* ld = builder->CreateLoad(i64_ty, ptr, "atomic_load");
+            ld->setAtomic(llvm::AtomicOrdering::Monotonic);
+            return makeI64(ld);
+        }
+        if (fn == "atomic_store" && getArgs(expr).size() >= 2) {
+            auto* addr = getI64(cg(getArgs(expr)[0]));
+            auto* val  = getI64(cg(getArgs(expr)[1]));
+            auto* ptr = builder->CreateIntToPtr(addr, llvm::PointerType::get(*ctx, 0));
+            auto* st = builder->CreateStore(val, ptr);
+            st->setAtomic(llvm::AtomicOrdering::Monotonic);
+            return makeNil();
+        }
+        // cmpxchg returns {i64 old, i1 matched}; we expose the old value so a
+        // caller can loop: `while (atomic_cas(p, 0, 1) != 0) {}` is a spinlock.
+        if (fn == "atomic_cas" && getArgs(expr).size() >= 3) {
+            auto* addr = getI64(cg(getArgs(expr)[0]));
+            auto* expected = getI64(cg(getArgs(expr)[1]));
+            auto* desired  = getI64(cg(getArgs(expr)[2]));
+            auto* ptr = builder->CreateIntToPtr(addr, llvm::PointerType::get(*ctx, 0));
+            auto* cx = builder->CreateAtomicCmpXchg(ptr, expected, desired,
+                llvm::Align(8), llvm::AtomicOrdering::Monotonic,
+                llvm::AtomicOrdering::Monotonic);
+            auto* old_val = builder->CreateExtractValue(cx, {0}, "cas_old");
+            return makeI64(old_val);
+        }
+        // atomicrmw binops: each returns the value that was previously stored.
+        if (fn == "atomic_add" || fn == "atomic_sub" || fn == "atomic_or" ||
+            fn == "atomic_and" || fn == "atomic_xor" || fn == "atomic_xchg") {
+            if (getArgs(expr).size() >= 2) {
+                llvm::AtomicRMWInst::BinOp op =
+                      (fn == "atomic_add") ? llvm::AtomicRMWInst::Add
+                    : (fn == "atomic_sub") ? llvm::AtomicRMWInst::Sub
+                    : (fn == "atomic_or")  ? llvm::AtomicRMWInst::Or
+                    : (fn == "atomic_and") ? llvm::AtomicRMWInst::And
+                    : (fn == "atomic_xor") ? llvm::AtomicRMWInst::Xor
+                    :                        llvm::AtomicRMWInst::Xchg;
+                auto* addr = getI64(cg(getArgs(expr)[0]));
+                auto* val  = getI64(cg(getArgs(expr)[1]));
+                auto* ptr = builder->CreateIntToPtr(addr, llvm::PointerType::get(*ctx, 0));
+                auto* rmw = builder->CreateAtomicRMW(op, ptr, val,
+                    llvm::Align(8), llvm::AtomicOrdering::Monotonic);
+                return makeI64(rmw);
+            }
+            return makeI64((int64_t)0);
+        }
+        // ── Bit manipulation (LLVM intrinsics — no asm, target-agnostic) ──
+        // Single instruction on arm64; pure win for bitmap allocators,
+        // priority encoders, and DMA endianness shuffling. ctlz/cttz take a
+        // zero_is_poison i1 — pass false so a zero input returns the width.
+        if (fn == "clz" || fn == "ctz" || fn == "rev" || fn == "rbit") {
+            if (!getArgs(expr).empty()) {
+                auto* i64_ty = llvm::Type::getInt64Ty(*ctx);
+                auto* arg = getI64(cg(getArgs(expr)[0]));
+                llvm::Function* decl = nullptr;
+                llvm::Value* call = nullptr;
+                if (fn == "clz" || fn == "ctz") {
+                    auto id = (fn == "clz") ? llvm::Intrinsic::ctlz
+                                            : llvm::Intrinsic::cttz;
+                    decl = llvm::Intrinsic::getOrInsertDeclaration(mod.get(), id, {i64_ty});
+                    auto* i1_ty = llvm::Type::getInt1Ty(*ctx);
+                    auto* zero_is_poison = llvm::ConstantInt::get(i1_ty, 0);
+                    call = builder->CreateCall(decl, {arg, zero_is_poison}, "bitop");
+                } else {  // rev, rbit — single-arg, no poison flag
+                    auto id = (fn == "rev") ? llvm::Intrinsic::bswap
+                                            : llvm::Intrinsic::bitreverse;
+                    decl = llvm::Intrinsic::getOrInsertDeclaration(mod.get(), id, {i64_ty});
+                    call = builder->CreateCall(decl, {arg}, "bitop");
+                }
+                return makeI64(call);
+            }
+            return makeI64((int64_t)0);
+        }
+        // ── Lighter barrier variants ──────────────────────────────────────
+        // dmb/dsb are already provided but hardcoded to `sy` (full-system).
+        // Most critical sections only need the cheaper store-store variant:
+        // dmb ishst is what you want before releasing a lock; dmb sy is overkill.
+        if (fn == "dmb_st") { emit_void_asm("dmb ishst"); return makeNil(); }
+        if (fn == "dsb_st") { emit_void_asm("dsb ishst"); return makeNil(); }
+        // ── DAIF (interrupt-mask) control ─────────────────────────────────
+        // The cheap critical-section primitive on arm64: clr/set the I/F bits
+        // in DAIF without a wrapper function. daifclr/daifset take an
+        // immediate mask: #1=F (FIQ), #2=I (IRQ), #4=A (SError), #8=D (Debug).
+        //   enable_irq  → daifclr #2   (unmask IRQ)
+        //   disable_irq → daifset #2   (mask IRQ)
+        //   enable_fiq  → daifclr #1   (unmask FIQ)
+        //   disable_fiq → daifset #1   (mask FIQ)
+        if (fn == "enable_irq")  { emit_void_asm("msr daifclr, #2"); return makeNil(); }
+        if (fn == "disable_irq") { emit_void_asm("msr daifset, #2"); return makeNil(); }
+        if (fn == "enable_fiq")  { emit_void_asm("msr daifclr, #1"); return makeNil(); }
+        if (fn == "disable_fiq") { emit_void_asm("msr daifset, #1"); return makeNil(); }
+        // Read/restore the full DAIF: get_daif returns the current mask word so
+        // it can be saved; set_daif writes it back (e.g. on critical-section
+        // exit, restoring the caller's mask regardless of what it nested over).
+        if (fn == "get_daif") {
+            return makeI64(emit_read_reg("mrs $0, daif"));
+        }
+        if (fn == "set_daif" && !getArgs(expr).empty()) {
+            emit_void_asm_in("msr daif, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        // ── Cache maintenance (by virtual address) ───────────────────────
+        // The DMA-coherency primitives. dc ivac/cvac/civac operate on the
+        // data cache; ic ivau on the instruction cache. Each takes one VA in
+        // $0 and operates on the line containing it. Required whenever a
+        // device DMAs into memory: invalidate before reading device-written
+        // data, clean before the device reads CPU-written data.
+        //   dc_ivac  → "dc ivac, x0"  (invalidate to PoC)
+        //   dc_cvac  → "dc cvac, x0"  (clean to PoC)
+        //   dc_civac → "dc civac, x0" (clean + invalidate)
+        //   ic_ivau  → "ic ivau, x0"  (invalidate I-cache to PoU)
+        if (fn == "dc_ivac" && !getArgs(expr).empty()) {
+            emit_void_asm_in("dc ivac, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        if (fn == "dc_cvac" && !getArgs(expr).empty()) {
+            emit_void_asm_in("dc cvac, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        if (fn == "dc_civac" && !getArgs(expr).empty()) {
+            emit_void_asm_in("dc civac, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        if (fn == "ic_ivau" && !getArgs(expr).empty()) {
+            emit_void_asm_in("ic ivau, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        // ── Cache maintenance (by set/way, with internal encoding) ───────
+        // `dc isw` / `dc cisw` / `dc csw` take a SINGLE register holding a
+        // pre-encoded SetWay value whose bit layout depends on the cache
+        // geometry (line size, associativity, number of sets) for the selected
+        // level. Rather than push that footgun onto every caller, dc_csw
+        // reads CCSIDR_EL1 for the requested level and encodes (set, way)
+        // itself. Signature: dc_csw(set, way, level) — one encoded op per
+        // call; a full flush-all sweep is higher-level policy that belongs in
+        // user code iterating over levels/sets/ways.
+        //
+        // Encoding (per ARM DDI0487, DC CISW SetWay[31:4]):
+        //   line_shift = (CCSIDR.LineSize + 1) * 2   // words → bytes; LineSize is a 3-bit log2 minus 4
+        //   way_shift  = clz(assoc)                   // 31 - (bit width of assoc field)
+        //   operand    = (way << way_shift) | (set << line_shift)
+        if (fn == "dc_csw" && getArgs(expr).size() >= 3) {
+            auto* set_v   = getI64(cg(getArgs(expr)[0]));
+            auto* way_v   = getI64(cg(getArgs(expr)[1]));
+            auto* level_v = getI64(cg(getArgs(expr)[2]));
+            // 1) Select the cache level: CSSELR_EL1.InD=0 (data/unified),
+            //    Level = bits[3:1]. Mask the level into place and write it,
+            //    then ISB so CCSIDR_EL1 reflects the new selection.
+            auto* const_3 = llvm::ConstantInt::get(arm_i64_ty, 3);
+            auto* csselr_val = builder->CreateShl(
+                builder->CreateAnd(level_v, const_3), const_3, "lvl_shift");
+            emit_void_asm_in("msr csselr_el1, $0", csselr_val);
+            emit_void_asm("isb");
+            // 2) Read the geometry: CCSIDR_EL1.
+            //      LineSize[2:0], Associativity[12:3], NumSets[27:13].
+            auto* ccsidr = emit_read_reg("mrs $0, ccsidr_el1");
+            auto* line_size_field = builder->CreateAnd(ccsidr,
+                llvm::ConstantInt::get(arm_i64_ty, 0x7), "ls_field");
+            auto* assoc_field = builder->CreateAnd(
+                builder->CreateLShr(ccsidr, llvm::ConstantInt::get(arm_i64_ty, 3)),
+                llvm::ConstantInt::get(arm_i64_ty, 0x3FF), "assoc_field");
+            // 3) line_shift = (LineSize + 1) * 2  (LineSize field is (bytes/4)-1, log2)
+            auto* line_shift = builder->CreateShl(
+                builder->CreateAdd(line_size_field,
+                    llvm::ConstantInt::get(arm_i64_ty, 1)),
+                llvm::ConstantInt::get(arm_i64_ty, 1), "line_shift");
+            // 4) way_shift = clz(assoc) — bit position of the top way bit.
+            auto* ctlz_decl = llvm::Intrinsic::getOrInsertDeclaration(
+                mod.get(), llvm::Intrinsic::ctlz, {arm_i64_ty});
+            auto* zero_not_poison = llvm::ConstantInt::get(
+                llvm::Type::getInt1Ty(*ctx), 0);
+            auto* assoc_clz = builder->CreateCall(ctlz_decl,
+                {assoc_field, zero_not_poison}, "assoc_clz");
+            auto* way_shift = builder->CreateSub(
+                llvm::ConstantInt::get(arm_i64_ty, 31), assoc_clz, "way_shift");
+            // 5) operand = (way << way_shift) | (set << line_shift)
+            auto* way_enc = builder->CreateShl(way_v, way_shift, "way_enc");
+            auto* set_enc = builder->CreateShl(set_v, line_shift, "set_enc");
+            auto* operand = builder->CreateOr(way_enc, set_enc, "setway");
+            // 6) Emit the set/way op. cisw = clean+invalidate (the strongest
+            //    variant; a caller wanting clean-only or invalidate-only would
+            //    name it so — but cisw is the universal flush primitive).
+            emit_void_asm_in("dc cisw, $0", operand);
+            return makeNil();
+        }
+        // ── Context switching / vector table ─────────────────────────────
+        // get_sp/get_fp: read the current stack/frame pointer (stack guards,
+        // context save, crash dumps). set_vbar: one-shot boot call pointing
+        // the exception vector at your table. ttbr0_el1: translation base
+        // (only meaningful once an MMU is enabled).
+        if (fn == "get_sp") {
+            return makeI64(emit_read_reg("mov $0, sp"));
+        }
+        if (fn == "get_fp") {
+            return makeI64(emit_read_reg("mov $0, x29"));
+        }
+        if (fn == "ttbr0_el1") {
+            return makeI64(emit_read_reg("mrs $0, ttbr0_el1"));
+        }
+        if (fn == "set_vbar" && !getArgs(expr).empty()) {
+            emit_void_asm_in("msr vbar_el1, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
         }
         // TS-2: builtin hash(x) -> i64. Hashes any value via __ang_obj_hash.
         if (fn == "hash") {

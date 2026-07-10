@@ -1,0 +1,169 @@
+// Freestanding intrinsic-set smoke test (Tier 1 + 2 + 3 + 4):
+// Exercises every intrinsic added by the freestanding-intrinsics expansion so a
+// regression in the ExprCodegen name-ladder fails here. Compiles under
+// --freestanding and must emit a clean relocatable object with _start.
+//
+// Lowering expectations (verified by disassembly in the implementation):
+//   • atomic_*  → atomicrmw / cmpxchg (arm64 LSE: cas/ldadd/ldset/ldclr/ldeor/swp)
+//   • get_mpidr/cntfrq/cntpct → mrs MPIDR_EL1 / CNTFRQ_EL0 / CNTPCT_EL0
+//   • clz/ctz/rev/rbit → llvm.ctlz/cttz/bswap/bitreverse (clz/rbit/rev+rbit)
+//   • dmb_st/dsb_st → dmb/dsb ishst
+//   • enable/disable_irq/fiq → msr daifclr/daifset #1/#2
+//   • get_daif/set_daif → mrs/msr daif
+//   • dc_ivac/cvac/civac, ic_ivau → dc/ic ..., x0
+//   • dc_csw → csselr write + isb + ccsidr read + ctlz encode + dc cisw
+//   • get_sp/get_fp/ttbr0_el1 → mov $0,sp / mov $0,x29 / mrs ttbr0_el1
+//   • set_vbar → msr vbar_el1, x0
+// expect: PASS
+// mode: --freestanding
+
+// --- Tier 1: atomic memory operations (monotonic) ---
+intrinsic func atomic_load(addr as i64) -> i64;
+intrinsic func atomic_store(addr as i64, val as i64) -> nil;
+intrinsic func atomic_cas(addr as i64, expected as i64, desired as i64) -> i64;
+intrinsic func atomic_add(addr as i64, val as i64) -> i64;
+intrinsic func atomic_sub(addr as i64, val as i64) -> i64;
+intrinsic func atomic_or(addr as i64, val as i64) -> i64;
+intrinsic func atomic_and(addr as i64, val as i64) -> i64;
+intrinsic func atomic_xor(addr as i64, val as i64) -> i64;
+intrinsic func atomic_xchg(addr as i64, val as i64) -> i64;
+
+// --- Tier 1: CPU register reads (siblings of get_el) ---
+intrinsic func get_mpidr() -> i64;
+intrinsic func cntfrq() -> i64;
+intrinsic func cntpct() -> i64;
+
+// --- Tier 2: bit manipulation (LLVM intrinsics, target-agnostic) ---
+intrinsic func clz(x as i64) -> i64;
+intrinsic func ctz(x as i64) -> i64;
+intrinsic func rev(x as i64) -> i64;
+intrinsic func rbit(x as i64) -> i64;
+
+// --- Tier 2: lighter store-store barriers ---
+intrinsic func dmb_st() -> nil;
+intrinsic func dsb_st() -> nil;
+
+// --- Tier 3: DAIF (interrupt-mask) control ---
+intrinsic func enable_irq() -> nil;
+intrinsic func disable_irq() -> nil;
+intrinsic func enable_fiq() -> nil;
+intrinsic func disable_fiq() -> nil;
+intrinsic func get_daif() -> i64;
+intrinsic func set_daif(daif as i64) -> nil;
+
+// --- Tier 3: cache maintenance (by virtual address) ---
+intrinsic func dc_ivac(addr as i64) -> nil;
+intrinsic func dc_cvac(addr as i64) -> nil;
+intrinsic func dc_civac(addr as i64) -> nil;
+intrinsic func ic_ivau(addr as i64) -> nil;
+
+// --- Tier 3: cache maintenance (by set/way, internally encoded) ---
+intrinsic func dc_csw(set as i64, way as i64, level as i64) -> nil;
+
+// --- Tier 4: context switching / vector table ---
+intrinsic func get_sp() -> i64;
+intrinsic func get_fp() -> i64;
+intrinsic func ttbr0_el1() -> i64;
+intrinsic func set_vbar(addr as i64) -> nil;
+
+// --- Existing intrinsics used as the I/O substrate ---
+intrinsic func poke64(addr as i64, val as i64) -> nil;
+intrinsic func peek64(addr as i64) -> i64;
+intrinsic func halt() -> nil;
+
+// Scratch addresses — a real board would point these at RAM. For the compile
+// contract test the addresses are arbitrary; the object only has to link.
+const SCRATCH as i64 = 0x80000000;
+
+// A monotonic cmpxchg spinlock: spin until the old value comes back 0 (the
+// lock was free and we just atomically wrote 1). This is the canonical
+// atomic_cas usage and exercises the cmpxchg lowering in a loop.
+func spin_lock(addr as i64) -> nil {
+    while (atomic_cas(addr, 0, 1) != 0) {}
+}
+
+func spin_unlock(addr as i64) -> nil {
+    // Release: store 0 with release-like ordering. We only have monotonic
+    // store, which is sufficient for the compile-test's correctness contract.
+    atomic_store(addr, 0);
+}
+
+func main() -> nil {
+    // Atomics: store, load, RMW family. Sum the returned old-values so the
+    // result is observable (prevents the optimizer from eliding the ops).
+    atomic_store(SCRATCH, 10);
+    let loaded as i64 = atomic_load(SCRATCH);
+
+    // RMW ops — each returns the value previously at the address.
+    let a_add as i64 = atomic_add(SCRATCH, 5);     // 10 -> 15, returns 10
+    let a_sub as i64 = atomic_sub(SCRATCH, 2);     // 15 -> 13, returns 15
+    let a_or  as i64 = atomic_or (SCRATCH, 0x10);  // 13 -> 29, returns 13
+    let a_and as i64 = atomic_and(SCRATCH, 0x0F);  // 29 -> 13, returns 29
+    let a_xor as i64 = atomic_xor(SCRATCH, 0x01);  // 13 -> 12, returns 13
+    let a_xhg as i64 = atomic_xchg(SCRATCH, 99);   // 12 -> 99, returns 12
+
+    // A real spinlock critical section using atomic_cas + atomic_store.
+    spin_lock(SCRATCH);
+    let guarded as i64 = atomic_load(SCRATCH);
+    spin_unlock(SCRATCH);
+
+    // CPU register reads: mpidr distinguishes cores; cntpct/cntfrq give a
+    // zero-glue cycle counter.
+    let cpu as i64 = get_mpidr();
+    let freq as i64 = cntfrq();
+    let now  as i64 = cntpct();
+
+    // Bit manipulation. clz(0x40) = 57 (bit 6 set in a 64-bit word); ctz = 6.
+    let lz as i64 = clz(0x40);
+    let tz as i64 = ctz(0x40);
+    let rv as i64 = rev(0x0102030405060708);
+    let rb as i64 = rbit(1);
+
+    // Lighter barriers before releasing the result to "device" memory.
+    dmb_st();
+    dsb_st();
+
+    // --- Tier 3: DAIF interrupt-mask control ---
+    // Save the current mask, mask IRQ, then unmask, then restore — a complete
+    // critical-section round-trip. get_daif returns the saved mask so it can be
+    // summed (and thus observed); set_daif restores it exactly.
+    let saved_daif as i64 = get_daif();
+    disable_irq();
+    enable_irq();
+    disable_fiq();
+    enable_fiq();
+    set_daif(saved_daif);
+
+    // --- Tier 3: cache maintenance (by VA) ---
+    // Operate on the line containing SCRATCH. Invalidate / clean / clean+inv
+    // the D-cache line, and invalidate the I-cache line to the PoU. These are
+    // void (no return to sum), but the calls must remain so the lowering is
+    // exercised — they're kept live by the poke64 below ordering after them.
+    dc_ivac(SCRATCH);
+    dc_cvac(SCRATCH);
+    dc_civac(SCRATCH);
+    ic_ivau(SCRATCH);
+
+    // --- Tier 3: cache maintenance (by set/way) ---
+    // dc_csw reads CCSIDR_EL1 for the requested level and encodes (set, way)
+    // itself. One call = one encoded `dc cisw`. Operate on level 0 (L1).
+    dc_csw(0, 0, 0);
+
+    // --- Tier 4: context switching / vector table ---
+    // get_sp/get_fp read the stack/frame pointers (context save, stack guards);
+    // ttbr0_el1 reads the translation base (meaningful once an MMU is on).
+    // set_vbar points the exception vector at SCRATCH (a no-op-safe address for
+    // the compile test; a real boot would pass a real vector table).
+    let sp as i64 = get_sp();
+    let fp as i64 = get_fp();
+    let ttbr as i64 = ttbr0_el1();
+    set_vbar(SCRATCH);
+
+    // Sink every result so nothing is DCE'd. The sum is written via poke64.
+    // The void cache/DAIF ops above are kept live by this store ordering after.
+    let sum as i64 = loaded + a_add + a_sub + a_or + a_and + a_xor + a_xhg
+                   + guarded + cpu + freq + now + lz + tz + rv + rb
+                   + saved_daif + sp + fp + ttbr;
+    poke64(SCRATCH, sum);
+    halt();
+}

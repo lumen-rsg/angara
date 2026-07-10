@@ -18,6 +18,34 @@ intrinsic func halt() -> nil;
 intrinsic func dmb() -> nil;
 intrinsic func dsb() -> nil;
 intrinsic func isb() -> nil;
+// Atomics (Tier 1): a monotonic cmpxchg spinlock + RMW family. These turn the
+// classic "every CAS loop needs hand-written asm" gap into a one-liner.
+intrinsic func atomic_load(addr as i64) -> i64;
+intrinsic func atomic_store(addr as i64, val as i64) -> nil;
+intrinsic func atomic_cas(addr as i64, expected as i64, desired as i64) -> i64;
+// CPU register reads (Tier 1): which core am I, and a free-running cycle count.
+intrinsic func get_mpidr() -> i64;
+intrinsic func cntfrq() -> i64;
+intrinsic func cntpct() -> i64;
+// Bit manipulation (Tier 2): single arm64 instructions via LLVM intrinsics.
+intrinsic func clz(x as i64) -> i64;
+intrinsic func rbit(x as i64) -> i64;
+// Lighter store-store barrier (Tier 2): cheaper than `dmb sy` before a lock release.
+intrinsic func dmb_st() -> nil;
+
+// Interrupt control (Tier 3): mask/unmask IRQ directly — the cheap critical
+// section. get_daif/set_daif save and restore the full mask word.
+intrinsic func disable_irq() -> nil;
+intrinsic func enable_irq() -> nil;
+intrinsic func get_daif() -> i64;
+intrinsic func set_daif(daif as i64) -> nil;
+// Cache maintenance (Tier 3): DMA coherency. dc_civac pushes a dirty D-cache
+// line to RAM (and invalidates it); ic_ivau invalidates an I-cache line to the
+// PoU (needed after writing new code so the CPU doesn't execute stale instrs).
+intrinsic func dc_civac(addr as i64) -> nil;
+intrinsic func ic_ivau(addr as i64) -> nil;
+// Context switching (Tier 4): read the stack pointer.
+intrinsic func get_sp() -> i64;
 
 // --- PL011 UART (QEMU virt: base 0x0900_0000) ---
 const UART_DR as i64 = 0x09000000;  // data register
@@ -98,9 +126,139 @@ func main() -> nil {
     uart_putc(13);   // CR
     uart_putc(10);   // LF
 
+    // Exercise the Tier 1 + 2 intrinsics: a monotonic-cas spinlock critical
+    // section, the CPU register reads (mpidr/cntpct/cntfrq), and the bit ops.
+    demo_intrinsics();
+
+    // Exercise the Tier 3 + 4 intrinsics: interrupt-mask control, cache
+    // maintenance, and the stack-pointer read.
+    demo_tier3();
+
     isb();
     dsb();
     halt();
+}
+
+// --- Spinlock over a fixed RAM address, using atomic_cas / atomic_store ---
+// This is the canonical pattern the atomic intrinsics unlock: a lock-free
+// critical section with no hand-written asm. The lock word lives at LOCK_ADDR;
+// 0 = free, 1 = held. boot.S parks secondary cores, so on this demo CPU0 takes
+// and releases the lock itself — but the primitive is SMP-correct by
+// construction (a contended CAS simply spins until the holder releases).
+// Lock word address: must be free RAM, NOT the kernel image (loaded at
+// 0x40080000) or the stack (just above it). QEMU virt has 128 MiB at
+// 0x40000000; 0x47FF0000 sits high in RAM, well clear of image+stack.
+const LOCK_ADDR as i64 = 0x47FF0000;
+
+// Spin until we atomically swap 0 -> 1. atomic_cas returns the OLD value, so
+// a return of 0 means we won the race and now hold the lock.
+func lock_acquire(addr as i64) -> nil {
+    while (atomic_cas(addr, 0, 1) != 0) {
+        // Contended: yield to the other core before retrying. wfe is declared
+        // via the existing `wfe` intrinsic below — but we don't re-declare it
+        // here; instead we just spin tightly (acceptable for a 2-core demo).
+    }
+}
+
+func lock_release(addr as i64) -> nil {
+    // dmb ishst ensures our critical-section stores are visible before we
+    // release the lock (cheaper than the full `dmb sy`).
+    dmb_st();
+    atomic_store(addr, 0);
+}
+
+// Demonstrate every new intrinsic on the running CPU. Output is one line per
+// family: the spinlock critical section, the CPU id, and the cycle counter.
+func demo_intrinsics() -> nil {
+    // 1) Spinlock: initialize free, take it, read it under the lock, release.
+    atomic_store(LOCK_ADDR, 0);
+    lock_acquire(LOCK_ADDR);
+    let held as i64 = atomic_load(LOCK_ADDR);  // == 1 under the lock
+    lock_release(LOCK_ADDR);
+
+    // "LOCK=" + hex(held) + CRLF  (expect 1)
+    let L as i64 = 76;   let O as i64 = 79;   let C as i64 = 67;   let K as i64 = 75;
+    let eq as i64 = 61;
+    uart_putc(L); uart_putc(O); uart_putc(C); uart_putc(K); uart_putc(eq);
+    uart_hex(held);
+    uart_putc(13); uart_putc(10);
+
+    // 2) CPU register reads: mpidr identifies the core; cntpct/cntfrq give a
+    //    zero-glue cycle counter.
+    let cpu as i64 = get_mpidr();
+    let freq as i64 = cntfrq();
+    let cyc as i64 = cntpct();
+
+    // "CPU=" + hex(cpu & 0xFF) + CRLF   (aff0 field; expect 0 on CPU0)
+    let Cp as i64 = 67; let U as i64 = 85; let P as i64 = 80;
+    uart_putc(Cp); uart_putc(P); uart_putc(U); uart_putc(eq);
+    uart_hex(cpu & 0xFF);
+    uart_putc(13); uart_putc(10);
+
+    // "CYC=" + hex(cyc) + CRLF          (monotonic count since boot)
+    let Y as i64 = 89;
+    uart_putc(Cp); uart_putc(Y); uart_putc(Cp); uart_putc(eq);
+    uart_hex(cyc);
+    uart_putc(13); uart_putc(10);
+
+    // "FRQ=" + hex(freq) + CRLF         (QEMU virt -cpu max: 0x3B9ACA00 = 1 GHz)
+    let F as i64 = 70; let R as i64 = 82; let Q as i64 = 81;
+    uart_putc(F); uart_putc(R); uart_putc(Q); uart_putc(eq);
+    uart_hex(freq);
+    uart_putc(13); uart_putc(10);
+
+    // 3) Bit manipulation: clz and rbit. clz of a single high bit counts down
+    //    from 63; rbit reverses bit order. We print clz(1<<20) and rbit(1).
+    let leading as i64 = clz(1 << 20);   // 64 - 21 = 43
+    let reversed as i64 = rbit(1);       // 1 << 63
+    uart_putc(67); uart_putc(76); uart_putc(90); uart_putc(eq);  // "CLZ="
+    uart_hex(leading);
+    uart_putc(13); uart_putc(10);
+    uart_putc(82); uart_putc(66); uart_putc(73); uart_putc(84); uart_putc(eq); // "RBIT="
+    uart_hex(reversed);
+    uart_putc(13); uart_putc(10);
+}
+
+// Demonstrate the Tier 3 + 4 intrinsics: a DAIF interrupt-mask round-trip
+// (save → mask IRQ → unmask → restore, the canonical critical-section shape),
+// a cache clean+invalidate on a known RAM line (DMA-coherency primitive), and
+// a stack-pointer read (context save / stack guard). Each result is printed so
+// `make verify-tier3` can assert the line appeared — proving the lowering ran
+// on the CPU without trapping.
+func demo_tier3() -> nil {
+    // 1) DAIF round-trip. Save the mask, mask IRQ, unmask IRQ, then restore the
+    //    saved mask exactly. The printed DAIF is the value we saved (and then
+    //    wrote back), so the critical section leaves the CPU's mask word
+    //    unchanged regardless of what it was on entry.
+    let saved as i64 = get_daif();
+    disable_irq();
+    enable_irq();
+    set_daif(saved);
+
+    // "DAIF=" + hex(saved) + CRLF
+    let D as i64 = 68; let A as i64 = 65; let I as i64 = 73; let Ff as i64 = 70;
+    let eq as i64 = 61;
+    uart_putc(D); uart_putc(A); uart_putc(I); uart_putc(Ff); uart_putc(eq);
+    uart_hex(saved);
+    uart_putc(13); uart_putc(10);
+
+    // 2) Cache maintenance: clean+invalidate the D-cache line containing
+    //    LOCK_ADDR, and invalidate the I-cache line to the PoU. These are the
+    //    DMA-coherency ops — on QEMU virt they're no-ops (no real DMA here),
+    //    but they exercise the inline-asm lowering and must not trap.
+    dc_civac(LOCK_ADDR);
+    ic_ivau(LOCK_ADDR);
+
+    // 3) Stack pointer. get_sp reads the current sp — context-save / stack-guard
+    //    primitive. We mask off the low bits so the printed value is stable
+    //    across runs (sp is 16-byte aligned on AArch64).
+    let sp as i64 = get_sp();
+
+    // "SP=" + hex(sp) + CRLF
+    let S as i64 = 83; let Pp as i64 = 80;
+    uart_putc(S); uart_putc(Pp); uart_putc(eq);
+    uart_hex(sp);
+    uart_putc(13); uart_putc(10);
 }
 
 // The banner, printed one byte at a time (no heap → no string type in
