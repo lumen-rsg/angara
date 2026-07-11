@@ -10,6 +10,7 @@
 #include "Stmt.h"
 #include "Expr.h"
 #include "Chaperone.h"
+#include "Intrinsics.h"
 
 #include <iostream>
 #include <filesystem>
@@ -45,97 +46,10 @@ static const AnnotationInfo kAnnotations[] = {
     {"@manual",      "Variable (let/const): opt out of automatic deallocation; caller manages lifetime via drop.", false},
 };
 
-struct IntrinsicInfo {
-    const char* name;
-    const char* signature;  // "(addr as i64) -> i64" etc.
-    const char* gate;       // "@unsafe", "@privileged", or ""
-    const char* note;       // short description / lowering
-};
-
-// Sourced from ExprCodegen.cpp name-ladder + docs/23-bare-metal.md tables.
-static const IntrinsicInfo kIntrinsics[] = {
-    // MMIO
-    {"peek8",  "(addr as i64) -> i64",   "@unsafe", "volatile load, 8-bit"},
-    {"peek16", "(addr as i64) -> i64",   "@unsafe", "volatile load, 16-bit"},
-    {"peek32", "(addr as i64) -> i64",   "@unsafe", "volatile load, 32-bit"},
-    {"peek64", "(addr as i64) -> i64",   "@unsafe", "volatile load, 64-bit"},
-    {"poke8",  "(addr as i64, val as i64) -> nil", "@unsafe", "volatile store, 8-bit"},
-    {"poke16", "(addr as i64, val as i64) -> nil", "@unsafe", "volatile store, 16-bit"},
-    {"poke32", "(addr as i64, val as i64) -> nil", "@unsafe", "volatile store, 32-bit"},
-    {"poke64", "(addr as i64, val as i64) -> nil", "@unsafe", "volatile store, 64-bit"},
-    // Control / barriers
-    {"halt",   "() -> nil", "", "llvm.trap + infinite loop (terminal)"},
-    {"nop",    "() -> nil", "", "llvm.donothing"},
-    {"wfi",    "() -> nil", "@unsafe", "wait for interrupt"},
-    {"wfe",    "() -> nil", "@unsafe", "wait for event"},
-    {"sev",    "() -> nil", "@unsafe", "send event (wake other cores)"},
-    {"dmb",    "() -> nil", "@unsafe", "data memory barrier (full-system)"},
-    {"dsb",    "() -> nil", "@unsafe", "data sync barrier (full-system)"},
-    {"isb",    "() -> nil", "@unsafe", "instruction sync barrier"},
-    {"dmb_st", "() -> nil", "@unsafe", "store-store barrier (ishst)"},
-    {"dsb_st", "() -> nil", "@unsafe", "store-store sync (ishst)"},
-    // CPU registers
-    {"get_el",    "() -> i64", "@unsafe", "CurrentEL >> 2 (exception level 0-3)"},
-    {"get_mpidr", "() -> i64", "@unsafe", "MPIDR_EL1 (CPU affinity)"},
-    {"cntfrq",    "() -> i64", "@unsafe", "CNTFRQ_EL0 (timer frequency)"},
-    {"cntpct",    "() -> i64", "@unsafe", "CNTPCT_EL0 (physical timer count)"},
-    // Atomics (monotonic)
-    {"atomic_load",  "(addr as i64) -> i64",                              "@unsafe", "monotonic load"},
-    {"atomic_store", "(addr as i64, val as i64) -> nil",                  "@unsafe", "monotonic store"},
-    {"atomic_cas",   "(addr as i64, expected as i64, desired as i64) -> i64", "@unsafe", "cmpxchg; returns old value (spinlock: while(cas(p,0,1)!=0){})"},
-    {"atomic_add",   "(addr as i64, val as i64) -> i64", "@unsafe", "atomicrmw add; returns old"},
-    {"atomic_sub",   "(addr as i64, val as i64) -> i64", "@unsafe", "atomicrmw sub; returns old"},
-    {"atomic_or",    "(addr as i64, val as i64) -> i64", "@unsafe", "atomicrmw or; returns old"},
-    {"atomic_and",   "(addr as i64, val as i64) -> i64", "@unsafe", "atomicrmw and; returns old"},
-    {"atomic_xor",   "(addr as i64, val as i64) -> i64", "@unsafe", "atomicrmw xor; returns old"},
-    {"atomic_xchg",  "(addr as i64, val as i64) -> i64", "@unsafe", "atomicrmw xchg; returns old"},
-    // Bit manipulation
-    {"clz",  "(x as i64) -> i64", "", "count leading zeros (llvm.ctlz)"},
-    {"ctz",  "(x as i64) -> i64", "", "count trailing zeros (llvm.cttz)"},
-    {"rev",  "(x as i64) -> i64", "", "byte-reverse (llvm.bswap)"},
-    {"rbit", "(x as i64) -> i64", "", "bit-reverse (llvm.bitreverse)"},
-    // Interrupt control (DAIF)
-    {"enable_irq",  "() -> nil",            "@unsafe", "daifclr #2"},
-    {"disable_irq", "() -> nil",            "@unsafe", "daifset #2"},
-    {"enable_fiq",  "() -> nil",            "@unsafe", "daifclr #1"},
-    {"disable_fiq", "() -> nil",            "@unsafe", "daifset #1"},
-    {"get_daif",    "() -> i64",            "@unsafe", "mrs daif"},
-    {"set_daif",    "(daif as i64) -> nil", "@unsafe", "msr daif"},
-    // Cache maintenance
-    {"dc_ivac",  "(addr as i64) -> nil", "@unsafe", "invalidate D-cache to PoC"},
-    {"dc_cvac",  "(addr as i64) -> nil", "@unsafe", "clean D-cache to PoC"},
-    {"dc_civac", "(addr as i64) -> nil", "@unsafe", "clean+invalidate D-cache"},
-    {"ic_ivau",  "(addr as i64) -> nil", "@unsafe", "invalidate I-cache to PoU"},
-    {"dc_csw",   "(set as i64, way as i64, level as i64) -> nil", "@unsafe", "set/way maintenance (encodes CCSIDR geometry)"},
-    // Context switching / vector table
-    {"get_sp",     "() -> i64",            "@unsafe", "current stack pointer"},
-    {"get_fp",     "() -> i64",            "@unsafe", "frame pointer (x29)"},
-    {"ttbr0_el1",  "() -> i64",            "@unsafe", "translation table base (MMU)"},
-    {"set_vbar",   "(addr as i64) -> nil", "@unsafe", "set exception vector base (msr vbar_el1)"},
-    // MMU control registers (@unsafe)
-    {"set_ttbr0",  "(addr as i64) -> nil", "@unsafe", "set translation table base 0 (msr ttbr0_el1)"},
-    {"set_mair",   "(val as i64) -> nil",  "@unsafe", "set memory attribute indirection (msr mair_el1)"},
-    {"set_tcr",    "(val as i64) -> nil",  "@unsafe", "set translation control (msr tcr_el1)"},
-    {"set_sctlr",  "(val as i64) -> nil",  "@unsafe", "set system control (msr sctlr_el1; bit 0 = MMU enable)"},
-    {"get_sctlr",  "() -> i64",            "@unsafe", "read system control (mrs sctlr_el1)"},
-    // Tier 5: TLB management (@unsafe) — full EL1 TLBI instruction space
-    {"tlbi_vmalle1",   "() -> nil",            "@unsafe", "invalidate all TLB entries, EL1 (local)"},
-    {"tlbi_vmalle1is", "() -> nil",            "@unsafe", "invalidate all TLB entries, EL1 (inner-shareable)"},
-    {"tlbi_alle1",     "() -> nil",            "@unsafe", "invalidate current-ASID entries (local)"},
-    {"tlbi_alle1is",   "() -> nil",            "@unsafe", "invalidate current-ASID entries (IS)"},
-    {"tlbi_vae1",      "(addr as i64) -> nil", "@unsafe", "invalidate by VA, ASID-specific (local)"},
-    {"tlbi_vae1is",    "(addr as i64) -> nil", "@unsafe", "invalidate by VA, ASID-specific (IS)"},
-    {"tlbi_vaae1",     "(addr as i64) -> nil", "@unsafe", "invalidate by VA, ASID-agnostic (local)"},
-    {"tlbi_vaae1is",   "(addr as i64) -> nil", "@unsafe", "invalidate by VA, ASID-agnostic (IS)"},
-    {"tlbi_aside1",    "(asid as i64) -> nil", "@unsafe", "invalidate by ASID (local)"},
-    {"tlbi_aside1is",  "(asid as i64) -> nil", "@unsafe", "invalidate by ASID (IS)"},
-    {"tlbi_vale1",     "(addr as i64) -> nil", "@unsafe", "invalidate last-level by VA, ASID-specific (local)"},
-    {"tlbi_vale1is",   "(addr as i64) -> nil", "@unsafe", "invalidate last-level by VA, ASID-specific (IS)"},
-    // Tier 5: privilege switching (@privileged)
-    {"eret",     "() -> nil",            "@privileged", "exception return (terminal; jumps to elr_el1 at spsr_el1 pstate)"},
-    {"set_spsr", "(daif as i64) -> nil", "@privileged", "set saved pstate (msr spsr_el1)"},
-    {"set_elr",  "(addr as i64) -> nil", "@privileged", "set exception link (msr elr_el1)"},
-};
+// The intrinsic table (kIntrinsics), findIntrinsic(), and gate-label helpers
+// now live in the shared header Intrinsics.h — the single source of truth
+// consumed by the LSP (hover + completion), the codegen name-ladder, and the
+// docs. Adding an intrinsic means adding one row there + one codegen arm.
 
 // Keyword completions (from Lexer.cpp keyword table). kind=14 (Keyword).
 static const char* const kKeywords[] = {
@@ -146,14 +60,6 @@ static const char* const kKeywords[] = {
     "is", "data", "enum", "union", "owned", "type", "drop", "finally", "match",
     "case", "foreign", "function", "intrinsic", "void", "async", "await", "asm",
 };
-
-// Look up an intrinsic by name. Returns nullptr if not found.
-static const IntrinsicInfo* findIntrinsic(const std::string& name) {
-    for (const auto& ii : kIntrinsics) {
-        if (name == ii.name) return &ii;
-    }
-    return nullptr;
-}
 
 // Look up an annotation by name (with or without leading '@').
 static const AnnotationInfo* findAnnotation(const std::string& word) {
@@ -1026,6 +932,17 @@ JSON LSPServer::handleCompletion(const JSON& params) {
         }
     }
 
+    // ── Intrinsic completions (from the shared table) ──
+    for (const auto& ii : kIntrinsics) {
+        if (seen.count(ii.name)) continue;
+        seen.insert(ii.name);
+        JSON item = JSON_OBJ{};
+        item["label"] = ii.name;
+        item["kind"] = 3; // Function
+        item["detail"] = std::string("intrinsic ") + ii.signature;
+        items.push_back(item);
+    }
+
     // ── Keyword completions (low-priority fallback) ──
     for (const char* kw : kKeywords) {
         if (seen.count(kw)) continue;
@@ -1093,8 +1010,9 @@ JSON LSPServer::handleHover(const JSON& params) {
                 std::string md = std::string("**") + ii->name + "** — intrinsic\n\n"
                     + "```\n" + ii->name + ii->signature + "\n```\n\n"
                     + ii->note;
-                if (ii->gate && ii->gate[0] != '\0') {
-                    md += std::string("\n\n⚠ Requires `") + ii->gate + "`.";
+                const char* gate_label = intrinsicGateLabel(ii->gate);
+                if (gate_label[0] != '\0') {
+                    md += std::string("\n\n⚠ Requires `") + gate_label + "`.";
                 }
                 contents["value"] = md;
                 result["contents"] = contents;

@@ -1,8 +1,10 @@
 #include "LLVMBackend.h"
 #include "RuntimeBuilder.h"
+#include "Intrinsics.h"
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/InlineAsm.h>
 #include <functional>
+#include <unordered_set>
 
 namespace angara {
 
@@ -1664,6 +1666,64 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
 
     if (auto* var = dynamic_cast<const VarExpr*>(expr.callee.get())) {
         std::string fn = var->name.lexeme;
+
+        // ── F8: intrinsic coverage self-check (runs once) ──────────────
+        // The intrinsic metadata table (Intrinsics.h kIntrinsics[]) is the
+        // single source of truth. This check verifies that every name in the
+        // table has a matching lowering arm in the ladder below, and vice
+        // versa. If a future edit adds a table row without a codegen arm (or
+        // the reverse), this fires a fatal diagnostic on the first intrinsic
+        // dispatch — catching the drift before any user-visible miscompile.
+        {
+            static bool s_checked = false;
+            if (!s_checked) {
+                s_checked = true;
+                // Every name the ladder below explicitly handles.
+                static const std::unordered_set<std::string> kHandled = {
+                    "peek8","peek16","peek32","peek64",
+                    "poke8","poke16","poke32","poke64",
+                    "halt","nop",
+                    "wfi","wfe","sev","dmb","dsb","isb","dmb_st","dsb_st",
+                    "get_el","get_mpidr","cntfrq","cntpct",
+                    "atomic_load","atomic_store","atomic_cas",
+                    "atomic_add","atomic_sub","atomic_or","atomic_and",
+                    "atomic_xor","atomic_xchg",
+                    "clz","ctz","rev","rbit",
+                    "enable_irq","disable_irq","enable_fiq","disable_fiq",
+                    "get_daif","set_daif",
+                    "dc_ivac","dc_cvac","dc_civac","ic_ivau","dc_csw",
+                    "get_sp","get_fp","ttbr0_el1","set_vbar",
+                    "set_ttbr0","set_mair","set_tcr","set_sctlr","get_sctlr",
+                    "tlbi_vmalle1","tlbi_vmalle1is","tlbi_alle1","tlbi_alle1is",
+                    "tlbi_vae1","tlbi_vae1is","tlbi_vaae1","tlbi_vaae1is",
+                    "tlbi_aside1","tlbi_aside1is","tlbi_vale1","tlbi_vale1is",
+                    "eret","set_spsr","set_elr",
+                };
+                if (kHandled.size() != kIntrinsicCount) {
+                    std::string msg =
+                        "Intrinsic coverage mismatch: codegen ladder handles " +
+                        std::to_string(kHandled.size()) +
+                        " names but Intrinsics.h declares " +
+                        std::to_string(kIntrinsicCount) +
+                        ". Add the missing arm or table row.";
+                    llvm::report_fatal_error(llvm::StringRef(msg));
+                }
+                for (const auto& ii : kIntrinsics) {
+                    if (kHandled.find(ii.name) == kHandled.end()) {
+                        std::string msg = "Intrinsic '" + std::string(ii.name) +
+                            "' is in Intrinsics.h but has no codegen lowering arm.";
+                        llvm::report_fatal_error(llvm::StringRef(msg));
+                    }
+                }
+                for (const auto& name : kHandled) {
+                    if (!findIntrinsic(name)) {
+                        std::string msg = "Codegen lowers '" + name +
+                            "' but it is not in Intrinsics.h — add a table row.";
+                        llvm::report_fatal_error(llvm::StringRef(msg));
+                    }
+                }
+            }
+        }
 
         // F3: len(byte_array_const) — return the compile-time size N. The type
         // checker already narrowed this to FIXED_ARRAY args only; anything else

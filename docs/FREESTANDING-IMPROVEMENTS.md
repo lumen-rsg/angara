@@ -281,7 +281,7 @@ someone learning the freestanding model.
 
 ## P3 — Infrastructure & quality-of-life
 
-### ☐ F8. Table-driven intrinsic registry (replace the name ladder)
+### ☑ F8. Table-driven intrinsic registry (replace the name ladder) *(done)*
 
 **Root cause.** ~60 intrinsics are dispatched by a ~400-line
 `if (fn == "...")` chain at `ExprCodegen.cpp:1665-2081`, **duplicated** in the
@@ -367,7 +367,7 @@ between the two will hit this with no warning.
 | F5 | `--target` arch validation | UX (clearer errors) | S |
 | F6 | RISC-V / x86 intrinsic tiers | breadth | XL (depends on F8) |
 | F7 | GIC / interrupt-vector example | onboarding | M (example only) |
-| F8 | Table-driven intrinsic registry | maintainability | M-L |
+| ~~F8~~ | ~~Table-driven intrinsic registry~~ ✅ | maintainability | M-L |
 | F9 | QEMU boot tests in CI | regression safety | S |
 | F10 | Document freestanding vs kernel | UX | XS |
 

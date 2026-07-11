@@ -68,6 +68,13 @@ context switching. These do not require any header or library — declare them w
 instructions. Intrinsics are recognized by name at the call site, so the
 declaration's signature is what the type checker enforces.
 
+> **Canonical source:** the tables below are generated from
+> [`angc/includes/Intrinsics.h`](../angc/includes/Intrinsics.h), the single
+> header shared by the compiler (codegen + coverage self-check), the LSP
+> (hover + completion), and this documentation. Adding an intrinsic means adding
+> one row there plus one codegen lowering arm — the compiler's self-check
+> asserts they stay in sync.
+
 #### Memory access (MMIO)
 
 | Intrinsic | Signature | Lowers to |
