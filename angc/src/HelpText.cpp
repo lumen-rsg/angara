@@ -49,6 +49,10 @@ void print_help() {
     std::cout << "  --dump-ir                   Debug: Emit unoptimized LLVM IR (.ll)\n";
     std::cout << "  --emit-llvm                 Emit LLVM IR to stdout instead of compiling\n";
     std::cout << "  --target <triple>           Cross-compile for target triple\n";
+    std::cout << "  --cpu <name>                Target CPU for codegen (default: host)\n";
+    std::cout << "                              e.g. cortex-a53 (LL/SC atomics), max (LSE)\n";
+    std::cout << "  --target-features <list>    LLVM target features (default: host)\n";
+    std::cout << "                              e.g. +lse, -lse (force LSE / LL/SC atomics)\n";
     std::cout << "  --sysroot <path>            Set sysroot for cross-compilation linker\n";
     std::cout << "  --freestanding              Freestanding mode (no libc, bare-metal)\n";
     std::cout << "  --kernel                    Kernel mode (emit relocatable .o for a Linux module)\n";

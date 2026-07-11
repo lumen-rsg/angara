@@ -40,6 +40,8 @@ int angara::CLI::cmdCheck(const std::string& file) {
     std::string base_name = angara::CompilerDriver::get_base_name(file);
     angara::CompilerDriver driver;
     if (!m_flags.target.empty()) driver.set_target(resolve_target_triple(m_flags.target));
+    if (!m_flags.cpu.empty()) driver.set_cpu(m_flags.cpu);
+    if (!m_flags.target_features.empty()) driver.set_target_features(m_flags.target_features);
     if (!m_flags.sysroot.empty()) driver.set_sysroot(m_flags.sysroot);
     driver.set_check_only(true);
     if (m_flags.werror) driver.set_warnings_as_errors(true);
@@ -116,6 +118,8 @@ int angara::CLI::cmdCompileSingleFile(const std::string& source_file) {
 
     angara::CompilerDriver driver;
     if (!resolved_target.empty()) driver.set_target(resolved_target);
+    if (!m_flags.cpu.empty()) driver.set_cpu(m_flags.cpu);
+    if (!m_flags.target_features.empty()) driver.set_target_features(m_flags.target_features);
     if (!m_flags.sysroot.empty()) driver.set_sysroot(m_flags.sysroot);
     if (m_flags.freestanding) driver.set_freestanding(true);
     if (m_flags.kernel) driver.set_kernel_mode(true);

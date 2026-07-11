@@ -37,8 +37,8 @@ KERNEL   = kernel8.img
 
 # QEMU virt: a modern ARMv8.x CPU (`-cpu max`) so LSE atomics (cas/ldadd/...)
 # are available for the intrinsic demo, 128 MiB RAM, PL011 UART on the console.
-# (The previous -cpu cortex-a57 predates the LSE extension, so cmpxchg-based
-#  atomics trap; `max` advertises LSE and is the modern virt default.)
+# To target a pre-8.1 core instead (LL/SC atomics), add --cpu cortex-a53 to
+# ANGC and change -cpu to cortex-a53 — both atomics and the QEMU model match.
 QEMU_OPTS = -machine virt -cpu max -m 128 -nographic -semihosting
 
 BANNER = Angara bare-metal on QEMU virt

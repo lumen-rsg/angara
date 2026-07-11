@@ -47,7 +47,9 @@ namespace angara {
                     bool debug = false,
                     bool emit_llvm = false,
                     bool lto = false,
-                    int dwarf_version = 0);
+                    int dwarf_version = 0,
+                    const std::string& cpu = "",
+                    const std::string& target_features = "");
 
         /// Releases LLVM objects (cleanup at process exit).
         ~LLVMBackend();
@@ -477,6 +479,8 @@ namespace angara {
         bool m_debug = false;
         bool m_lto = false;
         int  m_dwarf_version = 0;   // 0 = auto-detect by platform
+        std::string m_cpu;             // F4: override getHostCPUName ("" = host)
+        std::string m_target_features; // F4: LLVM feature string ("" = host default)
 
         // Debug info (DWARF) generation
         std::unique_ptr<llvm::DIBuilder> m_di_builder;

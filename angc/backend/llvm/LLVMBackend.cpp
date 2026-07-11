@@ -38,8 +38,8 @@ unsigned LLVMBackend::getJmpBufSize(const llvm::Triple& target) {
     return 1024;      // conservative fallback for unknown targets
 }
 
-LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool kernel, bool dump_ir, bool debug, bool emit_llvm, bool lto, int dwarf_version)
-    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_kernel(kernel), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm), m_lto(lto), m_dwarf_version(dwarf_version) {
+LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool kernel, bool dump_ir, bool debug, bool emit_llvm, bool lto, int dwarf_version, const std::string& cpu, const std::string& target_features)
+    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_kernel(kernel), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm), m_lto(lto), m_dwarf_version(dwarf_version), m_cpu(cpu), m_target_features(target_features) {
     ctx = std::make_unique<llvm::LLVMContext>();
     mod = std::make_unique<llvm::Module>("angara_module", *ctx);
     builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
@@ -53,7 +53,9 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
         llvm::TargetOptions opt;
         // RT-6: PIC relocation model + Small code model — must match the emitter
         // (below) so the DataLayout and emitted code agree.
-        if (auto tm = std::unique_ptr<llvm::TargetMachine>(t->createTargetMachine(targetTriple,llvm::sys::getHostCPUName().str(),"",opt,llvm::Reloc::PIC_,llvm::CodeModel::Small)))
+        if (auto tm = std::unique_ptr<llvm::TargetMachine>(t->createTargetMachine(targetTriple,
+                m_cpu.empty() ? llvm::sys::getHostCPUName().str() : m_cpu,
+                m_target_features, opt, llvm::Reloc::PIC_, llvm::CodeModel::Small)))
             mod->setDataLayout(tm->createDataLayout());
     }
 
@@ -209,8 +211,10 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
     if (!tgt) { std::cerr<<"No target: "<<le<<"\n"; return false; }
     llvm::TargetOptions opt;
     auto tm = std::unique_ptr<llvm::TargetMachine>(
-        tgt->createTargetMachine(targetTriple, llvm::sys::getHostCPUName().str(), "", opt,
-                                 llvm::Reloc::PIC_, llvm::CodeModel::Small));
+        tgt->createTargetMachine(targetTriple,
+            m_cpu.empty() ? llvm::sys::getHostCPUName().str() : m_cpu,
+            m_target_features, opt,
+            llvm::Reloc::PIC_, llvm::CodeModel::Small));
     if (!tm) { std::cerr<<"No TM\n"; return false; }
 
     {

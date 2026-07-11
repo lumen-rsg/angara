@@ -21,6 +21,8 @@ inline std::string angara_home() {
 /// Parsed CLI flags (target triple, output, warnings, etc.).
 struct CliFlags {
     std::string target;
+    std::string cpu;               // F4: --cpu — override getHostCPUName()
+    std::string target_features;   // F4: --target-features — LLVM feature string
     std::string sysroot;
     std::string output_name;
     std::vector<std::string> link_files;

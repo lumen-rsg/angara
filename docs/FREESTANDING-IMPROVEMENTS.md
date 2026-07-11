@@ -183,29 +183,35 @@ libc".
 
 ---
 
-### ☐ F4. Atomics: add an LL/SC path for pre-8.1 cores
+### ☑ F4. Atomics: add an LL/SC path for pre-8.1 cores *(done)*
+
+### ☑ F4. Atomics: add an LL/SC path for pre-8.1 cores *(done)*
 
 **Root cause.** Every `atomic_*` intrinsic lowers to LLVM atomic IR
-(`ExprCodegen.cpp:1771-1818`), which the AArch64 backend emits as **LSE**
-instructions (`cas`, `ldadd`, …). On a pre-ARMv8.1 core (Cortex-A53/-A57/-A72 —
-real hardware like the Raspberry Pi 3 and many SoCs) these trap as undefined.
-The docs (`23-bare-metal.md:96-99`) currently say "use `-cpu max`."
+(`ExprCodegen.cpp`), which the AArch64 backend emits as either LSE
+instructions (`cas`, `ldadd`, …) or LL/SC loops (`ldxr`/`stxr`), depending on
+the target CPU's `+lse`/`-lse` feature. The bug: `LLVMBackend::createTargetMachine`
+passed `getHostCPUName()` + an empty features string, so the atomics always
+lowered for the *build host's* CPU — LSE on Apple Silicon / `-cpu max`, even
+when cross-compiling for a pre-8.1 target. No inline asm was needed.
 
-**Fix.** Add a lowering strategy switch, e.g. `--atomic-style=lse|llsc|auto`:
-- `lse` (default today) — LLVM atomic IR → LSE.
-- `llsc` — emit inline-asm load-linked/store-conditional sequences
-  (`ldxr`/`stxr`, `ldaxr`/`stlxr` for acquire/release) per op.
-- `auto` — driven by the target's `+lse`/`-lse` feature flag.
+**Fix (simpler than originally planned).** Two new CLI flags:
+- `--cpu <name>` — override `getHostCPUName()`. E.g. `--cpu cortex-a53` → LL/SC.
+- `--target-features <string>` — override the empty features string. E.g.
+  `--target-features -lse` forces LL/SC on any CPU.
 
-The LL/SC sequences are well-known; `atomic_cas` becomes a `ldaxr`/`stlxr` loop.
-Keep monotonic as the default ordering (consistent with the LSE path).
+Wired through `CliFlags` → `CompilerDriver` → `LLVMBackend` constructor → both
+`createTargetMachine` call sites (`LLVMBackend.cpp:56, 212`). The default (empty
+cpu/features → host) is byte-identical to the prior behavior.
 
-**Scope.** `ExprCodegen.cpp` atomics block (1771-1818) — add a sibling lowering
-path. Possibly a new CLI flag in `CLI.cpp`. Medium.
-
-**Verify.** Extend `tests/kernel/run_ir_tests.sh` to assert the LL/SC
-instructions appear under `--atomic-style=llsc`. Add a QEMU test booting with
-`-cpu cortex-a53` (which lacks LSE) and asserting the atomics demo still runs.
+> **Implementation note (approach pivot).** The original plan proposed an
+> `--atomic-style=lse|llsc|auto` flag with inline-asm LL/SC sequences. Research
+> showed this was unnecessary: LLVM's AArch64 backend already auto-lowers
+> `atomicrmw`/`cmpxchg` to `ldxr`/`stxr` loops when the target lacks `+lse`, and
+> Angara's atomics already go through LLVM atomic IR. The only issue was the
+> target features. No inline asm, no new pass, no outline-atomics runtime
+> dependency (Angara drives LLVM directly, not the clang driver, so the
+> `__aarch64_cas*` IFUNC helpers are never emitted).
 
 ---
 
@@ -363,7 +369,7 @@ between the two will hit this with no warning.
 | ~~F1~~ | ~~`@unsafe` save/restore~~ ✅ | correctness | XS |
 | ~~F2~~ | ~~Drop dead GC allocator from freestanding runtime~~ ✅ | correctness + bloat | M |
 | ~~F3~~ | ~~No-heap `const` byte-array literal~~ ✅ | **high** (closes the biggest gap) | L (language feature) |
-| F4 | LL/SC atomics for pre-8.1 cores | portability (real hardware) | M |
+| ~~F4~~ | ~~LL/SC atomics for pre-8.1 cores~~ ✅ | portability (real hardware) | M |
 | F5 | `--target` arch validation | UX (clearer errors) | S |
 | F6 | RISC-V / x86 intrinsic tiers | breadth | XL (depends on F8) |
 | F7 | GIC / interrupt-vector example | onboarding | M (example only) |

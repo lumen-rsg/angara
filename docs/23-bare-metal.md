@@ -97,13 +97,26 @@ declaration's signature is what the type checker enforces.
 Lock-free multi-core and DMA-buffer access. All use **monotonic** ordering (the
 cheapest correct option); each `atomic_*` RMW returns the value previously at the
 address, and `atomic_cas` returns the old value so callers can loop. Lowered to
-LLVM atomic IR (`atomicrmw` / `cmpxchg`), which on AArch64 with LSE emits
-`cas` / `ldadd` / `ldset` / `ldclr` / `ldeor` / `swp`.
+LLVM atomic IR (`atomicrmw` / `cmpxchg`), which on AArch64 lowers to either
+LSE instructions (`cas` / `ldadd` / `ldset` / `ldclr` / `ldeor` / `swp`) or
+LL/SC retry loops (`ldxr` / `stxr`), depending on the target CPU's features.
 
-> **Requires ARMv8.1+ (LSE).** The atomics lower to LSE atomic instructions and
-> will trap as undefined on a pre-8.1 core (e.g. Cortex-A53/-A57/-A72). Boot
-> with a CPU that advertises LSE — the `examples/qemu_virt` Makefile uses
-> `-cpu max` for this reason. (See the target note below for the full details.)
+> **LSE vs LL/SC — `--cpu` and `--target-features`.** By default the atomics
+> lower for the **build host's** CPU: if the host has LSE (ARMv8.1+, e.g. Apple
+> Silicon, `-cpu max`) you get single-instruction `cas`/`ldadd`; if not, you get
+> `ldxr`/`stxr` loops. When cross-compiling for a pre-8.1 target (Cortex-A53/
+> -A57/-A72 — e.g. Raspberry Pi 3), pass `--cpu cortex-a53` or
+> `--target-features -lse` so the atomics lower to LL/SC and don't trap:
+>
+> ```sh
+> angc kernel.an --freestanding --target aarch64 --cpu cortex-a53
+> # or equivalently:
+> angc kernel.an --freestanding --target aarch64 --target-features -lse
+> ```
+>
+> No outline-atomics (`__aarch64_cas*` IFUNC helpers) are ever emitted — Angara
+> drives the LLVM backend directly (not the clang driver), so there is no
+> runtime library dependency either way.
 
 | Intrinsic | Signature | Lowers to |
 |-----------|-----------|-----------|
@@ -300,10 +313,11 @@ intrinsic func set_vbar(addr as i64) -> nil;
 intrinsic func get_sp() -> i64;
 ```
 
-> **Target note for atomics:** the atomic intrinsics lower to AArch64 **LSE**
-> instructions (`cas`, `ldadd`, …). Run the image on a CPU that advertises the
-> LSE extension (ARMv8.1+); on older cores these trap as undefined. The
-> `examples/qemu_virt` Makefile uses `-cpu max` for this reason.
+> **Target note for atomics:** the atomic intrinsics lower to either AArch64
+> **LSE** instructions (`cas`, `ldadd`, …) or **LL/SC** loops (`ldxr`/`stxr`),
+> depending on the target. Pass `--cpu cortex-a53` or `--target-features -lse`
+> for pre-8.1 cores (Cortex-A53/-A57/-A72); omit the flag for LSE-capable targets.
+> See the LSE vs LL/SC note above.
 
 ## Inline assembly
 

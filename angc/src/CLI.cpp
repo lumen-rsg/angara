@@ -19,6 +19,12 @@ void CLI::parseFlags(std::vector<std::string>& args) {
         if (args[i] == "--target" && i + 1 < args.size()) {
             m_flags.target = args[i + 1];
             args.erase(args.begin() + i, args.begin() + i + 2);
+        } else if (args[i] == "--cpu" && i + 1 < args.size()) {
+            m_flags.cpu = args[i + 1];
+            args.erase(args.begin() + i, args.begin() + i + 2);
+        } else if (args[i] == "--target-features" && i + 1 < args.size()) {
+            m_flags.target_features = args[i + 1];
+            args.erase(args.begin() + i, args.begin() + i + 2);
         } else if (args[i] == "--sysroot" && i + 1 < args.size()) {
             m_flags.sysroot = args[i + 1];
             args.erase(args.begin() + i, args.begin() + i + 2);

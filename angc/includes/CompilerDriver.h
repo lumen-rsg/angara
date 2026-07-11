@@ -59,6 +59,13 @@ namespace angara {
         void set_target(const std::string& triple) { m_target_triple = triple; }
         const std::string& get_target() const { return m_target_triple; }
 
+        /// F4: sets the target CPU (overrides getHostCPUName) and feature string.
+        /// Controls atomic lowering: --cpu cortex-a53 → LL/SC, --cpu max → LSE.
+        void set_cpu(const std::string& cpu) { m_cpu = cpu; }
+        void set_target_features(const std::string& features) { m_target_features = features; }
+        const std::string& get_cpu() const { return m_cpu; }
+        const std::string& get_target_features() const { return m_target_features; }
+
         /// Sets the sysroot path for the cross-compilation linker.
         void set_sysroot(const std::string& path) { m_sysroot = path; }
         const std::string& get_sysroot() const { return m_sysroot; }
@@ -230,6 +237,8 @@ namespace angara {
         std::map<std::string, std::string> m_project_entries;
 
         std::string m_target_triple;
+        std::string m_cpu;             // F4: --cpu override
+        std::string m_target_features; // F4: --target-features override
         std::string m_sysroot;
 
         bool m_freestanding = false;
