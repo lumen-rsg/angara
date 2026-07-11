@@ -317,6 +317,12 @@ void LLVMBackend::createStrlitInitFn() {
 
 void LLVMBackend::createAllocatorInitFn() {
     if (m_allocator_init_fn) return;
+    // Freestanding mode has no allocator layer (generateMemoryManagement is
+    // skipped, so __ang_allocator_set does not exist). Emitting this function
+    // would dereference a null callee. There is also no hosted C glue to call
+    // __ang_allocator_init_<module> on a bare-metal target, so the symbol is
+    // unwanted as well as unbuildable.
+    if (m_freestanding) return;
     // External linkage + module-unique name so external C (kernel init / host
     // harness) can swap this module's allocator. The body forwards to the
     // module-internal __ang_allocator_set (InternalLinkage, emitted by the

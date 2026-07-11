@@ -81,7 +81,7 @@ inner block closes) still type-checks. Run `bash tests/kernel/run_kernel_tests.s
 
 ---
 
-### ☐ F2. Freestanding runtime emits a GC/heap allocator it can never use
+### ☑ F2. Freestanding runtime emits a GC/heap allocator it can never use *(done)*
 
 **Root cause.** `angc/backend/llvm/rt/Freestanding.cpp:33-43` re-declares
 `malloc`/`realloc`/`free` as external symbols and then calls
@@ -118,6 +118,17 @@ non-obvious).
 crash) must still pass. Add a check to `run_kernel_tests.sh` that the freestanding
 object's undefined symbols do **not** include `malloc`/`realloc`/`free` (use
 `nm -u`).
+
+> **Implementation note (resolved).** Removing `generateMemoryManagement()` also
+> required gating `LLVMBackend::createAllocatorInitFn()` (`LLVMBackend.cpp:318`)
+> on `!m_freestanding`. That function is called unconditionally from both
+> `generateIR` (line 146) and `generate` (line 170); its body calls
+> `mod->getFunction("__ang_allocator_set")`, which is null without the memory
+> layer, and `CreateCall(nullptr, ...)` segfaults. `m_allocator_init_fn` is only
+> ever assigned (never read by the backend), so skipping it is safe. The
+> `nm -u` heap-free assertion was added to `run_kernel_tests.sh` in the
+> `--freestanding` PASS branch; `fs_intrinsics` now emits an object with **zero**
+> undefined symbols.
 
 ---
 
@@ -350,7 +361,7 @@ between the two will hit this with no warning.
 | ID | Item | Impact | Effort |
 |----|------|--------|--------|
 | ~~F1~~ | ~~`@unsafe` save/restore~~ ✅ | correctness | XS |
-| F2 | Drop dead GC allocator from freestanding runtime | correctness + bloat | M |
+| ~~F2~~ | ~~Drop dead GC allocator from freestanding runtime~~ ✅ | correctness + bloat | M |
 | F3 | No-heap `const` byte-array literal | **high** (closes the biggest gap) | L (language feature) |
 | F4 | LL/SC atomics for pre-8.1 cores | portability (real hardware) | M |
 | F5 | `--target` arch validation | UX (clearer errors) | S |

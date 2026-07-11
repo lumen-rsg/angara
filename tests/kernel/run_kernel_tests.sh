@@ -75,6 +75,15 @@ for test_file in "$SCRIPT_DIR/"*.an; do
                 printf "${RED}FAIL${RESET} (freestanding object missing _start)\n"
                 FAIL=$((FAIL + 1)); BUGS+=("$test_name: no _start"); continue
             fi
+            # Heap-free contract: a freestanding object must not reference the
+            # libc allocator. The type checker rejects every heap feature
+            # (E915–E917), so a malloc/realloc/free undefined symbol means a
+            # dead allocator dependency leaked back into the runtime.
+            if nm --undefined-only "$out" 2>/dev/null | /bin/grep -qwE "malloc|realloc|free"; then
+                leaked=$(nm --undefined-only "$out" 2>/dev/null | /bin/grep -owE "malloc|realloc|free" | sort -u | tr '\n' ' ')
+                printf "${RED}FAIL${RESET} (freestanding object references libc allocator: %s)\n" "$leaked"
+                FAIL=$((FAIL + 1)); BUGS+=("$test_name: heap dep ($leaked)"); continue
+            fi
         fi
         printf "${GREEN}PASS${RESET} (clean relocatable object)\n"
         PASS=$((PASS + 1))
