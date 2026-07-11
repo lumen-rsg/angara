@@ -56,6 +56,47 @@ void LLVMBackend::codegenTopLevelDecls(const std::vector<std::shared_ptr<Stmt>>&
 void LLVMBackend::codegenGlobalVarDecl(const VarDeclStmt& stmt) {
     const std::string name = "g_" + moduleName + "_" + sanitize(stmt.name.lexeme);
 
+    // F3: no-heap byte-array const. A top-level `const X as [u8; N] = b"..."`
+    // lowers to a .rodata [N x i8] constant global — NOT a boxed {i32,i64}
+    // AngaraObject. Detect it here and skip the objType global + the runtime
+    // store in codegenMainFunction entirely.
+    auto sym = const_cast<SymbolTable&>(m_type_checker.getSymbolTable()).resolve(stmt.name.lexeme);
+    if (sym && sym->type && sym->type->kind == TypeKind::FIXED_ARRAY) {
+        auto fa = std::dynamic_pointer_cast<FixedArrayType>(sym->type);
+        if (fa && fa->element_type &&
+            (fa->element_type->toString() == "u8" || fa->element_type->toString() == "i8") &&
+            stmt.initializer) {
+            if (auto lit = std::dynamic_pointer_cast<const Literal>(stmt.initializer)) {
+                if (lit->token.type == TokenType::BYTE_STRING) {
+                    const std::string& bytes = lit->token.lexeme;
+                    auto* i8_ty = llvm::Type::getInt8Ty(*ctx);
+                    auto* arr_ty = llvm::ArrayType::get(i8_ty, fa->size);
+                    // Copy bytes into a ConstantDataArray (no null terminator —
+                    // the array size is exact, enforced by the type checker).
+                    std::vector<llvm::Constant*> elems;
+                    elems.reserve(fa->size);
+                    for (int i = 0; i < fa->size; ++i) {
+                        unsigned char byte_val = static_cast<unsigned char>(i < static_cast<int>(bytes.size()) ? bytes[i] : 0);
+                        elems.push_back(llvm::ConstantInt::get(i8_ty, byte_val));
+                    }
+                    auto* arr_const = llvm::ConstantArray::get(arr_ty, elems);
+                    auto* gv = new llvm::GlobalVariable(
+                        *mod, arr_ty, /*isConstant=*/true,
+                        llvm::GlobalValue::InternalLinkage, arr_const, name);
+                    gv->setDSOLocal(true);
+                    gv->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+                    // Record under both the full name and the bare name (mirrors
+                    // the globals[] dual-keying below) so loadVar finds it.
+                    const std::string bare = sanitize(stmt.name.lexeme);
+                    m_byte_array_globals[name] = {gv, fa->size};
+                    m_byte_array_globals[bare] = {gv, fa->size};
+                    m_byte_array_globals["g_" + bare] = {gv, fa->size};
+                    return;  // skip the objType global
+                }
+            }
+        }
+    }
+
     auto* init_const = llvm::ConstantAggregateZero::get(objType);
 
     auto* global = new llvm::GlobalVariable(
@@ -1707,6 +1748,14 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
                             builder->CreateStore(angara_val, globals[global_name]);
                     }
                 }
+                continue;
+            }
+
+            // F3: byte-array globals are LLVM .rodata constants — no runtime
+            // store. They were emitted in codegenGlobalVarDecl and are read-only.
+            if (m_byte_array_globals.count(name) ||
+                m_byte_array_globals.count("g_" + name) ||
+                m_byte_array_globals.count("g_" + module_name + "_" + name)) {
                 continue;
             }
 

@@ -395,10 +395,30 @@ In freestanding mode you can use:
 - All intrinsic functions (the table above).
 - Inline assembly (in `@unsafe` blocks).
 - `foreign func` declarations (resolved by your linker script / boot stub).
+- **No-heap byte-array constants** — a top-level `const` annotated as
+  `[u8; N]` (or `u8[N]`) and initialized with a `b"..."` byte-string literal
+  lowers to a read-only `.rodata` global. No heap, no string runtime:
+
+  ```angara
+  const MSG as [u8; 20] = b"Hello from Angara!\r\n";
+
+  func main() -> nil {
+      for (let i = 0; i < len(MSG); i = i + 1) {
+          poke32(0x09000000, MSG[i] as i64);  // write each byte to UART
+      }
+      halt();
+  }
+  ```
+
+  `len(MSG)` folds to the compile-time size `N`. Subscript indexing (`MSG[i]`)
+  returns a `u8` with a trap-on-out-of-bounds check, like raw arrays. Regular
+  `"..."` string literals remain banned (E915) — use `b"..."` with a `[u8; N]`
+  target instead.
 
 What is **not** available:
 
-- String operations — require heap allocation (E915).
+- Heap string operations (`"..."` literals, concat, interpolation) — require
+  heap allocation (E915). Use a `[u8; N]` byte-array const (above) instead.
 - Lists — require heap allocation + the list runtime (E916).
 - Records, class instances, data instances — require heap allocation (E917).
 - Native module imports (`attach` of `.so`/`.dll`) — no dynamic loader (E914).

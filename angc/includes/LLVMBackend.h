@@ -382,6 +382,13 @@ namespace angara {
         // String literal intern cache: maps literal text -> module-level global
         std::map<std::string, llvm::GlobalVariable*> m_string_literal_cache;
 
+        // F3: no-heap byte-array globals. Maps the sanitized symbol name (the
+        // same key used by namedVals/globals) to the [N x i8] rodata constant
+        // and its compile-time size. loadVar returns the pointer directly
+        // (these are NOT boxed AngaraObjects); subscript GEPs into it; len()
+        // returns the size as a constant.
+        std::map<std::string, std::pair<llvm::GlobalVariable*, int>> m_byte_array_globals;
+
         // Centralized string-literal initialization function.  All per-literal
         // init calls (string_from_c + rt_pin + rt_clear_unique) are emitted here
         // instead of in whichever function first references the literal during

@@ -134,7 +134,7 @@ object's undefined symbols do **not** include `malloc`/`realloc`/`free` (use
 
 ## P1 — High-impact features
 
-### ☐ F3. Add a no-heap `const` byte-array / byte-string literal
+### ☑ F3. Add a no-heap `const` byte-array / byte-string literal *(done)*
 
 **Why.** This is the single most felt gap. The type checker bans *all* strings
 (E915) because the string runtime needs the heap. But a fixed-size byte literal
@@ -362,7 +362,7 @@ between the two will hit this with no warning.
 |----|------|--------|--------|
 | ~~F1~~ | ~~`@unsafe` save/restore~~ ✅ | correctness | XS |
 | ~~F2~~ | ~~Drop dead GC allocator from freestanding runtime~~ ✅ | correctness + bloat | M |
-| F3 | No-heap `const` byte-array literal | **high** (closes the biggest gap) | L (language feature) |
+| ~~F3~~ | ~~No-heap `const` byte-array literal~~ ✅ | **high** (closes the biggest gap) | L (language feature) |
 | F4 | LL/SC atomics for pre-8.1 cores | portability (real hardware) | M |
 | F5 | `--target` arch validation | UX (clearer errors) | S |
 | F6 | RISC-V / x86 intrinsic tiers | breadth | XL (depends on F8) |

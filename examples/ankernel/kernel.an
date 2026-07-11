@@ -10,6 +10,11 @@ intrinsic func peek32(addr as i64) -> i64;
 intrinsic func poke32(addr as i64, val as i64) -> nil;
 intrinsic func halt() -> nil;
 
+// --- The boot banner as a no-heap .rodata byte array (F3) ---
+// A byte-string literal (b"...") assigned to a [u8; N] const lowers to a
+// read-only global — no heap allocation, no string runtime.
+const MSG as [u8; 20] = b"Hello from Angara!\r\n";
+
 // --- Print a single character to PL011 UART (QEMU virt: 0x0900_0000) ---
 func uart_putc(c as i64) -> nil {
     // UART_FR is at offset 0x18 = 0x09000018
@@ -21,27 +26,11 @@ func uart_putc(c as i64) -> nil {
 
 // --- Kernel entry point ---
 func main() -> nil {
-    // Print "Hello from Angara!\r\n"
-    uart_putc(72);   // H
-    uart_putc(101);  // e
-    uart_putc(108);  // l
-    uart_putc(108);  // l
-    uart_putc(111);  // o
-    uart_putc(32);   // (space)
-    uart_putc(102);  // f
-    uart_putc(114);  // r
-    uart_putc(111);  // o
-    uart_putc(109);  // m
-    uart_putc(32);   // (space)
-    uart_putc(65);   // A
-    uart_putc(110);  // n
-    uart_putc(103);  // g
-    uart_putc(97);   // a
-    uart_putc(114);  // r
-    uart_putc(97);   // a
-    uart_putc(33);   // !
-    uart_putc(13);   // CR
-    uart_putc(10);   // LF
+    // Print the banner byte by byte from the .rodata array.
+    let n as i64 = len(MSG);
+    for (let i = 0; i < n; i = i + 1) {
+        uart_putc(MSG[i] as i64);
+    }
 
     // Halt the CPU
     halt();

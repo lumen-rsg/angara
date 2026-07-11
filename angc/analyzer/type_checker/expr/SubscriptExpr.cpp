@@ -88,6 +88,16 @@ namespace angara {
                 result_type = raw_arr_type->element_type;
             }
         }
+        // F3: fixed-size byte array (const [u8; N]) — subscript returns the
+        // element type (u8/i8). Same integer-index rule as raw arrays.
+        else if (collection_type->kind == TypeKind::FIXED_ARRAY) {
+            auto fixed_arr_type = std::dynamic_pointer_cast<FixedArrayType>(collection_type);
+            if (!isInteger(index_type)) {
+                error(expr.bracket, "Fixed array index must be an integer, but got '" + index_type->toString() + "'.", "E354");
+            } else {
+                result_type = fixed_arr_type->element_type;
+            }
+        }
         // SIMD-5: vector subscript — returns the element type
         else if (collection_type->kind == TypeKind::VECTOR) {
             auto vec_type = std::dynamic_pointer_cast<VectorType>(collection_type);

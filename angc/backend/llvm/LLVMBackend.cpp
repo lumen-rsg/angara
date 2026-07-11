@@ -610,6 +610,12 @@ void LLVMBackend::emitRtTeardown(llvm::Value* state_ptr) {
 }
 
 llvm::Value* LLVMBackend::loadVar(const std::string& n) {
+    // F3: byte-array globals are raw [N x i8] rodata constants, not boxed
+    // AngaraObjects. Return the GlobalVariable pointer directly — subscript
+    // codegen GEPs into it, len() reads the compile-time size from the map.
+    if (auto it = m_byte_array_globals.find(n); it != m_byte_array_globals.end()) {
+        return it->second.first;
+    }
     // LIB-4 Stage S: in async functions, load from frame slot (survives suspend/resume).
     if (m_in_async_function) {
         auto slot_it = m_async_local_slots.find(n);

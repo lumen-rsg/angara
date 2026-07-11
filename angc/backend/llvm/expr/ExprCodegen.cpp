@@ -1665,6 +1665,20 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
     if (auto* var = dynamic_cast<const VarExpr*>(expr.callee.get())) {
         std::string fn = var->name.lexeme;
 
+        // F3: len(byte_array_const) — return the compile-time size N. The type
+        // checker already narrowed this to FIXED_ARRAY args only; anything else
+        // falls through to the normal __ang_len path.
+        if (fn == "len" && getArgs(expr).size() == 1) {
+            if (auto* arg_var = dynamic_cast<const VarExpr*>(getArgs(expr)[0].get())) {
+                auto key = sanitize(arg_var->name.lexeme);
+                auto it = m_byte_array_globals.find(key);
+                if (it == m_byte_array_globals.end()) it = m_byte_array_globals.find("g_" + key);
+                if (it != m_byte_array_globals.end()) {
+                    return makeI64((int64_t)it->second.second);
+                }
+            }
+        }
+
         if (fn == "peek8" || fn == "peek16" || fn == "peek32" || fn == "peek64") {
             if (!getArgs(expr).empty()) {
                 auto* addr = getI64(cg(getArgs(expr)[0]));
@@ -2691,6 +2705,45 @@ llvm::Value* LLVMBackend::cgSubscript(const SubscriptExpr& e) {
 
         // Box back into AngaraObject
         return boxRaw(raw_val, elem_kind);
+    }
+
+    // F3: fixed-size byte array — the object is a raw pointer to a [N x i8]
+    // rodata global (returned directly by loadVar, NOT a boxed AngaraObject).
+    // GEP to the indexed byte, load it, zero-extend to i64, and box as an i64.
+    if (type_it != m_type_checker.getExpressionTypes().end() &&
+        type_it->second->kind == TypeKind::FIXED_ARRAY) {
+        auto fa = std::dynamic_pointer_cast<FixedArrayType>(type_it->second);
+        if (!fa || !fa->element_type) goto fallback_list;
+
+        auto* i8_ty  = llvm::Type::getInt8Ty(*ctx);
+        auto* i64_ty = llvm::Type::getInt64Ty(*ctx);
+        auto* arr_ty = llvm::ArrayType::get(i8_ty, fa->size);
+
+        // Unbox index: extract i64 payload
+        auto* idx_obj = cg(e.index);
+        auto* idx_val = getI64(idx_obj);
+
+        // Bounds check against the compile-time size — trap if out of range.
+        auto* arr_size = llvm::ConstantInt::get(i64_ty, fa->size);
+        auto* in_bounds = builder->CreateAnd(
+            builder->CreateICmpSGE(idx_val, llvm::ConstantInt::get(i64_ty, 0)),
+            builder->CreateICmpSLT(idx_val, arr_size), "ba_in_bounds");
+        auto* parent_fn = builder->GetInsertBlock()->getParent();
+        auto* oob_bb = llvm::BasicBlock::Create(*ctx, "ba_oob", parent_fn);
+        auto* ok_bb  = llvm::BasicBlock::Create(*ctx, "ba_ok",  parent_fn);
+        builder->CreateCondBr(in_bounds, ok_bb, oob_bb);
+        builder->SetInsertPoint(oob_bb);
+        auto* trap = llvm::Intrinsic::getOrInsertDeclaration(mod.get(), llvm::Intrinsic::trap);
+        builder->CreateCall(trap, {});
+        builder->CreateUnreachable();
+        builder->SetInsertPoint(ok_bb);
+
+        // obj is a pointer to [N x i8]. GEP to &obj[0][idx] then load the byte.
+        auto* elem_ptr = builder->CreateGEP(arr_ty, obj,
+            {llvm::ConstantInt::get(i64_ty, 0), idx_val}, "ba_elem_ptr");
+        auto* byte_val = builder->CreateLoad(i8_ty, elem_ptr, "ba_byte");
+        auto* extended = builder->CreateZExt(byte_val, i64_ty, "ba_zext");
+        return makeI64(extended);
     }
 
     // SIMD-5: vector subscript — extract a single element from the vector

@@ -26,7 +26,29 @@ namespace angara {
 
         std::shared_ptr<ASTType> base_type;
 
-        if (match({TokenType::LEFT_BRACE})) {
+        // Prefix fixed-array type: [T; N] (Rust-style). The postfix form T[N]
+        // below produces the same FixedArrayTypeExpr; both syntaxes are accepted.
+        if (match({TokenType::LEFT_BRACKET})) {
+            Token bracket = previous();
+            auto elem = type();
+            consume(TokenType::SEMICOLON, "Expected ';' after element type in '[T; N]' array type.", "E109");
+            Token size_token = consume(TokenType::NUMBER_INT, "Expected array size after ';' in '[T; N]'.", "E109");
+            consume(TokenType::RIGHT_BRACKET, "Expected ']' after array size in '[T; N]'.", "E110");
+            int arr_size;
+            try {
+                arr_size = std::stoi(size_token.lexeme);
+            } catch (const std::out_of_range&) {
+                throw error(size_token, "Array size '" + size_token.lexeme + "' is too large.", "E109");
+            } catch (const std::invalid_argument&) {
+                throw error(size_token, "Invalid array size '" + size_token.lexeme + "'.", "E109");
+            }
+            if (arr_size <= 0) {
+                throw error(size_token,
+                    "Array size must be positive, got " + std::to_string(arr_size) + ".", "E109");
+            }
+            base_type = std::make_shared<FixedArrayTypeExpr>(elem, arr_size);
+        }
+        else if (match({TokenType::LEFT_BRACE})) {
             Token keyword = previous();
             std::vector<RecordFieldType> fields;
             if (!check(TokenType::RIGHT_BRACE)) {

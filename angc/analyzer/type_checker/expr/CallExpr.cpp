@@ -7,6 +7,20 @@ namespace angara {
         // (hash) before accepting the callee, so they don't trigger E377.
         // `spawn` is also handled here for symmetry (it resolves as a function).
         if (auto var_expr = std::dynamic_pointer_cast<const VarExpr>(expr.callee)) {
+            // F3: len([u8; N]) returns the compile-time size N — no runtime call.
+            // Intercept before the general path so it never routes to __ang_len
+            // (which is a heap/string-runtime symbol, absent in --freestanding).
+            if (var_expr->name.lexeme == "len" && expr.arguments.size() == 1) {
+                expr.arguments[0]->accept(*this);
+                auto arg_type = popType();
+                if (arg_type && arg_type->kind == TypeKind::FIXED_ARRAY) {
+                    pushAndSave(&expr, m_type_i64);
+                    return {};
+                }
+                // Not a fixed array — fall through to the normal len() path
+                // (which re-visits the argument). Push the type back so the
+                // general path can pop it; simplest is to not return here.
+            }
             if (var_expr->name.lexeme == "hash") {
                 std::vector<std::shared_ptr<Type>> arg_types;
                 for (const auto& arg_expr : expr.arguments) {
@@ -79,10 +93,16 @@ namespace angara {
             // Freestanding gate (E915): string-producing builtins `len`, `typeof`,
             // and the `string(...)` conversion all touch the string runtime or
             // return a heap-allocated string — neither exists on bare metal.
+            // F3 carve-out: len(byte_array_const) is allowed — the length of a
+            // [u8; N] const is a compile-time constant, no runtime needed.
+            bool len_on_fixed_array =
+                var_expr->name.lexeme == "len" && arg_types.size() == 1 &&
+                arg_types[0] && arg_types[0]->kind == TypeKind::FIXED_ARRAY;
             if (m_is_in_freestanding_mode &&
                 (var_expr->name.lexeme == "len" ||
                  var_expr->name.lexeme == "typeof" ||
-                 var_expr->name.lexeme == "string")) {
+                 var_expr->name.lexeme == "string") &&
+                !len_on_fixed_array) {
                 error(expr.paren,
                       "'" + var_expr->name.lexeme + "()' is not available in --freestanding "
                       "mode (it depends on the string runtime, which requires heap "

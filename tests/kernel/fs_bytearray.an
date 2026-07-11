@@ -1,0 +1,35 @@
+// Freestanding byte-array literal test (F3): a `const ... as [u8; N] = b"..."`
+// lowers to a .rodata [N x i8] global — no heap, no string runtime. Exercises:
+//   • the prefix [u8; N] type syntax (the postfix u8[N] form is also valid)
+//   • BYTE_STRING literal carve-out from E915
+//   • subscript indexing with bounds-check lowering
+//   • len(byte_array) returning a compile-time constant
+//   • the postfix u8[N] type syntax in a second const
+// Must compile under --freestanding and emit a clean object with _start and
+// zero undefined symbols (verified by run_kernel_tests.sh's heap-free check).
+// expect: PASS
+// mode: --freestanding
+intrinsic func poke32(addr as i64, val as i64) -> nil;
+intrinsic func halt() -> nil;
+
+// Prefix syntax: [u8; N]
+const BANNER as [u8; 5] = b"hello";
+
+// Postfix syntax: u8[N] (same FixedArrayType, exercises the existing parser path)
+const TAIL as u8[2] = b"!\n";
+
+func main() -> nil {
+    // len(byte_array) → compile-time constant
+    let n as i64 = len(BANNER);
+
+    // Indexing + iteration: write each byte to a (dummy) MMIO address.
+    for (let i = 0; i < n; i = i + 1) {
+        poke32(0x09000000, BANNER[i] as i64);
+    }
+
+    // Index the postfix-typed array too.
+    poke32(0x09000000, TAIL[0] as i64);
+    poke32(0x09000000, TAIL[1] as i64);
+
+    halt();
+}
