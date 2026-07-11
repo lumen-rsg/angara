@@ -428,6 +428,37 @@ an unrecoverable fault. They require **`@privileged { ... }`**, which implies
 outside `@privileged` is E925. Reserve `@privileged` for a boot stub or
 privilege-management layer.
 
+## Freestanding vs kernel mode
+
+Angara has two strict compile modes that target non-hosted environments. They
+are **mutually exclusive** (`--freestanding` and `--kernel` cannot be combined).
+Both disable the hosted runtime and emit relocatable objects, but they differ
+in *how much* of the Angara runtime they keep:
+
+| Feature | `--freestanding` | `--kernel` |
+|---------|------------------|-----------|
+| **Purpose** | Bare metal, firmware, OS bring-up (no OS at all) | Linux loadable kernel module (`.ko`) |
+| **Heap: strings, lists, records** | Banned (E915–E917). Use `[u8; N]` byte-array consts. | Full support — routes through the kernel allocator (`kmalloc`/`kfree` via a libc shim) |
+| **Entry point** | `_start` (void, external linkage) — a boot stub branches to it | None — exported functions only; the module's `init_module` is C-side |
+| **Threading** (`spawn`, `Mutex`) | Banned (E912/E913) | Banned (E902/E903) |
+| **Exceptions** (`throw`, `try`/`catch`) | Banned (E910/E911) | Banned (E900/E901) |
+| **Native module** `attach` | Banned (E914) | Banned (E904) |
+| **IO** | None — drive MMIO via `peek`/`poke` | `printk` via `angara_kernel_print*` shim |
+| **Allocator** | None (removed — see the "What works without libc" section) | Swappable vtable (`__ang_allocator_set`) → `kmalloc` |
+| **Intrinsics** | Full set (MMIO, atomics, CPU control, cache, TLB, etc.) | Full set |
+| **Inline assembly** | `@unsafe` blocks | `@unsafe` blocks |
+| **Object symbol** | `_start` present, no `main` | Neither `_start` nor `main` |
+
+**When to use which:**
+- `--freestanding` for raw boot on QEMU or real hardware (the `qemu_virt` and
+  `qemu_virt_irq` examples, Arduino, board bring-up).
+- `--kernel` for Angara code compiled into a Linux kernel module — see
+  [`KERNEL-MODE-IMPLEMENTATION.md`](./KERNEL-MODE-IMPLEMENTATION.md) for the
+  full Linux driver guide, libc shim, and Kbuild bridge.
+
+See also: the [`tests/kernel/`](../tests/kernel/) suite runs both modes
+(gate tests `gate_*` → kernel E900–E904; `fs_gate_*` → freestanding E910–E917).
+
 ## Freestanding gates
 
 `--freestanding` is a strict mode. Features that depend on the hosted runtime

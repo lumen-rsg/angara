@@ -339,7 +339,7 @@ being present (skip with a clear message if not). Chain it from
 
 ---
 
-### ☐ F10. Document the `--freestanding` vs `--kernel` relationship
+### ☑ F10. Document the `--freestanding` vs `--kernel` relationship *(done)*
 
 **Why.** The two modes are mutually exclusive (`CLI.cpp:46`) and their runtime
 stubs are near-identical mirrors (`Freestanding.cpp` vs
@@ -375,7 +375,7 @@ between the two will hit this with no warning.
 | ~~F7~~ | ~~GIC / interrupt-vector example~~ ✅ | onboarding | M (example only) |
 | ~~F8~~ | ~~Table-driven intrinsic registry~~ ✅ | maintainability | M-L |
 | ~~F9~~ | ~~QEMU boot tests in CI~~ ✅ | regression safety | S |
-| F10 | Document freestanding vs kernel | UX | XS |
+| ~~F10~~ | ~~Document freestanding vs kernel~~ ✅ | UX | XS |
 
 **Suggested order for a new agent:** F1 → F2 (safe correctness fixes) → F8
 (unblocks F4/F5/F6) → F3 (highest-impact feature) → F4 → F5.

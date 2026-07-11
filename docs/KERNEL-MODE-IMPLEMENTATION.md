@@ -67,6 +67,11 @@
 
 ## TL;DR
 
+> **New to kernel mode?** See the
+> [Freestanding vs kernel mode](./23-bare-metal.md#freestanding-vs-kernel-mode)
+> comparison in the Bare-Metal Programming guide for a quick overview of what
+> each mode permits and when to use which.
+
 Angara already has most of the structural support for kernel-mode targets: a
 `--freestanding` flag that emits a `_start` entry and skips libc-init/native-module
 glue, a `--nostdlib` flag, a **swappable runtime allocator** (the old GC was already
