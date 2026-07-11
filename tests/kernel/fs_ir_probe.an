@@ -26,9 +26,26 @@ intrinsic func dc_csw(set as i64, way as i64, level as i64) -> nil;
 intrinsic func get_sp() -> i64;
 intrinsic func ttbr0_el1() -> i64;
 intrinsic func set_vbar(addr as i64) -> nil;
-// Tier 5: TLB management (@unsafe) + privilege switching (@privileged).
+// MMU control registers (@unsafe).
+intrinsic func set_ttbr0(addr as i64) -> nil;
+intrinsic func set_mair(val as i64) -> nil;
+intrinsic func set_tcr(val as i64) -> nil;
+intrinsic func set_sctlr(val as i64) -> nil;
+intrinsic func get_sctlr() -> i64;
+// Tier 5: TLB management (@unsafe) — full EL1 TLBI instruction space.
 intrinsic func tlbi_vmalle1() -> nil;
+intrinsic func tlbi_vmalle1is() -> nil;
+intrinsic func tlbi_alle1() -> nil;
+intrinsic func tlbi_alle1is() -> nil;
+intrinsic func tlbi_vae1(addr as i64) -> nil;
+intrinsic func tlbi_vae1is(addr as i64) -> nil;
 intrinsic func tlbi_vaae1(addr as i64) -> nil;
+intrinsic func tlbi_vaae1is(addr as i64) -> nil;
+intrinsic func tlbi_aside1(asid as i64) -> nil;
+intrinsic func tlbi_aside1is(asid as i64) -> nil;
+intrinsic func tlbi_vale1(addr as i64) -> nil;
+intrinsic func tlbi_vale1is(addr as i64) -> nil;
+// Tier 5: privilege switching (@privileged).
 intrinsic func eret() -> nil;
 intrinsic func set_spsr(daif as i64) -> nil;
 intrinsic func set_elr(addr as i64) -> nil;
@@ -79,9 +96,26 @@ func main() -> nil {
 // so its LLVM IR lowering can be asserted by run_ir_tests.sh.
 func tier5_probe() -> nil {
     // TLB invalidation — normal privileged system ops, @unsafe only.
+    // Exercises the full EL1 TLBI instruction space.
     @unsafe {
         tlbi_vmalle1();
+        tlbi_vmalle1is();
+        tlbi_alle1();
+        tlbi_alle1is();
+        tlbi_vae1(SCRATCH);
+        tlbi_vae1is(SCRATCH);
         tlbi_vaae1(SCRATCH);
+        tlbi_vaae1is(SCRATCH);
+        tlbi_aside1(0);
+        tlbi_aside1is(0);
+        tlbi_vale1(SCRATCH);
+        tlbi_vale1is(SCRATCH);
+        // MMU control registers.
+        set_ttbr0(SCRATCH);
+        set_mair(0x04FF);
+        set_tcr(0);
+        let s as i64 = get_sctlr();
+        set_sctlr(s);
     }
     // Privilege switching — requires @privileged (implies @unsafe). eret is
     // last because it never returns.

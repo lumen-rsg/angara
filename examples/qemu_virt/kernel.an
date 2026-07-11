@@ -14,6 +14,7 @@
 // --- Intrinsic declarations (compiler-provided, no libc needed) ---
 intrinsic func peek32(addr as i64) -> i64;
 intrinsic func poke32(addr as i64, val as i64) -> nil;
+intrinsic func poke64(addr as i64, val as i64) -> nil;
 intrinsic func halt() -> nil;
 intrinsic func dmb() -> nil;
 intrinsic func dsb() -> nil;
@@ -47,9 +48,16 @@ intrinsic func ic_ivau(addr as i64) -> nil;
 // Context switching (Tier 4): read the stack pointer.
 intrinsic func get_sp() -> i64;
 
+// MMU control registers (Tier 5): program the EL1 MMU. @unsafe.
+intrinsic func set_ttbr0(addr as i64) -> nil;
+intrinsic func set_mair(val as i64) -> nil;
+intrinsic func set_tcr(val as i64) -> nil;
+intrinsic func set_sctlr(val as i64) -> nil;
+intrinsic func get_sctlr() -> i64;
 // TLB management (Tier 5): invalidate TLB entries. @unsafe only — these cannot
 // bric a running kernel (they're normal privileged system operations).
 intrinsic func tlbi_vmalle1() -> nil;
+intrinsic func tlbi_vmalle1is() -> nil;
 intrinsic func tlbi_vaae1(addr as i64) -> nil;
 // Privilege switching (Tier 5): the exception-return primitives. These require
 // @privileged (eret jumps to elr_el1 with the spsr_el1 pstate; a wrong value is
@@ -144,6 +152,10 @@ func main() -> nil {
     // Exercise the Tier 3 + 4 intrinsics: interrupt-mask control, cache
     // maintenance, and the stack-pointer read.
     demo_tier3();
+
+    // Enable the MMU with a flat 1:1 identity map, so the Tier 5 TLBI ops
+    // below invalidate real live TLB entries instead of being no-ops.
+    demo_mmu();
 
     // Exercise the Tier 5 intrinsics: TLB invalidation, the exception-return
     // register writes (read back to prove they landed), and a safe eret-to-self.
@@ -276,6 +288,66 @@ func demo_tier3() -> nil {
     uart_putc(13); uart_putc(10);
 }
 
+// ── MMU enablement ─────────────────────────────────────────────
+// Build a flat 1:1 identity map using a single L1 table of 1 GiB block
+// descriptors (T0SZ=30 → 34-bit VA → walk starts at L1). Two entries cover
+// the regions we care about:
+//   L1[0] → PA 0x00000000 (UART at 0x09000000 + MMIO) → Device-nGnRE
+//   L1[1] → PA 0x40000000 (RAM)                       → Normal WB IS
+// After enabling, the TLBI calls in demo_tier5() invalidate real entries.
+const L1_BASE as i64 = 0x40000000;  // free RAM below the kernel image (0x40080000)
+
+// L1 block descriptor encoding (ARM DDI0487):
+//   bits[1:0]   = 0b01 (block descriptor)
+//   bits[4:2]   = AttrIndx (0=Normal, 1=Device)
+//   bits[9:8]   = Shareability (0b11=inner)
+//   bit[10]     = AF (access flag — must be set)
+//   bits[38:30] = output address / 1 GiB
+const DESC_DEVICE as i64 = 0x00000405;   // PA 0x00000000, AttrIndx=1(Device), AF=1
+const DESC_NORMAL as i64 = 0x40000701;   // PA 0x40000000, AttrIndx=0(Normal), SH=IS, AF=1
+
+// MAIR_EL1: attr0 = Normal WB-RA-WA (0xFF), attr1 = Device-nGnRE (0x04)
+const MAIR_VAL as i64 = 0x04FF;
+// TCR_EL1: T0SZ=30, IRGN0=WB, ORGN0=WB, SH0=inner, TG0=4KiB, IPS=44-bit
+const TCR_VAL as i64 = 0x50000351E;
+
+func demo_mmu() -> nil {
+    @unsafe {
+        // 1) Build the L1 page table in RAM (two entries, rest stays zero = invalid).
+        poke64(L1_BASE + 0, DESC_DEVICE);   // entry 0: 0x00000000–0x3FFFFFFF → Device
+        poke64(L1_BASE + 8, DESC_NORMAL);   // entry 1: 0x40000000–0x7FFFFFFF → Normal WB
+
+        // 2) Program the MMU registers.
+        set_mair(MAIR_VAL);
+        set_tcr(TCR_VAL);
+        set_ttbr0(L1_BASE);
+
+        // 3) Flush stale TLB entries + sync before enabling.
+        tlbi_vmalle1();
+        dsb();
+        isb();
+
+        // 4) Enable the MMU: read SCTLR_EL1, set bit 0 (M), write back.
+        let sctlr as i64 = get_sctlr();
+        sctlr = sctlr | 1;
+        set_sctlr(sctlr);
+        isb();   // pipeline flush — MMU is now live; subsequent fetches are translated
+    }
+
+    // Proof: read SCTLR_EL1 back and print the M bit. If the page tables were
+    // wrong, the UART write below would fault (it goes through the MMU now).
+    let mmu_on as i64 = 0;
+    @unsafe {
+        mmu_on = get_sctlr() & 1;
+    }
+
+    // "MMU=" + hex(mmu_on) + CRLF   (expect 1)
+    let M as i64 = 77; let U as i64 = 85; let eq as i64 = 61;
+    uart_putc(M); uart_putc(M); uart_putc(U); uart_putc(eq);
+    uart_hex(mmu_on);
+    uart_putc(13); uart_putc(10);
+}
+
 // Demonstrate the Tier 5 intrinsics: TLB invalidation (vmalle1 + by-VA), the
 // exception-return register writes (set_spsr/set_elr, read back to prove they
 // landed), and a safe eret-to-self. Each result is printed so `make
@@ -284,9 +356,8 @@ func demo_tier3() -> nil {
 func demo_tier5() -> nil {
     let eq as i64 = 61;
 
-    // 1) TLB invalidation. With the MMU off (QEMU virt's default) these are
-    //    no-ops, but they must not trap. @unsafe is sufficient (these are
-    //    normal privileged system ops, not privilege transitions).
+    // 1) TLB invalidation. demo_mmu() enabled the MMU above, so these now
+    //    invalidate real live TLB entries (not no-ops). @unsafe is sufficient.
     @unsafe {
         tlbi_vmalle1();
         tlbi_vaae1(LOCK_ADDR);

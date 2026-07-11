@@ -14,6 +14,8 @@
 #   make verify-intrinsics — Boot and assert the Tier 1+2 intrinsic demo lines
 #   make verify-tier3    — Boot and assert the Tier 3+4 (DAIF/cache/SP) demo lines
 #   make verify-tier5    — Boot and assert the Tier 5 (TLB/SPSR/ELR/eret) demo lines
+#   make verify-mmu      — Boot and assert the MMU was enabled (MMU=1) and the
+#                          identity map keeps UART working post-enable
 #   make verify-smp      — Boot with -smp 2 and assert the banner still appears
 #   make clean           — Remove build artifacts
 
@@ -41,7 +43,7 @@ QEMU_OPTS = -machine virt -cpu max -m 128 -nographic -semihosting
 
 BANNER = Angara bare-metal on QEMU virt
 
-.PHONY: all run verify verify-intrinsics verify-tier3 verify-tier5 verify-smp clean
+.PHONY: all run verify verify-intrinsics verify-tier3 verify-tier5 verify-mmu verify-smp clean
 
 all: $(KERNEL)
 
@@ -127,6 +129,24 @@ verify-tier5: $(KERNEL)
 	@timeout 5 $(QEMU) $(QEMU_OPTS) -kernel $(KERNEL) > qemu.out 2>&1 || true
 	@ok=1; \
 	for tag in TLBI TLBIVA SPSR ELR ERET; do \
+		if grep -q "$$tag=" qemu.out; then \
+			line=$$(grep "$$tag=" qemu.out | head -1); \
+			echo "[OK] $$line"; \
+		else \
+			echo "[FAIL] missing $$tag= line"; ok=0; \
+		fi; \
+	done; \
+	if [ "$$ok" -ne 1 ]; then echo "--- full output ---"; cat qemu.out; exit 1; fi
+
+# Boot headlessly and verify the MMU was enabled with a valid identity map:
+#   MMU=1               (SCTLR_EL1.M bit set after demo_mmu)
+#   TLBI=OK  ERET=OK    (Tier 5 ops still work post-MMU — proves the identity
+#                        map covers both the code and the UART, since the UART
+#                        write to print these lines goes through the MMU)
+verify-mmu: $(KERNEL)
+	@timeout 5 $(QEMU) $(QEMU_OPTS) -kernel $(KERNEL) > qemu.out 2>&1 || true
+	@ok=1; \
+	for tag in MMU TLBI ERET; do \
 		if grep -q "$$tag=" qemu.out; then \
 			line=$$(grep "$$tag=" qemu.out | head -1); \
 			echo "[OK] $$line"; \

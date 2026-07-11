@@ -193,12 +193,39 @@ it**; loop over the whole buffer in line-size strides (read from `CTR_EL0`).
 #### TLB management (`@unsafe`)
 
 Invalidate TLB entries once the MMU is enabled. These are normal privileged
-system operations and only require `@unsafe`.
+system operations and only require `@unsafe`. The `is`-suffixed variants are
+inner-shareable (they broadcast to other cores); the others apply to the local
+core only.
+
+| Intrinsic | Signature | Lowers to | Scope |
+|-----------|-----------|-----------|-------|
+| `tlbi_vmalle1` | `() -> nil` | `tlbi vmalle1` | all entries (local) |
+| `tlbi_vmalle1is` | `() -> nil` | `tlbi vmalle1is` | all entries (inner-shareable) |
+| `tlbi_alle1` | `() -> nil` | `tlbi alle1` | current-ASID entries (local) |
+| `tlbi_alle1is` | `() -> nil` | `tlbi alle1is` | current-ASID entries (IS) |
+| `tlbi_vae1` | `(addr as i64) -> nil` | `tlbi vae1, x0` | by VA, ASID-specific (local) |
+| `tlbi_vae1is` | `(addr as i64) -> nil` | `tlbi vae1is, x0` | by VA, ASID-specific (IS) |
+| `tlbi_vaae1` | `(addr as i64) -> nil` | `tlbi vaae1, x0` | by VA, ASID-agnostic (local) |
+| `tlbi_vaae1is` | `(addr as i64) -> nil` | `tlbi vaae1is, x0` | by VA, ASID-agnostic (IS) |
+| `tlbi_aside1` | `(asid as i64) -> nil` | `tlbi aside1, x0` | by ASID (local) |
+| `tlbi_aside1is` | `(asid as i64) -> nil` | `tlbi aside1is, x0` | by ASID (IS) |
+| `tlbi_vale1` | `(addr as i64) -> nil` | `tlbi vale1, x0` | last-level by VA (local) |
+| `tlbi_vale1is` | `(addr as i64) -> nil` | `tlbi vale1is, x0` | last-level by VA (IS) |
+
+#### MMU control registers (`@unsafe`)
+
+Program the EL1 MMU. These are the register writes needed to enable paging:
+set up the page-table base (`ttbr0`), memory attributes (`mair`), translation
+control (`tcr`), and flip the M bit in the system control register (`sctlr`).
+`get_sctlr` reads SCTLR_EL1 for the read-modify-write that enables the MMU.
 
 | Intrinsic | Signature | Lowers to |
 |-----------|-----------|-----------|
-| `tlbi_vmalle1` | `() -> nil` | `tlbi vmalle1` (invalidate all entries, EL1) |
-| `tlbi_vaae1` | `(addr as i64) -> nil` | `tlbi vaae1, x0` (invalidate by VA, ASID-agnostic) |
+| `set_ttbr0` | `(addr as i64) -> nil` | `msr ttbr0_el1, x0` (translation table base 0) |
+| `set_mair` | `(val as i64) -> nil` | `msr mair_el1, x0` (memory attribute indirection) |
+| `set_tcr` | `(val as i64) -> nil` | `msr tcr_el1, x0` (translation control) |
+| `set_sctlr` | `(val as i64) -> nil` | `msr sctlr_el1, x0` (system control; bit 0 = MMU on) |
+| `get_sctlr` | `() -> i64` | `mrs sctlr_el1` (read system control) |
 
 #### Privilege switching (`@privileged`)
 

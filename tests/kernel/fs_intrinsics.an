@@ -68,9 +68,26 @@ intrinsic func get_fp() -> i64;
 intrinsic func ttbr0_el1() -> i64;
 intrinsic func set_vbar(addr as i64) -> nil;
 
-// --- Tier 5: TLB management (tlbi) + privilege switching (eret/set_spsr/set_elr) ---
+// --- MMU control registers ---
+intrinsic func set_ttbr0(addr as i64) -> nil;
+intrinsic func set_mair(val as i64) -> nil;
+intrinsic func set_tcr(val as i64) -> nil;
+intrinsic func set_sctlr(val as i64) -> nil;
+intrinsic func get_sctlr() -> i64;
+
+// --- Tier 5: TLB management (full EL1 TLBI space) + privilege switching ---
 intrinsic func tlbi_vmalle1() -> nil;
+intrinsic func tlbi_vmalle1is() -> nil;
+intrinsic func tlbi_alle1() -> nil;
+intrinsic func tlbi_alle1is() -> nil;
+intrinsic func tlbi_vae1(addr as i64) -> nil;
+intrinsic func tlbi_vae1is(addr as i64) -> nil;
 intrinsic func tlbi_vaae1(addr as i64) -> nil;
+intrinsic func tlbi_vaae1is(addr as i64) -> nil;
+intrinsic func tlbi_aside1(asid as i64) -> nil;
+intrinsic func tlbi_aside1is(asid as i64) -> nil;
+intrinsic func tlbi_vale1(addr as i64) -> nil;
+intrinsic func tlbi_vale1is(addr as i64) -> nil;
 intrinsic func eret() -> nil;
 intrinsic func set_spsr(daif as i64) -> nil;
 intrinsic func set_elr(addr as i64) -> nil;

@@ -1974,16 +1974,85 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             emit_void_asm_in("msr vbar_el1, $0", getI64(cg(getArgs(expr)[0])));
             return makeNil();
         }
+        // ── MMU control registers ────────────────────────────────────────
+        // Program the EL1 MMU: translation table base, attribute indirection,
+        // translation control, and system control (the M bit enables paging).
+        // get_sctlr reads SCTLR_EL1 (needed for the read-modify-write that flips
+        // the M bit). These are @unsafe msr/mrs writes, like set_vbar.
+        if (fn == "set_ttbr0" && !getArgs(expr).empty()) {
+            emit_void_asm_in("msr ttbr0_el1, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        if (fn == "set_mair" && !getArgs(expr).empty()) {
+            emit_void_asm_in("msr mair_el1, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        if (fn == "set_tcr" && !getArgs(expr).empty()) {
+            emit_void_asm_in("msr tcr_el1, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        if (fn == "set_sctlr" && !getArgs(expr).empty()) {
+            emit_void_asm_in("msr sctlr_el1, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        if (fn == "get_sctlr") {
+            return makeI64(emit_read_reg("mrs $0, sctlr_el1"));
+        }
         // ── Tier 5: TLB management ────────────────────────────────────────
-        // tlbi invalidates TLB entries. vmalle1 = all, EL1; vaae1 = by VA,
-        // ASID-agnostic. These are normal privileged system ops and only need
-        // @unsafe (they cannot bric a correctly-running kernel).
+        // tlbi invalidates TLB entries. The full EL1 TLBI instruction space:
+        //   vmalle1[s]     all entries (local / inner-shareable)
+        //   alle1[s]       current-ASID entries (local / IS)
+        //   vae1[s]        by VA, ASID-specific (local / IS)
+        //   vaae1[s]       by VA, ASID-agnostic (local / IS)
+        //   aside1[s]      by ASID (local / IS)
+        //   vale1[s]       last-level by VA, ASID-specific (local / IS)
+        // All are normal privileged system ops — @unsafe only.
         if (fn == "tlbi_vmalle1") {
             emit_void_asm("tlbi vmalle1");
             return makeNil();
         }
+        if (fn == "tlbi_vmalle1is") {
+            emit_void_asm("tlbi vmalle1is");
+            return makeNil();
+        }
+        if (fn == "tlbi_alle1") {
+            emit_void_asm("tlbi alle1");
+            return makeNil();
+        }
+        if (fn == "tlbi_alle1is") {
+            emit_void_asm("tlbi alle1is");
+            return makeNil();
+        }
+        if (fn == "tlbi_vae1" && !getArgs(expr).empty()) {
+            emit_void_asm_in("tlbi vae1, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        if (fn == "tlbi_vae1is" && !getArgs(expr).empty()) {
+            emit_void_asm_in("tlbi vae1is, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
         if (fn == "tlbi_vaae1" && !getArgs(expr).empty()) {
             emit_void_asm_in("tlbi vaae1, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        if (fn == "tlbi_vaae1is" && !getArgs(expr).empty()) {
+            emit_void_asm_in("tlbi vaae1is, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        if (fn == "tlbi_aside1" && !getArgs(expr).empty()) {
+            emit_void_asm_in("tlbi aside1, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        if (fn == "tlbi_aside1is" && !getArgs(expr).empty()) {
+            emit_void_asm_in("tlbi aside1is, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        if (fn == "tlbi_vale1" && !getArgs(expr).empty()) {
+            emit_void_asm_in("tlbi vale1, $0", getI64(cg(getArgs(expr)[0])));
+            return makeNil();
+        }
+        if (fn == "tlbi_vale1is" && !getArgs(expr).empty()) {
+            emit_void_asm_in("tlbi vale1is, $0", getI64(cg(getArgs(expr)[0])));
             return makeNil();
         }
         // ── Tier 5: privilege switching ───────────────────────────────────

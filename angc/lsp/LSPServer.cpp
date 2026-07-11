@@ -112,9 +112,25 @@ static const IntrinsicInfo kIntrinsics[] = {
     {"get_fp",     "() -> i64",            "@unsafe", "frame pointer (x29)"},
     {"ttbr0_el1",  "() -> i64",            "@unsafe", "translation table base (MMU)"},
     {"set_vbar",   "(addr as i64) -> nil", "@unsafe", "set exception vector base (msr vbar_el1)"},
-    // Tier 5: TLB management (@unsafe)
-    {"tlbi_vmalle1", "() -> nil",            "@unsafe", "invalidate all TLB entries, EL1"},
-    {"tlbi_vaae1",   "(addr as i64) -> nil", "@unsafe", "invalidate TLB by VA, ASID-agnostic"},
+    // MMU control registers (@unsafe)
+    {"set_ttbr0",  "(addr as i64) -> nil", "@unsafe", "set translation table base 0 (msr ttbr0_el1)"},
+    {"set_mair",   "(val as i64) -> nil",  "@unsafe", "set memory attribute indirection (msr mair_el1)"},
+    {"set_tcr",    "(val as i64) -> nil",  "@unsafe", "set translation control (msr tcr_el1)"},
+    {"set_sctlr",  "(val as i64) -> nil",  "@unsafe", "set system control (msr sctlr_el1; bit 0 = MMU enable)"},
+    {"get_sctlr",  "() -> i64",            "@unsafe", "read system control (mrs sctlr_el1)"},
+    // Tier 5: TLB management (@unsafe) — full EL1 TLBI instruction space
+    {"tlbi_vmalle1",   "() -> nil",            "@unsafe", "invalidate all TLB entries, EL1 (local)"},
+    {"tlbi_vmalle1is", "() -> nil",            "@unsafe", "invalidate all TLB entries, EL1 (inner-shareable)"},
+    {"tlbi_alle1",     "() -> nil",            "@unsafe", "invalidate current-ASID entries (local)"},
+    {"tlbi_alle1is",   "() -> nil",            "@unsafe", "invalidate current-ASID entries (IS)"},
+    {"tlbi_vae1",      "(addr as i64) -> nil", "@unsafe", "invalidate by VA, ASID-specific (local)"},
+    {"tlbi_vae1is",    "(addr as i64) -> nil", "@unsafe", "invalidate by VA, ASID-specific (IS)"},
+    {"tlbi_vaae1",     "(addr as i64) -> nil", "@unsafe", "invalidate by VA, ASID-agnostic (local)"},
+    {"tlbi_vaae1is",   "(addr as i64) -> nil", "@unsafe", "invalidate by VA, ASID-agnostic (IS)"},
+    {"tlbi_aside1",    "(asid as i64) -> nil", "@unsafe", "invalidate by ASID (local)"},
+    {"tlbi_aside1is",  "(asid as i64) -> nil", "@unsafe", "invalidate by ASID (IS)"},
+    {"tlbi_vale1",     "(addr as i64) -> nil", "@unsafe", "invalidate last-level by VA, ASID-specific (local)"},
+    {"tlbi_vale1is",   "(addr as i64) -> nil", "@unsafe", "invalidate last-level by VA, ASID-specific (IS)"},
     // Tier 5: privilege switching (@privileged)
     {"eret",     "() -> nil",            "@privileged", "exception return (terminal; jumps to elr_el1 at spsr_el1 pstate)"},
     {"set_spsr", "(daif as i64) -> nil", "@privileged", "set saved pstate (msr spsr_el1)"},
