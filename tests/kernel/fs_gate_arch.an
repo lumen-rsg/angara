@@ -1,0 +1,11 @@
+// F5 gate test: an AArch64-only intrinsic (get_el) called while targeting a
+// non-AArch64 architecture must be rejected at type-check time (E926), not
+// left to fail at assembly time with a confusing inline-asm error.
+// expect: E926
+// mode: --freestanding --target x86_64
+intrinsic func get_el() -> i64;
+intrinsic func halt() -> nil;
+func main() -> nil {
+    get_el();
+    halt();
+}

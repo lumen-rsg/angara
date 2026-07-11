@@ -1123,6 +1123,14 @@ int CLI::handleExplain(std::vector<std::string> args) {
         "block (which also implies '@unsafe').\n\n"
         "  Fix: Wrap the call in '@privileged { ... }'. These primitives belong\n"
         "  in a boot stub or privilege-management layer."}},
+    {"E926", {"AArch64-only intrinsic on a non-AArch64 target",
+        "The intrinsic (e.g. get_el, wfi, dc_ivac, tlbi_*) lowers to an AArch64\n"
+        "system-register, cache, barrier, or exception instruction. Calling it\n"
+        "while targeting a different architecture (e.g. x86_64, riscv64) would\n"
+        "fail at assembly time with a confusing error from the inline-asm string.\n\n"
+        "  Fix: Compile with '--target aarch64' (and optionally '--cpu <name>').\n"
+        "  Portable intrinsics (halt, nop, atomic_*, clz, ctz, rev, rbit) lower\n"
+        "  to LLVM IR and work on any target."}},
 
     // ═══════════════════════════════════════════════════════════════════════
     //  WARNINGS  (W001–W522)

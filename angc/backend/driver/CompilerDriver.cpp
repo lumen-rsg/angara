@@ -9,6 +9,7 @@
 #include "Colors.h"
 #include "ThreadPool.h"
 #include "BuildManifest.h"
+#include <llvm/TargetParser/Host.h>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -675,6 +676,15 @@ namespace angara {
         TypeChecker typeChecker(*this, errorHandler, disc.name);
         typeChecker.set_kernel_mode(m_kernel_mode);
         typeChecker.set_freestanding_mode(m_freestanding);
+        // F5: derive the target arch from the triple so the type checker can
+        // reject AArch64-only intrinsics on the wrong arch (E926).
+        {
+            std::string triple = m_target_triple.empty()
+                ? llvm::sys::getDefaultTargetTriple() : m_target_triple;
+            auto dash = triple.find('-');
+            typeChecker.set_target_arch(dash != std::string::npos
+                ? triple.substr(0, dash) : triple);
+        }
         try {
             if (!typeChecker.check(statements)) {
                 std::lock_guard<std::mutex> lock(m_cache_mutex);
@@ -968,6 +978,14 @@ namespace angara {
         TypeChecker typeChecker(*this, errorHandler, module_name);
         typeChecker.set_kernel_mode(m_kernel_mode);
         typeChecker.set_freestanding_mode(m_freestanding);
+        // F5: derive the target arch for the E926 intrinsic-arch check.
+        {
+            std::string triple = m_target_triple.empty()
+                ? llvm::sys::getDefaultTargetTriple() : m_target_triple;
+            auto dash = triple.find('-');
+            typeChecker.set_target_arch(dash != std::string::npos
+                ? triple.substr(0, dash) : triple);
+        }
         try {
         if (!typeChecker.check(statements)) { errorHandler.printSummary(); m_had_error = true; return nullptr; }
         } catch (const std::exception& e) {

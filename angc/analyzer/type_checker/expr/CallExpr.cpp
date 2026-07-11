@@ -1,4 +1,5 @@
 #include "TypeChecker.h"
+#include "Intrinsics.h"
 #include <set>
 namespace angara {
 
@@ -127,6 +128,25 @@ namespace angara {
                       "E925");
                 pushAndSave(&expr, m_type_error);
                 return {};
+            }
+            // F5: arch validation — AArch64-only intrinsics on a non-AArch64
+            // target. The intrinsic table's arch field (Any vs AArch64) is the
+            // source of truth. Catches the mismatch at type-check time instead
+            // of letting it fail with a confusing assembly-time error from the
+            // inline-asm string. Portable intrinsics (arch==Any) are never gated.
+            if (auto* ii = findIntrinsic(var_expr->name.lexeme)) {
+                if (ii->arch == IntrinsicArch::AArch64 &&
+                    !m_target_arch.empty() &&
+                    m_target_arch != "aarch64" && m_target_arch != "arm64") {
+                    error(expr.paren,
+                          "Intrinsic '" + var_expr->name.lexeme +
+                          "' requires an AArch64 target (it lowers to a system-register / "
+                          "cache / barrier instruction), but the target is '" +
+                          m_target_arch + "'. Compile with --target aarch64.",
+                          "E926");
+                    pushAndSave(&expr, m_type_error);
+                    return {};
+                }
             }
             if (var_expr->name.lexeme == "spawn") {
                 if (m_is_in_kernel_mode) {

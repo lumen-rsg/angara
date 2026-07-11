@@ -43,17 +43,18 @@ for test_file in "$SCRIPT_DIR/"*.an; do
     if [ -z "$expected" ]; then
         continue
     fi
-    # mode: --kernel (default), --freestanding, or hosted. Hosted tests are
-    # run by a separate runner (they link a C helper), so skip them here.
-    mode=$(strip_ansi < "$test_file" | /bin/grep -oE "mode: (hosted|--[a-z]+)" | head -1 | awk '{print $2}')
-    if [ "$mode" = "hosted" ]; then
-        continue   # owned by run_alloc_swap_test.sh
-    fi
+    # mode: --kernel (default), --freestanding, hosted, or a multi-flag string
+    # like "--freestanding --target x86_64". Hosted tests are run by a separate
+    # runner (they link a C helper), so skip them here.
+    mode=$(strip_ansi < "$test_file" | /bin/grep -oE "mode: .*" | head -1 | sed 's/^mode: //')
+    # Skip hosted tests (they may carry a trailing comment, e.g. "hosted  (run by ...)").
+    case "$mode" in hosted*) continue ;; esac
     [ -n "$mode" ] || mode="--kernel"
     printf "  ${BOLD}%s${RESET} ${DIM}(expect %s, %s)${RESET}: " "$test_name" "$expected" "$mode"
 
     out="$TMPDIR_TEST/${test_name}.o"
-    compile_output=$("$ANGC" --force "$mode" "$test_file" -o "$out" 2>&1) || true
+    # shellcheck disable=SC2086  # intentional: mode may contain multiple flags
+    compile_output=$("$ANGC" --force $mode "$test_file" -o "$out" 2>&1) || true
     clean=$(echo "$compile_output" | strip_ansi)
 
     if [ "$expected" = "PASS" ]; then

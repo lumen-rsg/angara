@@ -371,6 +371,7 @@ position: `$0`, `$1`, …
 | E923 | An asm operand is not integer-typed. |
 | E924 | The `-> type` clause names a non-integer type. |
 | E925 | A privilege-transition intrinsic (`eret`/`set_spsr`/`set_elr`) outside a `@privileged` block. |
+| E926 | An AArch64-only intrinsic (e.g. `get_el`, `wfi`, `dc_ivac`) called while targeting a non-AArch64 architecture. Portable intrinsics (`halt`, `nop`, `atomic_*`, `clz`, `ctz`, `rev`, `rbit`) are never gated. |
 
 ### `@privileged` — the privilege-transition escape hatch
 

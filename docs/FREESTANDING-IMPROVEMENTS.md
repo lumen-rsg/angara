@@ -215,7 +215,7 @@ cpu/features → host) is byte-identical to the prior behavior.
 
 ---
 
-### ☐ F5. `--target` validation: catch AArch64 intrinsics on the wrong arch
+### ☑ F5. `--target` validation: catch AArch64 intrinsics on the wrong arch *(done)*
 
 **Root cause.** The `--target` flag is passed straight through to clang
 (`CompileCommands.cpp:104`). Nothing checks that the AArch64-only intrinsics
@@ -370,7 +370,7 @@ between the two will hit this with no warning.
 | ~~F2~~ | ~~Drop dead GC allocator from freestanding runtime~~ ✅ | correctness + bloat | M |
 | ~~F3~~ | ~~No-heap `const` byte-array literal~~ ✅ | **high** (closes the biggest gap) | L (language feature) |
 | ~~F4~~ | ~~LL/SC atomics for pre-8.1 cores~~ ✅ | portability (real hardware) | M |
-| F5 | `--target` arch validation | UX (clearer errors) | S |
+| ~~F5~~ | ~~`--target` arch validation~~ ✅ | UX (clearer errors) | S |
 | F6 | RISC-V / x86 intrinsic tiers | breadth | XL (depends on F8) |
 | F7 | GIC / interrupt-vector example | onboarding | M (example only) |
 | ~~F8~~ | ~~Table-driven intrinsic registry~~ ✅ | maintainability | M-L |
