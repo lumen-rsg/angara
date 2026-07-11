@@ -35,19 +35,20 @@ const UART_FR as i64 = 0x09000018;  // flag register
 const GRID_W as i64 = 32;           // DQS delay sweep steps (columns, 0..31)
 const GRID_H as i64 = 16;           // DQ delay sweep steps (rows, 0..15)
 
-// --- Simulated DDR PHY model parameters ---
+// --- Simulated DDR PHY model parameters (mutable — randomized per iteration) ---
 // The eye opening is a 2D Gaussian centered here, with these half-widths.
 // EYE_HALF_WIDTH/HEIGHT act as the Gaussian sigma — larger = wider eye =
 // better signal integrity. NOISE_FLOOR is the % failure rate even at center.
 //
+// These are `let` globals (not const) so randomize_phy() can change them each
+// iteration, producing a different eye pattern every loop.
+//
 // The model uses pure integer math (no f64) because the freestanding runtime
-// does not stub the i64↔f64 conversion routines. Distances are computed in
-// a fixed-point-like manner: the normalized distance-squared is scaled by
-// SCALE² so all intermediate values stay in i64 range.
-const EYE_CENTER_DQS as i64 = 16;   // ideal DQS sampling point (column)
-const EYE_CENTER_DQ  as i64 = 8;    // ideal DQ sampling point (row)
-const EYE_HALF_WIDTH as i64 = 7;    // DQS eye half-width (signal quality)
-const EYE_HALF_HEIGHT as i64 = 4;   // DQ eye half-width
+// does not stub the i64↔f64 conversion routines.
+let g_center_dqs as i64 = 16;   // ideal DQS sampling point (column)
+let g_center_dq  as i64 = 8;    // ideal DQ sampling point (row)
+let g_half_width as i64 = 7;    // DQS eye half-width (signal quality)
+let g_half_height as i64 = 4;   // DQ eye half-width
 const NOISE_FLOOR as i64 = 8;       // % jitter-induced failure at center
 const SAMPLES_PER_CELL as i64 = 8;  // reads per delay point (averaging cleans the eye)
 const PASS_THRESHOLD as i64 = 5;    // out of SAMPLES_PER_CELL — majority pass
@@ -159,8 +160,8 @@ func next_rand() -> i64 {
 //   distortion → 0..100 via a precomputed exp(-distortion/65536) curve.)
 func eye_pass_probability(dqs as i64, dq as i64) -> i64 {
     // Normalized offset from center, scaled ×256 for integer precision.
-    let off_dqs as i64 = (256 * (dqs - EYE_CENTER_DQS)) / EYE_HALF_WIDTH;
-    let off_dq  as i64 = (256 * (dq  - EYE_CENTER_DQ))  / EYE_HALF_HEIGHT;
+    let off_dqs as i64 = (256 * (dqs - g_center_dqs)) / g_half_width;
+    let off_dq  as i64 = (256 * (dq  - g_center_dq))  / g_half_height;
     // Squared normalized distance (the Gaussian exponent, ×256²).
     let dist as i64 = off_dqs * off_dqs + off_dq * off_dq;
     // Lookup the Gaussian value. dist ranges from 0 (center) to ~131072 (corner).
@@ -201,6 +202,39 @@ func gaussian_lookup(dist as i64) -> i64 {
 }
 
 // ============================================================================
+// Phase 0: Randomize the simulated PHY parameters for a new eye pattern
+// ============================================================================
+
+// Pick new random eye parameters. The center wanders within the grid (keeping
+// a margin so the eye stays visible), and the half-widths vary to simulate
+// different signal-quality conditions (good link = wide eye, marginal = narrow).
+func randomize_phy() -> nil {
+    // Center: keep a margin of 8 on each axis so the eye doesn't clip off-grid.
+    g_center_dqs = 8 + (next_rand() % (GRID_W - 16));   // 8..23
+    g_center_dq  = 3 + (next_rand() % (GRID_H - 6));    // 3..12
+    // Half-widths: 5..10 (DQS), 3..6 (DQ). Narrower = harder to train.
+    g_half_width  = 5 + (next_rand() % 6);
+    g_half_height = 3 + (next_rand() % 4);
+}
+
+// Print the current PHY parameters as a compact header line:
+//   PHY: center=<dqs>,<dq>  eye=<w>x<h>
+func print_params() -> nil {
+    uart_putc(80); uart_putc(72); uart_putc(89); uart_putc(58); uart_putc(32);  // "PHY: "
+    uart_putc(99); uart_putc(101); uart_putc(110); uart_putc(116); uart_putc(101); uart_putc(114);  // "center"
+    uart_putc(61);  // =
+    uart_dec(g_center_dqs);
+    uart_putc(44);  // ,
+    uart_dec(g_center_dq);
+    uart_putc(32); uart_putc(32);  // "  "
+    uart_putc(101); uart_putc(121); uart_putc(101); uart_putc(61);  // "eye="
+    uart_dec(g_half_width);
+    uart_putc(120);  // x
+    uart_dec(g_half_height);
+    newline();
+}
+
+// ============================================================================
 // Phase 1: DQS × DQ delay sweep
 // ============================================================================
 
@@ -233,9 +267,10 @@ func sweep_eye() -> nil {
 // ============================================================================
 
 // The detected eye center, computed by find_center().
-let g_center_dqs as i64 = 0;
-let g_center_dq as i64 = 0;
+let g_found_dqs as i64 = 0;
+let g_found_dq as i64 = 0;
 let g_pass_count as i64 = 0;
+let g_iteration as i64 = 0;   // loop counter for the continuous training mode
 
 func find_center() -> nil {
     let sum_dqs as i64 = 0;
@@ -253,8 +288,8 @@ func find_center() -> nil {
     }
     g_pass_count = count;
     if (count > 0) {
-        g_center_dqs = sum_dqs / count;
-        g_center_dq = sum_dq / count;
+        g_found_dqs = sum_dqs / count;
+        g_found_dq = sum_dq / count;
     }
 }
 
@@ -317,13 +352,18 @@ func print_report() -> nil {
     let total as i64 = GRID_W * GRID_H;
     let quality as i64 = (g_pass_count * 100) / total;
 
+    // ITER=<n>
+    uart_putc(73); uart_putc(84); uart_putc(69); uart_putc(82); uart_putc(61);  // "ITER="
+    uart_dec(g_iteration);
+    newline();
+
     // EYE_CENTER=<dqs>,<dq>
     uart_putc(69); uart_putc(89); uart_putc(69); uart_putc(95);  // "EYE_"
     uart_putc(67); uart_putc(69); uart_putc(78); uart_putc(84); uart_putc(69); uart_putc(82);  // "CENTER"
     uart_putc(61);  // =
-    uart_dec(g_center_dqs);
+    uart_dec(g_found_dqs);
     uart_putc(44);  // ,
-    uart_dec(g_center_dq);
+    uart_dec(g_found_dq);
     newline();
 
     // EYE_PASSES=<count>
@@ -372,13 +412,28 @@ func print_banner() -> nil {
     newline();
 }
 
+// Print a separator line of dashes (visual break between iterations).
+func print_separator() -> nil {
+    for (let i = 0; i < GRID_W + 6; i = i + 1) {
+        uart_putc(45);   // '-'
+    }
+    newline();
+}
+
+// Busy-wait approximately `ms` milliseconds using the cycle counter.
+// QEMU virt -cpu max runs cntfrq at ~1 GHz, so ~1M cycles ≈ 1 ms.
+func delay_ms(ms as i64) -> nil {
+    let cycles as i64 = ms * 1000000;
+    let start as i64 = cntpct();
+    while ((cntpct() - start) < cycles) {}
+}
+
 // ============================================================================
-// Entry point
+// Entry point — continuous training loop
 // ============================================================================
 
 func main() -> nil {
     // Seed the PRNG from the cycle counter for run-to-run variation.
-    // (Xorshift must not start at 0, so OR in a non-zero constant.)
     rng_state = cntpct() ^ 0x5DEECE66D;
     if (rng_state == 0) {
         rng_state = 1;
@@ -387,17 +442,31 @@ func main() -> nil {
     print_banner();
     newline();
 
-    // Phase 1: sweep the DQS × DQ delay grid.
-    sweep_eye();
+    // Train forever: each iteration gets a fresh random PHY model, producing a
+    // different eye pattern. This mimics continuous retraining (e.g. during
+    // temperature drift on real hardware).
+    while (1 == 1) {
+        g_iteration = g_iteration + 1;
 
-    // Phase 2: find the centroid of the passing region (the eye center).
-    find_center();
+        // Phase 0: randomize the simulated DDR PHY (new center + eye shape).
+        randomize_phy();
 
-    // Phase 3: render the ASCII eye diagram.
-    render_eye();
+        // Phase 1: sweep the DQS × DQ delay grid.
+        sweep_eye();
 
-    // Phase 4: summary report.
-    print_report();
+        // Phase 2: find the centroid of the passing region (the eye center).
+        find_center();
 
-    halt();
+        // Phase 3: render the ASCII eye diagram.
+        print_params();
+        render_eye();
+
+        // Phase 4: summary report.
+        print_report();
+
+        print_separator();
+        delay_ms(500);   // pause so each pattern is readable
+    }
+
+    halt();   // unreachable (the loop never exits)
 }
