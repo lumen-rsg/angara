@@ -129,20 +129,21 @@ namespace angara {
                 pushAndSave(&expr, m_type_error);
                 return {};
             }
-            // F5: arch validation — AArch64-only intrinsics on a non-AArch64
-            // target. The intrinsic table's arch field (Any vs AArch64) is the
-            // source of truth. Catches the mismatch at type-check time instead
-            // of letting it fail with a confusing assembly-time error from the
-            // inline-asm string. Portable intrinsics (arch==Any) are never gated.
+            // F5/F6: arch validation. The intrinsic table's arch bitmask
+            // (Any / AArch64 / RISCV / combinations) is the source of truth.
+            // Catches arch mismatches at type-check time instead of letting
+            // them fail at assembly time. Portable intrinsics (arch==Any) and
+            // multi-arch intrinsics (e.g. wfi = AArch64|RISCV) pass through
+            // when the target bit is set.
             if (auto* ii = findIntrinsic(var_expr->name.lexeme)) {
-                if (ii->arch == IntrinsicArch::AArch64 &&
-                    !m_target_arch.empty() &&
-                    m_target_arch != "aarch64" && m_target_arch != "arm64") {
+                IntrinsicArch target_bit = archBitFromString(m_target_arch);
+                if (!m_target_arch.empty() && target_bit != IntrinsicArch::Any &&
+                    !archMatches(ii->arch, target_bit)) {
                     error(expr.paren,
                           "Intrinsic '" + var_expr->name.lexeme +
-                          "' requires an AArch64 target (it lowers to a system-register / "
-                          "cache / barrier instruction), but the target is '" +
-                          m_target_arch + "'. Compile with --target aarch64.",
+                          "' requires a " + archLabel(ii->arch) +
+                          " target, but the target is '" + m_target_arch +
+                          "'. Compile with the matching --target.",
                           "E926");
                     pushAndSave(&expr, m_type_error);
                     return {};

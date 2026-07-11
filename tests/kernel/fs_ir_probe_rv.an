@@ -1,0 +1,30 @@
+// RISC-V IR-lowering probe (F6): one call per RISC-V Tier-1 intrinsic.
+// Compiled with --emit-llvm --target riscv64-unknown-none-elf; the IR is
+// grepped by run_ir_tests.sh for the expected inline-asm tokens.
+// Owned by run_ir_tests.sh, not the gate runner (no PASS/CAUGHT marker).
+// mode: --freestanding --target riscv64-unknown-none-elf
+intrinsic func rdcycle() -> i64;
+intrinsic func rdtime() -> i64;
+intrinsic func rdinstret() -> i64;
+intrinsic func csrr(csr as i64) -> i64;
+intrinsic func csrw(csr as i64, val as i64) -> nil;
+intrinsic func fence() -> nil;
+intrinsic func fence_i() -> nil;
+intrinsic func sfence_vma() -> nil;
+intrinsic func wfi() -> nil;
+intrinsic func get_sp() -> i64;
+intrinsic func halt() -> nil;
+
+func main() -> nil {
+    let c as i64 = rdcycle();
+    let t as i64 = rdtime();
+    let i as i64 = rdinstret();
+    let v as i64 = csrr(0xc00);
+    csrw(0x300, 0);
+    let sp as i64 = get_sp();
+    fence();
+    fence_i();
+    sfence_vma();
+    wfi();
+    halt();
+}

@@ -120,6 +120,46 @@ assert "set_spsr → msr spsr_el1"    "msr spsr_el1"
 assert "set_elr → msr elr_el1"      "msr elr_el1"
 echo ""
 
+# ── F6: RISC-V Tier-1 intrinsic lowering ────────────────────────────────────
+# Compile the RISC-V probe with a RISC-V target and grep for the expected
+# inline-asm tokens. Uses a second IR file.
+RV_IR_FILE="$(mktemp)"
+# --emit-llvm prints IR to stdout; the -o path may still fail on cross-target
+# CPU mismatches (e.g. host CPU invalid for RISC-V), so we check the IR file
+# content rather than the exit code.
+"$ANGC" --emit-llvm --freestanding --target riscv64-unknown-none-elf --cpu generic --force \
+    "$SCRIPT_DIR/fs_ir_probe_rv.an" -o /tmp/fs_ir_probe_rv \
+    2>/dev/null > "$RV_IR_FILE"
+if [ ! -s "$RV_IR_FILE" ] || ! /bin/grep -qF "target triple" "$RV_IR_FILE"; then
+    printf "${RED}FATAL${RESET}: --emit-llvm --target riscv64 failed to produce IR\n"
+    rm -f "$RV_IR_FILE"
+    FAIL=$((FAIL + 1)); BUGS+=("RISC-V IR: no output")
+else
+    rv_assert() {
+        local label="$1" pattern="$2"
+        if /bin/grep -qF -- "$pattern" "$RV_IR_FILE"; then
+            printf "  ${GREEN}PASS${RESET}  ${DIM}%s${RESET} → %s\n" "$label" "$pattern"
+            PASS=$((PASS + 1))
+        else
+            printf "  ${RED}FAIL${RESET}  ${BOLD}%s${RESET} — expected '%s' in RISC-V IR\n" "$label" "$pattern"
+            FAIL=$((FAIL + 1)); BUGS+=("$label: missing '$pattern'")
+        fi
+    }
+    printf "${BOLD}RISC-V Tier-1: counters & CSR & barriers (inline asm)${RESET}\n"
+    rv_assert "rdcycle → rdcycle"          "rdcycle \$0"
+    rv_assert "rdtime → rdtime"            "rdtime \$0"
+    rv_assert "rdinstret → rdinstret"      "rdinstret \$0"
+    rv_assert "csrr → csrrw"               "csrrw \$0, \$1, x0"
+    rv_assert "csrw → csrrw x0"            "csrrw x0, \$0, \$1"
+    rv_assert "fence → fence rw, rw"       "fence rw, rw"
+    rv_assert "fence_i → fence.i"          "fence.i"
+    rv_assert "sfence_vma → sfence.vma"    "sfence.vma zero, zero"
+    rv_assert "wfi → wfi (RISC-V)"         "wfi"
+    rv_assert "get_sp → mv sp (RISC-V)"    "mv \$0, sp"
+    echo ""
+fi
+rm -f "$RV_IR_FILE"
+
 printf "${BOLD}IR-lowering results: ${GREEN}%d passed${RESET}, ${RED}%d failed${RESET}\n\n" "$PASS" "$FAIL"
 if [ ${#BUGS[@]} -gt 0 ]; then
     printf "${RED}Failures:${RESET}\n"

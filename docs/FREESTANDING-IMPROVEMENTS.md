@@ -243,7 +243,7 @@ x86_64-...` calling `get_el()` expects E926.
 
 ## P2 — Architecture & portability
 
-### ☐ F6. RISC-V / x86 bare-metal intrinsic tiers
+### ☑ F6. RISC-V / x86 bare-metal intrinsic tiers *(RISC-V Tier 1 done)*
 
 **Why.** Every intrinsic today is an AArch64 system register. There is no
 RISC-V set (`csrrw`, `fence`, `sfence.vma`, `wfi`) and no x86 set (`cpuid`,
@@ -371,7 +371,7 @@ between the two will hit this with no warning.
 | ~~F3~~ | ~~No-heap `const` byte-array literal~~ ✅ | **high** (closes the biggest gap) | L (language feature) |
 | ~~F4~~ | ~~LL/SC atomics for pre-8.1 cores~~ ✅ | portability (real hardware) | M |
 | ~~F5~~ | ~~`--target` arch validation~~ ✅ | UX (clearer errors) | S |
-| F6 | RISC-V / x86 intrinsic tiers | breadth | XL (depends on F8) |
+| ~~F6~~ | ~~RISC-V / x86 intrinsic tiers~~ ✅ (RISC-V Tier 1) | breadth | XL (depends on F8) |
 | F7 | GIC / interrupt-vector example | onboarding | M (example only) |
 | ~~F8~~ | ~~Table-driven intrinsic registry~~ ✅ | maintainability | M-L |
 | F9 | QEMU boot tests in CI | regression safety | S |

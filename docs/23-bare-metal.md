@@ -277,6 +277,33 @@ to LLVM IR that is portable across targets (LLVM picks the right lowering per
 architecture); `dc_csw` mixes both — its arithmetic encoding is portable LLVM
 IR, but the final `dc cisw` and the `csselr`/`ccsidr` accesses are AArch64.
 
+#### RISC-V intrinsics (Tier 1)
+
+Compile with `--target riscv64-unknown-none-elf` to target RISC-V bare metal.
+The following intrinsics are RISC-V-specific (calling them on an AArch64 or x86
+target is E926). The portable intrinsics (`halt`, `nop`, `atomic_*`, `clz`,
+`ctz`, `rev`, `rbit`) work on RISC-V without change — they lower to LLVM IR.
+
+`wfi` and `get_sp` are **multi-arch**: they are valid on both AArch64 and
+RISC-V (the codegen picks the right instruction per target).
+
+| Intrinsic | Signature | Lowers to |
+|-----------|-----------|-----------|
+| `rdcycle` | `() -> i64` | `rdcycle` (cycle counter) |
+| `rdtime` | `() -> i64` | `rdtime` (real-time clock) |
+| `rdinstret` | `() -> i64` | `rdinstret` (retired-instruction count) |
+| `csrr` | `(csr as i64) -> i64` | `csrrw $0, $1, x0` (read CSR by number) |
+| `csrw` | `(csr as i64, val as i64) -> nil` | `csrrw x0, $0, $1` (write CSR by number) |
+| `fence` | `() -> nil` | `fence rw, rw` (full memory barrier) |
+| `fence_i` | `() -> nil` | `fence.i` (instruction-cache sync) |
+| `sfence_vma` | `() -> nil` | `sfence.vma zero, zero` (flush all TLB entries) |
+| `wfi` | `() -> nil` | `wfi` (also available on AArch64) |
+| `get_sp` | `() -> i64` | `mv $0, sp` (also available on AArch64 as `mov $0, sp`) |
+
+The `csrr`/`csrw` intrinsics take a CSR *number* (e.g. `0xc00` for `mcycle`,
+`0x300` for `mstatus`). The underlying `csrrw` instruction uses a GPR for the
+CSR address so the number can be a runtime value.
+
 ```angara
 intrinsic func peek32(addr as i64) -> i64;
 intrinsic func poke32(addr as i64, val as i64) -> nil;

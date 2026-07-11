@@ -1,0 +1,11 @@
+// F6 gate test: a RISC-V-only intrinsic (rdcycle) called while targeting
+// AArch64 must be rejected at type-check time (E926), symmetric to the
+// AArch64-on-x86_64 gate test (fs_gate_arch.an).
+// expect: E926
+// mode: --freestanding --target aarch64
+intrinsic func rdcycle() -> i64;
+intrinsic func halt() -> nil;
+func main() -> nil {
+    rdcycle();
+    halt();
+}

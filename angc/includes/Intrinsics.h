@@ -34,13 +34,42 @@ enum class IntrinsicGate {
     Privileged,  // requires a @privileged block (eret/set_spsr/set_elr)
 };
 
-// Target architecture the intrinsic lowers for. Most integer/atomic/bit
-// intrinsics are target-agnostic (LLVM picks the lowering); the system-register
-// and cache ops are AArch64-only.
-enum class IntrinsicArch {
-    Any,      // LLVM IR — portable (atomics, bit ops, halt, nop)
-    AArch64,  // inline asm (mrs/msr/dc/ic/tlbi/eret/daif/wfi/…) — AArch64 only
+// Target architecture the intrinsic lowers for. This is a bitmask so an
+// intrinsic can advertise support for multiple architectures (e.g. `wfi` is
+// valid on both AArch64 and RISC-V). `Any` means portable LLVM IR.
+enum class IntrinsicArch : unsigned {
+    Any     = 0,
+    AArch64 = 1 << 0,
+    RISCV   = 1 << 1,
+    X86_64  = 1 << 2,  // no intrinsics yet, but needed so E926 rejects
+                       // AArch64/RISCV intrinsics on x86_64 targets
 };
+constexpr IntrinsicArch operator|(IntrinsicArch a, IntrinsicArch b) {
+    return static_cast<IntrinsicArch>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
+}
+constexpr bool archMatches(IntrinsicArch intrinsic_arch, IntrinsicArch target_bit) {
+    // Any (0) matches everything. Otherwise the target bit must be set.
+    return intrinsic_arch == IntrinsicArch::Any ||
+           (static_cast<unsigned>(intrinsic_arch) & static_cast<unsigned>(target_bit)) != 0;
+}
+// Maps a target-arch string ("aarch64", "riscv64", …) to its IntrinsicArch bit.
+// Returns Any for unknown/host (so the E926 check stays silent).
+inline IntrinsicArch archBitFromString(const std::string& arch) {
+    if (arch == "aarch64" || arch == "arm64") return IntrinsicArch::AArch64;
+    if (arch == "riscv64" || arch == "riscv32") return IntrinsicArch::RISCV;
+    if (arch == "x86_64" || arch == "x86" || arch == "amd64") return IntrinsicArch::X86_64;
+    return IntrinsicArch::Any;  // unknown — check stays silent (no false alarm)
+}
+inline std::string archLabel(IntrinsicArch arch) {
+    std::string result;
+    if (static_cast<unsigned>(arch) & static_cast<unsigned>(IntrinsicArch::AArch64)) {
+        result += (result.empty() ? "" : " | ") + std::string("AArch64");
+    }
+    if (static_cast<unsigned>(arch) & static_cast<unsigned>(IntrinsicArch::RISCV)) {
+        result += (result.empty() ? "" : " | ") + std::string("RISC-V");
+    }
+    return result.empty() ? "Any" : result;
+}
 
 // What the codegen lowering returns. Used by the coverage self-check to verify
 // each arm produces the declared kind.
@@ -80,7 +109,7 @@ inline constexpr IntrinsicInfo kIntrinsics[] = {
     {"nop",  "() -> nil",  IntrinsicGate::None, IntrinsicArch::Any, IntrinsicResult::Nil, "llvm.donothing"},
 
     // ── Barriers / wait (AArch64 instructions) ──
-    {"wfi",    "() -> nil", IntrinsicGate::Unsafe, IntrinsicArch::AArch64, IntrinsicResult::Nil, "wait for interrupt"},
+    {"wfi",    "() -> nil", IntrinsicGate::Unsafe, IntrinsicArch::AArch64 | IntrinsicArch::RISCV, IntrinsicResult::Nil, "wait for interrupt"},
     {"wfe",    "() -> nil", IntrinsicGate::Unsafe, IntrinsicArch::AArch64, IntrinsicResult::Nil, "wait for event"},
     {"sev",    "() -> nil", IntrinsicGate::Unsafe, IntrinsicArch::AArch64, IntrinsicResult::Nil, "send event (wake other cores)"},
     {"dmb",    "() -> nil", IntrinsicGate::Unsafe, IntrinsicArch::AArch64, IntrinsicResult::Nil, "data memory barrier (full-system)"},
@@ -128,7 +157,7 @@ inline constexpr IntrinsicInfo kIntrinsics[] = {
     {"dc_csw",   "(set as i64, way as i64, level as i64) -> nil", IntrinsicGate::Unsafe, IntrinsicArch::AArch64, IntrinsicResult::Nil, "set/way maintenance (encodes CCSIDR geometry)"},
 
     // ── Context switching / vector table ──
-    {"get_sp",    "() -> i64",            IntrinsicGate::Unsafe, IntrinsicArch::AArch64, IntrinsicResult::I64, "current stack pointer"},
+    {"get_sp",    "() -> i64",            IntrinsicGate::Unsafe, IntrinsicArch::AArch64 | IntrinsicArch::RISCV, IntrinsicResult::I64, "current stack pointer"},
     {"get_fp",    "() -> i64",            IntrinsicGate::Unsafe, IntrinsicArch::AArch64, IntrinsicResult::I64, "frame pointer (x29)"},
     {"ttbr0_el1", "() -> i64",            IntrinsicGate::Unsafe, IntrinsicArch::AArch64, IntrinsicResult::I64, "translation table base (MMU)"},
     {"set_vbar",  "(addr as i64) -> nil", IntrinsicGate::Unsafe, IntrinsicArch::AArch64, IntrinsicResult::Nil, "set exception vector base (msr vbar_el1)"},
@@ -158,6 +187,18 @@ inline constexpr IntrinsicInfo kIntrinsics[] = {
     {"eret",     "() -> nil",            IntrinsicGate::Privileged, IntrinsicArch::AArch64, IntrinsicResult::Nil, "exception return (terminal; jumps to elr_el1 at spsr_el1 pstate)"},
     {"set_spsr", "(daif as i64) -> nil", IntrinsicGate::Privileged, IntrinsicArch::AArch64, IntrinsicResult::Nil, "set saved pstate (msr spsr_el1)"},
     {"set_elr",  "(addr as i64) -> nil", IntrinsicGate::Privileged, IntrinsicArch::AArch64, IntrinsicResult::Nil, "set exception link (msr elr_el1)"},
+
+    // ── RISC-V: counters (machine-mode cycle/time/instret CSRs) ──
+    {"rdcycle",   "() -> i64", IntrinsicGate::Unsafe, IntrinsicArch::RISCV, IntrinsicResult::I64, "RISC-V cycle counter (rdcycle)"},
+    {"rdtime",    "() -> i64", IntrinsicGate::Unsafe, IntrinsicArch::RISCV, IntrinsicResult::I64, "RISC-V timer (rdtime)"},
+    {"rdinstret", "() -> i64", IntrinsicGate::Unsafe, IntrinsicArch::RISCV, IntrinsicResult::I64, "RISC-V retired-instruction counter (rdinstret)"},
+    // ── RISC-V: CSR read/write (runtime CSR number) ──
+    {"csrr", "(csr as i64) -> i64",            IntrinsicGate::Unsafe, IntrinsicArch::RISCV, IntrinsicResult::I64, "RISC-V CSR read (csrrw $0, $1, x0)"},
+    {"csrw", "(csr as i64, val as i64) -> nil", IntrinsicGate::Unsafe, IntrinsicArch::RISCV, IntrinsicResult::Nil, "RISC-V CSR write (csrrw x0, $0, $1)"},
+    // ── RISC-V: barriers ──
+    {"fence",      "() -> nil", IntrinsicGate::Unsafe, IntrinsicArch::RISCV, IntrinsicResult::Nil, "RISC-V full barrier (fence rw, rw)"},
+    {"fence_i",    "() -> nil", IntrinsicGate::Unsafe, IntrinsicArch::RISCV, IntrinsicResult::Nil, "RISC-V instruction fence (fence.i — I-cache sync)"},
+    {"sfence_vma", "() -> nil", IntrinsicGate::Unsafe, IntrinsicArch::RISCV, IntrinsicResult::Nil, "RISC-V TLB flush (sfence.vma zero, zero)"},
 };
 
 inline constexpr size_t kIntrinsicCount = std::size(kIntrinsics);

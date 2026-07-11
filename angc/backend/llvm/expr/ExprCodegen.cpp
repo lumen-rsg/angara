@@ -1698,6 +1698,10 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
                     "tlbi_vae1","tlbi_vae1is","tlbi_vaae1","tlbi_vaae1is",
                     "tlbi_aside1","tlbi_aside1is","tlbi_vale1","tlbi_vale1is",
                     "eret","set_spsr","set_elr",
+                    // F6: RISC-V Tier-1 intrinsics
+                    "rdcycle","rdtime","rdinstret",
+                    "csrr","csrw",
+                    "fence","fence_i","sfence_vma",
                 };
                 if (kHandled.size() != kIntrinsicCount) {
                     std::string msg =
@@ -2036,7 +2040,9 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
         // the exception vector at your table. ttbr0_el1: translation base
         // (only meaningful once an MMU is enabled).
         if (fn == "get_sp") {
-            return makeI64(emit_read_reg("mov $0, sp"));
+            // F6: multi-arch — AArch64 uses `mov`, RISC-V uses `mv`.
+            const char* sp_read = targetTriple.isRISCV() ? "mv $0, sp" : "mov $0, sp";
+            return makeI64(emit_read_reg(sp_read));
         }
         if (fn == "get_fp") {
             return makeI64(emit_read_reg("mov $0, x29"));
@@ -2146,6 +2152,38 @@ llvm::Value* LLVMBackend::cgCall(const CallExpr& expr) {
             emit_void_asm_in("msr elr_el1, $0", getI64(cg(getArgs(expr)[0])));
             return makeNil();
         }
+        // ── F6: RISC-V Tier-1 intrinsics ────────────────────────────────
+        // Counters: rdcycle/rdtime/rdinstret are pseudoinstructions the RISC-V
+        // assembler accepts directly. Same shape as the AArch64 mrs reads.
+        if (fn == "rdcycle")   { return makeI64(emit_read_reg("rdcycle $0")); }
+        if (fn == "rdtime")    { return makeI64(emit_read_reg("rdtime $0")); }
+        if (fn == "rdinstret") { return makeI64(emit_read_reg("rdinstret $0")); }
+        // CSR read/write with a runtime CSR number. RISC-V csrr/csrw pseudos
+        // only accept an immediate CSR; for a register-resolved CSR number we
+        // use the underlying csrrw instruction: csrrw rd, rs_csr, rs_val.
+        //   csrr(csr)    → csrrw $0, $1, x0   (read CSR into $0, discard x0)
+        //   csrw(csr,val) → csrrw x0, $0, $1  (write $1 to CSR $0, discard old)
+        if (fn == "csrr" && !getArgs(expr).empty()) {
+            auto* csr_val = getI64(cg(getArgs(expr)[0]));
+            // Output $0, input CSR $1. Constraint "=r,r".
+            auto* fn_ty = llvm::FunctionType::get(arm_i64_ty, {arm_i64_ty}, false);
+            auto* ia = llvm::InlineAsm::get(fn_ty, "csrrw $0, $1, x0", "=r,r", /*hasSideEffects=*/true);
+            return makeI64(builder->CreateCall(fn_ty, ia, {csr_val}, "csrr"));
+        }
+        if (fn == "csrw" && getArgs(expr).size() >= 2) {
+            auto* csr_val = getI64(cg(getArgs(expr)[0]));
+            auto* new_val = getI64(cg(getArgs(expr)[1]));
+            // Two inputs, no output. Constraint "r,r".
+            auto* void_ty = llvm::Type::getVoidTy(*ctx);
+            auto* fn_ty = llvm::FunctionType::get(void_ty, {arm_i64_ty, arm_i64_ty}, false);
+            auto* ia = llvm::InlineAsm::get(fn_ty, "csrrw x0, $0, $1", "r,r", /*hasSideEffects=*/true);
+            builder->CreateCall(fn_ty, ia, {csr_val, new_val});
+            return makeNil();
+        }
+        // Barriers: fence (full rw,rw), fence.i (I-cache sync), sfence.vma (TLB).
+        if (fn == "fence")      { emit_void_asm("fence rw, rw"); return makeNil(); }
+        if (fn == "fence_i")    { emit_void_asm("fence.i"); return makeNil(); }
+        if (fn == "sfence_vma") { emit_void_asm("sfence.vma zero, zero"); return makeNil(); }
         // TS-2: builtin hash(x) -> i64. Hashes any value via __ang_obj_hash.
         if (fn == "hash") {
             if (!getArgs(expr).empty()) {
