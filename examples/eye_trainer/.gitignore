@@ -1,0 +1,5 @@
+# Build artifacts not covered by the root .gitignore
+*.elf
+*.img
+qemu.out
+.angara/

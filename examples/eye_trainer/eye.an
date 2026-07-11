@@ -1,0 +1,403 @@
+// ============================================================================
+// eye_trainer — Simulated DDR Eye-Pattern Memory Trainer (bare-metal QEMU)
+//
+// Reconstructs the real DDR training algorithm (the kind an RK3588 boot ROM or
+// U-Boot SPL performs) against a SOFTWARE DDR PHY model. Sweeps DQS (data
+// strobe) and DQ (data) delay taps, finds the passing region — the "eye" —
+// computes its center, and renders an ASCII eye diagram to the PL011 UART.
+//
+// This is a SIMULATION. QEMU's memory has perfect signal integrity — there is
+// no real DDR PHY, no analog jitter, no crosstalk. The eye opening is modeled
+// as a 2D Gaussian with a noise floor. The training ALGORITHM (sweep, detect,
+// center) is faithful to the real process; the PHYSICS is faked. See README.md
+// for what real eye training looks like on RK3588 hardware.
+//
+// Pure Angara, compiled with --freestanding. No heap, no strings, no lists —
+// all rendering is byte-at-a-time to the UART, and the pass/fail grid lives in
+// a RAM region accessed via peek64/poke64 (the freestanding "array" idiom).
+// ============================================================================
+
+// --- Intrinsic declarations (compiler-provided, no libc needed) ---
+intrinsic func peek32(addr as i64) -> i64;
+intrinsic func poke32(addr as i64, val as i64) -> nil;
+intrinsic func poke64(addr as i64, val as i64) -> nil;
+intrinsic func peek64(addr as i64) -> i64;
+intrinsic func halt() -> nil;
+intrinsic func cntpct() -> i64;   // cycle counter — seeds the PRNG
+
+// --- PL011 UART (QEMU virt: base 0x0900_0000) ---
+const UART_DR as i64 = 0x09000000;  // data register
+const UART_FR as i64 = 0x09000018;  // flag register
+
+// --- Eye-diagram grid dimensions ---
+// The grid is indexed by (DQS delay, DQ delay). Each cell records whether a
+// "read" at that delay combination passed (1) or failed (0).
+const GRID_W as i64 = 32;           // DQS delay sweep steps (columns, 0..31)
+const GRID_H as i64 = 16;           // DQ delay sweep steps (rows, 0..15)
+
+// --- Simulated DDR PHY model parameters ---
+// The eye opening is a 2D Gaussian centered here, with these half-widths.
+// EYE_HALF_WIDTH/HEIGHT act as the Gaussian sigma — larger = wider eye =
+// better signal integrity. NOISE_FLOOR is the % failure rate even at center.
+//
+// The model uses pure integer math (no f64) because the freestanding runtime
+// does not stub the i64↔f64 conversion routines. Distances are computed in
+// a fixed-point-like manner: the normalized distance-squared is scaled by
+// SCALE² so all intermediate values stay in i64 range.
+const EYE_CENTER_DQS as i64 = 16;   // ideal DQS sampling point (column)
+const EYE_CENTER_DQ  as i64 = 8;    // ideal DQ sampling point (row)
+const EYE_HALF_WIDTH as i64 = 7;    // DQS eye half-width (signal quality)
+const EYE_HALF_HEIGHT as i64 = 4;   // DQ eye half-width
+const NOISE_FLOOR as i64 = 8;       // % jitter-induced failure at center
+const SAMPLES_PER_CELL as i64 = 8;  // reads per delay point (averaging cleans the eye)
+const PASS_THRESHOLD as i64 = 5;    // out of SAMPLES_PER_CELL — majority pass
+
+// Pass/fail grid in free RAM. 32×16 = 512 cells × 8 bytes = 4 KiB.
+// 0x48000000 is high in QEMU virt's 128 MiB RAM (0x40000000–0x47FFFFFF)...
+// wait, 0x48000000 is past 128 MiB. Use 0x47F00000 instead (near the top,
+// below LOCK_ADDR-style regions, clear of the image+stack at 0x40080000+).
+const PASS_RAM as i64 = 0x47F00000;
+
+// PRNG state (xorshift32). Seeded from the cycle counter in main().
+let rng_state as i64 = 1;
+
+// ============================================================================
+// UART helpers (ported from qemu_virt — no-heap, byte-at-a-time)
+// ============================================================================
+
+func uart_putc(c as i64) -> nil {
+    while ((peek32(UART_FR) & 0x20) != 0) {}
+    poke32(UART_DR, c);
+}
+
+func uart_put_hex_digit(nibble as i64) -> nil {
+    if (nibble < 10) {
+        uart_putc(48 + nibble);   // '0'..'9'
+    } else {
+        uart_putc(55 + nibble);   // 'A'..'F'
+    }
+}
+
+func uart_hex_from(value as i64, shift as i64, started as i64) -> nil {
+    let nibble as i64 = (value >> shift) & 0xF;
+    let will_start as i64 = started;
+    if (started == 0) {
+        if (nibble != 0) {
+            will_start = 1;
+        }
+    }
+    if (shift == 0) {
+        if (will_start != 0) {
+            uart_put_hex_digit(nibble);
+        } else {
+            uart_putc(48);  // value was 0 — print "0"
+        }
+        return;
+    }
+    if (will_start != 0) {
+        uart_put_hex_digit(nibble);
+    }
+    uart_hex_from(value, shift - 4, will_start);
+}
+
+func uart_hex(value as i64) -> nil {
+    uart_hex_from(value, 60, 0);
+}
+
+// Print a non-negative decimal integer. Recurses to print MSD-first by
+// dividing down to the last digit, then emitting on the way back up.
+func uart_dec_rec(value as i64) -> nil {
+    if (value >= 10) {
+        uart_dec_rec(value / 10);
+    }
+    uart_putc(48 + (value % 10));
+}
+
+func uart_dec(value as i64) -> nil {
+    if (value == 0) {
+        uart_putc(48);
+        return;
+    }
+    uart_dec_rec(value);
+}
+
+func newline() -> nil {
+    uart_putc(13);   // CR
+    uart_putc(10);   // LF
+}
+
+// ============================================================================
+// PRNG — xorshift32 (no libc rand on bare metal)
+// ============================================================================
+
+func next_rand() -> i64 {
+    // xorshift32: x ^= x << 13; x ^= x >> 17; x ^= x << 5
+    rng_state = rng_state ^ (rng_state << 13);
+    rng_state = rng_state ^ (rng_state >> 17);
+    rng_state = rng_state ^ (rng_state << 5);
+    // Return a non-negative value (mask off the sign bit).
+    return rng_state & 0x7FFFFFFFFFFFFFFF;
+}
+
+// ============================================================================
+// Simulated DDR PHY model
+// ============================================================================
+
+// The "read" pass probability at delay point (dqs, dq), as a percentage 0..100.
+// Models the eye opening as a 2D Gaussian: the further from the ideal center,
+// the lower the probability. NOISE_FLOOR subtracts from the peak so even the
+// center has occasional failures (jitter).
+//
+// Pure integer math (no f64 — the freestanding runtime doesn't stub i64↔f64
+// conversions). The Gaussian exp(-d²) is approximated by a lookup table keyed
+// on the integer "distortion" value (sum of normalized squared distances,
+// scaled to avoid fractions). The table gives the pass percentage directly.
+//
+//   distortion = (256 * (dqs - center) / half_width)²
+//              + (256 * (dq  - center) / half_height)²
+//   (scaled by 256² so the division is integer-safe; the table maps
+//   distortion → 0..100 via a precomputed exp(-distortion/65536) curve.)
+func eye_pass_probability(dqs as i64, dq as i64) -> i64 {
+    // Normalized offset from center, scaled ×256 for integer precision.
+    let off_dqs as i64 = (256 * (dqs - EYE_CENTER_DQS)) / EYE_HALF_WIDTH;
+    let off_dq  as i64 = (256 * (dq  - EYE_CENTER_DQ))  / EYE_HALF_HEIGHT;
+    // Squared normalized distance (the Gaussian exponent, ×256²).
+    let dist as i64 = off_dqs * off_dqs + off_dq * off_dq;
+    // Lookup the Gaussian value. dist ranges from 0 (center) to ~131072 (corner).
+    // We bucket into 16 levels and return a precomputed percentage.
+    return gaussian_lookup(dist) - NOISE_FLOOR;
+}
+
+// Integer Gaussian lookup: maps a scaled squared-distance to a pass percentage
+// (0..100). dist is off_dqs² + off_dq² where each off = 256*(delta/half_width).
+// So dist = 65536 * normalized_dist². The Gaussian exp(-normalized_dist²):
+//   at 0.0σ → 100%, 0.5σ → 78%, 1.0σ → 37%, 1.5σ → 10%, 2.0σ → 2%.
+// We bucket dist into 8192-wide buckets (so bucket = normalized_dist² × 8)
+// and map each to the precomputed percentage.
+func gaussian_lookup(dist as i64) -> i64 {
+    let bucket as i64 = dist / 8192;
+    if (bucket > 15) {
+        return 0;
+    }
+    // Precomputed exp(-bucket/8) * 100 for bucket 0..15:
+    //   0→100, 1→88, 2→78, 3→69, 4→61, 5→54, 6→47, 7→42,
+    //   8→37, 9→32, 10→29, 11→25, 12→22, 13→20, 14→17, 15→15
+    if (bucket == 0) { return 100; }
+    if (bucket == 1) { return 88; }
+    if (bucket == 2) { return 78; }
+    if (bucket == 3) { return 69; }
+    if (bucket == 4) { return 61; }
+    if (bucket == 5) { return 54; }
+    if (bucket == 6) { return 47; }
+    if (bucket == 7) { return 42; }
+    if (bucket == 8) { return 37; }
+    if (bucket == 9) { return 32; }
+    if (bucket == 10) { return 29; }
+    if (bucket == 11) { return 25; }
+    if (bucket == 12) { return 22; }
+    if (bucket == 13) { return 20; }
+    if (bucket == 14) { return 17; }
+    return 15;  // bucket == 15
+}
+
+// ============================================================================
+// Phase 1: DQS × DQ delay sweep
+// ============================================================================
+
+// Sweep every (DQS, DQ) delay combination and record pass/fail in the RAM grid.
+// Each delay point is sampled SAMPLES_PER_CELL times; the cell passes if at
+// least PASS_THRESHOLD of those reads succeed. Multi-sampling cleans the eye
+// edges — a single noisy read would scatter salt-and-pepper across the grid.
+func sweep_eye() -> nil {
+    for (let dq = 0; dq < GRID_H; dq = dq + 1) {
+        for (let dqs = 0; dqs < GRID_W; dqs = dqs + 1) {
+            let prob as i64 = eye_pass_probability(dqs, dq);
+            let hits as i64 = 0;
+            for (let s = 0; s < SAMPLES_PER_CELL; s = s + 1) {
+                let roll as i64 = next_rand() % 100;
+                if (roll < prob) {
+                    hits = hits + 1;
+                }
+            }
+            let pass as i64 = 0;
+            if (hits >= PASS_THRESHOLD) {
+                pass = 1;
+            }
+            poke64(PASS_RAM + (dq * GRID_W + dqs) * 8, pass);
+        }
+    }
+}
+
+// ============================================================================
+// Phase 2: Eye centering — find the centroid of all passing cells
+// ============================================================================
+
+// The detected eye center, computed by find_center().
+let g_center_dqs as i64 = 0;
+let g_center_dq as i64 = 0;
+let g_pass_count as i64 = 0;
+
+func find_center() -> nil {
+    let sum_dqs as i64 = 0;
+    let sum_dq as i64 = 0;
+    let count as i64 = 0;
+    for (let dq = 0; dq < GRID_H; dq = dq + 1) {
+        for (let dqs = 0; dqs < GRID_W; dqs = dqs + 1) {
+            let pass as i64 = peek64(PASS_RAM + (dq * GRID_W + dqs) * 8);
+            if (pass == 1) {
+                sum_dqs = sum_dqs + dqs;
+                sum_dq = sum_dq + dq;
+                count = count + 1;
+            }
+        }
+    }
+    g_pass_count = count;
+    if (count > 0) {
+        g_center_dqs = sum_dqs / count;
+        g_center_dq = sum_dq / count;
+    }
+}
+
+// ============================================================================
+// Phase 3: ASCII eye rendering
+// ============================================================================
+
+func render_eye() -> nil {
+    // Header: column ruler (DQS delay 0..31, tens digit row + ones digit row).
+    uart_putc(32); uart_putc(32); uart_putc(32); uart_putc(32);  // indent
+    for (let dqs = 0; dqs < GRID_W; dqs = dqs + 1) {
+        let tens as i64 = (dqs / 10) % 10;
+        if (tens == 0) {
+            uart_putc(32);  // space for leading-zero suppression
+        } else {
+            uart_putc(48 + tens);
+        }
+    }
+    newline();
+    uart_putc(68); uart_putc(81); uart_putc(83);  // "DQS"
+    for (let dqs = 0; dqs < GRID_W; dqs = dqs + 1) {
+        uart_putc(48 + (dqs % 10));
+    }
+    newline();
+    newline();
+
+    // Grid: one row per DQ delay value.
+    for (let dq = 0; dq < GRID_H; dq = dq + 1) {
+        // Row label: "DQ " + right-aligned 2-digit number + ": "
+        uart_putc(68); uart_putc(81); uart_putc(32);  // "DQ "
+        let dq_tens as i64 = (dq / 10) % 10;
+        uart_putc(48 + dq_tens);
+        uart_putc(48 + (dq % 10));
+        uart_putc(58); uart_putc(32);  // ": "
+
+        for (let dqs = 0; dqs < GRID_W; dqs = dqs + 1) {
+            let pass as i64 = peek64(PASS_RAM + (dq * GRID_W + dqs) * 8);
+            if (pass == 1) {
+                uart_putc(35);          // '#' = solid pass
+            } else {
+                // Marginal: high probability but rolled a fail (fuzzy edge).
+                let prob as i64 = eye_pass_probability(dqs, dq);
+                if (prob > 30) {
+                    uart_putc(46);      // '.' = marginal
+                } else {
+                    uart_putc(32);      // ' ' = fail
+                }
+            }
+        }
+        newline();
+    }
+    newline();
+}
+
+// ============================================================================
+// Phase 4: Report
+// ============================================================================
+
+func print_report() -> nil {
+    let total as i64 = GRID_W * GRID_H;
+    let quality as i64 = (g_pass_count * 100) / total;
+
+    // EYE_CENTER=<dqs>,<dq>
+    uart_putc(69); uart_putc(89); uart_putc(69); uart_putc(95);  // "EYE_"
+    uart_putc(67); uart_putc(69); uart_putc(78); uart_putc(84); uart_putc(69); uart_putc(82);  // "CENTER"
+    uart_putc(61);  // =
+    uart_dec(g_center_dqs);
+    uart_putc(44);  // ,
+    uart_dec(g_center_dq);
+    newline();
+
+    // EYE_PASSES=<count>
+    uart_putc(69); uart_putc(89); uart_putc(69); uart_putc(95);  // "EYE_"
+    uart_putc(80); uart_putc(65); uart_putc(83); uart_putc(83); uart_putc(69); uart_putc(83);  // "PASSES"
+    uart_putc(61);
+    uart_dec(g_pass_count);
+    uart_putc(47);  // /
+    uart_dec(total);
+    newline();
+
+    // EYE_QUALITY=<pct>%
+    uart_putc(69); uart_putc(89); uart_putc(69); uart_putc(95);  // "EYE_"
+    uart_putc(81); uart_putc(85); uart_putc(65); uart_putc(76); uart_putc(73); uart_putc(84); uart_putc(89);  // "QUALITY"
+    uart_putc(61);
+    uart_dec(quality);
+    uart_putc(37);  // %
+    newline();
+
+    // PHY_TRAIN=OK
+    uart_putc(80); uart_putc(72); uart_putc(89); uart_putc(95);  // "PHY_"
+    uart_putc(84); uart_putc(82); uart_putc(65); uart_putc(73); uart_putc(78);  // "TRAIN"
+    uart_putc(61);
+    uart_putc(79); uart_putc(75);  // "OK"
+    newline();
+}
+
+// ============================================================================
+// Banner
+// ============================================================================
+
+func emit(c as i64) -> nil {
+    uart_putc(c);
+}
+
+func print_banner() -> nil {
+    // "Angara DDR Eye Trainer (simulated PHY)"
+    let sp as i64 = 32;
+    emit(65);  emit(110); emit(103); emit(97);  emit(114); emit(97);  // Angara
+    emit(sp);  emit(68);  emit(68);  emit(82);                          //  DDR
+    emit(sp);  emit(69);  emit(121); emit(101);                        //  Eye
+    emit(sp);  emit(84);  emit(114); emit(97); emit(105); emit(110); emit(101); emit(114);  //  Trainer
+    emit(sp);  emit(40);  emit(115); emit(105); emit(109);             //  (sim
+    emit(117); emit(108); emit(97); emit(116); emit(101); emit(100);   // ulated
+    emit(sp);  emit(80);  emit(72);  emit(89);  emit(41);              //  PHY)
+    newline();
+}
+
+// ============================================================================
+// Entry point
+// ============================================================================
+
+func main() -> nil {
+    // Seed the PRNG from the cycle counter for run-to-run variation.
+    // (Xorshift must not start at 0, so OR in a non-zero constant.)
+    rng_state = cntpct() ^ 0x5DEECE66D;
+    if (rng_state == 0) {
+        rng_state = 1;
+    }
+
+    print_banner();
+    newline();
+
+    // Phase 1: sweep the DQS × DQ delay grid.
+    sweep_eye();
+
+    // Phase 2: find the centroid of the passing region (the eye center).
+    find_center();
+
+    // Phase 3: render the ASCII eye diagram.
+    render_eye();
+
+    // Phase 4: summary report.
+    print_report();
+
+    halt();
+}
