@@ -1,0 +1,27 @@
+// Regression test for nested @unsafe blocks. The @unsafe visitor used to set
+// m_is_in_unsafe_context = true on entry and = false on exit unconditionally,
+// so a nested @unsafe block would clobber the enclosing @unsafe context on
+// return — the outer block's statements following the inner block would
+// spuriously hit E920 (asm outside @unsafe). The fix saves/restores the flag.
+//
+// This test places an asm(...) in the OUTER @unsafe block AFTER a nested
+// @unsafe block has closed. Before the fix: E920, no object emitted.
+// After the fix: compiles cleanly with _start.
+// expect: PASS
+// mode: --freestanding
+intrinsic func halt() -> nil;
+
+func main() -> nil {
+    @unsafe {
+        let x as i64 = 0;
+        // Nested @unsafe block — on the buggy path its exit set the flag false.
+        @unsafe {
+            x = asm("mov $0, #1" -> i64, out("=r") x);
+        }
+        // This asm is in the OUTER @unsafe block, after the inner one closed.
+        // It must still be permitted (no E920).
+        let y as i64 = 0;
+        y = asm("mov $0, #2" -> i64, out("=r") y);
+    }
+    halt();
+}
