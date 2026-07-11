@@ -119,4 +119,15 @@ if [ "$FAIL" -eq 0 ]; then
     fi
 fi
 
+# QEMU boot tests: build + boot the bare-metal examples in QEMU and assert
+# the expected serial output. Runs only if the gate + IR suites passed AND
+# qemu-system-aarch64 is installed (the script skips gracefully otherwise).
+QEMU_RC=0
+if [ "$FAIL" -eq 0 ]; then
+    bash "$SCRIPT_DIR/run_qemu_tests.sh" || QEMU_RC=$?
+    if [ "$QEMU_RC" -ne 0 ]; then
+        FAIL=$((FAIL + 1)); BUGS+=("QEMU boot suite: see output above")
+    fi
+fi
+
 [ "$FAIL" -eq 0 ]

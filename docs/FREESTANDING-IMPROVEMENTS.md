@@ -321,7 +321,7 @@ still pass unchanged.
 
 ---
 
-### ☐ F9. Wire QEMU boot tests into the central test runner
+### ☑ F9. Wire QEMU boot tests into the central test runner *(done)*
 
 **Root cause.** `run_kernel_tests.sh` checks compile contracts (`nm`) and IR
 lowering (`grep`), but never *executes* a freestanding image. `make verify` in
@@ -374,7 +374,7 @@ between the two will hit this with no warning.
 | ~~F6~~ | ~~RISC-V / x86 intrinsic tiers~~ ✅ (RISC-V Tier 1) | breadth | XL (depends on F8) |
 | ~~F7~~ | ~~GIC / interrupt-vector example~~ ✅ | onboarding | M (example only) |
 | ~~F8~~ | ~~Table-driven intrinsic registry~~ ✅ | maintainability | M-L |
-| F9 | QEMU boot tests in CI | regression safety | S |
+| ~~F9~~ | ~~QEMU boot tests in CI~~ ✅ | regression safety | S |
 | F10 | Document freestanding vs kernel | UX | XS |
 
 **Suggested order for a new agent:** F1 → F2 (safe correctness fixes) → F8
