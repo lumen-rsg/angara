@@ -264,7 +264,7 @@ to avoid doubling the name ladder. Design first.
 
 ---
 
-### ☐ F7. GIC / interrupt-vector example and scaffolding
+### ☑ F7. GIC / interrupt-vector example and scaffolding *(done)*
 
 **Why.** `set_vbar` exists (`ExprCodegen.cpp:1964-2000`) but no example builds
 the 16-byte-stride exception vector table AArch64 requires, and none talks to
@@ -372,7 +372,7 @@ between the two will hit this with no warning.
 | ~~F4~~ | ~~LL/SC atomics for pre-8.1 cores~~ ✅ | portability (real hardware) | M |
 | ~~F5~~ | ~~`--target` arch validation~~ ✅ | UX (clearer errors) | S |
 | ~~F6~~ | ~~RISC-V / x86 intrinsic tiers~~ ✅ (RISC-V Tier 1) | breadth | XL (depends on F8) |
-| F7 | GIC / interrupt-vector example | onboarding | M (example only) |
+| ~~F7~~ | ~~GIC / interrupt-vector example~~ ✅ | onboarding | M (example only) |
 | ~~F8~~ | ~~Table-driven intrinsic registry~~ ✅ | maintainability | M-L |
 | F9 | QEMU boot tests in CI | regression safety | S |
 | F10 | Document freestanding vs kernel | UX | XS |

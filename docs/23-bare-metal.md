@@ -59,6 +59,24 @@ SP=…        # get_sp → current stack pointer
 See [`examples/qemu_virt/README.md`](../examples/qemu_virt/README.md) for the
 full raw-boot flow and prerequisites.
 
+### Interrupt-driven example
+
+`examples/qemu_virt_irq/` is a step up: it configures the GICv2 interrupt
+controller, the ARM generic physical timer, and an AArch64 exception vector
+table, then prints a tick counter to UART on each timer interrupt. This bridges
+the gap from "intrinsics exist" to "you can write a real interrupt-driven
+bare-metal driver."
+
+```sh
+cd examples/qemu_virt_irq
+make verify-irq   # boot in QEMU and assert TICK= lines appear
+```
+
+The vector table + register save/restore lives in `boot.S` (it's data at fixed
+offsets); the GIC programming and handler logic is pure Angara (`kernel.an`).
+See [`examples/qemu_virt_irq/README.md`](../examples/qemu_virt_irq/README.md)
+for details.
+
 ## Intrinsic functions
 
 The compiler provides built-in intrinsics for memory access, CPU control, atomics,

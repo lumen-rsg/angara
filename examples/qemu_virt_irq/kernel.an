@@ -1,0 +1,185 @@
+// ============================================================================
+// qemu_virt_irq — Bare-metal interrupt demo for QEMU virt (AArch64).
+//
+// Configures the GICv2 interrupt controller and the ARM generic physical
+// timer, installs an exception vector table (via boot.S), and prints a tick
+// counter to UART on each timer interrupt. The split of labor:
+//   boot.S     — vector table + IRQ register save/restore (data layout)
+//   kernel.an  — GIC init, timer setup, irq_handler logic (pure Angara)
+//
+// Compile: angc --freestanding --target aarch64 kernel.an
+// Boot:    qemu-system-aarch64 -machine virt -cpu max -kernel kernel8.img
+// ============================================================================
+
+// ── Intrinsics ──
+intrinsic func peek32(addr as i64) -> i64;
+intrinsic func poke32(addr as i64, val as i64) -> nil;
+intrinsic func poke8(addr as i64, val as i64) -> nil;
+intrinsic func halt() -> nil;
+intrinsic func dmb() -> nil;
+intrinsic func dsb() -> nil;
+intrinsic func isb() -> nil;
+intrinsic func wfi() -> nil;
+intrinsic func enable_irq() -> nil;
+intrinsic func cntfrq() -> i64;
+
+// ── MMIO addresses (QEMU virt, GICv2) ──
+const UART_DR as i64 = 0x09000000;       // PL011 UART data register
+const UART_FR as i64 = 0x09000018;       // PL011 UART flag register
+
+const GICD_BASE as i64 = 0x08000000;     // GICv2 Distributor
+const GICC_BASE as i64 = 0x08010000;     // GICv2 CPU interface
+
+const GICD_CTLR       as i64 = GICD_BASE;          // 0x000 — distributor enable
+const GICD_ISENABLER0 as i64 = GICD_BASE + 0x100;  // 0x100 — enable IRQ 0–31
+const GICD_IPRIORITYR as i64 = GICD_BASE + 0x400;  // 0x400 — per-IRQ priority (byte)
+const GICD_ITARGETSR  as i64 = GICD_BASE + 0x800;  // 0x800 — per-IRQ CPU target (byte)
+const GICC_CTLR       as i64 = GICC_BASE;          // 0x000 — CPU interface enable
+const GICC_PMR        as i64 = GICC_BASE + 0x004;  // 0x004 — priority mask
+const GICC_IAR        as i64 = GICC_BASE + 0x00C;  // 0x00C — interrupt acknowledge
+const GICC_EOIR       as i64 = GICC_BASE + 0x010;  // 0x010 — end of interrupt
+
+// On QEMU virt with GICv2, the physical timer (CNTP) fires on INTID 30
+// (PPI #14). At EL1 without a hypervisor, the physical timer is the one to
+// use (the virtual timer is EL2-controlled).
+const TIMER_IRQ as i64 = 30;
+
+// ── Global state (mutable globals written from irq_handler) ──
+let g_tick_count as i64 = 0;
+let g_timer_interval as i64 = 0;
+
+// ── UART ──
+func uart_putc(c as i64) -> nil {
+    while ((peek32(UART_FR) & 0x20) != 0) {}  // spin if TX FIFO full
+    poke32(UART_DR, c);
+}
+
+// Print a decimal number to UART (no-heap, fixed-width).
+func uart_dec(n as i64) -> nil {
+    if (n == 0) { uart_putc(48); return; }
+    let tmp as i64 = n;
+    let digits as i64 = 0;
+    while (tmp > 0) { tmp = tmp / 10; digits = digits + 1; }
+    let i as i64 = digits;
+    while (i > 0) {
+        let j as i64 = i - 1;
+        let divisor as i64 = 1;
+        let k as i64 = 0;
+        while (k < j) { divisor = divisor * 10; k = k + 1; }
+        let digit as i64 = (n / divisor) % 10;
+        uart_putc(48 + digit);  // ASCII '0' + digit
+        i = i - 1;
+    }
+}
+
+// ── GIC initialization ──
+func gic_init() -> nil {
+    @unsafe {
+        poke32(GICD_CTLR, 1);        // enable distributor
+        poke32(GICC_PMR, 0xFF);      // allow all priorities
+        poke32(GICC_CTLR, 1);        // enable CPU interface
+        dmb();
+    }
+}
+
+// Enable an interrupt (INTID < 32): set priority, route to CPU 0, enable.
+func gic_enable_irq(irq as i64) -> nil {
+    @unsafe {
+        poke8(GICD_IPRIORITYR + irq, 0);    // highest priority
+        poke8(GICD_ITARGETSR + irq, 0x01);  // route to CPU 0
+        poke32(GICD_ISENABLER0, 1 << irq);  // enable
+        dmb();
+    }
+}
+
+// ── Physical timer setup ──
+// CNTP_TVAL_EL0: count-down value (writes reload the timer).
+// CNTP_CTL_EL0: bit 0 = enable, bit 1 = mask (0 = unmasked → fires IRQ).
+func timer_init(interval as i64) -> nil {
+    @unsafe {
+        let zero as i64 = 0;
+        asm("msr cntp_ctl_el0, $0", in("r") zero);
+        asm("msr cntp_tval_el0, $0", in("r") interval);
+        let one as i64 = 1;
+        asm("msr cntp_ctl_el0, $0", in("r") one);
+        isb();
+    }
+}
+
+// ── IRQ handler (called from boot.S el1_irq_handler stub) ──
+// The asm stub saved x0–x30. Here we:
+//   1. Acknowledge the interrupt (read GICC_IAR → IRQ ID).
+//   2. If it's the physical timer (INTID 30), increment the counter, print
+//      it, and reload the timer interval for the next tick.
+//   3. End-of-interrupt (write IRQ ID to GICC_EOIR).
+func irq_handler() -> nil {
+    let iar as i64 = peek32(GICC_IAR);
+    let irq_id as i64 = iar & 0x3FF;   // GICv2: low 10 bits are the INTID
+
+    if (irq_id == TIMER_IRQ) {
+        g_tick_count = g_tick_count + 1;
+
+        // Reload the timer down-counter for the next tick.
+        @unsafe {
+            asm("msr cntp_tval_el0, $0", in("r") g_timer_interval);
+        }
+
+        // Print "TICK=<n>\r\n"
+        uart_putc(84);   // T
+        uart_putc(73);   // I
+        uart_putc(67);   // C
+        uart_putc(75);   // K
+        uart_putc(61);   // =
+        uart_dec(g_tick_count);
+        uart_putc(13);   // CR
+        uart_putc(10);   // LF
+    }
+
+    // Signal end-of-interrupt to the GIC.
+    poke32(GICC_EOIR, iar);
+    dsb();
+}
+
+// ── Entry point ──
+func main() -> nil {
+    @unsafe {
+        gic_init();
+        gic_enable_irq(TIMER_IRQ);
+
+        // 10 ticks/sec: CNTFRQ is 1 GHz on QEMU -cpu max.
+        let freq as i64 = cntfrq();
+        g_timer_interval = freq / 10;
+        timer_init(g_timer_interval);
+
+        // Print a boot banner so the verify target knows the kernel started.
+        // "IRQ demo ready\r\n"
+        uart_putc(73);   // I
+        uart_putc(82);   // R
+        uart_putc(81);   // Q
+        uart_putc(32);   // (space)
+        uart_putc(100);  // d
+        uart_putc(101);  // e
+        uart_putc(109);  // m
+        uart_putc(111);  // o
+        uart_putc(32);   // (space)
+        uart_putc(114);  // r
+        uart_putc(101);  // e
+        uart_putc(97);   // a
+        uart_putc(100);  // d
+        uart_putc(121);  // y
+        uart_putc(13);   // CR
+        uart_putc(10);   // LF
+
+        // Enable IRQs — now timer interrupts will fire and vector to the
+        // boot.S handler, which calls irq_handler().
+        enable_irq();
+    }
+
+    // Sleep until an interrupt wakes us. The timer fires ~10x/sec; each
+    // interrupt prints a TICK= line.
+    while (true) {
+        @unsafe { wfi(); }
+    }
+
+    halt();  // unreachable
+}
