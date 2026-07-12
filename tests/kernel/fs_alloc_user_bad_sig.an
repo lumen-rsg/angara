@@ -1,0 +1,10 @@
+// F11 Phase 2: user defines all three functions but with wrong signatures.
+// __ang_fs_free has an extra parameter — must fail with E929.
+// expect: E929
+// mode: --freestanding --freestanding-alloc
+func __ang_fs_alloc(size as i64) -> i64 { return 0x1000; }
+func __ang_fs_realloc(ptr as i64, old_size as i64, new_size as i64) -> i64 { return 0x2000; }
+func __ang_fs_free(ptr as i64, size as i64, extra as i64) {}
+
+func main() {
+}

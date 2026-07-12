@@ -1,0 +1,14 @@
+// F11: freestanding + allocator — string literals work with --freestanding-alloc.
+// The built-in bump allocator provides the heap; this test verifies the string
+// runtime lowers correctly and the object has no undefined libc symbols.
+// expect: PASS
+// mode: --freestanding --freestanding-alloc
+intrinsic func halt() -> nil;
+
+func main() -> nil {
+    let s = "Hello, bare metal!";
+    let greeting = "Hello" + ", " + "world!";
+    drop s;
+    drop greeting;
+    halt();
+}

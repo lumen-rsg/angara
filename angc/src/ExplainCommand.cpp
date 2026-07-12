@@ -62,17 +62,20 @@ void printCategoryFallback(const std::string& code, char prefix) {
                       << "and no pthreads.\n\n"
                       << CLR_DIM << "  Remove the unsupported construct or compile without "
                       << "--kernel if you are building a userspace program.\n" << CLR_RESET;
-        } else if (num >= 910 && num <= 925) {
+        } else if (num >= 910 && num <= 929) {
             std::cout << CLR_BOLD << CLR_RED << code << CLR_RESET
                       << " is a freestanding-mode restriction error.\n\n"
                       << "When compiling with --freestanding, the hosted runtime is not "
                       << "linked: there is no heap, no string/list/record runtime, no "
                       << "exceptions, no threads, and no dynamic loader. Constructs that "
                       << "depend on any of these are hard errors (E910-E917), as is misuse "
-                      << "of inline assembly (E920-E924).\n\n"
+                      << "of inline assembly (E920-E924). E927 flags a missing --freestanding "
+                      "flag with --freestanding-alloc.\n\n"
                       << CLR_DIM << "  Rewrite the code to use intrinsics + peek/poke for I/O, "
                       << "fixed-size integer buffers instead of heap types, and return codes "
-                      << "instead of exceptions. See docs/23-bare-metal.md.\n" << CLR_RESET;
+                      << "instead of exceptions. For heap types on bare metal, add "
+                      << "--freestanding-alloc to enable the built-in bump allocator. "
+                      << "See docs/23-bare-metal.md.\n" << CLR_RESET;
         } else {
             std::cout << CLR_BOLD << CLR_RED << code << CLR_RESET
                       << " is a compiler error.\n"
@@ -1066,20 +1069,24 @@ int CLI::handleExplain(std::vector<std::string> args) {
         "which exists on bare metal. This covers string literals, concatenation,\n"
         "interpolation, and the len/typeof/string builtins.\n\n"
         "  Fix: Use fixed-size i8 buffers with peek/poke for I/O, and format\n"
-        "  values into integer buffers manually."}},
+        "  values into integer buffers manually. Alternatively, add\n"
+        "  --freestanding-alloc to enable the built-in bump allocator, which\n"
+        "  provides a heap and lifts the E915/E916/E917 restrictions."}},
 
     {"E916", {"list operations not available in freestanding mode",
         "Lists are heap-allocated and require the list runtime, neither of\n"
         "which exists on bare metal.\n\n"
         "  Fix: Use fixed-size i8 arrays or preallocated buffers instead of\n"
-        "  list<T>."}},
+        "  list<T>. Alternatively, add --freestanding-alloc to enable the\n"
+        "  built-in bump allocator."}},
 
     {"E917", {"record/class/data operations not available in freestanding mode",
         "Heap objects (records, class instances, data instances) require\n"
         "allocation and the record runtime, neither of which exists on bare\n"
         "metal.\n\n"
         "  Fix: Lay data out in plain integer globals or foreign structs\n"
-        "  instead of record/class/data literals."}},
+        "  instead of record/class/data literals. Alternatively, add\n"
+        "  --freestanding-alloc to enable the built-in bump allocator."}},
 
     // ═══════════════════════════════════════════════════════════════════════
     //  INLINE-ASSEMBLY RESTRICTION ERRORS  (E920–E924)
@@ -1131,6 +1138,31 @@ int CLI::handleExplain(std::vector<std::string> args) {
         "  Fix: Compile with '--target aarch64' (and optionally '--cpu <name>').\n"
         "  Portable intrinsics (halt, nop, atomic_*, clz, ctz, rev, rbit) lower\n"
         "  to LLVM IR and work on any target."}},
+
+    {"E927", {"--freestanding-alloc requires --freestanding",
+        "The --freestanding-alloc flag enables the built-in bump allocator for\n"
+        "freestanding (bare-metal) mode, allowing strings, lists, and records\n"
+        "on targets with no libc. It only makes sense in --freestanding mode.\n\n"
+        "  Fix: Add --freestanding before --freestanding-alloc, e.g.:\n"
+        "    angc compile --freestanding --freestanding-alloc main.an"}},
+
+    {"E928", {"incomplete custom allocator definition",
+        "When you define custom allocator functions (__ang_fs_alloc,\n"
+        "__ang_fs_realloc, __ang_fs_free) to replace the built-in bump\n"
+        "allocator in --freestanding-alloc mode, all three must be defined\n"
+        "together.\n\n"
+        "  Fix: Define the missing function(s) with the correct signatures:\n"
+        "    __ang_fs_alloc(size: i64) -> i64\n"
+        "    __ang_fs_realloc(ptr: i64, old_size: i64, new_size: i64) -> i64\n"
+        "    __ang_fs_free(ptr: i64, size: i64) -> nil"}},
+
+    {"E929", {"invalid custom allocator signature",
+        "The custom allocator functions must match these exact signatures:\n"
+        "    __ang_fs_alloc(size: i64) -> i64\n"
+        "    __ang_fs_realloc(ptr: i64, old_size: i64, new_size: i64) -> i64\n"
+        "    __ang_fs_free(ptr: i64, size: i64) -> nil\n\n"
+        "  All parameters must be i64; __ang_fs_alloc/__ang_fs_realloc must\n"
+        "  return i64; __ang_fs_free must return nil."}},
 
     // ═══════════════════════════════════════════════════════════════════════
     //  WARNINGS  (W001–W522)

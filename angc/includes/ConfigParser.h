@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <map>
@@ -66,6 +67,8 @@ namespace angara {
         BuildStep post_build;
         BuildProfile profile;
         bool freestanding = false;
+        bool freestanding_alloc = false;        // F11: built-in bump allocator
+        uint64_t freestanding_alloc_size = 0;   // F11: heap bytes (0 = default 1 MiB)
         bool nostdlib = false;
     };
 

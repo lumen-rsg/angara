@@ -4,7 +4,8 @@ namespace angara {
     std::any TypeChecker::visit(const ListExpr& expr) {
         // Freestanding gate (E916): lists are heap-allocated and need the list
         // runtime, neither of which exists on bare metal.
-        if (m_is_in_freestanding_mode) {
+        // F11: relaxed when a freestanding allocator is enabled.
+        if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
             error(Token(),
                   "List literals are not available in --freestanding mode "
                   "(lists require heap allocation and the list runtime). "

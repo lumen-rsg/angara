@@ -99,7 +99,7 @@ namespace angara {
             bool len_on_fixed_array =
                 var_expr->name.lexeme == "len" && arg_types.size() == 1 &&
                 arg_types[0] && arg_types[0]->kind == TypeKind::FIXED_ARRAY;
-            if (m_is_in_freestanding_mode &&
+            if (m_is_in_freestanding_mode && !m_has_fs_allocator &&
                 (var_expr->name.lexeme == "len" ||
                  var_expr->name.lexeme == "typeof" ||
                  var_expr->name.lexeme == "string") &&
@@ -357,7 +357,7 @@ namespace angara {
             }
         }
         else if (callee_type->kind == TypeKind::CLASS) {
-            if (m_is_in_freestanding_mode) {
+            if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
                 error(expr.paren,
                       "Class construction is not available in --freestanding mode "
                       "(class instances require heap allocation). Lay data out in "
@@ -382,7 +382,7 @@ namespace angara {
                 result_type = std::make_shared<InstanceType>(class_type);
             }
         } else if (callee_type->kind == TypeKind::DATA) {
-            if (m_is_in_freestanding_mode) {
+            if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
                 error(expr.paren,
                       "Data construction is not available in --freestanding mode "
                       "(data instances require heap allocation). Lay data out in "

@@ -4,7 +4,8 @@ namespace angara {
     std::any TypeChecker::visit(const RecordExpr& expr) {
         // Freestanding gate (E917): records are heap-allocated and need the
         // record runtime, neither of which exists on bare metal.
-        if (m_is_in_freestanding_mode) {
+        // F11: relaxed when a freestanding allocator is enabled.
+        if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
             error(expr.keys.empty() ? Token() : expr.keys[0],
                   "Record literals are not available in --freestanding mode "
                   "(records require heap allocation and the record runtime). "

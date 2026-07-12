@@ -1,0 +1,10 @@
+// F11: freestanding + allocator — record literals and field access work.
+// expect: PASS
+// mode: --freestanding --freestanding-alloc
+intrinsic func halt() -> nil;
+
+func main() -> nil {
+    let r = { x: 100, y: 200 };
+    drop r;
+    halt();
+}

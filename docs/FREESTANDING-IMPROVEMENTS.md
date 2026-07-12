@@ -376,6 +376,52 @@ between the two will hit this with no warning.
 | ~~F8~~ | ~~Table-driven intrinsic registry~~ ✅ | maintainability | M-L |
 | ~~F9~~ | ~~QEMU boot tests in CI~~ ✅ | regression safety | S |
 | ~~F10~~ | ~~Document freestanding vs kernel~~ ✅ | UX | XS |
+| ~~F11~~ | ~~Built-in bump allocator (`--freestanding-alloc`)~~ ✅ | **high** (unblocks heap types on bare metal) | XL (language feature) |
 
 **Suggested order for a new agent:** F1 → F2 (safe correctness fixes) → F8
 (unblocks F4/F5/F6) → F3 (highest-impact feature) → F4 → F5.
+
+---
+
+### ☑ F11. Built-in bump allocator for freestanding mode *(done)*
+
+**Why.** The strictest gap in `--freestanding` mode was the total ban on heap
+types (E915 strings, E916 lists, E917 records). F3's byte-array literal patched
+the most common case (banner strings), but any project needing dynamic strings,
+lists, or records on bare metal was stuck with hand-rolled C allocators and
+linker glue.
+
+**Fix.** A new `--freestanding-alloc[=SIZE]` flag that enables a built-in bump
+allocator backed by a BSS-placed heap region (default 1 MiB). The allocator is
+entirely self-contained: `malloc`/`realloc`/`free`/`memcpy`/`memset`/`strlen`/
+`strcmp`/`strdup`/`snprintf` are all emitted as in-module LLVM IR — no external
+libc symbols, no linker glue. The freestanding object still satisfies the
+`nm --undefined-only` heap-free contract.
+
+The implementation mirrors `--kernel` mode: it runs the full
+`generateMemoryManagement()` vtable + the data-structure generators
+(strings, lists, records, conversions), but replaces the external libc layer
+with a self-contained one (`generateFreestandingCLib` in
+`angc/backend/llvm/rt/FreestandingAlloc.cpp`). The `_start` entry installs the
+default allocator before any user code runs.
+
+**Key files:**
+- `angc/backend/llvm/rt/FreestandingAlloc.cpp` — new file: bump allocator,
+  in-module libc, IO stubs, exception stubs, `__ang_api_throw_error` → trap.
+- `angc/backend/llvm/RuntimeBuilder.cpp:19-27` — dispatch to
+  `generateFreestandingAllocRuntime` when `m_fs_alloc` is set.
+- `angc/backend/llvm/LLVMBackend.cpp:329` — gate `createAllocatorInitFn` on
+  `!m_fs_alloc` (so the init function is emitted in alloc mode).
+- `angc/backend/llvm/TopLevel.cpp:1637` — allocator init call in `_start`.
+- `angc/analyzer/type_checker/` — 16 heap-gate sites relaxed with
+  `&& !m_has_fs_allocator` (E915/E916/E917). The 6 non-heap gates (E910–E914)
+  are unchanged — exceptions/threads/native-attach remain banned.
+
+**Bump semantics.** `free` is a no-op (bump never reclaims). Heap exhaustion
+traps via `llvm.trap`. Single-threaded only (`spawn`/`Mutex` still E912/E913).
+
+**Verify.** `tests/kernel/fs_alloc_string.an`, `fs_alloc_list.an`,
+`fs_alloc_record.an` (positive gate tests); `fs_alloc_still_no_throw.an`
+(E911 still fires with the allocator). The IR-lowering suite
+(`run_ir_tests.sh`) asserts the bump allocator globals and in-module libc
+definitions are present in the emitted IR.

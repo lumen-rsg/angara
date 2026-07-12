@@ -46,6 +46,34 @@ void CLI::parseFlags(std::vector<std::string>& args) {
         } else if (args[i] == "--freestanding") {
             m_flags.freestanding = true;
             args.erase(args.begin() + i);
+        } else if (args[i] == "--freestanding-alloc" ||
+                   args[i].substr(0, 20) == "--freestanding-alloc=") {
+            // F11: opt-in built-in bump allocator for --freestanding mode.
+            // Accepts an optional size suffix: --freestanding-alloc=4M / =256K / =1048576.
+            // Default (no suffix) is 1 MiB.
+            m_flags.freestanding_alloc = true;
+            if (args[i].size() > 20) {
+                std::string sz = args[i].substr(20);
+                uint64_t mult = 1;
+                char suffix = 0;
+                if (!sz.empty()) {
+                    char last = sz.back();
+                    if (last == 'K' || last == 'k') { mult = 1024ULL; suffix = last; }
+                    else if (last == 'M' || last == 'm') { mult = 1024ULL * 1024; suffix = last; }
+                    else if (last == 'G' || last == 'g') { mult = 1024ULL * 1024 * 1024; suffix = last; }
+                }
+                std::string num = suffix ? sz.substr(0, sz.size() - 1) : sz;
+                try {
+                    m_flags.freestanding_alloc_size = std::stoull(num) * mult;
+                } catch (...) {
+                    std::cerr << "error: invalid size '" << sz << "' for --freestanding-alloc\n";
+                    args.erase(args.begin() + i);
+                    continue;
+                }
+            } else {
+                m_flags.freestanding_alloc_size = 1024ULL * 1024;  // default 1 MiB
+            }
+            args.erase(args.begin() + i);
         } else if (args[i] == "--kernel") {
             // Kernel-mode target: emit a relocatable object with the kernel
             // runtime subset, no _start/main, no libc link step. Mutually

@@ -24,7 +24,8 @@ namespace angara {
                 // Freestanding gate (E915): strings are heap-allocated and need the
                 // string runtime, neither of which exists on bare metal. Drive MMIO
                 // with peek/poke and fixed-size i8 buffers instead.
-                if (m_is_in_freestanding_mode) {
+                // F11: relaxed when a freestanding allocator is enabled (--freestanding-alloc).
+                if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
                     error(expr.token,
                           "String literals are not available in --freestanding mode "
                           "(strings require heap allocation and the string runtime). "
@@ -42,7 +43,8 @@ namespace angara {
                 // [u8; N] / [i8; N] fixed-array type is expected (flowed down via
                 // m_expected_type from a `const ... as [u8; N]` annotation); a bare
                 // b"..." with no array target is still a heap string and errors.
-                if (m_is_in_freestanding_mode) {
+                // F11: relaxed when a freestanding allocator is enabled.
+                if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
                     bool is_byte_array_target = false;
                     int  declared_size = 0;
                     std::shared_ptr<Type> elem_type;

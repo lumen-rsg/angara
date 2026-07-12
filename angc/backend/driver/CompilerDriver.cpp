@@ -676,6 +676,7 @@ namespace angara {
         TypeChecker typeChecker(*this, errorHandler, disc.name);
         typeChecker.set_kernel_mode(m_kernel_mode);
         typeChecker.set_freestanding_mode(m_freestanding);
+        typeChecker.set_fs_allocator(m_fs_alloc);  // F11
         // F5: derive the target arch from the triple so the type checker can
         // reject AArch64-only intrinsics on the wrong arch (E926).
         {
@@ -703,6 +704,72 @@ namespace angara {
         }
 
         auto mod = typeChecker.getModuleType();
+
+        // F11 Phase 2: detect user-supplied allocator override functions.
+        // If the user defines __ang_fs_alloc/__ang_fs_realloc/__ang_fs_free,
+        // they replace the built-in bump allocator. Validate all three exist
+        // with correct signatures, or emit E928/E929.
+        if (m_fs_alloc) {
+            bool found_alloc = false, found_realloc = false, found_free = false;
+            for (const auto& stmt : statements) {
+                auto func = std::dynamic_pointer_cast<const FuncStmt>(stmt);
+                if (!func || func->is_intrinsic || func->is_foreign) continue;
+                if (func->name.lexeme == "__ang_fs_alloc")   found_alloc   = true;
+                if (func->name.lexeme == "__ang_fs_realloc") found_realloc = true;
+                if (func->name.lexeme == "__ang_fs_free")    found_free    = true;
+            }
+
+            if (found_alloc || found_realloc || found_free) {
+                if (!found_alloc || !found_realloc || !found_free) {
+                    std::string missing;
+                    if (!found_alloc) missing += " __ang_fs_alloc";
+                    if (!found_realloc) missing += " __ang_fs_realloc";
+                    if (!found_free)   missing += " __ang_fs_free";
+                    errorHandler.report(Token(),
+                        "When defining a custom freestanding allocator, all three "
+                        "functions must be defined together:" + missing,
+                        "E928");
+                    m_had_error = true;
+                    return false;
+                }
+
+                // Validate signatures via the type-checker's symbol table.
+                auto validate = [&](const std::string& name,
+                                    size_t params, bool returns_i64) -> bool {
+                    auto sym = typeChecker.getSymbolTable().resolve(name);
+                    if (!sym || !sym->type || sym->type->kind != TypeKind::FUNCTION)
+                        return false;
+                    auto ft = std::dynamic_pointer_cast<FunctionType>(sym->type);
+                    if (!ft) return false;
+                    if (ft->param_types.size() != params) return false;
+                    for (const auto& p : ft->param_types)
+                        if (!p || p->toString() != "i64") return false;
+                    if (returns_i64) {
+                        if (!ft->return_type || ft->return_type->toString() != "i64")
+                            return false;
+                    } else {
+                        if (!ft->return_type || (ft->return_type->kind != TypeKind::NIL &&
+                             ft->return_type->kind != TypeKind::VOID)) return false;
+                    }
+                    return true;
+                };
+
+                if (!validate("__ang_fs_alloc",   1, true) ||
+                    !validate("__ang_fs_realloc", 3, true) ||
+                    !validate("__ang_fs_free",    2, false)) {
+                    errorHandler.report(Token(),
+                        "Custom allocator functions must have these signatures:\n"
+                        "  __ang_fs_alloc(size: i64) -> i64\n"
+                        "  __ang_fs_realloc(ptr: i64, old_size: i64, new_size: i64) -> i64\n"
+                        "  __ang_fs_free(ptr: i64, size: i64) -> nil",
+                        "E929");
+                    m_had_error = true;
+                    return false;
+                }
+
+                m_has_fs_user_allocator = true;
+            }
+        }
 
         // Check-only mode: stop after type-checking.
         if (m_check_only) {
@@ -747,7 +814,8 @@ namespace angara {
             LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple,
                                      m_freestanding, m_kernel_mode, m_dump_ir, m_debug,
                                      m_emit_llvm, m_lto, m_dwarf_version,
-                                     m_cpu, m_target_features);
+                                     m_cpu, m_target_features,
+                                     m_fs_alloc, m_fs_alloc_size, m_has_fs_user_allocator);
             if (!m_build_dir.empty()) {
                 llvmBackend.set_output_dir(m_build_dir);
             }
@@ -978,6 +1046,7 @@ namespace angara {
         TypeChecker typeChecker(*this, errorHandler, module_name);
         typeChecker.set_kernel_mode(m_kernel_mode);
         typeChecker.set_freestanding_mode(m_freestanding);
+        typeChecker.set_fs_allocator(m_fs_alloc);  // F11
         // F5: derive the target arch for the E926 intrinsic-arch check.
         {
             std::string triple = m_target_triple.empty()
@@ -1017,7 +1086,8 @@ namespace angara {
                 return nullptr;
             }
 
-            LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding, m_kernel_mode, m_dump_ir, m_debug, m_emit_llvm, m_lto, m_dwarf_version);
+            LLVMBackend llvmBackend(typeChecker, errorHandler, m_target_triple, m_freestanding, m_kernel_mode, m_dump_ir, m_debug, m_emit_llvm, m_lto, m_dwarf_version,
+                                    "", "", m_fs_alloc, m_fs_alloc_size, m_has_fs_user_allocator);
             if (!llvmBackend.generate(statements, mod, m_angara_module_names, m_native_lib_names)) {
                 m_had_error = true;
                 return nullptr;

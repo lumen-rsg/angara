@@ -49,7 +49,10 @@ namespace angara {
                     bool lto = false,
                     int dwarf_version = 0,
                     const std::string& cpu = "",
-                    const std::string& target_features = "");
+                    const std::string& target_features = "",
+                    bool fs_alloc = false,
+                    uint64_t fs_alloc_size = 0,
+                    bool has_user_allocator = false);
 
         /// Releases LLVM objects (cleanup at process exit).
         ~LLVMBackend();
@@ -474,6 +477,10 @@ namespace angara {
 
         bool m_freestanding = false;
         bool m_kernel = false;
+        bool m_fs_alloc = false;              // F11: built-in bump allocator
+        uint64_t m_fs_alloc_size = 0;         // F11: heap bytes
+        bool m_has_user_allocator = false;     // F11 Phase 2: user-defined allocator
+        llvm::GlobalVariable* m_user_allocator_vtable = nullptr;  // F11 Phase 2
         bool m_dump_ir = false;
         bool m_emit_llvm = false;
         bool m_debug = false;

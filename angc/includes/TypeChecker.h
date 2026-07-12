@@ -99,6 +99,10 @@ namespace angara {
         /// attach: no heap/threading/dynamic-loader on bare metal).
         void set_freestanding_mode(bool v) { m_is_in_freestanding_mode = v; }
 
+        /// F11: Marks that a freestanding allocator is enabled (--freestanding-alloc),
+        /// which relaxes the E915/E916/E917 heap-feature gates.
+        void set_fs_allocator(bool v) { m_has_fs_allocator = v; }
+
         /// F5: sets the target architecture string (e.g. "aarch64", "x86_64").
         /// Used by the E926 check to reject AArch64-only intrinsics on the
         /// wrong arch. Empty = unknown (check stays silent).
@@ -376,6 +380,7 @@ namespace angara {
         bool m_is_in_privileged_context = false;  // inside @privileged (eret/set_spsr/set_elr)
         bool m_is_in_kernel_mode = false;   // --kernel: hard-error try/spawn/Mutex/native-attach
         bool m_is_in_freestanding_mode = false;  // --freestanding: hard-error heap/threading/native-attach
+        bool m_has_fs_allocator = false;          // F11: --freestanding-alloc relaxes E915/E916/E917
         std::string m_target_arch;  // F5: "aarch64"/"x86_64"/… (empty = unknown)
 
         // Downward-flowing expected type for bidirectional inference (e.g., list<i64> -> [] element type)

@@ -52,8 +52,13 @@ public:
     /// @param kernel       If true, generates the kernel-mode runtime subset (full
     ///                     collections/strings, kernel IO via printk, no exceptions/
     ///                     threads/glibc-IO). Mutually exclusive with freestanding.
+    /// @param fs_alloc     F11: if true (with freestanding), generates the
+    ///                     freestanding+allocator runtime (built-in bump allocator +
+    ///                     full collections/strings/records). Requires freestanding.
+    /// @param fs_alloc_size F11: heap bytes for the built-in allocator (0 = 1 MiB).
     RuntimeBuilder(llvm::LLVMContext& context, llvm::Module& module, llvm::IRBuilder<>& builder,
-                   bool freestanding = false, bool kernel = false, unsigned jmp_buf_size = 1024);
+                   bool freestanding = false, bool kernel = false, unsigned jmp_buf_size = 1024,
+                   bool fs_alloc = false, uint64_t fs_alloc_size = 0);
 
     /// Destructor — defined in RuntimeBuilder.cpp where RuntimeBuilder is complete.
     ~RuntimeBuilder();
@@ -239,6 +244,18 @@ private:
     void generateKernelIO();
     /// Generates minimal stub functions for freestanding (bare-metal) targets.
     void generateFreestandingStubs();
+    /// F11: Generates the freestanding+allocator runtime — the full collection/
+    /// string/record generators backed by a built-in bump allocator (no libc
+    /// dependency). Mirrors generateKernelRuntime but with a self-contained libc
+    /// layer and no-op IO stubs instead of kernel printk routing.
+    void generateFreestandingAllocRuntime(uint64_t heap_size);
+    /// F11: Defines libc functions (malloc/realloc/free/memcpy/memset/strlen/
+    /// strcmp/strdup/snprintf) in-module for freestanding+alloc mode. malloc is
+    /// a bump allocator over a BSS-placed heap region; free is a no-op.
+    void generateFreestandingCLib(uint64_t heap_size);
+    /// F11: Emits no-op stubs for IO symbols (__ang_io_print, etc.) referenced by
+    /// codegen. Bare metal has no stdout; the user drives MMIO via peek/poke.
+    void generateFreestandingIOStubs();
     /// Builds the AngaraAPI vtable struct for native module interop.
     void generateModuleAPIVTable();
 
@@ -341,6 +358,9 @@ private:
 
     // Unified Allocator (vtable: alloc/realloc/free)
     llvm::StructType*     m_allocator_type          = nullptr;
+public:
+    /// Returns the AngaraAllocator vtable struct type ({ptr, ptr, ptr}).
+    llvm::StructType* getAllocatorType() const { return m_allocator_type; }
     llvm::GlobalVariable* m_g_allocator             = nullptr;
 
     llvm::FunctionCallee m_fn_rt_alloc;
@@ -364,6 +384,8 @@ private:
 
     bool m_freestanding = false;
     bool m_kernel = false;
+    bool m_fs_alloc = false;          ///< F11: built-in bump allocator for freestanding mode
+    uint64_t m_fs_alloc_size = 0;     ///< F11: heap bytes (0 = default 1 MiB)
     unsigned m_jmp_buf_size = 1024;   ///< Safe minimum jmp_buf size for the target (see LLVMBackend::getJmpBufSize)
 };
 

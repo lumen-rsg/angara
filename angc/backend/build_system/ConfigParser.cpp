@@ -14,6 +14,23 @@ namespace angara {
         return str.substr(first, (last - first) + 1);
     }
 
+    // F11: Parse a size string with optional K/M/G suffix (e.g. "4M", "256K", "1048576").
+    uint64_t parse_size_string(const std::string& value) {
+        std::string v = trim(value);
+        if (v.empty()) return 0;
+        uint64_t mult = 1;
+        char last = v.back();
+        if (last == 'K' || last == 'k') mult = 1024ULL;
+        else if (last == 'M' || last == 'm') mult = 1024ULL * 1024;
+        else if (last == 'G' || last == 'g') mult = 1024ULL * 1024 * 1024;
+        std::string num = (mult > 1) ? v.substr(0, v.size() - 1) : v;
+        try {
+            return std::stoull(num) * mult;
+        } catch (...) {
+            return 0;
+        }
+    }
+
     std::vector<std::string> parse_list(const std::string& value) {
         std::vector<std::string> list;
         std::string v = trim(value);
@@ -153,6 +170,13 @@ namespace angara {
                 }
                 else if (key == "freestanding") {
                     currentProject.freestanding = (value == "true" || value == "1" || value == "yes");
+                }
+                else if (key == "freestanding-alloc") {
+                    currentProject.freestanding_alloc = (value == "true" || value == "1" || value == "yes");
+                }
+                else if (key == "freestanding-alloc-size") {
+                    // Parse size string (e.g. "4M", "256K", "1048576").
+                    currentProject.freestanding_alloc_size = parse_size_string(value);
                 }
                 else if (key == "nostdlib") {
                     currentProject.nostdlib = (value == "true" || value == "1" || value == "yes");

@@ -145,7 +145,7 @@ namespace angara {
                         result_type = m_type_i64;
                     }
                 } else if (left_type->toString() == "string" && isInteger(right_type)) {
-                    if (m_is_in_freestanding_mode) {
+                    if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
                         error(expr.op,
                               "String repetition is not available in --freestanding mode "
                               "(strings require heap allocation and the string runtime).",
@@ -218,7 +218,7 @@ namespace angara {
                         result_type = m_type_i64;
                     }
                 } else if (left_type->toString() == "string" && right_type->toString() == "string") {
-                    if (m_is_in_freestanding_mode) {
+                    if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
                         error(expr.op,
                               "String concatenation is not available in --freestanding mode "
                               "(strings require heap allocation and the string runtime).",

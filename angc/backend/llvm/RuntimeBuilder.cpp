@@ -7,8 +7,8 @@ using namespace llvm;
 
 namespace angara {
 
-RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>& builder, bool freestanding, bool kernel, unsigned jmp_buf_size)
-    : m_ctx(context), m_module(module), m_builder(builder), m_freestanding(freestanding), m_kernel(kernel), m_jmp_buf_size(jmp_buf_size) {
+RuntimeBuilder::RuntimeBuilder(LLVMContext& context, Module& module, IRBuilder<>& builder, bool freestanding, bool kernel, unsigned jmp_buf_size, bool fs_alloc, uint64_t fs_alloc_size)
+    : m_ctx(context), m_module(module), m_builder(builder), m_freestanding(freestanding), m_kernel(kernel), m_fs_alloc(fs_alloc), m_fs_alloc_size(fs_alloc_size), m_jmp_buf_size(jmp_buf_size) {
 }
 
 RuntimeBuilder::~RuntimeBuilder() = default;
@@ -17,7 +17,12 @@ void RuntimeBuilder::generateRuntime() {
     generateTypes();
 
     if (m_freestanding) {
-        generateFreestandingStubs();
+        if (m_fs_alloc) {
+            // F11: freestanding + built-in bump allocator — full runtime.
+            generateFreestandingAllocRuntime(m_fs_alloc_size);
+        } else {
+            generateFreestandingStubs();
+        }
         return;
     }
 

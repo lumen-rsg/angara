@@ -76,16 +76,32 @@ void RuntimeBuilder::generateFreestandingStubs() {
     stub_nil("__ang_list_get", FunctionType::get(obj_ty, {obj_ty, obj_ty}, false), m_fn_list_get);
     stub_void("__ang_list_push", FunctionType::get(void_ty, {obj_ty, obj_ty}, false), m_fn_list_push);
 
+    // __ang_fs_panic: user-overridable panic hook (weak default = no-op).
+    // The user provides a strong definition (e.g. in their C boot stub) to
+    // intercept runtime errors (div-by-zero, bounds checks, etc.) and write
+    // diagnostics before the inevitable trap.
+    {
+        auto* i8_ptr = PointerType::get(m_ctx, 0);
+        auto* panic_ty = FunctionType::get(void_ty, {i8_ptr}, false);
+        auto* panic_fn = cast<Function>(
+            m_module.getOrInsertFunction("__ang_fs_panic", panic_ty).getCallee());
+        panic_fn->setLinkage(Function::WeakODRLinkage);
+        IRBuilder<>(BasicBlock::Create(m_ctx, "entry", panic_fn)).CreateRetVoid();
+    }
+
     // Shift/division/modulo bounds checks (H12) route runtime errors here. Bare
     // metal has no exception machinery, so a runtime error is a hard fault —
     // emit llvm.trap so the CPU halts cleanly instead of calling an undefined
-    // symbol. Signature: void(ptr msg).
+    // symbol. The user-overridable __ang_fs_panic hook is called first so
+    // diagnostics can be written (e.g. to UART) before the trap.
+    // Signature: void(ptr msg).
     {
         auto* i8_ptr = PointerType::get(m_ctx, 0);
         auto* fn = createRuntimeFunc("__ang_api_throw_error",
             FunctionType::get(void_ty, {i8_ptr}, false));
         auto* e = BasicBlock::Create(m_ctx, "entry", fn);
         IRBuilder<> b(e);
+        b.CreateCall(m_module.getFunction("__ang_fs_panic"), {fn->arg_begin()});
         auto* trap = Intrinsic::getOrInsertDeclaration(&m_module, Intrinsic::trap);
         b.CreateCall(trap, {});
         b.CreateUnreachable();

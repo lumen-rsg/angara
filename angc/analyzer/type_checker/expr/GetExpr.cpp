@@ -232,7 +232,7 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::LIST) {
-        if (m_is_in_freestanding_mode) {
+        if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
             error(expr.name,
                   "List operations are not available in --freestanding mode "
                   "(lists require heap allocation and the list runtime).",
@@ -290,7 +290,7 @@ std::any TypeChecker::visit(const GetExpr& expr) {
         }
     }
     else if (unwrapped_object_type->kind == TypeKind::RECORD) {
-        if (m_is_in_freestanding_mode) {
+        if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
             error(expr.name,
                   "Record operations are not available in --freestanding mode "
                   "(records require heap allocation and the record runtime).",

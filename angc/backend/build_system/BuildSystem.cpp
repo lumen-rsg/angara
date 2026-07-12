@@ -425,6 +425,7 @@ namespace angara {
         else if (!config.profile.target.empty()) driver.set_target(config.profile.target);
         if (!m_sysroot.empty()) driver.set_sysroot(m_sysroot);
         if (config.freestanding) driver.set_freestanding(true);
+        if (config.freestanding_alloc) driver.set_fs_alloc(true, config.freestanding_alloc_size);
         if (config.nostdlib) driver.set_nostdlib(true);
         if (m_build_mode == BuildMode::DEBUG) driver.set_debug(true);
 

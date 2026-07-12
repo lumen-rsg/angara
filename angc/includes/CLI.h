@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdlib>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -30,6 +31,8 @@ struct CliFlags {
     bool dump_ir = false;
     bool emit_llvm = false;
     bool freestanding = false;
+    bool freestanding_alloc = false;       // F11: --freestanding-alloc (built-in heap)
+    uint64_t freestanding_alloc_size = 0;  // F11: heap bytes (0 = default 1 MiB)
     bool nostdlib = false;
     bool kernel = false;       // Kernel-mode target (Linux loadable module)
     bool release = false;

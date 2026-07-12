@@ -160,6 +160,89 @@ else
 fi
 rm -f "$RV_IR_FILE"
 
+# ── F11: Freestanding + allocator IR-lowering ───────────────────────────────
+# Compile a freestanding+alloc program and verify the bump allocator + libc
+# functions are emitted in-module (not as undefined external declarations).
+ALLOC_IR_FILE="$(mktemp)"
+cat > /tmp/fs_alloc_probe.an << 'PROBE'
+intrinsic func halt() -> nil;
+func main() -> nil {
+    let s = "hello";
+    let xs = [1, 2, 3];
+    drop s;
+    drop xs;
+    halt();
+}
+PROBE
+"$ANGC" --emit-llvm --freestanding --freestanding-alloc --force \
+    /tmp/fs_alloc_probe.an -o /tmp/fs_alloc_probe \
+    2>/dev/null > "$ALLOC_IR_FILE"
+
+if [ ! -s "$ALLOC_IR_FILE" ] || ! /bin/grep -qF "target triple" "$ALLOC_IR_FILE"; then
+    printf "${RED}FATAL${RESET}: --emit-llvm --freestanding --freestanding-alloc failed to produce IR\n"
+    rm -f "$ALLOC_IR_FILE"
+    FAIL=$((FAIL + 1)); BUGS+=("alloc IR: no output")
+else
+    alloc_assert() {
+        local label="$1" pattern="$2"
+        if /bin/grep -qF -- "$pattern" "$ALLOC_IR_FILE"; then
+            printf "  ${GREEN}PASS${RESET}  ${DIM}%s${RESET} → %s\n" "$label" "$pattern"
+            PASS=$((PASS + 1))
+        else
+            printf "  ${RED}FAIL${RESET}  ${BOLD}%s${RESET} — expected '%s' in alloc IR\n" "$label" "$pattern"
+            FAIL=$((FAIL + 1)); BUGS+=("$label: missing '$pattern'")
+        fi
+    }
+
+    printf "${BOLD}F11: Freestanding+alloc runtime (bump allocator + in-module libc)${RESET}\n"
+    alloc_assert "bump heap global present"    "__ang_fs_heap"
+    alloc_assert "bump pointer global present" "__ang_fs_bump"
+    alloc_assert "malloc defined in-module"    "dso_local ptr @malloc("
+    alloc_assert "free defined in-module"      "dso_local void @free("
+    alloc_assert "realloc defined in-module"   "dso_local ptr @realloc("
+    alloc_assert "memcpy defined in-module"    "dso_local ptr @memcpy("
+    alloc_assert "strlen defined in-module"    "dso_local i64 @strlen("
+    alloc_assert "strdup defined in-module"    "dso_local ptr @strdup("
+    alloc_assert "snprintf defined in-module"  "dso_local i32 @snprintf("
+    alloc_assert "__ang_rt_alloc present"      "__ang_rt_alloc"
+    alloc_assert "__ang_string_concat present" "__ang_string_concat"
+    alloc_assert "allocator init present"      "__ang_allocator_init_"
+    alloc_assert "panic hook (weak) present"   "define weak_odr void @__ang_fs_panic"
+    echo ""
+fi
+rm -f "$ALLOC_IR_FILE" /tmp/fs_alloc_probe.an
+
+# -- F11 Phase 2: user allocator override IR check --
+USER_ALLOC_IR_FILE="$(mktemp)"
+cat > /tmp/fs_user_alloc_probe.an << 'PROBE'
+intrinsic func halt() -> nil;
+func __ang_fs_alloc(size as i64) -> i64 { return 0x1000; }
+func __ang_fs_realloc(ptr as i64, old_size as i64, new_size as i64) -> i64 { return 0x2000; }
+func __ang_fs_free(ptr as i64, size as i64) {}
+func main() { let s = "hello"; drop s; halt(); }
+PROBE
+"$ANGC" --emit-llvm --freestanding --freestanding-alloc --force \
+    /tmp/fs_user_alloc_probe.an -o /tmp/fs_user_alloc_probe \
+    2>/dev/null > "$USER_ALLOC_IR_FILE"
+
+if [ -s "$USER_ALLOC_IR_FILE" ] && /bin/grep -qF "target triple" "$USER_ALLOC_IR_FILE"; then
+    user_assert() {
+        local label="$1" pattern="$2"
+        if /bin/grep -qF -- "$pattern" "$USER_ALLOC_IR_FILE"; then
+            printf "  ${GREEN}PASS${RESET}  ${DIM}%s${RESET} → %s\n" "$label" "$pattern"
+            PASS=$((PASS + 1))
+        else
+            printf "  ${RED}FAIL${RESET}  ${BOLD}%s${RESET} — expected '%s' in user alloc IR\n" "$label" "$pattern"
+            FAIL=$((FAIL + 1)); BUGS+=("$label: missing '$pattern'")
+        fi
+    }
+    user_assert "user vtable present"  "@__ang_fs_user_vtable"
+    echo ""
+else
+    printf "  ${RED}SKIP${RESET} user allocator IR check (no output)\n"
+fi
+rm -f "$USER_ALLOC_IR_FILE" /tmp/fs_user_alloc_probe.an
+
 printf "${BOLD}IR-lowering results: ${GREEN}%d passed${RESET}, ${RED}%d failed${RESET}\n\n" "$PASS" "$FAIL"
 if [ ${#BUGS[@]} -gt 0 ]; then
     printf "${RED}Failures:${RESET}\n"

@@ -349,7 +349,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         if (name == "f32") return m_type_f32;
         if (name == "bool") return m_type_bool;
         if (name == "string") {
-            if (m_is_in_freestanding_mode) {
+            if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
                 error(simple->name,
                       "The 'string' type is not available in --freestanding mode "
                       "(strings require heap allocation and the string runtime). "
@@ -368,7 +368,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         if (name == "void") return std::make_shared<VoidType>();
 
         if (name == "record") {
-            if (m_is_in_freestanding_mode) {
+            if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
                 error(simple->name,
                       "The 'record' type is not available in --freestanding mode "
                       "(records require heap allocation and the record runtime).",
@@ -379,7 +379,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         }
 
         if (name == "list") {
-            if (m_is_in_freestanding_mode) {
+            if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
                 error(simple->name,
                       "The 'list' type is not available in --freestanding mode "
                       "(lists require heap allocation and the list runtime).",
@@ -423,7 +423,7 @@ std::shared_ptr<Type> TypeChecker::resolveType(const std::shared_ptr<ASTType>& a
         const std::string& base_name = generic->name.lexeme;
 
         if (base_name == "list") {
-            if (m_is_in_freestanding_mode) {
+            if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
                 error(generic->name,
                       "The 'list<T>' type is not available in --freestanding mode "
                       "(lists require heap allocation and the list runtime).",

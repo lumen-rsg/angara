@@ -1,0 +1,24 @@
+// F11 Phase 2: user-supplied allocator override.
+// The user defines __ang_fs_alloc/__ang_fs_realloc/__ang_fs_free in Angara
+// source. The compiler detects them, builds a vtable, and installs it in
+// _start instead of the built-in bump allocator.
+// expect: PASS
+// mode: --freestanding --freestanding-alloc
+intrinsic func halt() -> nil;
+
+func __ang_fs_alloc(size as i64) -> i64 {
+    // Dummy alloc: return a fixed address (compile-test only).
+    return 0x1000;
+}
+func __ang_fs_realloc(ptr as i64, old_size as i64, new_size as i64) -> i64 {
+    return 0x2000;
+}
+func __ang_fs_free(ptr as i64, size as i64) {
+    // no-op
+}
+
+func main() {
+    let s = "hello";  // calls __ang_fs_alloc via the vtable
+    drop s;
+    halt();
+}

@@ -1,0 +1,8 @@
+// F11 Phase 2: user defines __ang_fs_alloc but not __ang_fs_realloc/__ang_fs_free.
+// Must fail with E928 (incomplete allocator definition).
+// expect: E928
+// mode: --freestanding --freestanding-alloc
+func __ang_fs_alloc(size as i64) -> i64 { return 0x1000; }
+
+func main() {
+}

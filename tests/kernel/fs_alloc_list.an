@@ -1,0 +1,11 @@
+// F11: freestanding + allocator — list literals and operations work.
+// expect: PASS
+// mode: --freestanding --freestanding-alloc
+intrinsic func halt() -> nil;
+
+func main() -> nil {
+    let xs = [10, 20, 30];
+    xs.push(40);
+    drop xs;
+    halt();
+}

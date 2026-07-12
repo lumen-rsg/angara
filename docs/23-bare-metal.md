@@ -438,13 +438,13 @@ in *how much* of the Angara runtime they keep:
 | Feature | `--freestanding` | `--kernel` |
 |---------|------------------|-----------|
 | **Purpose** | Bare metal, firmware, OS bring-up (no OS at all) | Linux loadable kernel module (`.ko`) |
-| **Heap: strings, lists, records** | Banned (E915–E917). Use `[u8; N]` byte-array consts. | Full support — routes through the kernel allocator (`kmalloc`/`kfree` via a libc shim) |
+| **Heap: strings, lists, records** | Banned (E915–E917). Use `[u8; N]` byte-array consts, or add `--freestanding-alloc` for the built-in bump allocator. | Full support — routes through the kernel allocator (`kmalloc`/`kfree` via a libc shim) |
 | **Entry point** | `_start` (void, external linkage) — a boot stub branches to it | None — exported functions only; the module's `init_module` is C-side |
 | **Threading** (`spawn`, `Mutex`) | Banned (E912/E913) | Banned (E902/E903) |
 | **Exceptions** (`throw`, `try`/`catch`) | Banned (E910/E911) | Banned (E900/E901) |
 | **Native module** `attach` | Banned (E914) | Banned (E904) |
 | **IO** | None — drive MMIO via `peek`/`poke` | `printk` via `angara_kernel_print*` shim |
-| **Allocator** | None (removed — see the "What works without libc" section) | Swappable vtable (`__ang_allocator_set`) → `kmalloc` |
+| **Allocator** | None by default (see "What works without libc"). With `--freestanding-alloc`: built-in bump allocator (see "Using a heap allocator"). | Swappable vtable (`__ang_allocator_set`) → `kmalloc` |
 | **Intrinsics** | Full set (MMIO, atomics, CPU control, cache, TLB, etc.) | Full set |
 | **Inline assembly** | `@unsafe` blocks | `@unsafe` blocks |
 | **Object symbol** | `_start` present, no `main` | Neither `_start` nor `main` |
@@ -522,6 +522,109 @@ What is **not** available:
 - Native module imports (`attach` of `.so`/`.dll`) — no dynamic loader (E914).
 - Exception handling (`try`/`catch`/`throw`) — E910/E911.
 - Threading (`spawn`, `Mutex`) — E912/E913.
+
+### Error reporting on bare metal
+
+Runtime errors (div-by-zero, bounds checks, shift overflow) route to
+`__ang_api_throw_error`, which in freestanding mode calls the **user-overridable**
+panic hook `__ang_fs_panic(msg)` and then executes `llvm.trap`. The default
+hook is a no-op (WeakODRLinkage), so by default the CPU just halts silently.
+
+To inject diagnostics, define `__ang_fs_panic` in your C boot stub:
+
+```c
+void __ang_fs_panic(const char* msg) {
+    volatile char* uart = (volatile char*)0x09000000;
+    for (const char* p = msg; *p; p++) *uart = *p;
+}
+```
+
+The linker picks your strong definition over the compiler's weak default, and
+the error message (e.g. `"division by zero"` or `"out-of-bounds index"`) is
+written to your UART before the trap fires. The hook **does not** need to call
+`halt()` or trap — `llvm.trap` follows automatically.
+
+## Using a heap allocator (`--freestanding-alloc`)
+
+The default `--freestanding` mode is heap-free: E915–E917 ban strings, lists,
+and records because there is no allocator. For projects that need these on bare
+metal, add `--freestanding-alloc`:
+
+```bash
+angc compile --freestanding --freestanding-alloc main.an
+# or with a custom heap size:
+angc compile --freestanding --freestanding-alloc=4M main.an
+```
+
+This enables a **built-in bump allocator** — a contiguous BSS-placed heap region
+(default 1 MiB) with a monotonically advancing bump pointer. With the allocator
+active, E915/E916/E917 are relaxed and the full string/list/record runtime
+becomes available:
+
+```angara
+func main() -> nil {
+    let banner = "Angara bare-metal with heap!\n";  // E915 relaxed
+    let xs = [1, 2, 3];                              // E916 relaxed
+    xs.push(4);
+    let config = { baud: 115200, core: 0 };           // E917 relaxed
+    // ...
+}
+```
+
+The allocator is entirely self-contained: `malloc`, `realloc`, `free`, `memcpy`,
+`memset`, `strlen`, `strcmp`, `strdup`, and `snprintf` are all emitted as
+in-module LLVM IR. The resulting object has **zero undefined libc symbols** —
+the `nm --undefined-only` heap-free contract still holds.
+
+### Bump semantics and limitations
+
+- **`free` is a no-op.** The bump allocator never reclaims memory. This is
+  intentional — bare-metal programs typically run forever and don't need
+  reclamation. Design your heap usage around the fixed region size.
+- **Heap exhaustion traps.** If the bump pointer exceeds the region, the program
+  executes `llvm.trap` (a hard fault). Choose a size with `--freestanding-alloc=SIZE`.
+- **Single-threaded only.** `spawn()` and `Mutex` remain hard-errored (E912/E913),
+  so the allocator has no atomic operations on the bump pointer.
+- **`snprintf` is minimal.** The in-module formatter supports `%ld`, `%d`, `%u`,
+  `%s`, `%c`, `%%`, and a basic `%.15g` for `f64` (used by `__ang_to_string`).
+  Integer and string formatting are fully correct; float formatting is
+  approximate (sign + integer part + up to 6 fractional digits).
+- **Exceptions still rejected.** `try`/`catch`/`throw` remain E910/E911 even
+  with the allocator. Use return codes or `match`.
+
+### User-supplied allocator
+
+To replace the built-in bump allocator with your own, define three functions
+in your Angara source:
+
+```angara
+func __ang_fs_alloc(size as i64) -> i64 {
+    // Return an i64 address pointing at a block of 'size' bytes.
+    // Use module-level vars or peek/poke to manage your heap.
+}
+func __ang_fs_realloc(ptr as i64, old_size as i64, new_size as i64) -> i64 {
+    // Return a new address; the old block may be freed.
+}
+func __ang_fs_free(ptr as i64, size as i64) {
+    // Free a previously allocated block.
+}
+```
+
+The compiler detects these functions automatically and builds a vtable from
+them. In `_start`, your vtable is installed via `__ang_allocator_set` before
+any allocation occurs — strings, lists, and records then route through your
+functions instead of the bump allocator.
+
+All three functions must be defined together (E928), and signatures must be
+exact (E929). Undefined or partially-defined allocators fall back to the
+built-in bump allocator.
+
+### What stays the same
+
+The entry point is still `_start` (not `main`), the link step is still skipped,
+and the object is still a bare relocatable ELF. The only difference is the
+runtime: instead of stub no-ops for `__ang_string_*`/`__ang_list_*`/`__ang_record_*`,
+the full implementations are emitted and backed by the bump allocator.
 
 ## Building a bare-metal kernel
 

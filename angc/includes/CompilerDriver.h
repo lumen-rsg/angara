@@ -74,6 +74,18 @@ namespace angara {
         void set_freestanding(bool val) { m_freestanding = val; }
         bool is_freestanding() const { return m_freestanding; }
 
+        /// F11: Enables the built-in bump allocator for freestanding mode
+        /// (unblocks strings/lists/records on bare metal).
+        void set_fs_alloc(bool val, uint64_t size = 0) {
+            m_fs_alloc = val; m_fs_alloc_size = val ? size : 0;
+        }
+        bool fs_alloc() const { return m_fs_alloc; }
+        uint64_t fs_alloc_size() const { return m_fs_alloc_size; }
+
+        /// F11 Phase 2: whether user-defined allocator override functions
+        /// (__ang_fs_alloc/__ang_fs_realloc/__ang_fs_free) were detected.
+        bool has_fs_user_allocator() const { return m_has_fs_user_allocator; }
+
         /// Enables or disables nostdlib mode (skip linking standard libraries).
         void set_nostdlib(bool val) { m_nostdlib = val; }
         bool is_nostdlib() const { return m_nostdlib; }
@@ -242,6 +254,9 @@ namespace angara {
         std::string m_sysroot;
 
         bool m_freestanding = false;
+        bool m_fs_alloc = false;               // F11: built-in bump allocator
+        uint64_t m_fs_alloc_size = 0;          // F11: heap bytes (0 = default 1 MiB)
+        bool m_has_fs_user_allocator = false;  // F11 Phase 2: user override detected
         bool m_nostdlib = false;
         bool m_kernel_mode = false;
         bool m_check_only = false;

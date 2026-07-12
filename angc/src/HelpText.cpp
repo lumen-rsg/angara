@@ -55,6 +55,8 @@ void print_help() {
     std::cout << "                              e.g. +lse, -lse (force LSE / LL/SC atomics)\n";
     std::cout << "  --sysroot <path>            Set sysroot for cross-compilation linker\n";
     std::cout << "  --freestanding              Freestanding mode (no libc, bare-metal)\n";
+    std::cout << "  --freestanding-alloc[=SIZE] Enable built-in bump allocator (strings/lists/records).\n";
+    std::cout << "                              Size suffix: K/M/G (default 1M). Requires --freestanding.\n";
     std::cout << "  --kernel                    Kernel mode (emit relocatable .o for a Linux module)\n";
     std::cout << "  --nostdlib                  Don't link standard libraries\n";
     std::cout << std::endl;

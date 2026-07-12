@@ -123,6 +123,14 @@ int angara::CLI::cmdCompileSingleFile(const std::string& source_file) {
     if (!m_flags.sysroot.empty()) driver.set_sysroot(m_flags.sysroot);
     if (m_flags.freestanding) driver.set_freestanding(true);
     if (m_flags.kernel) driver.set_kernel_mode(true);
+    if (m_flags.freestanding_alloc) {
+        // E927: --freestanding-alloc requires --freestanding.
+        if (!m_flags.freestanding) {
+            std::cerr << "error E927: --freestanding-alloc requires --freestanding\n";
+            return 1;
+        }
+        driver.set_fs_alloc(true, m_flags.freestanding_alloc_size);
+    }
     if (m_flags.nostdlib) driver.set_nostdlib(true);
     if (m_flags.dump_ir) driver.set_dump_ir(true);
     if (m_flags.emit_llvm) driver.set_emit_llvm(true);

@@ -38,8 +38,8 @@ unsigned LLVMBackend::getJmpBufSize(const llvm::Triple& target) {
     return 1024;      // conservative fallback for unknown targets
 }
 
-LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool kernel, bool dump_ir, bool debug, bool emit_llvm, bool lto, int dwarf_version, const std::string& cpu, const std::string& target_features)
-    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_kernel(kernel), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm), m_lto(lto), m_dwarf_version(dwarf_version), m_cpu(cpu), m_target_features(target_features) {
+LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& target_triple, bool freestanding, bool kernel, bool dump_ir, bool debug, bool emit_llvm, bool lto, int dwarf_version, const std::string& cpu, const std::string& target_features, bool fs_alloc, uint64_t fs_alloc_size, bool has_user_allocator)
+    : m_type_checker(tc), m_errorHandler(eh), m_freestanding(freestanding), m_kernel(kernel), m_fs_alloc(fs_alloc), m_fs_alloc_size(fs_alloc_size), m_has_user_allocator(has_user_allocator), m_dump_ir(dump_ir), m_debug(debug), m_emit_llvm(emit_llvm), m_lto(lto), m_dwarf_version(dwarf_version), m_cpu(cpu), m_target_features(target_features) {
     ctx = std::make_unique<llvm::LLVMContext>();
     mod = std::make_unique<llvm::Module>("angara_module", *ctx);
     builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
@@ -81,7 +81,7 @@ LLVMBackend::LLVMBackend(TypeChecker& tc, ErrorHandler& eh, const std::string& t
         m_di_cu = diCU;
     }
 
-    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding, m_kernel, getJmpBufSize(targetTriple));
+    rt = std::make_unique<RuntimeBuilder>(*ctx, *mod, *builder, m_freestanding, m_kernel, getJmpBufSize(targetTriple), m_fs_alloc, m_fs_alloc_size);
     rt->generateRuntime();
     objType = rt->getAngaraObjType();
     // C7: build the canonical header via an explicit vector (NOT a braced-init-
@@ -177,6 +177,26 @@ bool LLVMBackend::generate(const std::vector<std::shared_ptr<Stmt>>& stmts,
         auto func = std::dynamic_pointer_cast<const FuncStmt>(stmt);
         if (func && func->name.lexeme == "main") { has_user_main = true; break; }
     }
+
+    // F11 Phase 2: if the user defined allocator override functions, build
+    // a vtable pointing at them. This replaces the built-in bump allocator.
+    if (m_fs_alloc && m_has_user_allocator) {
+        auto* user_alloc   = mod->getFunction(mangle(moduleName, "__ang_fs_alloc"));
+        auto* user_realloc = mod->getFunction(mangle(moduleName, "__ang_fs_realloc"));
+        auto* user_free    = mod->getFunction(mangle(moduleName, "__ang_fs_free"));
+
+        if (user_alloc && user_realloc && user_free) {
+            auto* alloc_type = rt->getAllocatorType();
+            if (alloc_type) {
+                m_user_allocator_vtable = new llvm::GlobalVariable(
+                    *mod, alloc_type, true, llvm::GlobalValue::PrivateLinkage,
+                    llvm::ConstantStruct::get(alloc_type,
+                        {user_alloc, user_realloc, user_free}),
+                    "__ang_fs_user_vtable");
+            }
+        }
+    }
+
     // Kernel mode: emit no entry point (_start/main). The module's init is the
     // C-side init_module, which must call __ang_strlit_init_<module> first.
     if (has_user_main && !m_kernel) {
@@ -326,7 +346,10 @@ void LLVMBackend::createAllocatorInitFn() {
     // would dereference a null callee. There is also no hosted C glue to call
     // __ang_allocator_init_<module> on a bare-metal target, so the symbol is
     // unwanted as well as unbuildable.
-    if (m_freestanding) return;
+    // F11 exception: in freestanding+alloc mode, generateMemoryManagement IS
+    // called (via generateFreestandingAllocRuntime), so __ang_allocator_set
+    // exists and the init function is callable from _start.
+    if (m_freestanding && !m_fs_alloc) return;
     // External linkage + module-unique name so external C (kernel init / host
     // harness) can swap this module's allocator. The body forwards to the
     // module-internal __ang_allocator_set (InternalLinkage, emitted by the

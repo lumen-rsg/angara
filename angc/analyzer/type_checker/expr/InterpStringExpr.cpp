@@ -4,7 +4,7 @@ namespace angara {
     // LANG-3: interpolated string. Visit each sub-expression for type-checking,
     // then the whole thing is type string.
     std::any TypeChecker::visit(const InterpStringExpr& expr) {
-        if (m_is_in_freestanding_mode) {
+        if (m_is_in_freestanding_mode && !m_has_fs_allocator) {
             error(Token(),
                   "Interpolated strings are not available in --freestanding mode "
                   "(strings require heap allocation and the string runtime). "

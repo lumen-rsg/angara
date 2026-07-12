@@ -1,0 +1,11 @@
+// F11: try/catch is STILL rejected even with --freestanding-alloc.
+// The allocator unblocks heap features (E915-E917) but NOT exceptions (E911).
+// expect: E911
+// mode: --freestanding --freestanding-alloc
+func main() -> nil {
+    try {
+        // This should be E911 even with the allocator enabled.
+    } catch (e) {
+        // unreachable
+    }
+}

@@ -1635,6 +1635,24 @@ void LLVMBackend::codegenMainFunction(const std::vector<std::shared_ptr<Stmt>>& 
     m_inlined_main_ret_alloca = nullptr;
     m_inlined_main_cleanup_bb = nullptr;
 
+    // F11: In freestanding+alloc mode, install the allocator before any
+    // string-literal init or user code runs. If the user defined allocator
+    // override functions (Phase 2), use their vtable; otherwise fall back
+    // to the built-in bump allocator default.
+    if (m_freestanding && m_fs_alloc) {
+        std::string init_name = "__ang_allocator_init_" + moduleName;
+        if (auto* init_fn = mod->getFunction(init_name)) {
+            auto* vtable = m_user_allocator_vtable;
+            if (!vtable)
+                vtable = mod->getGlobalVariable("__ang_default_allocator");
+            if (vtable) {
+                auto* ptr_ty = llvm::PointerType::get(*ctx, 0);
+                builder->CreateCall(init_fn,
+                    {builder->CreateBitCast(vtable, ptr_ty)});
+            }
+        }
+    }
+
     // RT: register main thread and push root frame
     llvm::Value* gc_thread_state = nullptr;
     if (!m_freestanding) {
