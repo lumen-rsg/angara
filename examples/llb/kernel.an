@@ -1,0 +1,263 @@
+// ============================================================================
+// LLB — Angara Linux Loader/Bootloader for QEMU virt (AArch64).
+//
+// Loaded by QEMU's -kernel at 0x40080000. Copies an embedded Linux kernel Image
+// to a 2 MiB-aligned address, places the embedded DTB, flushes caches, and
+// jumps to the kernel per the AArch64 Linux boot protocol:
+//   x0 = physical address of DTB
+//   x1 = x2 = x3 = 0 (reserved)
+//   MMU off, D-cache off, I-cache either
+//
+// The kernel Image and DTB are embedded by boot.S via .incbin.
+// ============================================================================
+
+// --- Intrinsic declarations (compiler-provided, no libc needed) ---
+intrinsic func peek32(addr as i64) -> i64;
+intrinsic func poke32(addr as i64, val as i64) -> nil;
+intrinsic func peek64(addr as i64) -> i64;
+intrinsic func poke64(addr as i64, val as i64) -> nil;
+intrinsic func halt() -> nil;
+intrinsic func dmb() -> nil;
+intrinsic func dsb() -> nil;
+intrinsic func isb() -> nil;
+intrinsic func dc_civac(addr as i64) -> nil;
+intrinsic func ic_ivau(addr as i64) -> nil;
+intrinsic func get_sctlr() -> i64;
+intrinsic func set_sctlr(val as i64) -> nil;
+
+// --- PL011 UART (QEMU virt: base 0x0900_0000) ---
+const UART_DR as i64 = 0x09000000;  // data register
+const UART_FR as i64 = 0x09000018;  // flag register
+const UART_FR_TXFF as i64 = 0x20;   // bit 5 = TX FIFO full
+
+// --- Memory layout constants ---
+// QEMU virt has 256 MiB of RAM at 0x40000000. The LLB is loaded at 0x40080000
+// by QEMU's -kernel loader. We copy the kernel to 0x42000000 (2 MiB aligned,
+// well clear of the LLB image) and the DTB to 0x45000000 (well above the
+// kernel, avoiding any overlap with the LLB or kernel destination).
+const KERNEL_DST as i64 = 0x44000000;   // kernel destination (2 MiB aligned, above embedded blob)
+const DTB_DST as i64 = 0x47000000;      // DTB destination (above kernel, within 256 MiB RAM)
+const CACHE_LINE as i64 = 64;           // typical D-cache line size for arm64
+const CACHE_LINE_MASK as i64 = 63;      // cache_line - 1, for address rounding
+
+// --- Boot banner as a no-heap byte-array constant (lives in .rodata) ---
+const BANNER as [u8; 60] = b"Angara LLB v0.1.0 — booting Linux on QEMU virt (AArch64)\r\n";
+
+// --- Print a single character to UART ---
+func uart_putc(c as i64) -> nil {
+    while ((peek32(UART_FR) & UART_FR_TXFF) != 0) {}
+    poke32(UART_DR, c);
+}
+
+// --- Print a single hex nibble (0..15) as one ASCII character ---
+func uart_put_hex_digit(nibble as i64) -> nil {
+    if (nibble < 10) {
+        uart_putc(48 + nibble);    // '0'..'9'
+    } else {
+        uart_putc(55 + nibble);    // 'A'..'F'
+    }
+}
+
+// --- Print a 64-bit value in hex (16 digits, fixed width) ---
+func uart_hex64(value as i64) -> nil {
+    let i as i64 = 60;
+    while (i >= 0) {
+        let nibble as i64 = (value >> i) & 0xF;
+        uart_put_hex_digit(nibble);
+        i = i - 4;
+    }
+}
+
+// --- Copy memory from src to dst using 8-byte MMIO accesses ---
+// Both src and dst must be 8-byte aligned; len should be a multiple of 8.
+// The kernel Image is naturally aligned, and the DTB is aligned in the linker.
+// Note: peek64/poke64 are volatile but correct; bulk copies of large blobs
+// take a few seconds in QEMU but complete reliably.
+func mem_copy(dst as i64, src as i64, len as i64) -> nil {
+    let i as i64 = 0;
+    while (i < len) {
+        let val as i64 = peek64(src + i);
+        poke64(dst + i, val);
+        i = i + 8;
+    }
+}
+
+// --- Flush D-cache and I-cache over an address range ---
+// start is rounded down to the nearest cache line; end is rounded up.
+// dc_civac: clean + invalidate D-cache line (push to RAM, then invalidate).
+// ic_ivau:  invalidate I-cache line to the Point of Unification.
+func cache_flush_range(start as i64, end as i64) -> nil {
+    let addr as i64 = start & (~CACHE_LINE_MASK);
+    let stop as i64 = (end + CACHE_LINE_MASK) & (~CACHE_LINE_MASK);
+
+    while (addr < stop) {
+        @unsafe {
+            dc_civac(addr);
+            ic_ivau(addr);
+        }
+        addr = addr + CACHE_LINE;
+    }
+}
+
+// --- Read the current exception level from CurrentEL ---
+func read_el() -> i64 {
+    let el as i64 = 0;
+    @unsafe {
+        el = asm("mrs $0, CurrentEL" -> i64, out("=r") el);
+    }
+    return (el >> 2) & 0x3;
+}
+
+// --- Check if MMU is enabled (SCTLR_EL1.M bit) ---
+func is_mmu_on() -> i64 {
+    let sctlr as i64 = 0;
+    @unsafe {
+        sctlr = get_sctlr();
+    }
+    return sctlr & 1;
+}
+
+// --- Disable the MMU by clearing SCTLR_EL1.M ---
+func mmu_disable() -> nil {
+    @unsafe {
+        let sctlr as i64 = get_sctlr();
+        sctlr = sctlr & (~1);      // clear bit 0 (M)
+        set_sctlr(sctlr);
+        isb();                      // pipeline flush — MMU is now off
+    }
+}
+
+// ============================================================================
+// Entry point — called from boot.S after stack + BSS setup
+// ============================================================================
+func main() -> nil {
+    // 1) Print the banner byte by byte from the .rodata array
+    for (let i = 0; i < len(BANNER); i = i + 1) {
+        uart_putc(BANNER[i] as i64);
+    }
+
+    // 2) Print the current exception level
+    let el as i64 = read_el();
+    uart_putc(69);    // 'E'
+    uart_putc(76);    // 'L'
+    uart_putc(61);    // '='
+    uart_putc(48 + el);  // digit
+    uart_putc(13);    // CR
+    uart_putc(10);    // LF
+
+    // 3) Check MMU state and disable if necessary
+    let mmu_on as i64 = is_mmu_on();
+    if (mmu_on != 0) {
+        // "MMU=ON, disabling...\r\n"
+        uart_putc(77); uart_putc(77); uart_putc(85); uart_putc(61);  // MMU=
+        uart_putc(79); uart_putc(78);  // ON
+        uart_putc(44); uart_putc(32);  // ", "
+        uart_putc(100); uart_putc(105); uart_putc(115); uart_putc(97);  // disa
+        uart_putc(98); uart_putc(108); uart_putc(105); uart_putc(110);  // blin
+        uart_putc(103); uart_putc(46); uart_putc(46); uart_putc(46);    // g...
+        uart_putc(13); uart_putc(10);
+        mmu_disable();
+    } else {
+        // "MMU=OFF\r\n"
+        uart_putc(77); uart_putc(77); uart_putc(85); uart_putc(61);  // MMU=
+        uart_putc(79); uart_putc(70); uart_putc(70);  // OFF
+        uart_putc(13); uart_putc(10);
+    }
+    dsb();
+    isb();
+
+    // 4) Get embedded blob addresses from linker symbols
+    let kernel_start as i64 = 0;
+    let kernel_end as i64 = 0;
+    let dtb_start as i64 = 0;
+    let dtb_end as i64 = 0;
+    @unsafe {
+        // Load linker-defined symbols via the literal pool.
+        // "_kernel_start" etc. are defined in boot.S / linker.ld.
+        kernel_start = asm("ldr $0, =_kernel_start" -> i64, out("=r") kernel_start);
+        kernel_end   = asm("ldr $0, =_kernel_end"   -> i64, out("=r") kernel_end);
+        dtb_start    = asm("ldr $0, =_dtb_start"    -> i64, out("=r") dtb_start);
+        dtb_end      = asm("ldr $0, =_dtb_end"      -> i64, out("=r") dtb_end);
+    }
+
+    let kernel_size as i64 = kernel_end - kernel_start;
+    let dtb_size as i64 = dtb_end - dtb_start;
+
+    // "Kernel: 0x<start>..0x<end> (<size> bytes)\r\n"
+    uart_putc(75); uart_putc(101); uart_putc(114); uart_putc(110); uart_putc(101); uart_putc(108); uart_putc(58); uart_putc(32);
+    uart_putc(48); uart_putc(120);  // "0x"
+    uart_hex64(kernel_start);
+    uart_putc(46); uart_putc(46);  // ".."
+    uart_putc(48); uart_putc(120);
+    uart_hex64(kernel_end);
+    uart_putc(32); uart_putc(40);  // " ("
+    uart_hex64(kernel_size);
+    uart_putc(32); uart_putc(98); uart_putc(121); uart_putc(116); uart_putc(101); uart_putc(115); uart_putc(41);
+    uart_putc(13); uart_putc(10);
+
+    // "DTB:    0x<start>..0x<end> (<size> bytes)\r\n"
+    uart_putc(68); uart_putc(84); uart_putc(66); uart_putc(58); uart_putc(32); uart_putc(32); uart_putc(32); uart_putc(32);
+    uart_putc(48); uart_putc(120);
+    uart_hex64(dtb_start);
+    uart_putc(46); uart_putc(46);
+    uart_putc(48); uart_putc(120);
+    uart_hex64(dtb_end);
+    uart_putc(32); uart_putc(40);
+    uart_hex64(dtb_size);
+    uart_putc(32); uart_putc(98); uart_putc(121); uart_putc(116); uart_putc(101); uart_putc(115); uart_putc(41);
+    uart_putc(13); uart_putc(10);
+
+    // 5) Copy kernel to 2 MiB-aligned destination
+    // "Copying kernel to 0x<KERNEL_DST>...\r\n"
+    uart_putc(67); uart_putc(111); uart_putc(112); uart_putc(121); uart_putc(105); uart_putc(110); uart_putc(103); uart_putc(32);
+    uart_putc(107); uart_putc(101); uart_putc(114); uart_putc(110); uart_putc(101); uart_putc(108); uart_putc(32); uart_putc(116); uart_putc(111); uart_putc(32);
+    uart_putc(48); uart_putc(120);
+    uart_hex64(KERNEL_DST);
+    uart_putc(46); uart_putc(46); uart_putc(46);
+    uart_putc(13); uart_putc(10);
+    mem_copy(KERNEL_DST, kernel_start, kernel_size);
+
+    // 6) Copy DTB to destination
+    // "Copying DTB to 0x<DTB_DST>...\r\n"
+    uart_putc(67); uart_putc(111); uart_putc(112); uart_putc(121); uart_putc(105); uart_putc(110); uart_putc(103); uart_putc(32);
+    uart_putc(68); uart_putc(84); uart_putc(66); uart_putc(32); uart_putc(116); uart_putc(111); uart_putc(32);
+    uart_putc(48); uart_putc(120);
+    uart_hex64(DTB_DST);
+    uart_putc(46); uart_putc(46); uart_putc(46);
+    uart_putc(13); uart_putc(10);
+    mem_copy(DTB_DST, dtb_start, dtb_size);
+
+    // 7) Flush caches over both destination ranges so the kernel sees
+    //    the data from RAM, not stale D-cache / I-cache lines.
+    // "Flushing caches...\r\n"
+    uart_putc(70); uart_putc(108); uart_putc(117); uart_putc(115); uart_putc(104); uart_putc(105); uart_putc(110); uart_putc(103);
+    uart_putc(32); uart_putc(99); uart_putc(97); uart_putc(99); uart_putc(104); uart_putc(101); uart_putc(115); uart_putc(46); uart_putc(46); uart_putc(46);
+    uart_putc(13); uart_putc(10);
+    cache_flush_range(KERNEL_DST, KERNEL_DST + kernel_size);
+    cache_flush_range(DTB_DST, DTB_DST + dtb_size);
+    dsb();
+    isb();
+
+    // 8) Jump to the Linux kernel.
+    //    The AArch64 Linux boot protocol requires:
+    //      x0 = physical address of the DTB (8-byte aligned)
+    //      x1 = x2 = x3 = 0 (reserved)
+    //      MMU off, D-cache off (ensured above)
+    //    The kernel Image entry point is at offset 0 from the Image start.
+    // "Jumping to kernel...\r\n"
+    uart_putc(74); uart_putc(117); uart_putc(109); uart_putc(112); uart_putc(105); uart_putc(110); uart_putc(103); uart_putc(32);
+    uart_putc(116); uart_putc(111); uart_putc(32); uart_putc(107); uart_putc(101); uart_putc(114); uart_putc(110); uart_putc(101); uart_putc(108); uart_putc(46); uart_putc(46); uart_putc(46);
+    uart_putc(13); uart_putc(10);
+    dsb();
+    isb();
+
+    @unsafe {
+        // Set boot protocol registers and branch to kernel entry.
+        // The kernel provides its own entry logic; we never return.
+        asm("mov x0, $0; mov x1, xzr; mov x2, xzr; mov x3, xzr; br $1",
+            in("r") DTB_DST, in("r") KERNEL_DST);
+    }
+
+    // Unreachable — if the kernel somehow returns, halt.
+    halt();
+}

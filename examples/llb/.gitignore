@@ -1,0 +1,15 @@
+# Build artifacts
+*.o
+*.elf
+*.img
+*.ll
+
+# Embedded blobs (user-provided / generated)
+Image
+qemu_virt.dtb
+
+# QEMU output
+qemu.out
+
+# Compiler working directory
+.angara/
